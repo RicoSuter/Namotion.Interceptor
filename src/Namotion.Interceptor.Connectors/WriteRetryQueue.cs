@@ -128,6 +128,48 @@ internal sealed class WriteRetryQueue : IDisposable
     }
 
     /// <summary>
+    /// Drains every pending write, hands it to <paramref name="reconcile"/>, retains the writes it returns and
+    /// flushes them, all under the flush gate, so that no write can be put back into the queue between the
+    /// drain and the retain.
+    /// </summary>
+    /// <param name="source">The source to flush to.</param>
+    /// <param name="reconcile">Decides the drained writes and returns those to send, or <c>null</c>. It runs
+    /// synchronously under the flush gate and must not wait on this queue.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>True when nothing was left to send or the flush succeeded.</returns>
+    public async ValueTask<bool> ReconcileAsync(
+        ISubjectSource source,
+        Func<SubjectPropertyChange[], SubjectPropertyChange[]?> reconcile,
+        CancellationToken cancellationToken)
+    {
+        if (!await TryEnterFlushAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        try
+        {
+            var drained = DrainForLocalReapply();
+            if (drained.Length == 0)
+            {
+                return true;
+            }
+
+            if (reconcile(drained) is not { Length: > 0 } toSend)
+            {
+                return true;
+            }
+
+            Enqueue(toSend);
+            return await FlushCoreAsync(source, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _flushSemaphore.Release();
+        }
+    }
+
+    /// <summary>
     /// Flushes older pending writes, then attempts the supplied writes while retaining exact ownership
     /// until they are confirmed, parked for retry, or counted as dropped.
     /// </summary>

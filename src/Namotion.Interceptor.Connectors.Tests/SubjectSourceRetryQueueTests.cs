@@ -60,22 +60,12 @@ public class SubjectSourceRetryQueueTests
         }
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenTheSourceIsIdleWithAParkedWrite_ThenItIsSentWithoutAFurtherChange(bool reloadInsideConnector)
+    [Fact]
+    public async Task WhenTheSourceIsIdleWithAParkedWrite_ThenTheIntervalSendsItWithoutAFurtherChange()
     {
-        // Arrange: without the reload only the interval can send it in time, with it only the Synchronized wake.
+        // Arrange
         var failFirstName = false;
-        SubjectPropertyWriter? propertyWriter = null;
-        var (person, source, gate, receivedWrites) = CreateSource(
-            () => failFirstName,
-            retryTime: reloadInsideConnector ? TimeSpan.FromMinutes(1) : TimeSpan.FromMilliseconds(200),
-            startListening: (writer, _) =>
-            {
-                propertyWriter = writer;
-                return Task.FromResult<IAsyncDisposable?>(null);
-            });
+        var (person, source, gate, receivedWrites) = CreateSource(() => failFirstName, retryTime: TimeSpan.FromMilliseconds(200));
 
         await source.StartAsync(CancellationToken.None);
         try
@@ -102,13 +92,6 @@ public class SubjectSourceRetryQueueTests
                 failFirstName = false;
             }
 
-            if (reloadInsideConnector)
-            {
-                // A reload inside the connector, as on a transport reconnect, which ends in Synchronized.
-                propertyWriter!.StartBuffering();
-                await propertyWriter.LoadInitialStateAndResumeAsync(CancellationToken.None);
-            }
-
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(() =>
             {
@@ -125,10 +108,10 @@ public class SubjectSourceRetryQueueTests
     }
 
     [Fact]
-    public async Task WhenAReloadInsideTheConnectorOverwritesAParkedWrite_ThenTheWriteIsReplayedAfterTheLoadAndReadBack()
+    public async Task WhenAReloadInsideTheConnectorMovesTheModelOffAParkedWrite_ThenTheWriteIsRestoredAndSent()
     {
-        // Arrange: a peer that holds FirstName and reads every accepted write back through the property writer,
-        // as a subscription does. The long retry time leaves the replay to the wake on Synchronized.
+        // Arrange: a peer that holds FirstName and never reads a write back, so only the reconcile can bring the
+        // model back to the parked write. The long retry time leaves it to the wake on Synchronized.
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -173,7 +156,6 @@ public class SubjectSourceRetryQueueTests
             },
             WriteChangesOverride = (changes, _) =>
             {
-                string? acceptedValue = null;
                 lock (gate)
                 {
                     foreach (var change in changes.Span)
@@ -189,16 +171,9 @@ public class SubjectSourceRetryQueueTests
                             return ValueTask.FromResult(WriteResult.Failure(changes, new InvalidOperationException("Peer is down")));
                         }
 
-                        acceptedValue = change.GetNewValue<string?>();
-                        peerFirstName = acceptedValue!;
-                        events.Add("Write=" + acceptedValue);
+                        peerFirstName = change.GetNewValue<string?>()!;
+                        events.Add("Write=" + peerFirstName);
                     }
-                }
-
-                if (acceptedValue is not null)
-                {
-                    propertyWriter!.Write((firstName, source, acceptedValue),
-                        static state => state.firstName.SetValueFromSource(state.source, null, null, state.acceptedValue));
                 }
 
                 return ValueTask.FromResult(WriteResult.Success);
@@ -245,15 +220,105 @@ public class SubjectSourceRetryQueueTests
             {
                 lock (gate)
                 {
-                    return peerFirstName == "Written" && person.FirstName == "Written";
+                    return person.FirstName == "Written" && peerFirstName == "Written";
                 }
-            }, message: "The parked write was not replayed and read back after the reload.");
+            }, message: "The parked write was not restored locally and sent after the reload.");
 
             lock (gate)
             {
                 var reloadIndex = events.LastIndexOf("Load=Initial");
                 Assert.True(reloadIndex > 0, "The reload did not apply the peer's older value.");
                 Assert.Equal("Write=Written", events[reloadIndex + 1]);
+            }
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenALocalWriteDuringAReloadSupersedesAParkedWrite_ThenTheParkedWriteIsDroppedNotSent()
+    {
+        // Arrange: the first load's local write is parked when the reconcile at connect fails to send it. The
+        // long buffer time holds the reload's local write in the processor, so only the reconcile on the wake
+        // decides the parked write.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+
+        var gate = new object();
+        var peerIsDown = true;
+        var loadCount = 0;
+        var attemptedWrites = new List<string>();
+        SubjectPropertyWriter? propertyWriter = null;
+
+        using var source = new TestSubjectSource(person, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMinutes(5),
+            retryTime: TimeSpan.FromMinutes(1))
+        {
+            StartListeningOverride = (writer, _) =>
+            {
+                propertyWriter = writer;
+                return Task.FromResult<IAsyncDisposable?>(null);
+            },
+            LoadInitialStateOverride = _ =>
+            {
+                var value = Interlocked.Increment(ref loadCount) == 1 ? "Parked" : "Newer";
+                return Task.FromResult<Action?>(() => person.FirstName = value);
+            },
+            WriteChangesOverride = (changes, _) =>
+            {
+                lock (gate)
+                {
+                    foreach (var change in changes.Span)
+                    {
+                        attemptedWrites.Add($"{change.Property.Name}={change.GetNewValue<object?>()}");
+                    }
+
+                    return ValueTask.FromResult(peerIsDown
+                        ? WriteResult.Failure(changes, new InvalidOperationException("Peer is down"))
+                        : WriteResult.Success);
+                }
+            },
+        };
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
+
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            // Tried by the reconcile at connect and again by the reconcile on the startup wake, both failing.
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                lock (gate)
+                {
+                    return attemptedWrites.Count == 2 && source.Diagnostics.OutboundRetries.Depth > 0;
+                }
+            }, message: "The write made during the first load was not parked.");
+
+            // Act
+            lock (gate)
+            {
+                peerIsDown = false;
+            }
+            propertyWriter!.StartBuffering();
+            await propertyWriter.LoadInitialStateAndResumeAsync(CancellationToken.None);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.Depth == 0,
+                message: "The parked write was not taken out of the queue after the reload.");
+
+            // Takes the flush gate, so it returns only after the reconcile has finished.
+            await source.WriteRetryQueue.FlushAsync(source, CancellationToken.None);
+
+            // Assert
+            lock (gate)
+            {
+                Assert.Equal(["FirstName=Parked", "FirstName=Parked"], attemptedWrites);
             }
         }
         finally
@@ -271,7 +336,7 @@ public class SubjectSourceRetryQueueTests
         await source.StartAsync(CancellationToken.None);
         try
         {
-            // The reconcile before the pump can deliver a probe too, so only the write below proves the pump runs.
+            // Waits until the reconcile or the pump has sent a probe, so the write below can only be delivered by the pump.
             var probeValue = 0;
             await AsyncTestHelpers.WaitUntilAsync(() =>
             {
@@ -304,8 +369,7 @@ public class SubjectSourceRetryQueueTests
     /// </summary>
     private static (Person Person, TestSubjectSource Source, object Gate, List<string> ReceivedWrites) CreateSource(
         Func<bool> failFirstName,
-        TimeSpan? retryTime = null,
-        Func<SubjectPropertyWriter, CancellationToken, Task<IAsyncDisposable?>>? startListening = null)
+        TimeSpan? retryTime = null)
     {
         var context = InterceptorSubjectContext
             .Create()
@@ -321,7 +385,6 @@ public class SubjectSourceRetryQueueTests
             bufferTime: TimeSpan.FromMilliseconds(8),
             retryTime: retryTime)
         {
-            StartListeningOverride = startListening,
             WriteChangesOverride = (changes, _) =>
             {
                 lock (gate)

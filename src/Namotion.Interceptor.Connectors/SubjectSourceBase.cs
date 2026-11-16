@@ -32,8 +32,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     private readonly Lock _stateLock = new();
 
     // Never disposed: it holds no handle unless AvailableWaitHandle is read, and the idle flush can still
-    // wait on it after Dispose.
+    // wait on it after Dispose. Released only while its count is 0, so wakes coalesce.
     private readonly SemaphoreSlim _synchronizedWake = new(0);
+
+    // Cached so a reconcile does not allocate a delegate.
+    private readonly Func<SubjectPropertyChange[], SubjectPropertyChange[]?> _reconcileParkedChanges;
 
     // The state and its two timestamps are swapped as one value: in separate fields a reader can see
     // the new state beside the previous timestamp, and LastSynchronizedAt has to be visible before
@@ -87,6 +90,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         ArgumentOutOfRangeException.ThrowIfNegative(writeRetryQueueSize);
 
         WriteRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger, metrics.OutboundRetries);
+        _reconcileParkedChanges = ReconcileParkedChanges;
 
         // The registration lives as long as the source, and the queue count stays readable after
         // the queue itself is disposed.
@@ -464,30 +468,37 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     /// <summary>
-    /// Runs the idle flush: flushes the write retry queue every retry interval while the source is
-    /// <see cref="SourceState.Synchronized"/> and each time it becomes so, until cancelled. An exception
-    /// from one flush is logged and does not stop the next.
+    /// Runs the idle flush until cancelled. Each time the source becomes <see cref="SourceState.Synchronized"/>
+    /// it reconciles the write retry queue against the state just loaded, and between those wakes it flushes
+    /// the queue every retry interval while the source is synchronized. An exception from one run is logged
+    /// and does not stop the next.
     /// </summary>
     private async Task RunIdleFlushAsync(CancellationToken cancellationToken)
     {
-        // Outside 1 ms to int.MaxValue ms the interval is off: WaitAsync truncates a sub-millisecond timeout
-        // to zero and completes synchronously, so this loop would never yield back to RunAsync, and it
-        // rejects a larger one.
-        var interval = _retryTime >= TimeSpan.FromMilliseconds(1) && _retryTime.TotalMilliseconds <= int.MaxValue
-            ? _retryTime
-            : Timeout.InfiniteTimeSpan;
+        // Outside 1 ms to int.MaxValue ms the interval is off: a sub-millisecond timeout truncates to zero and
+        // completes synchronously, so this loop would never yield back to RunAsync, and a larger one is rejected.
+        var interval = _retryTime.TotalMilliseconds is >= 1 and <= int.MaxValue ? _retryTime : Timeout.InfiniteTimeSpan;
 
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await _synchronizedWake.WaitAsync(interval, cancellationToken).ConfigureAwait(false);
+                var woken = await _synchronizedWake.WaitAsync(interval, cancellationToken).ConfigureAwait(false);
 
                 // Skipped during a reconnect inside the connector, which would fail every interval's flush;
                 // the wake on Synchronized covers it.
-                if (State == SourceState.Synchronized)
+                if (State != SourceState.Synchronized)
                 {
-                    // Ordered against the write handler's sends by the retry queue's flush gate.
+                    continue;
+                }
+
+                if (woken)
+                {
+                    // A load just moved the model, so parked writes are ranked against it as at connect.
+                    await WriteRetryQueue.ReconcileAsync(this, _reconcileParkedChanges, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
                     await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -521,14 +532,22 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
     }
 
+    /// <summary>
+    /// Reconciles the write retry queue against the state just loaded: restores, sends or drops each parked
+    /// write by commit order. Runs at connect and each time the source becomes synchronized again.
+    /// </summary>
     internal async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)
     {
-        var retryChanges = WriteRetryQueue.DrainForLocalReapply();
-        if (retryChanges.Length == 0)
-        {
-            return;
-        }
+        await WriteRetryQueue.ReconcileAsync(this, _reconcileParkedChanges, cancellationToken).ConfigureAwait(false);
+    }
 
+    /// <summary>
+    /// Decides each parked write and returns those to send. Runs under the retry queue's flush gate, which
+    /// keeps the write handler from settling a failed batch back into the queue meanwhile, while the
+    /// processor may still be running.
+    /// </summary>
+    private SubjectPropertyChange[]? ReconcileParkedChanges(SubjectPropertyChange[] retryChanges)
+    {
         var restored = 0;
         var sent = 0;
         // Counted apart from dropped and failed, because only those two are added to
@@ -560,19 +579,25 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                 if (Equals(currentValue, change.GetNewValue<object?>()))
                 {
                     // Already the current model value: the source has not received it, so send it.
-                    // Marked here because this path flushes the retry queue directly rather than going
-                    // through the processor, and without the mark a later transaction confirmation on
+                    // Marked published, because this path flushes the retry queue directly rather than
+                    // going through the processor, and without the mark a later transaction confirmation on
                     // this property is not written back, which is the divergence that repair exists for.
-                    // Set without the subject lock, which is safe only because the reconcile runs before
-                    // the processor starts, so no confirmation for this connector is judged concurrently.
-                    property.MarkAsPublishedToSource();
+                    // Checked and marked under the subject lock on first publish, since a confirmation can
+                    // commit concurrently once the processor runs.
+                    if (!ChangeDeliveryFilter.TryAcceptForDelivery(in change, DeliveryRule))
+                    {
+                        superseded++;
+                        continue;
+                    }
+
                     (toSend ??= []).Add(change);
                     sent++;
                 }
                 else if (property.Metadata.SetValue is { } setValue)
                 {
-                    // The load moved the model off it: restore locally so the connected phase captures
-                    // and sends the re-applied write.
+                    // The load moved the model off it: restore locally so the processor captures and sends
+                    // the re-applied write. A local write landing between the check above and this restore
+                    // is overwritten by it (#442).
                     setValue(property.Subject, change.GetNewValue<object?>());
                     restored++;
                 }
@@ -598,12 +623,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             }
         }
 
-        if (toSend is not null)
-        {
-            WriteRetryQueue.Enqueue(toSend.ToArray());
-            await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
-        }
-
         if (superseded > 0 || dropped > 0 || failed > 0)
         {
             _logger.LogWarning(
@@ -615,6 +634,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             _logger.LogInformation(
                 "Retry queue reconcile: {Restored} restored, {Sent} sent.", restored, sent);
         }
+
+        return toSend?.ToArray();
     }
 
     // ---- Source monitoring surface ----
@@ -686,7 +707,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
             Volatile.Write(ref _stateSnapshot, new SourceStateSnapshot(newState, now, lastSynchronizedAt));
 
-            if (newState == SourceState.Synchronized)
+            if (newState == SourceState.Synchronized && _synchronizedWake.CurrentCount == 0)
             {
                 _synchronizedWake.Release();
             }
