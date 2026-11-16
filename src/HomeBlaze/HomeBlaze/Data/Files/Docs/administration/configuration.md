@@ -25,13 +25,16 @@ Standard ASP.NET Core logging configuration:
   "Logging": {
     "LogLevel": {
       "Default": "Information",
-      "Microsoft.AspNetCore": "Warning"
+      "Microsoft.AspNetCore": "Warning",
+      "System.Net.Http.HttpClient": "Warning"
     }
   }
 }
 ```
 
 Category-level overrides use the fully qualified type name (or prefix) as the key.
+
+`System.Net.Http.HttpClient` is set to `Warning` because devices are polled over HTTP every few seconds, and at `Information` every request writes four log entries. To see the requests of a device while troubleshooting, set it to `Information`, for example with the environment variable `Logging__LogLevel__System.Net.Http.HttpClient=Information`.
 
 ---
 

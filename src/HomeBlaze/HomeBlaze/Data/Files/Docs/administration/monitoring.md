@@ -26,8 +26,33 @@ The `Host system` subject reports the machine HomeBlaze runs on and the HomeBlaz
 | `Process.GcHeapSize` | Size of the .NET heap at the last garbage collection |
 | `Process.AllocationRate` | Memory HomeBlaze allocates per second |
 | `Process.GcPauseTime` | Share of the time the garbage collector paused HomeBlaze; under 1 % is normal |
+| `Process.GcCommittedSize` | Memory the garbage collector held from the operating system at the last garbage collection, including free space it keeps for reuse |
+| `Process.GcFragmentedSize` | Free space between objects in the .NET heap at the last garbage collection |
+| `Process.Gen2Size`, `Process.LargeObjectHeapSize` | Long-lived objects and objects of 85,000 bytes or more after the last full garbage collection, including the free space between them |
+| `Process.ResidentAnonymousMemory`, `Process.ResidentFileMemory` | Physical memory not backed by a file (heaps, stacks) and backed by one (executable, libraries); Linux only |
+| `Process.HandleCount` | Open file descriptors on Linux, kernel handles on Windows; empty on macOS |
+| `Process.TimerCount` | Active .NET timers, including the ones behind `Task.Delay` and `CancelAfter` |
+| `Process.ThreadPoolThreadCount`, `Process.ThreadPoolQueueLength` | Thread pool threads, and work items waiting for one |
+| `Process.LockContentionRate` | Times per second a thread waited for a lock another thread held |
+| `Process.ExceptionRate` | Exceptions thrown per second, caught or not; an exception rethrown through `await` counts again at each awaiting method |
+| `Process.ResidentSharedMemory` | Physical shared memory; Linux only. It holds the code .NET compiles at runtime only while write-xor-execute is on, the default; with `DOTNET_EnableWriteXorExecute=0` that memory shows in `ResidentAnonymousMemory` instead |
+| `Process.JitCompiledMethodCount` | Methods the JIT compiler compiled since HomeBlaze started |
 
-The values refresh every `PollingInterval` (15 seconds by default, at least 1 second). CPU usage, allocation rate and GC pause time appear after the second reading.
+The values refresh every `PollingInterval` (15 seconds by default, at least 1 second). CPU usage, allocation rate, GC pause time, lock contention rate and exception rate appear after the second reading. The garbage collection values stay empty until the first collection, `Gen2Size` and `LargeObjectHeapSize` until the first full one.
+
+All of them are recorded in history, so a trend shows where memory or CPU goes:
+
+| Trend | Points to |
+|-------|-----------|
+| `Gen2Size` or `LargeObjectHeapSize` rises over days | A managed leak: objects that are never released. Both are measured after the last full garbage collection and include free space. Under Server GC most full collections run in the background and do not compact, so free space can keep them high; run `Collect garbage`, which compacts, and compare the values right after it over days to tell a leak from fragmentation |
+| `GcCommittedSize` keeps growing over days while `GcHeapSize` does not | Free memory the garbage collector keeps instead of returning it to the operating system; `Collect garbage` returns it. Staying far above `GcHeapSize` is normal under Server GC, so only a persistent growth matters |
+| `ResidentAnonymousMemory` grows while `GcCommittedSize` does not | Native memory outside .NET, such as SQLite or a device driver. If `SqliteMemorySize` of the SQLite history store stays flat meanwhile, the growth is not in memory SQLite currently holds, though the C library may still keep heap SQLite freed; a rising `OpenConnectionCount` points to databases the store keeps open |
+| `JitCompiledMethodCount` or `ResidentSharedMemory` keeps growing and does not level off long after startup | Code generated at runtime again and again, such as a regular expression or expression tree compiled per call. Tiered recompilation and code paths first used later add some, so only a growth that continues matters |
+| `HandleCount` or `TimerCount` keeps growing | Connections, files or timers that are never closed |
+| `ThreadPoolQueueLength` stays above zero while `Process.CpuUsage` is low | Blocked threads: work waits for a thread although the CPU is idle |
+| `ExceptionRate` or `LockContentionRate` stays high | A retry loop or contended lock that costs CPU |
+
+The SQLite history store reports `OpenConnectionCount` and `SqliteMemorySize`, the memory all SQLite databases in the process hold.
 
 Inside a container the host values describe the machine running the container, and the container limits sit beside them. `Process.CpuUsage` is measured against the processors available to HomeBlaze, which is the container CPU limit rounded up.
 

@@ -148,6 +148,40 @@ public class SqliteHistoryStoreRecordingTests
     }
 
     [Fact]
+    public async Task WhenRunningStoreStops_ThenItReportsSqliteMemoryWhileRunningAndNoOpenConnectionsAfterwards()
+    {
+        // Arrange
+        var (context, _, _) = CreateGraph();
+        var (store, databasePath) = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            // Both values are written by the same metrics refresh, SqliteMemorySize after OpenConnectionCount.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => store.OpenConnectionCount > 0 && store.SqliteMemorySize > 0,
+                message: "Store did not report open connections and SQLite memory while running");
+            var runningOpenConnectionCount = store.OpenConnectionCount;
+            var runningSqliteMemorySize = store.SqliteMemorySize;
+
+            // Act
+            await hostedService.StopAsync(CancellationToken.None);
+
+            // Assert
+            Assert.True(runningOpenConnectionCount > 0);
+            Assert.True(runningSqliteMemorySize > 0);
+            Assert.Equal("Stopped", store.Status);
+            Assert.Equal(0, store.OpenConnectionCount);
+        }
+        finally
+        {
+            // Stops the store when the wait failed; a no-op once the Act stopped it.
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
     public async Task WhenRootStatePropertyMutated_ThenRecordedUnderCanonicalPath()
     {
         // Arrange
