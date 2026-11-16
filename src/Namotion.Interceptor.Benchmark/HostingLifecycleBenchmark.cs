@@ -1,4 +1,3 @@
-using System;
 using System.Threading;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
@@ -7,8 +6,8 @@ using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Benchmark;
 
@@ -129,28 +128,27 @@ public class HostingLifecycleBenchmark
     [Params(false, true)]
     public bool StructureGateRaised;
 
-    private HostingStructureReader? _structureReader;
+    [GlobalSetup(Targets = [nameof(AttachCold), nameof(Detach)])]
+    public void Setup()
+    {
+        RaiseStructureGateIfRequested();
+    }
 
-    [GlobalSetup]
-    public void RaiseStructureGate()
+    private void RaiseStructureGateIfRequested()
     {
         if (!StructureGateRaised)
         {
             return;
         }
 
-        // Evaluating a derived getter that reads a structure API creates a structure dependency, which
-        // raises the gate. The reader is kept alive so the dependency stays in place.
+        // Attaching a subject whose derived getter reads a structure API evaluates the getter, which
+        // creates a structure dependency and raises the gate.
         var context = InterceptorSubjectContext
             .Create()
             .WithDerivedPropertyChangeDetection()
             .WithContextInheritance();
 
-        _structureReader = new HostingStructureReader(context);
-        if (_structureReader.ParentCount != 0)
-        {
-            throw new InvalidOperationException("The structure reader did not evaluate.");
-        }
+        _ = new HostingStructureReader(context);
     }
 
     private IInterceptorSubjectContext CreateContext()
@@ -201,6 +199,8 @@ public class HostingLifecycleBenchmark
     [GlobalSetup(Targets = [nameof(AttachWarm)])]
     public void SetupWarm()
     {
+        RaiseStructureGateIfRequested();
+
         _warmContext = CreateContext();
         _warmRoot = new HostingGraphRoot(_warmContext);
 
