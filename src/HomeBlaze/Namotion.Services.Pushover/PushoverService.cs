@@ -187,13 +187,20 @@ public partial class PushoverService :
 
     internal void RequestValidation()
     {
+        // Checked first so an already pending validation does not throw, which would raise a first-chance
+        // exception on most configuration changes.
+        if (_validationSignal.CurrentCount != 0)
+        {
+            return;
+        }
+
         try
         {
             _validationSignal.Release();
         }
         catch (SemaphoreFullException)
         {
-            // A validation is already pending.
+            // Another caller released between the check above and this release.
         }
     }
 
