@@ -152,9 +152,10 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
     /// Queues an entry for the exception unless Debug is disabled, the thread is already inside this method
     /// or writing an entry, the exception instance was seen before, or an entry for the same exception type
     /// and throw site was queued within the last minute. The throw site is the first frame shown in the calling
-    /// stack outside the framework, so frames hidden from stack traces are skipped. When the stack has only framework frames it is the first visible frame of the stack
-    /// after the runtime's exception dispatch frames, then the exception's throwing frame. Never throws and
-    /// never writes to a logging provider, only <see cref="ILogger.IsEnabled"/> is called on the calling thread.
+    /// stack outside the framework, so frames hidden from stack traces are skipped. When the stack has only
+    /// framework frames it is the first visible frame of the stack after the runtime's exception dispatch
+    /// frames, then the exception's throwing frame. Never throws and never writes to a logging provider,
+    /// only <see cref="ILogger.IsEnabled"/> is called on the calling thread.
     /// </summary>
     /// <param name="exception">The exception being thrown.</param>
     /// <param name="skippedCallerFrames">The frames between this method and the throwing method, left out of the call stack.</param>
@@ -218,8 +219,9 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
 
     /// <summary>
     /// Returns whether the type is one of the CoreCLR managed exception dispatch types, whose frames
-    /// start the call stack at first chance and are shown in formatted stacks on some platforms. Native AOT
-    /// uses other type names; there its leading frames are only skipped when hidden from stack traces.
+    /// start the call stack at first chance and are shown in formatted stacks on some platforms. Other runtimes
+    /// may use other names; there leading frames are only skipped when hidden from stack traces or, when searching
+    /// for a caller outside the framework, by namespace.
     /// </summary>
     private static bool IsExceptionDispatchType(string? declaringTypeName) =>
         declaringTypeName is "System.Runtime.EH" or "System.Runtime.ExceptionServices.InternalCalls";
