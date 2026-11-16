@@ -100,8 +100,8 @@ public class OpcUaServerConfiguration
     /// accept, and no anonymous policy unless one of them accepts anonymous tokens, such as the SDK's
     /// <c>AnonymousAuthenticator</c>. Unlike the SDK's own hosting, which keeps anonymous access when only custom
     /// authenticators are added, a configured list turns anonymous logins off unless one of them accepts them. The SDK
-    /// keeps one authenticator per token type and issued token profile, so checks for the same token type have to be
-    /// combined in one authenticator; <see cref="Validate"/> rejects duplicates.
+    /// keeps one authenticator per token type and issued token profile, and for issued tokens per issuer, so checks
+    /// for the same token type have to be combined in one authenticator; <see cref="Validate"/> rejects duplicates.
     /// </remarks>
     public IReadOnlyList<IUserTokenAuthenticator> UserTokenAuthenticators { get; set; } = [];
 
@@ -307,10 +307,13 @@ public class OpcUaServerConfiguration
             return false;
         }
 
-        var addedIssuer = (added as IIssuerTokenAuthenticator)?.IssuerUri;
-        var existingIssuer = (existing as IIssuerTokenAuthenticator)?.IssuerUri;
+        var addedIssuer = GetIssuer(added);
+        var existingIssuer = GetIssuer(existing);
         return addedIssuer is null || existingIssuer is null || string.Equals(addedIssuer, existingIssuer, StringComparison.Ordinal);
     }
+
+    private static string? GetIssuer(IUserTokenAuthenticator authenticator) =>
+        authenticator.TokenType == UserTokenType.IssuedToken ? (authenticator as IIssuerTokenAuthenticator)?.IssuerUri : null;
 
     public virtual string[] GetNamespaceUris()
     {
