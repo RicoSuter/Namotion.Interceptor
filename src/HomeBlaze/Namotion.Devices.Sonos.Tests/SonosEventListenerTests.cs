@@ -13,6 +13,38 @@ namespace Namotion.Devices.Sonos.Tests;
 
 public class SonosEventListenerTests
 {
+    [Fact]
+    public void WhenTheEventSequenceWrapsFromItsMaximumToOne_ThenNoEventIsMissed()
+    {
+        // Arrange
+        var subscription = new SonosEventSubscription("RINCON_X/AVTransport", new Uri("http://127.0.0.1:1400/"), _ => { });
+        subscription.RecordSequence(uint.MaxValue - 1);
+        subscription.TakeMissedEvents();
+        subscription.RecordSequence(uint.MaxValue);
+
+        // Act
+        subscription.RecordSequence(1);
+
+        // Assert
+        Assert.False(subscription.TakeMissedEvents());
+    }
+
+    [Fact]
+    public void WhenMissedEventsAreTaken_ThenTheReportIsCleared()
+    {
+        // Arrange
+        var subscription = new SonosEventSubscription("RINCON_X/AVTransport", new Uri("http://127.0.0.1:1400/"), _ => { });
+        subscription.RecordSequence(5);
+
+        // Act
+        var first = subscription.TakeMissedEvents();
+        var second = subscription.TakeMissedEvents();
+
+        // Assert
+        Assert.True(first);
+        Assert.False(second);
+    }
+
     private static readonly TimeSpan WaitTimeout = TestTimeouts.Default;
     private static readonly TimeSpan NegativeCheckDuration = TimeSpan.FromMilliseconds(300);
 
@@ -384,11 +416,10 @@ public class SonosEventListenerTests
         // Arrange
         using var httpClient = new HttpClient();
         await using var listener = CreateListener(httpClient);
-        LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
+        var port = LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() =>
-            listener.Start("127.0.0.1", LoopbackPorts.GetFreePort(), listenHost: "127.0.0.1"));
+        Assert.Throws<InvalidOperationException>(() => listener.Start("127.0.0.1", port, listenHost: "127.0.0.1"));
     }
 
     [Fact]
@@ -592,12 +623,11 @@ public class SonosEventListenerTests
         // Arrange
         using var httpClient = new HttpClient();
         var listener = CreateListener(httpClient);
-        LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
+        var port = LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         await listener.DisposeAsync();
 
         // Act & Assert
-        Assert.Throws<ObjectDisposedException>(() =>
-            listener.Start("127.0.0.1", LoopbackPorts.GetFreePort(), listenHost: "127.0.0.1"));
+        Assert.Throws<ObjectDisposedException>(() => listener.Start("127.0.0.1", port, listenHost: "127.0.0.1"));
         await Assert.ThrowsAsync<ObjectDisposedException>(() =>
             listener.SubscribeAsync("RINCON_X/AVTransport", new Uri("http://127.0.0.1:1/Event"), _ => { }, CancellationToken.None));
     }

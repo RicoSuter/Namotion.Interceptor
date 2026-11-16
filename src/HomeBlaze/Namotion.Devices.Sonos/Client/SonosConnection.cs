@@ -203,6 +203,27 @@ internal sealed class SonosConnection
             HasSleepTimer: sleepTimer is not null);
     }
 
+    /// <summary>
+    /// Reads the position and the sleep timer, each only when asked for, with the same fault handling as
+    /// <see cref="ReadPlayerAsync"/>.
+    /// </summary>
+    internal async Task<SonosProgressReading> ReadProgressAsync(
+        bool readsPosition, bool readsSleepTimer, List<SonosReadFault> newFaults, CancellationToken cancellationToken)
+    {
+        var position = readsPosition
+            ? await ReadOrDefaultAsync(SonosService.AvTransport, "GetPositionInfo", [Instance], newFaults, cancellationToken)
+            : null;
+        var sleepTimer = readsSleepTimer
+            ? await ReadOrDefaultAsync(SonosService.AvTransport, "GetRemainingSleepTimerDuration", [Instance], newFaults, cancellationToken)
+            : null;
+
+        return new SonosProgressReading(
+            SonosValues.ParseDuration(position?.GetString("RelTime")),
+            position is not null,
+            SonosValues.ParseDuration(sleepTimer?.GetString("RemainingSleepTimerDuration")),
+            sleepTimer is not null);
+    }
+
     private static AvTransportChange CreateAvTransportChange(
         SonosSoapResponse? transport, SonosSoapResponse? settings, SonosSoapResponse? media, SonosSoapResponse? position) =>
         new(
