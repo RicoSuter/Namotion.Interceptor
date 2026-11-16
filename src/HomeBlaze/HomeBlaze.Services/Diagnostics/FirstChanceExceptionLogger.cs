@@ -11,7 +11,7 @@ namespace HomeBlaze.Services.Diagnostics;
 
 /// <summary>
 /// Writes a <see cref="LogLevel.Debug"/> entry per first-chance exception in the process, at most one
-/// per exception type and throw site per minute, where the throw site is the first method on the stack
+/// per exception type and throw site per minute, where the throw site is the first method shown on the stack
 /// outside the framework. Does nothing unless Debug is enabled for its category.
 /// Entries are written by a background task, so the throwing thread never writes to a logging provider.
 /// An instance runs once: it is not started again after it was stopped or disposed.
@@ -151,8 +151,8 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
     /// <summary>
     /// Queues an entry for the exception unless Debug is disabled, the thread is already inside this method
     /// or writing an entry, the exception instance was seen before, or an entry for the same exception type
-    /// and throw site was queued within the last minute. The throw site is the first frame of the calling
-    /// stack outside the framework. When the stack has only framework frames it is the first visible frame of the stack
+    /// and throw site was queued within the last minute. The throw site is the first frame shown in the calling
+    /// stack outside the framework, so frames hidden from stack traces are skipped. When the stack has only framework frames it is the first visible frame of the stack
     /// after the runtime's exception dispatch frames, then the exception's throwing frame. Never throws and
     /// never writes to a logging provider, only <see cref="ILogger.IsEnabled"/> is called on the calling thread.
     /// </summary>
@@ -217,8 +217,9 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
     }
 
     /// <summary>
-    /// Returns whether the type is one of the runtime's managed exception dispatch types, whose frames
-    /// start the call stack at first chance and are shown in formatted stacks on some platforms.
+    /// Returns whether the type is one of the CoreCLR managed exception dispatch types, whose frames
+    /// start the call stack at first chance and are shown in formatted stacks on some platforms. Native AOT
+    /// uses other type names; there its leading frames are only skipped when hidden from stack traces.
     /// </summary>
     private static bool IsExceptionDispatchType(string? declaringTypeName) =>
         declaringTypeName is "System.Runtime.EH" or "System.Runtime.ExceptionServices.InternalCalls";

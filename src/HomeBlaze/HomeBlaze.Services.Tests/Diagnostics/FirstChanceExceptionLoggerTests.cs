@@ -556,7 +556,7 @@ public class FirstChanceExceptionLoggerTests
         }
 
         // Assert
-        var entry = logger.Entries.First(IsReadCancellation);
+        var entry = Assert.Single(logger.Entries, IsReadCancellation);
         var throwSite = (string)entry.Properties["ThrowSite"]!;
         Assert.StartsWith("System.", throwSite);
         Assert.DoesNotContain(TestClassName, throwSite);
@@ -568,7 +568,6 @@ public class FirstChanceExceptionLoggerTests
         bool IsReadCancellation(LogEntry candidate) =>
             candidate.Exception is TaskCanceledException { Task: { } task } && task == stream.CanceledRead;
     }
-
 
     [Fact]
     public async Task WhenConsumerIsBlockedAndStopTokenIsCanceled_ThenStoppedAsyncCompletes()

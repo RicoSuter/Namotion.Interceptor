@@ -27,7 +27,7 @@ public partial class PushoverService :
 {
     private readonly PushoverClient _client;
     private readonly ILogger<PushoverService> _logger;
-    private readonly SemaphoreSlim _validationSignal = new(0, 1);
+    private readonly SemaphoreSlim _validationSignal = new(0);
 
     [Configuration]
     public partial string Name { get; set; }
@@ -187,25 +187,9 @@ public partial class PushoverService :
 
     internal void RequestValidation()
     {
-        // Release fences through its lock; without this fence the configuration written before this call could
-        // become visible after a stale count is read, and the validation that consumed it would miss the change.
-        Interlocked.MemoryBarrier();
-
-        // Checked first so an already pending validation does not throw, which would raise a first-chance
-        // exception on most configuration changes.
-        if (_validationSignal.CurrentCount != 0)
-        {
-            return;
-        }
-
-        try
-        {
-            _validationSignal.Release();
-        }
-        catch (SemaphoreFullException)
-        {
-            // Another caller released between the check above and this release.
-        }
+        // Unbounded, so a release never throws; the monitoring loop drains every pending request before it
+        // validates, so several requests while one validation runs still cause only one more.
+        _validationSignal.Release();
     }
 
     // Set before Targets changes, so there is no window in which a target is reachable through Targets but cannot
