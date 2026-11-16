@@ -32,7 +32,10 @@ public partial class SqliteHistoryStoreSubject :
     private readonly ILogger<SqliteHistoryStoreSubject> _logger;
 
     private HistoryChangeRecorder? _recorder;
-    private SqliteHistoryStore? _engine;
+
+    // Null while the store is not running, so queries never reach a disposed engine. Read once per call: a
+    // query still holding the engine when stop disposes it gets empty results (see SqliteHistoryStore.Dispose).
+    private volatile SqliteHistoryStore? _engine;
 
     public SqliteHistoryStoreSubject(ILogger<SqliteHistoryStoreSubject> logger)
     {
@@ -197,7 +200,8 @@ public partial class SqliteHistoryStoreSubject :
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_engine is null)
+        var engine = _engine;
+        if (engine is null)
         {
             return Task.FromResult(
                 new HistorySeries(
@@ -207,7 +211,7 @@ public partial class SqliteHistoryStoreSubject :
                     ImmutableArray<HistoryCoverage>.Empty));
         }
 
-        return _engine.QueryAsync(query, cancellationToken);
+        return engine.QueryAsync(query, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -227,9 +231,14 @@ public partial class SqliteHistoryStoreSubject :
     }
 
     /// <summary>
+    /// Test-only hook that returns the engine of the running store, or null while it is not running.
+    /// </summary>
+    internal SqliteHistoryStore? Engine => _engine;
+
+    /// <summary>
     /// Test-only hook that forces the engine to flush its pending samples immediately, so queued
     /// changes become queryable without waiting for the interval flush. Returns a completed task
-    /// (no-op) before the engine is built.
+    /// (no-op) while the store is not running.
     /// </summary>
     internal Task FlushNowAsync(CancellationToken cancellationToken = default)
     {
@@ -301,16 +310,19 @@ public partial class SqliteHistoryStoreSubject :
             logger: _logger);
 
         engine.BeginCoverageSession();
-        _engine = engine;
 
-        _logger.LogInformation("Recording SQLite history to {Directory}.", directory);
-
-        LastError = null;
-        Status = "Running";
-
-        var flushTask = RunFlushLoopAsync(engine, stoppingToken);
+        var flushTask = Task.CompletedTask;
         try
         {
+            // Inside the try, so a throw from here on still clears and disposes the engine.
+            _engine = engine;
+
+            _logger.LogInformation("Recording SQLite history to {Directory}.", directory);
+
+            LastError = null;
+            Status = "Running";
+
+            flushTask = RunFlushLoopAsync(engine, stoppingToken);
             await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -333,6 +345,7 @@ public partial class SqliteHistoryStoreSubject :
                 _logger.LogError(exception, "Final history flush on shutdown failed; pending samples were not persisted.");
             }
 
+            _engine = null;
             engine.Dispose();
 
             // After disposing, so a stopped store reports no open connections.
