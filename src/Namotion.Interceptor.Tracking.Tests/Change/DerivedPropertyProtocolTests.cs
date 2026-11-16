@@ -844,10 +844,7 @@ public class DerivedPropertyProtocolTests
         worker.Evaluator = _ =>
         {
             var value = machine.Configuration.Value * 10 + Volatile.Read(ref external);
-            if (!IsAttachBaseline)
-            {
-                gate.PauseIfArmed();
-            }
+            gate.PauseIfArmed();
 
             return value;
         };
@@ -935,10 +932,7 @@ public class DerivedPropertyProtocolTests
         worker.Evaluator = _ =>
         {
             var anchor = root.Anchor;
-            if (!IsAttachBaseline)
-            {
-                gate.PauseIfArmed();
-            }
+            gate.PauseIfArmed();
 
             return anchor;
         };

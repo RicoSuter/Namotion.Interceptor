@@ -13,16 +13,15 @@ namespace Namotion.Interceptor.Tracking.Change;
 [RunsFirst]
 internal sealed class DerivedPropertyBaselineHandler : ILifecycleHandler
 {
-    // The derived property names of a property dictionary: per type for the static dictionary of generated subjects,
-    // per subject for one with properties added at run time. Weak, so that neither the dictionary nor its type is kept.
-    private static readonly ConditionalWeakTable<IReadOnlyDictionary<string, SubjectPropertyMetadata>, string[]> NamesByProperties = new();
+    // The derived property names of a type's property dictionary, the static one of generated subjects. Weak, so that
+    // neither a type nor its dictionary is kept; a subject whose dictionary differs, such as one with properties added
+    // at run time, is enumerated instead.
+    private static readonly ConditionalWeakTable<Type, TypeEntry> Entries = new();
 
     // Consecutive attaches mostly attach subjects of one type, which the thread's last entry answers without a lookup.
+    // Keeps at most one type alive per thread, as the type gate does.
     [ThreadStatic]
-    private static IReadOnlyDictionary<string, SubjectPropertyMetadata>? _lastProperties;
-
-    [ThreadStatic]
-    private static string[]? _lastNames;
+    private static TypeEntry? _last;
 
     /// <inheritdoc />
     public void HandleLifecycleChange(SubjectLifecycleChange change)
@@ -33,37 +32,78 @@ internal sealed class DerivedPropertyBaselineHandler : ILifecycleHandler
         }
 
         var subject = change.Subject;
-        foreach (var name in GetDerivedPropertyNames(subject.Properties))
+        var properties = subject.Properties;
+        if (GetEntry(subject.GetType()).TryGetNames(properties) is { } names)
         {
-            DerivedPropertyOwnership.CaptureAttachBaseline(new PropertyReference(subject, name));
-        }
-    }
+            foreach (var name in names)
+            {
+                DerivedPropertyOwnership.CaptureAttachBaseline(new PropertyReference(subject, name));
+            }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static string[] GetDerivedPropertyNames(IReadOnlyDictionary<string, SubjectPropertyMetadata> properties)
-    {
-        if (ReferenceEquals(_lastProperties, properties))
-        {
-            return _lastNames!;
+            return;
         }
 
-        var names = NamesByProperties.GetValue(properties, static properties => FindDerivedPropertyNames(properties));
-        _lastProperties = properties;
-        _lastNames = names;
-        return names;
-    }
-
-    private static string[] FindDerivedPropertyNames(IReadOnlyDictionary<string, SubjectPropertyMetadata> properties)
-    {
-        List<string>? names = null;
         foreach (var (name, metadata) in properties)
         {
-            if (metadata.IsDerived && metadata.GetValue is not null)
+            if (IsCaptured(metadata))
             {
-                (names ??= []).Add(name);
+                DerivedPropertyOwnership.CaptureAttachBaseline(new PropertyReference(subject, name));
             }
         }
-
-        return names?.ToArray() ?? [];
     }
+
+    private static bool IsCaptured(SubjectPropertyMetadata metadata) => metadata.IsDerived && metadata.GetValue is not null;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static TypeEntry GetEntry(Type type)
+    {
+        var last = _last;
+        if (last is not null && ReferenceEquals(last.Type, type))
+        {
+            return last;
+        }
+
+        var entry = Entries.GetValue(type, static type => new TypeEntry(type));
+        _last = entry;
+        return entry;
+    }
+
+    private sealed class TypeEntry(Type type)
+    {
+        // Replaced as a whole, so a reader sees a dictionary with its own names.
+        private Snapshot? _snapshot;
+
+        public Type Type { get; } = type;
+
+        // The names when the dictionary is the one cached for the type, or null. The first dictionary seen, and one that
+        // replaces a collected one, is cached: a type's static dictionary is never collected, so it stays.
+        public string[]? TryGetNames(IReadOnlyDictionary<string, SubjectPropertyMetadata> properties)
+        {
+            var snapshot = Volatile.Read(ref _snapshot);
+            if (snapshot is not null && snapshot.Properties.TryGetTarget(out var cached))
+            {
+                return ReferenceEquals(cached, properties) ? snapshot.Names : null;
+            }
+
+            var names = FindNames(properties);
+            Volatile.Write(ref _snapshot, new Snapshot(new WeakReference<IReadOnlyDictionary<string, SubjectPropertyMetadata>>(properties), names));
+            return names;
+        }
+
+        private static string[] FindNames(IReadOnlyDictionary<string, SubjectPropertyMetadata> properties)
+        {
+            List<string>? names = null;
+            foreach (var (name, metadata) in properties)
+            {
+                if (IsCaptured(metadata))
+                {
+                    (names ??= []).Add(name);
+                }
+            }
+
+            return names?.ToArray() ?? [];
+        }
+    }
+
+    private sealed record Snapshot(WeakReference<IReadOnlyDictionary<string, SubjectPropertyMetadata>> Properties, string[] Names);
 }

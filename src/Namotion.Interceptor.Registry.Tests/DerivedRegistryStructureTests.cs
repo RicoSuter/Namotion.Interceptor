@@ -396,14 +396,13 @@ public class DerivedRegistryStructureTests
                 return "value";
             }
         };
-        var evaluationsAfterAttach = evaluations;
 
         // Act: the structure of the holder, then of the target changes.
         other.TryGetRegisteredSubject()!.AddProperty<int>("Added", _ => 1);
         other.OtherTarget = other.Target;
 
-        // Assert
-        Assert.Equal(evaluationsAfterAttach, evaluations);
+        // Assert: once for the value before the attach and once by the attach, and not for the structure changes.
+        Assert.Equal(2, evaluations);
     }
 
     private static (Func<string?> Read, Action Change) CreateScenario(

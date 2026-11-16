@@ -131,9 +131,10 @@ internal sealed class EvaluationGate
 
     public void Arm() => Volatile.Write(ref _isArmed, 1);
 
+    // Pauses an evaluation of the attach or a recalculation, not the one that records the value before the attach.
     public void PauseIfArmed()
     {
-        if (Interlocked.Exchange(ref _isArmed, 0) == 1)
+        if (!DerivedPropertyTestHelpers.IsAttachBaseline && Interlocked.Exchange(ref _isArmed, 0) == 1)
         {
             Paused.Set();
             _hasTimedOut = !Resume.Wait(TestTimeouts.Default);

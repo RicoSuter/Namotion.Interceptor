@@ -3,12 +3,17 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using static Namotion.Interceptor.Tracking.Tests.Change.DerivedPropertyTestHelpers;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
+[Collection(PerPropertySubscriptionCollection.Name)]
 public class DerivedPropertyAttachTests
 {
+    public DerivedPropertyAttachTests() => PropertyChangeSubscriptions.ResetForTests();
+
     [Fact]
     public void WhenASourceIsWrittenWhileItsSubjectAttachesBeforeTheDerivedPropertyIsAttached_ThenTheDerivedChangeIsPublished()
     {
@@ -125,6 +130,142 @@ public class DerivedPropertyAttachTests
         // Assert
         Assert.Contains("FullName: Ann -> Ann Smith", changes.Select(Describe));
     }
+
+    [Fact]
+    public void WhenAGetterReadsItsParent_ThenTheAttachAndAMovePublishTheChange()
+    {
+        // Arrange: the structure of the worker's ancestors is a tracked dependency, which the attach moves.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var first = new EvaluatorRoot(context) { Anchor = 1 };
+        var second = new EvaluatorRoot(context) { Anchor = 2 };
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = worker => worker.TryGetFirstParent<EvaluatorRoot>()?.Anchor ?? -1;
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordResultChanges(machine, published);
+
+        // Act
+        first.Machine = machine;
+        second.Machine = machine;
+        first.Machine = null;
+
+        // Assert
+        Assert.Equal([(-1, 1), (1, 2)], published.ToArray());
+    }
+
+    [Fact]
+    public void WhenAGetterBuildsAnArrayAndNothingItReadsIsWritten_ThenAttachesPublishNothingAndEvaluateTwiceEach()
+    {
+        // Arrange: an array has no value equality, so each evaluation differs from the one before the attach.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var evaluations = 0;
+        machine.Worker.ObjectEvaluator = _ =>
+        {
+            evaluations++;
+            return new[] { 1 };
+        };
+        var changes = SubscribeToChanges(context);
+
+        // Act
+        for (var attach = 0; attach < 3; attach++)
+        {
+            root.Machine = machine;
+            root.Machine = null;
+        }
+
+        // Assert
+        Assert.DoesNotContain(changes, change => change.Property.Name == nameof(EvaluatorWorker.ObjectResult));
+        Assert.Equal(6, evaluations);
+    }
+
+    [Fact]
+    public void WhenAGetterCountsItsEvaluationsAndNothingItReadsIsWritten_ThenTheAttachPublishesNothing()
+    {
+        // Arrange: the value comes from state that is not followed.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var counter = 0;
+        machine.Worker.Evaluator = _ => ++counter;
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordResultChanges(machine, published);
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.Empty(published);
+        Assert.Equal(2, counter);
+    }
+
+    [Fact]
+    public void WhenTheGetterThrowsBeforeTheAttachAndASourceIsWrittenWhileItAttaches_ThenTheChangeStaysUnpublished()
+    {
+        // Arrange: without a parent the getter throws, so there is no value before the attach to publish the change
+        // from (the documented gap).
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context) { Anchor = 1 };
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = worker => worker.TryGetFirstParent<EvaluatorRoot>()!.Anchor;
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordResultChanges(machine, published);
+        context.AddService<ILifecycleHandler>(new AttachingHook(machine.Worker, () => root.Anchor = 2));
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.Empty(published);
+        Assert.Equal(2, machine.Worker.Result);
+    }
+
+    [Fact]
+    public void WhenTheGetterThrowsAtALaterBaseline_ThenTheEarlierBaselineAndItsDependenciesAreCleared()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var isThrowing = false;
+        machine.Worker.Evaluator = _ => isThrowing ? throw new InvalidOperationException("Not ready.") : root.Anchor;
+        var result = new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result));
+        DerivedPropertyOwnership.CaptureAttachBaseline(result);
+        var hadBaseline = result.TryGetDerivedPropertyData()!.HasAttachBaseline;
+
+        // Act
+        isThrowing = true;
+        DerivedPropertyOwnership.CaptureAttachBaseline(result);
+
+        // Assert
+        Assert.True(hadBaseline);
+        Assert.False(result.TryGetDerivedPropertyData()!.HasAttachBaseline);
+        Assert.Empty(result.GetRequiredProperties().ToArray());
+        Assert.DoesNotContain(result, new PropertyReference(root, nameof(EvaluatorRoot.Anchor)).GetUsedByProperties().Items.ToArray());
+    }
+
+    [Fact]
+    public void WhenAPropertyWithABaselineIsDetachedWithoutBeingAttached_ThenTheBaselineAndItsDependenciesAreCleared()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = _ => root.Anchor;
+        var result = new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result));
+        DerivedPropertyOwnership.CaptureAttachBaseline(result);
+
+        // Act
+        DerivedPropertyOwnership.Detach(result, onlyIfSubjectIsDetached: false);
+
+        // Assert
+        Assert.False(result.TryGetDerivedPropertyData()!.HasAttachBaseline);
+        Assert.DoesNotContain(result, new PropertyReference(root, nameof(EvaluatorRoot.Anchor)).GetUsedByProperties().Items.ToArray());
+    }
+
+    private static IDisposable RecordResultChanges(EvaluatorMachine machine, List<(int OldValue, int NewValue)> published) =>
+        new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).SubscribeInline((in SubjectPropertyChange change) =>
+            published.Add((change.GetOldValue<int>(), change.GetNewValue<int>())));
 
     private static string Describe(SubjectPropertyChange change) =>
         $"{change.Property.Name}: {change.GetOldValue<object?>() ?? "null"} -> {change.GetNewValue<object?>() ?? "null"}";
