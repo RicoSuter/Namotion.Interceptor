@@ -9,6 +9,43 @@ public class UpnpEventParserTests
 {
     private const string SpotifyUri = TestFixtures.SpotifyConnectUri;
 
+    [Theory]
+    [InlineData("FV:2,5", "5")]
+    [InlineData("R:0,3,FV:2,3", "3")]
+    [InlineData("R:,1", null)]
+    [InlineData("Q:0,3,FV:2,7", "7")]
+    [InlineData("FV:2,7,Q:0,3", "7")]
+    [InlineData("SFV:2,4", null)]
+    [InlineData("Q:0,3", null)]
+    [InlineData("FV:2", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void WhenContainerUpdateIdsAreRead_ThenOnlyTheUpdateIdOfTheFavoritesContainerIsTaken(string? containerUpdateIds, string? expected)
+    {
+        // Act
+        var updateId = UpnpEventParser.GetContainerUpdateId(containerUpdateIds, "FV:2");
+
+        // Assert
+        Assert.Equal(expected, updateId);
+    }
+
+    [Fact]
+    public void WhenContentDirectoryEventIsParsed_ThenTheFavoritesIdsAreRead()
+    {
+        // Arrange
+        var body = SonosEventBodies.Properties(
+            ("SystemUpdateID", "8"), ("ContainerUpdateIDs", "R:0,3,FV:2,3"), ("FavoritesUpdateID", "RINCON_C43875930F2801400,13"),
+            ("RadioFavoritesUpdateID", "RINCON_C43875930F2801400,13"));
+
+        // Act
+        var change = UpnpEventParser.ParseContentDirectory(body);
+
+        // Assert
+        Assert.Equal("RINCON_C43875930F2801400,13", change.FavoritesUpdateId);
+        Assert.Equal("3", change.FavoritesContainerUpdateId);
+        Assert.Equal("8", change.SystemUpdateId);
+    }
+
     [Fact]
     public void WhenAvTransportEventHasSpotifyTrack_ThenAllFieldsAreRead()
     {

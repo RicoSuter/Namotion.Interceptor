@@ -336,7 +336,7 @@ public class SonosSystemRuntimeTests
 
         // Assert
         Assert.Equal(
-            new[] { AvTransportEventPath, "/MediaRenderer/GroupRenderingControl/Event", "/MediaRenderer/RenderingControl/Event", "/ZoneGroupTopology/Event" },
+            new[] { AvTransportEventPath, "/MediaRenderer/GroupRenderingControl/Event", "/MediaRenderer/RenderingControl/Event", "/MediaServer/ContentDirectory/Event", "/ZoneGroupTopology/Event" },
             speaker.Unsubscribed.Order(StringComparer.Ordinal));
         Assert.Equal(ServiceStatus.Stopped, connected.System.Status);
         Assert.False(connected.System.IsConnected);
@@ -793,8 +793,8 @@ public class SonosSystemRuntimeTests
         await system.RefreshAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(4, logger.Warnings.Count(message => message.Contains("subscription")));
-        Assert.Equal(8, logger.Entries.Count(entry => entry.Level == LogLevel.Debug && entry.Message.Contains("subscription")));
+        Assert.Equal(5, logger.Warnings.Count(message => message.Contains("subscription")));
+        Assert.Equal(10, logger.Entries.Count(entry => entry.Level == LogLevel.Debug && entry.Message.Contains("subscription")));
         Assert.False(system.AreEventsActive);
     }
 

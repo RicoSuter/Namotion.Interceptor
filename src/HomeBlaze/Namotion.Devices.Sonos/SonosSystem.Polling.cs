@@ -212,7 +212,7 @@ public partial class SonosSystem
                 .Where(satellite => satellite.IsInTopology && satellite.NeedsStaticData)
                 .Select(satellite => PollSatelliteAsync(satellite, cancellationToken)));
 
-            if (eventListener is null || !IsSubscriptionLive(eventListener, TopologySubscriptionKey, now))
+            if (ReadsFavorites(eventListener, listener, now))
             {
                 await RefreshFavoritesAsync(players, cancellationToken);
             }
@@ -472,9 +472,33 @@ public partial class SonosSystem
         }
     }
 
+    // Caller holds _reconcileLock. A full reconciliation reads the favorites, as the safety net for events, and so does
+    // every poll while the topology subscription is not live. Otherwise ContentDirectory events re-read them, and a
+    // poll only repairs an event the subscription missed.
+    private static bool ReadsFavorites(SonosEventListener? eventListener, SonosEventListener? runningListener, long now)
+    {
+        var hasMissedEvents = runningListener is not null && TakeMissedEvents(runningListener, ContentDirectorySubscriptionKey);
+        return eventListener is null || hasMissedEvents || !IsSubscriptionLive(eventListener, TopologySubscriptionKey, now);
+    }
+
+    // Caller holds _reconcileLock, which serializes every favorites read. The read covers the refreshes events
+    // requested before it started, also when it fails, since the next full reconciliation reads them again.
+    private async Task RefreshFavoritesAsync(SonosPlayer[] players, CancellationToken cancellationToken)
+    {
+        var requests = Volatile.Read(ref _favoritesRefreshRequests);
+        try
+        {
+            await ReadFavoritesAsync(players, cancellationToken);
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _favoritesRefreshRequests, 0, requests);
+        }
+    }
+
     // Read through a player, not the seed: the seed may be a satellite, and satellites answer the favorites Browse
     // with HTTP 500.
-    private async Task RefreshFavoritesAsync(SonosPlayer[] players, CancellationToken cancellationToken)
+    private async Task ReadFavoritesAsync(SonosPlayer[] players, CancellationToken cancellationToken)
     {
         Exception? failure = null;
         var candidates = new List<(SonosPlayer Player, SonosConnection Connection)>(players.Length);

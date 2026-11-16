@@ -25,6 +25,11 @@ internal sealed class SonosConnection
     /// </summary>
     internal const int MaximumFavoritesPages = 20;
 
+    /// <summary>
+    /// The ContentDirectory container of the favorites.
+    /// </summary>
+    internal const string FavoritesContainerId = "FV:2";
+
     private readonly HttpClient _httpClient;
     private readonly ILogger _logger;
     private readonly SonosSoapClient _soapClient;
@@ -149,7 +154,7 @@ internal sealed class SonosConnection
             SonosService.ContentDirectory,
             "Browse",
             [
-                ("ObjectID", "FV:2"),
+                ("ObjectID", FavoritesContainerId),
                 ("BrowseFlag", "BrowseDirectChildren"),
                 ("Filter", "*"),
                 ("StartingIndex", Format(startingIndex)),
