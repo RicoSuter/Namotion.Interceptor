@@ -150,7 +150,8 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
     /// Queues an entry for the exception unless Debug is disabled, the thread is already inside this method
     /// or writing an entry, the exception instance was seen before, or an entry for the same exception type
     /// and throw site was queued within the last minute. The throw site is the first frame of the calling
-    /// stack outside the framework, or the exception's throwing frame when there is none. Never throws and
+    /// stack outside the framework. When the stack has only framework frames it is the first visible frame of the stack,
+    /// then the exception's throwing frame. Never throws and
     /// never writes to a logging provider, only <see cref="ILogger.IsEnabled"/> is called on the calling thread.
     /// </summary>
     /// <param name="exception">The exception being thrown.</param>
@@ -183,7 +184,7 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
             // be captured here, formatting it is left to the consumer.
             var callStack = new StackTrace(1 + skippedCallerFrames, fNeedFileInfo: false);
             string? throwingFrame = null;
-            var throwSite = FindCallerOutsideFramework(callStack) ?? (throwingFrame = GetThrowingFrame(exception));
+            var throwSite = FindCallerOutsideFramework(callStack) ?? FindFirstVisibleFrame(callStack) ?? (throwingFrame = GetThrowingFrame(exception));
 
             var exceptionType = exception.GetType().FullName ?? exception.GetType().Name;
             var state = TryBeginEntry(exceptionType, throwSite, out var skippedCount);
@@ -225,6 +226,7 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
             }
 
             // Unlike StackFrame.GetMethod, safe under trimming and Native AOT; null when the method is unknown.
+            // Under Native AOT the call stack starts with runtime exception handling frames, which the System. prefix skips.
             var declaringTypeName = DiagnosticMethodInfo.Create(frame)?.DeclaringTypeName;
             if (declaringTypeName is null ||
                 declaringTypeName.StartsWith("System.", StringComparison.Ordinal) ||
@@ -245,14 +247,39 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
         return null;
     }
 
+    /// <summary>
+    /// Returns the first frame of the stack that formats to text, or null when there is none. For a stack of
+    /// framework frames only this is the framework method that awaited or called into the throwing helper,
+    /// since the runtime hides awaiter and exception dispatch frames from formatted stacks.
+    /// </summary>
+    private static string? FindFirstVisibleFrame(StackTrace callStack)
+    {
+        for (var index = 0; index < callStack.FrameCount; index++)
+        {
+            var frame = callStack.GetFrame(index);
+            if (frame is null)
+            {
+                continue;
+            }
+
+            var formattedFrame = FormatFirstFrame(new StackTrace(frame).ToString());
+            if (formattedFrame is not null)
+            {
+                return formattedFrame;
+            }
+        }
+
+        return null;
+    }
+
     private static string GetThrowingFrame(Exception exception)
     {
         // At first chance the exception's stack trace holds only the throwing frame. Without file
-        // information no symbols are loaded on the throwing thread.
+        // information no symbols are loaded on the throwing thread. Native AOT exceptions carry no frames at first chance, so this is "unknown" there.
         return FormatFirstFrame(new StackTrace(exception, fNeedFileInfo: false).ToString()) ?? UnknownFrame;
     }
 
-    /// <summary>Returns the method of the first line of a formatted stack trace, with async state machines resolved to their method.</summary>
+    /// <summary>Returns the method of the first line of a formatted stack trace, as the runtime formats it. Async state machine names are not resolved to their method on Native AOT, where the throw site key stays correct but the fields degrade.</summary>
     private static string? FormatFirstFrame(string stackTrace)
     {
         var frame = stackTrace.AsSpan();

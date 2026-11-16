@@ -339,12 +339,14 @@ public class FirstChanceExceptionLoggerTests
             await firstChanceLogger.StoppedAsync(CancellationToken.None);
         }
 
-        // The consumer has finished, so only a handler still subscribed can call IsEnabled.
-        var isEnabledCallCount = logger.IsEnabledCallCount;
+        // The consumer has finished, so only a handler still subscribed can call IsEnabled. Only calls on
+        // this thread count: other tests raise the event on their threads.
+        var threadId = Environment.CurrentManagedThreadId;
+        var isEnabledCallCount = logger.GetIsEnabledCallCount(threadId);
         ThrowAndCatch(messageAfterStop);
 
         // Assert
-        Assert.Equal(isEnabledCallCount, logger.IsEnabledCallCount);
+        Assert.Equal(isEnabledCallCount, logger.GetIsEnabledCallCount(threadId));
         var entries = logger.Entries;
         var entry = Assert.Single(entries, candidate => HasMessage(candidate, messageWhileStarted));
         Assert.DoesNotContain(entries, candidate => HasMessage(candidate, messageAfterStop));
@@ -450,7 +452,7 @@ public class FirstChanceExceptionLoggerTests
     {
         // Arrange
         var logger = new RecordingLogger(LogLevel.Debug);
-        var firstChanceLogger = new FirstChanceExceptionLogger(logger);
+        using var firstChanceLogger = new FirstChanceExceptionLogger(logger);
         await firstChanceLogger.StartingAsync(CancellationToken.None);
         // Only calls on this thread count: the consumer and the handler raised by other tests call IsEnabled on other threads.
         var threadId = Environment.CurrentManagedThreadId;
@@ -466,6 +468,70 @@ public class FirstChanceExceptionLoggerTests
         // Assert
         Assert.True(callCountAfterThrow > callCountBeforeThrow);
         Assert.Equal(callCountAfterDispose, logger.GetIsEnabledCallCount(threadId));
+    }
+
+    [Fact]
+    public async Task WhenCallStackHasOnlyFrameworkFrames_ThenThrowSiteIsNotTheAwaiterHelper()
+    {
+        // Arrange
+        var message = $"Framework only {Guid.NewGuid()}";
+        var logger = new RecordingLogger(LogLevel.Debug);
+        using var firstChanceLogger = new FirstChanceExceptionLogger(logger);
+        var faulted = Task.FromException(new InvalidOperationException(message));
+
+        // Act
+        await firstChanceLogger.StartingAsync(CancellationToken.None);
+        try
+        {
+            // Task.Wait throws on a pool thread from a method group, so no frame of this assembly is on the stack.
+            var wait = Task.Run(faulted.Wait);
+            await AsyncTestHelpers.WaitUntilAsync(() => logger.Entries.Any(entry => ((string?)entry.Properties.GetValueOrDefault("ExceptionMessage"))?.Contains(message) == true));
+            await Assert.ThrowsAsync<AggregateException>(() => wait);
+        }
+        finally
+        {
+            await firstChanceLogger.StoppedAsync(CancellationToken.None);
+        }
+
+        // Assert
+        var entry = Assert.Single(logger.Entries, candidate => ((string?)candidate.Properties.GetValueOrDefault("ExceptionMessage"))?.Contains(message) == true);
+        var throwSite = (string)entry.Properties["ThrowSite"]!;
+        Assert.StartsWith("System.", throwSite);
+        Assert.DoesNotContain("TaskAwaiter.ThrowForNonSuccess", throwSite);
+        Assert.DoesNotContain(TestClassName, throwSite);
+    }
+
+    [Fact]
+    public async Task WhenConsumerIsBlockedAndStopTokenIsCanceled_ThenStoppedAsyncCompletes()
+    {
+        // Arrange
+        using var consumerEntered = new ManualResetEventSlim();
+        using var releaseConsumer = new ManualResetEventSlim();
+        var logger = new RecordingLogger(LogLevel.Debug, () =>
+        {
+            consumerEntered.Set();
+            releaseConsumer.Wait();
+        });
+        using var firstChanceLogger = CreateStarted(logger, new FakeTimeProvider());
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+
+        try
+        {
+            ThrowFromSiteA(firstChanceLogger);
+            await AsyncTestHelpers.WaitUntilAsync(() => consumerEntered.IsSet);
+
+            // Act
+            var stopped = firstChanceLogger.StoppedAsync(canceled.Token);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => stopped.IsCompleted);
+            await stopped;
+        }
+        finally
+        {
+            releaseConsumer.Set();
+        }
     }
 
     [Fact]
