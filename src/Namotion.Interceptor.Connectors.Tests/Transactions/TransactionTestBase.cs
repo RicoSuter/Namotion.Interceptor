@@ -99,8 +99,6 @@ public abstract class TransactionTestBase
         }
         finally
         {
-            // Await the consumer before disposing: Dispose tears down the subscription's signal,
-            // which a still-running TryDequeue may be about to wait on (ObjectDisposedException).
             await processorCts.CancelAsync();
             try { await processTask.WaitAsync(TimeSpan.FromSeconds(30)); } catch (OperationCanceledException) { }
             processor.Dispose();
