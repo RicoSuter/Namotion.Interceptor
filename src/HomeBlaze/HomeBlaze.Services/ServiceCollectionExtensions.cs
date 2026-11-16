@@ -38,10 +38,12 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System,
             serviceProvider.GetService<ILogger<ClientConnectionService>>() ?? NullLogger<ClientConnectionService>.Instance));
         services.AddScoped<ITimeZoneDisplay, TimeZoneDisplayService>();
-        services.AddHostedService(sp => sp.GetRequiredService<RootManager>());
+        // It subscribes before any hosted service starts and unsubscribes after all have stopped;
+        // registered first so that also holds against the lifecycle callbacks of other services.
         services.AddHostedService(serviceProvider => new FirstChanceExceptionLogger(
             serviceProvider.GetService<ILogger<FirstChanceExceptionLogger>>() ?? NullLogger<FirstChanceExceptionLogger>.Instance,
             serviceProvider.GetService<TimeProvider>()));
+        services.AddHostedService(sp => sp.GetRequiredService<RootManager>());
 
         return services;
     }
