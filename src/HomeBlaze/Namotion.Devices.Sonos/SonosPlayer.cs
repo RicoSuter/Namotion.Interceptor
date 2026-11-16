@@ -19,12 +19,23 @@ public partial class SonosPlayer : SonosDevice,
 {
     private readonly SonosSystem _system;
 
-    // Guards the event versus poll ordering: an order and the fields it protects change together. Every poll goes
-    // through all three, so a poll superseded by a later one applies nothing; the sleep timer has no events.
+    // Guards the event versus poll ordering: an order and the fields it protects change together. Every full poll
+    // goes through all of them, so a poll superseded by a later one applies nothing; the sleep timer has no events.
+    // The position has its own order, which AVTransport events also advance, since a progress poll reads it alone.
     private readonly Lock _stateLock = new();
     private PollEventOrder _avTransportOrder = new();
+    private PollEventOrder _positionOrder = new();
     private PollEventOrder _renderingControlOrder = new();
     private PollEventOrder _sleepTimerOrder = new();
+
+    // Counts the requests to make the event subscriptions again, since the speaker may have dropped them without
+    // telling: it rebooted or went missing from the topology. Incremented by topology applies on any thread and reset
+    // by the subscription upkeep once it replaced them, unless another request came in meanwhile.
+    private int _newSubscriptionsRequests;
+
+    // The BootSeq of the last applied topology; a change means the speaker rebooted. Guarded by the system's topology
+    // lock.
+    private string? _bootSequence;
 
     // The Spotify Connect or AirPlay session the last AVTransport event described, see KeepSessionEventValues.
     // Guarded by _stateLock.
@@ -50,7 +61,35 @@ public partial class SonosPlayer : SonosDevice,
         ReportedSource = null;
         HomeTheater = null;
         Satellites = new Dictionary<string, SonosSatellite>(StringComparer.Ordinal);
+
+        AvTransportSubscriptionKey = $"{uuid}/{SonosSystem.AvTransportService}";
+        RenderingControlSubscriptionKey = $"{uuid}/{SonosSystem.RenderingControlService}";
+        GroupRenderingControlSubscriptionKey = $"{uuid}/{SonosSystem.GroupRenderingControlService}";
     }
+
+    internal string AvTransportSubscriptionKey { get; }
+
+    internal string RenderingControlSubscriptionKey { get; }
+
+    internal string GroupRenderingControlSubscriptionKey { get; }
+
+    /// <summary>
+    /// The pending requests to make the event subscriptions again, zero for none, see
+    /// <see cref="RequestNewSubscriptions"/>.
+    /// </summary>
+    internal int NewSubscriptionsRequests => Volatile.Read(ref _newSubscriptionsRequests);
+
+    /// <summary>
+    /// Records that the speaker may have dropped its event subscriptions without telling, so they are made again.
+    /// </summary>
+    internal void RequestNewSubscriptions() => Interlocked.Increment(ref _newSubscriptionsRequests);
+
+    /// <summary>
+    /// Clears the requests once the subscriptions were made again, unless more than <paramref name="handled"/>
+    /// requests came in meanwhile.
+    /// </summary>
+    internal void CompleteNewSubscriptionsRequests(int handled) =>
+        Interlocked.CompareExchange(ref _newSubscriptionsRequests, 0, handled);
 
     /// <summary>
     /// The media the player was told to play (AVTransportURI), which identifies the source better than the track.
@@ -261,9 +300,11 @@ public partial class SonosPlayer : SonosDevice,
         }
     }
 
+    // Caller holds the system's topology lock.
     internal void ApplyPlayerTopology(SonosTopologyPlayer topology, string coordinatorUuid)
     {
         ApplyTopology(topology.RoomName, topology.BaseUri, topology.SoftwareVersion, topology.IsWireless);
+        ApplyBootSequence(topology.BootSequence);
 
         // Before the coordinator changes, while the public properties still read the old one, so no observer sees
         // the member values as the player's own.
@@ -310,6 +351,22 @@ public partial class SonosPlayer : SonosDevice,
         }
     }
 
+    // Caller holds the system's topology lock.
+    private void ApplyBootSequence(string? bootSequence)
+    {
+        if (bootSequence is null)
+        {
+            return;
+        }
+
+        if (_bootSequence is not null && _bootSequence != bootSequence)
+        {
+            RequestNewSubscriptions();
+        }
+
+        _bootSequence = bootSequence;
+    }
+
     // What a member reported describes the group it left: an x-rincon: transport that points at its old coordinator
     // and that group's playback state. Play mode and sleep timer are the player's own and stay.
     private void ForgetMemberPlayback()
@@ -317,7 +374,9 @@ public partial class SonosPlayer : SonosDevice,
         lock (_stateLock)
         {
             // Like an event: a poll that started before the regroup read the member's transport.
-            _avTransportOrder.RecordEvent(_system.NextOrder());
+            var order = _system.NextOrder();
+            _avTransportOrder.RecordEvent(order);
+            _positionOrder.RecordEvent(order);
 
             // An event often delivers the player's own transport before the topology shows that it left.
             if (!SonosUris.IsMemberTransportUri(MediaUri) && !SonosUris.IsMemberTransportUri(ReportedTrackUri))
@@ -342,6 +401,7 @@ public partial class SonosPlayer : SonosDevice,
         lock (_stateLock)
         {
             _avTransportOrder.RecordEvent(order);
+            _positionOrder.RecordEvent(order);
             ApplyAvTransport(change, isPoll: false);
             if (SonosValues.IsKnown(change.MediaUri))
             {
@@ -371,13 +431,14 @@ public partial class SonosPlayer : SonosDevice,
             // poll that started before the latest event read state the event has since replaced. That includes the
             // position, which belongs to the track the poll read.
             var appliesAvTransport = _avTransportOrder.TryApplyPoll(pollStartedAt);
+            var appliesPosition = _positionOrder.TryApplyPoll(pollStartedAt) && appliesAvTransport;
             var appliesRenderingControl = _renderingControlOrder.TryApplyPoll(pollStartedAt);
             var appliesSleepTimer = _sleepTimerOrder.TryApplyPoll(pollStartedAt);
 
             if (appliesAvTransport)
             {
                 ApplyAvTransport(KeepSessionEventValues(reading.AvTransport), isPoll: true);
-                if (reading.HasPosition)
+                if (appliesPosition && reading.HasPosition)
                 {
                     ReportedTrackPosition = reading.Position;
                 }
@@ -392,6 +453,37 @@ public partial class SonosPlayer : SonosDevice,
             {
                 ReportedSleepTimerRemaining = reading.SleepTimerRemaining;
             }
+        }
+    }
+
+    /// <param name="reading">The position and sleep timer the progress poll read.</param>
+    /// <param name="pollStartedAt">When the poll started, from <see cref="SonosSystem.NextOrder"/>.</param>
+    internal void ApplyProgressPoll(SonosProgressReading reading, long pollStartedAt)
+    {
+        lock (_stateLock)
+        {
+            if (reading.HasPosition && _positionOrder.TryApplyPoll(pollStartedAt))
+            {
+                ReportedTrackPosition = reading.Position;
+            }
+
+            if (reading.HasSleepTimer && _sleepTimerOrder.TryApplyPoll(pollStartedAt))
+            {
+                ReportedSleepTimerRemaining = reading.SleepTimerRemaining;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns which values a progress poll reads while events deliver the rest: the position of a playing group and
+    /// the sleep timer of one that plays or has a timer running, whose remaining time is not evented either.
+    /// </summary>
+    internal (bool ReadsPosition, bool ReadsSleepTimer) GetProgressReads()
+    {
+        lock (_stateLock)
+        {
+            var isPlaying = ReportedPlaybackState is MediaPlaybackState.Playing or MediaPlaybackState.Buffering;
+            return (isPlaying, isPlaying || ReportedSleepTimerRemaining is not null);
         }
     }
 

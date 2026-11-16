@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net;
 using Microsoft.Extensions.Logging;
@@ -74,6 +75,9 @@ internal sealed class SonosEventListener : IAsyncDisposable
     }
 
     internal bool HasSubscription(string key) => _subscriptionsByKey.ContainsKey(key);
+
+    internal bool TryGetSubscription(string key, [MaybeNullWhen(false)] out SonosEventSubscription subscription) =>
+        _subscriptionsByKey.TryGetValue(key, out subscription);
 
     /// <summary>
     /// The URI speakers send events to, without the subscription key; null until started.
@@ -150,7 +154,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
             var sid = GetHeader(response, "SID")
                 ?? throw new InvalidOperationException($"The subscription to {eventUri} returned no SID.");
             subscription.SubscribedAt = _clock.GetTimestamp();
-            subscription.RenewAt = _clock.GetTimestampAfter(GetLifetime(response) / 2);
+            SetLifetime(subscription, response);
 
             // Unsubscribed while the request was in flight: Forget found no SID, so its caller sent nothing and the
             // speaker still holds the subscription. The lock makes exactly one of the two sides own the UNSUBSCRIBE.
@@ -202,7 +206,8 @@ internal sealed class SonosEventListener : IAsyncDisposable
             return;
         }
 
-        subscription.RenewAt = _clock.GetTimestampAfter(GetLifetime(response) / 2);
+        SetLifetime(subscription, response);
+        subscription.HasFailedRenewal = false;
     }
 
     internal async Task UnsubscribeAsync(SonosEventSubscription subscription, CancellationToken cancellationToken)
@@ -479,7 +484,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
     private static string? GetHeader(HttpResponseMessage response, string name) =>
         response.Headers.TryGetValues(name, out var values) ? values.FirstOrDefault() : null;
 
-    private TimeSpan GetLifetime(HttpResponseMessage response)
+    private void SetLifetime(SonosEventSubscription subscription, HttpResponseMessage response)
     {
         const string prefix = "Second-";
         var timeout = GetHeader(response, "TIMEOUT");
@@ -489,8 +494,11 @@ internal sealed class SonosEventListener : IAsyncDisposable
                 ? TimeSpan.FromSeconds(seconds)
                 : DefaultSubscriptionLifetime;
 
+        var now = _clock.GetTimestamp();
+        subscription.ExpiresAt = _clock.AddToTimestamp(now, lifetime);
+
         // A tiny grant such as Second-0 would otherwise schedule a renewal at every wake of the connection loop.
-        return lifetime > _minimumLifetime ? lifetime : _minimumLifetime;
+        subscription.RenewAt = _clock.AddToTimestamp(now, (lifetime > _minimumLifetime ? lifetime : _minimumLifetime) / 2);
     }
 
     public async ValueTask DisposeAsync()

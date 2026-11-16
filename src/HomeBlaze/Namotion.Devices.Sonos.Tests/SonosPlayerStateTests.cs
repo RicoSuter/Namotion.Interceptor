@@ -40,6 +40,77 @@ public class SonosPlayerStateTests
         new(avTransport, TimeSpan.FromSeconds(42), null, renderingControl ?? EmptyRenderingControl);
 
     [Fact]
+    public void WhenAProgressPollStartedBeforeAnAvTransportEvent_ThenItsPositionIsDropped()
+    {
+        // Arrange
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        player.ApplyPoll(Reading(SpotifyPlaying()), T0);
+        player.ApplyAvTransportEvent(QueueTrackPlaying(), T0 + 2);
+
+        // Act
+        player.ApplyProgressPoll(new SonosProgressReading(TimeSpan.FromSeconds(7), true, null, false), T0 + 1);
+
+        // Assert
+        Assert.Null(player.CurrentTrackPosition);
+    }
+
+    [Fact]
+    public void WhenAProgressPollStartedAfterTheLastEvent_ThenItsPositionAndSleepTimerApply()
+    {
+        // Arrange
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(QueueTrackPlaying(), T0);
+
+        // Act
+        player.ApplyProgressPoll(new SonosProgressReading(TimeSpan.FromSeconds(7), true, TimeSpan.FromMinutes(5), true), T0 + 1);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(7), player.CurrentTrackPosition);
+        Assert.Equal(TimeSpan.FromMinutes(5), player.SleepTimerRemaining);
+    }
+
+    [Fact]
+    public void WhenAFullPollStartedBeforeANewerProgressPoll_ThenItKeepsTheNewerPosition()
+    {
+        // Arrange
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        player.ApplyPoll(Reading(QueueTrackPlaying()), T0);
+        player.ApplyProgressPoll(new SonosProgressReading(TimeSpan.FromSeconds(50), true, null, false), T0 + 2);
+
+        // Act
+        player.ApplyPoll(Reading(QueueTrackPlaying()), T0 + 1);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(50), player.CurrentTrackPosition);
+    }
+
+    [Theory]
+    [InlineData("PLAYING", null, true, true)]
+    [InlineData("TRANSITIONING", null, true, true)]
+    [InlineData("PAUSED_PLAYBACK", null, false, false)]
+    [InlineData("PAUSED_PLAYBACK", "0:10:00", false, true)]
+    [InlineData("STOPPED", null, false, false)]
+    public void WhenEventsAreLive_ThenAProgressPollReadsWhatAPlayingGroupOrARunningSleepTimerNeeds(
+        string transportState, string? sleepTimer, bool readsPosition, bool readsSleepTimer)
+    {
+        // Arrange
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        player.ApplyPoll(
+            new SonosPlayerReading(
+                QueueTrackPlaying() with { TransportState = transportState },
+                null,
+                SonosValues.ParseDuration(sleepTimer),
+                EmptyRenderingControl),
+            T0);
+
+        // Act
+        var reads = player.GetProgressReads();
+
+        // Assert
+        Assert.Equal((readsPosition, readsSleepTimer), reads);
+    }
+
+    [Fact]
     public void WhenOlderPollCompletesAfterNewerPoll_ThenOlderPollIsDropped()
     {
         // Arrange

@@ -127,6 +127,13 @@ public partial class SonosSystem
                     return false;
                 }
 
+                // Gone, even briefly, a speaker may have rebooted or missed sending events, and it does not tell
+                // either; new subscriptions make it send its full state again.
+                foreach (var uuid in missing)
+                {
+                    players[uuid].RequestNewSubscriptions();
+                }
+
                 if (!missing.IsSubsetOf(_unconfirmedMissingPlayers))
                 {
                     _unconfirmedMissingPlayers = missing;

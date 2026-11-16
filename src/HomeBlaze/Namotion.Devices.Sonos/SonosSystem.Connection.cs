@@ -426,7 +426,7 @@ public partial class SonosSystem
 
             try
             {
-                await ReconcileAsync(stoppingToken);
+                await PollAsync(stoppingToken);
                 consecutiveFailures = 0;
                 MarkConnected();
             }

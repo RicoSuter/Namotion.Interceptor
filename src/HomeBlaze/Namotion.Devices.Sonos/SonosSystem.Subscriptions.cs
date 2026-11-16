@@ -5,14 +5,14 @@ namespace Namotion.Devices.Sonos;
 
 public partial class SonosSystem
 {
-    private const string AvTransportService = "AVTransport";
-    private const string RenderingControlService = "RenderingControl";
-    private const string GroupRenderingControlService = "GroupRenderingControl";
+    internal const string AvTransportService = "AVTransport";
+    internal const string RenderingControlService = "RenderingControl";
+    internal const string GroupRenderingControlService = "GroupRenderingControl";
     private const string TopologySubscriptionKey = "seed/ZoneGroupTopology";
 
     // The monotonic timestamp of the loop's next subscription wake, for the earliest renewal or first-event deadline,
     // TimeProviderExtensions.Never for none. Written under _reconcileLock, which also guards the subscriptions'
-    // RenewAt, and read by the connection loop while it holds no lock.
+    // RenewAt, ExpiresAt and HasFailedRenewal, and read by the connection loop while it holds no lock.
     private long _nextWakeAt = TimeProviderExtensions.Never;
 
     // Serializes recomputing AreEventsActive: the first event of a subscription reports from the listener's thread
@@ -45,14 +45,18 @@ public partial class SonosSystem
         }
 
         var desired = GetDesiredSubscriptions();
+        var requests = GetNewSubscriptionsRequests(out var replaced);
         var now = Clock.GetTimestamp();
         try
         {
             // Each stage concurrently: a speaker that left does not answer, and each request may take the whole
             // timeout while the reconcile lock blocks commands. The stages stay in order, so a rejected renewal, which
-            // forgets its subscription, is subscribed again in the last one.
+            // forgets its subscription, and a replaced one are subscribed again in the last one.
             var obsolete = eventListener.Subscriptions
-                .Where(subscription => !desired.TryGetValue(subscription.Key, out var target) || target.EventUri != subscription.EventUri)
+                .Where(subscription =>
+                    !desired.TryGetValue(subscription.Key, out var target) ||
+                    target.EventUri != subscription.EventUri ||
+                    replaced?.Contains(subscription.Key) == true)
                 .ToArray();
             await Task.WhenAll(obsolete.Select(subscription =>
                 RunSubscriptionRequestAsync(() => eventListener.UnsubscribeAsync(subscription, cancellationToken), subscription.Key, cancellationToken)));
@@ -68,6 +72,12 @@ public partial class SonosSystem
                 .ToArray();
             await Task.WhenAll(missing.Select(pair =>
                 RunSubscriptionRequestAsync(() => eventListener.SubscribeAsync(pair.Key, pair.Value.EventUri, pair.Value.Handler, cancellationToken), pair.Key, cancellationToken)));
+
+            // A replacement that failed left no subscription, which the next upkeep subscribes again.
+            foreach (var (player, handled) in requests ?? [])
+            {
+                player.CompleteNewSubscriptionsRequests(handled);
+            }
 
             UpdateAreEventsActive();
             ReportMissingInitialEvents(eventListener);
@@ -85,8 +95,41 @@ public partial class SonosSystem
         {
             // Keeps an unreachable speaker from being retried at every loop wake.
             subscription.RenewAt = Clock.GetTimestampAfter(FailedRenewalRetryDelay);
+            subscription.HasFailedRenewal = true;
         }
     }
+
+    // Caller holds _reconcileLock. Returns the players with pending requests and how many each had, and the keys of
+    // the subscriptions to replace for them; both null for none. The topology subscription is replaced with them,
+    // since the seed may be the speaker that rebooted.
+    private List<(SonosPlayer Player, int Handled)>? GetNewSubscriptionsRequests(out HashSet<string>? replaced)
+    {
+        List<(SonosPlayer Player, int Handled)>? requests = null;
+        replaced = null;
+        foreach (var player in Players.Values)
+        {
+            if (player.NewSubscriptionsRequests is var handled and not 0)
+            {
+                requests ??= [];
+                requests.Add((player, handled));
+                replaced ??= new HashSet<string>(StringComparer.Ordinal) { TopologySubscriptionKey };
+                replaced.Add(player.AvTransportSubscriptionKey);
+                replaced.Add(player.RenderingControlSubscriptionKey);
+                replaced.Add(player.GroupRenderingControlSubscriptionKey);
+            }
+        }
+
+        return requests;
+    }
+
+    /// <summary>
+    /// Returns whether the subscription delivers events now: the speaker accepted it, an event arrived, its last
+    /// renewal was answered and its lifetime has not ended. Caller holds _reconcileLock, which guards those values.
+    /// </summary>
+    private static bool IsSubscriptionLive(SonosEventListener eventListener, string key, long now) =>
+        eventListener.TryGetSubscription(key, out var subscription) &&
+        subscription is { Sid: not null, HasReceivedEvent: true, HasFailedRenewal: false } &&
+        now < subscription.ExpiresAt;
 
     private void UpdateAreEventsActive()
     {
@@ -184,15 +227,15 @@ public partial class SonosSystem
             }
 
             var canSubscribe = player.IsConnected;
-            void Add(string service, Action<string> handler) =>
-                desired[$"{player.Uuid}/{service}"] = new SubscriptionTarget(new Uri(baseUri, $"/MediaRenderer/{service}/Event"), handler, canSubscribe);
+            void Add(string key, string service, Action<string> handler) =>
+                desired[key] = new SubscriptionTarget(new Uri(baseUri, $"/MediaRenderer/{service}/Event"), handler, canSubscribe);
 
-            Add(AvTransportService, body => OnAvTransportEvent(player, body));
-            Add(RenderingControlService, body => OnRenderingControlEvent(player, body));
+            Add(player.AvTransportSubscriptionKey, AvTransportService, body => OnAvTransportEvent(player, body));
+            Add(player.RenderingControlSubscriptionKey, RenderingControlService, body => OnRenderingControlEvent(player, body));
             if (groups.ContainsKey(player.Uuid))
             {
                 var coordinatorUuid = player.Uuid;
-                Add(GroupRenderingControlService, body => OnGroupRenderingControlEvent(coordinatorUuid, body));
+                Add(player.GroupRenderingControlSubscriptionKey, GroupRenderingControlService, body => OnGroupRenderingControlEvent(coordinatorUuid, body));
             }
         }
 

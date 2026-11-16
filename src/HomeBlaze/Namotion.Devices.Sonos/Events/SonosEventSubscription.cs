@@ -56,6 +56,17 @@ internal sealed class SonosEventSubscription
     internal long RenewAt { get; set; }
 
     /// <summary>
+    /// When the lifetime the speaker granted with the last accepted SUBSCRIBE or renewal ends, as a monotonic
+    /// <see cref="TimeProvider.GetTimestamp"/> value of the listener's clock.
+    /// </summary>
+    internal long ExpiresAt { get; set; }
+
+    /// <summary>
+    /// Whether the last renewal got no answer, so the speaker may have dropped the subscription.
+    /// </summary>
+    internal bool HasFailedRenewal { get; set; }
+
+    /// <summary>
     /// Records that a NOTIFY arrived and returns whether it was the first.
     /// </summary>
     internal bool MarkEventReceived() => Interlocked.Exchange(ref _hasReceivedEvent, 1) == 0;
