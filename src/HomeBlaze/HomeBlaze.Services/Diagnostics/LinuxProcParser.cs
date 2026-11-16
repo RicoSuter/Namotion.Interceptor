@@ -71,6 +71,18 @@ internal static class LinuxProcParser
     }
 
     /// <summary>
+    /// Parses RssAnon, RssFile and RssShmem from /proc/self/status: resident memory not backed by a file (heap,
+    /// stacks, anonymous mappings), resident memory backed by one (the executable, libraries, mapped files) and
+    /// resident shared memory.
+    /// </summary>
+    public static bool TryParseProcessStatus(ReadOnlySpan<byte> content, out long anonymousBytes, out long fileBytes, out long sharedBytes)
+    {
+        return TryReadMemInfoValue(content, "\nRssAnon:"u8, out anonymousBytes) &
+               TryReadMemInfoValue(content, "\nRssFile:"u8, out fileBytes) &
+               TryReadMemInfoValue(content, "\nRssShmem:"u8, out sharedBytes);
+    }
+
+    /// <summary>
     /// Returns the PRETTY_NAME value of /etc/os-release without quotes, or null when it is missing or empty.
     /// </summary>
     public static string? ParseOsReleasePrettyName(string content)
@@ -169,7 +181,8 @@ internal static class LinuxProcParser
             valueStart = index + newlineAndKey.Length;
         }
 
-        var value = content[valueStart..].TrimStart((byte)' ');
+        // /proc/meminfo pads with spaces, /proc/self/status with a tab and spaces.
+        var value = content[valueStart..].TrimStart(" \t"u8);
         if (!Utf8Parser.TryParse(value, out long kibibytes, out _))
         {
             return false;
