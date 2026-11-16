@@ -38,8 +38,9 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System,
             serviceProvider.GetService<ILogger<ClientConnectionService>>() ?? NullLogger<ClientConnectionService>.Instance));
         services.AddScoped<ITimeZoneDisplay, TimeZoneDisplayService>();
-        // It subscribes before any hosted service starts and unsubscribes after all have stopped;
-        // registered first so that also holds against the lifecycle callbacks of other services.
+        // It subscribes before any hosted service starts and unsubscribes after all have stopped. Registered
+        // ahead of the HomeBlaze services so it also covers their lifecycle callbacks, but not those of
+        // services registered earlier, such as by AddServiceDefaults.
         services.AddHostedService(serviceProvider => new FirstChanceExceptionLogger(
             serviceProvider.GetService<ILogger<FirstChanceExceptionLogger>>() ?? NullLogger<FirstChanceExceptionLogger>.Instance,
             serviceProvider.GetService<TimeProvider>()));

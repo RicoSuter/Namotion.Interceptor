@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
@@ -10,7 +11,8 @@ namespace HomeBlaze.Services.Diagnostics;
 
 /// <summary>
 /// Writes a <see cref="LogLevel.Debug"/> entry per first-chance exception in the process, at most one
-/// per exception type and throw site per minute. Does nothing unless Debug is enabled for its category.
+/// per exception type and throw site per minute, where the throw site is the first method on the stack
+/// outside the framework. Does nothing unless Debug is enabled for its category.
 /// Entries are written by a background task, so the throwing thread never writes to a logging provider.
 /// An instance runs once: it is not started again after it was stopped or disposed.
 /// </summary>
@@ -22,15 +24,17 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
 
     internal static readonly TimeSpan Window = TimeSpan.FromMinutes(1);
 
-    private const string UnknownThrowSite = "unknown";
+    private const string UnknownFrame = "unknown";
+
+    private static readonly string LoggerTypeName = typeof(FirstChanceExceptionLogger).FullName!;
 
     private static readonly object SeenMarker = new();
 
-    private static readonly Action<ILogger, string, string, string, int, string, Exception?> LogException =
-        LoggerMessage.Define<string, string, string, int, string>(
+    private static readonly Action<ILogger, string, string, string, string, int, string, Exception?> LogException =
+        LoggerMessage.Define<string, string, string, string, int, string>(
             LogLevel.Debug,
             new EventId(1, "FirstChanceException"),
-            "First-chance {ExceptionType} thrown at {ThrowSite}: {ExceptionMessage} ({SkippedCount} skipped since the previous entry)" +
+            "First-chance {ExceptionType} thrown at {ThrowSite} by {ThrowingFrame}: {ExceptionMessage} ({SkippedCount} skipped since the previous entry)" +
             Environment.NewLine + "{CallStack}");
 
     private static readonly Action<ILogger, int, Exception?> LogKeyLimitReached =
@@ -78,10 +82,6 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
         });
     }
 
-    internal int QueuedCount => _channel.Reader.Count;
-
-    internal int KeyCount => Volatile.Read(ref _keyCount);
-
     public Task StartingAsync(CancellationToken cancellationToken)
     {
         StartConsumer();
@@ -106,14 +106,13 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
             return;
         }
 
-        try
+        // Queued entries are written while the logging providers are still alive. When the host gives up
+        // waiting the remaining entries are not written; WhenAny instead of WaitAsync, whose
+        // OperationCanceledException would itself be a first-chance exception.
+        var hostGaveUp = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using (cancellationToken.UnsafeRegister(static state => ((TaskCompletionSource)state!).TrySetResult(), hostGaveUp))
         {
-            // Queued entries are written while the logging providers are still alive.
-            await _consumer.WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // The host gave up waiting; the remaining entries are not written.
+            await Task.WhenAny(_consumer, hostGaveUp.Task).ConfigureAwait(false);
         }
     }
 
@@ -150,8 +149,9 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
     /// <summary>
     /// Queues an entry for the exception unless Debug is disabled, the thread is already inside this method
     /// or writing an entry, the exception instance was seen before, or an entry for the same exception type
-    /// and throw site was queued within the last minute. Never throws and never writes to a logging provider,
-    /// only <see cref="ILogger.IsEnabled"/> is called on the calling thread.
+    /// and throw site was queued within the last minute. The throw site is the first frame of the calling
+    /// stack outside the framework, or the exception's throwing frame when there is none. Never throws and
+    /// never writes to a logging provider, only <see cref="ILogger.IsEnabled"/> is called on the calling thread.
     /// </summary>
     /// <param name="exception">The exception being thrown.</param>
     /// <param name="skippedCallerFrames">The frames between this method and the throwing method, left out of the call stack.</param>
@@ -178,19 +178,22 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
                 return;
             }
 
+            // At first chance the exception's own stack trace holds only the throwing frame, so the
+            // current stack provides the callers; the first frame skipped is this method. It can only
+            // be captured here, formatting it is left to the consumer.
+            var callStack = new StackTrace(1 + skippedCallerFrames, fNeedFileInfo: false);
+            string? throwingFrame = null;
+            var throwSite = FindCallerOutsideFramework(callStack) ?? (throwingFrame = GetThrowingFrame(exception));
+
             var exceptionType = exception.GetType().FullName ?? exception.GetType().Name;
-            var throwSite = GetThrowSite(exception);
             var state = TryBeginEntry(exceptionType, throwSite, out var skippedCount);
             if (state is null)
             {
                 return;
             }
 
-            // At first chance the exception's own stack trace holds only the throwing frame, so the
-            // current stack provides the callers; the first frame skipped is this method. It can only
-            // be captured here, formatting it is left to the consumer.
-            var callStack = new StackTrace(1 + skippedCallerFrames, fNeedFileInfo: false);
-            if (!TryEnqueue(new Entry(exception, callStack, exceptionType, throwSite, skippedCount)))
+            throwingFrame ??= GetThrowingFrame(exception);
+            if (!TryEnqueue(new Entry(exception, callStack, exceptionType, throwSite, throwingFrame, skippedCount)))
             {
                 // The dropped entry and the skips it carried are reported by the next entry of its key.
                 Interlocked.Add(ref state.SkippedCount, skippedCount + 1);
@@ -206,16 +209,52 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
         }
     }
 
-    private static string GetThrowSite(Exception exception)
+    /// <summary>
+    /// Returns the first frame outside the framework and this class, or null when there is none. Framework
+    /// exceptions are mostly thrown by shared helpers, which would put every cancellation of the process,
+    /// for example, under one throw site.
+    /// </summary>
+    private static string? FindCallerOutsideFramework(StackTrace callStack)
     {
-        // At first chance the first line is the throwing frame, with async state machines resolved to their
-        // method. Without file information no symbols are loaded on the throwing thread.
-        var stackTrace = new StackTrace(exception, fNeedFileInfo: false).ToString();
-        if (string.IsNullOrEmpty(stackTrace))
+        for (var index = 0; index < callStack.FrameCount; index++)
         {
-            return UnknownThrowSite;
+            var frame = callStack.GetFrame(index);
+            if (frame is null)
+            {
+                continue;
+            }
+
+            // Unlike StackFrame.GetMethod, safe under trimming and Native AOT; null when the method is unknown.
+            var declaringTypeName = DiagnosticMethodInfo.Create(frame)?.DeclaringTypeName;
+            if (declaringTypeName is null ||
+                declaringTypeName.StartsWith("System.", StringComparison.Ordinal) ||
+                declaringTypeName.StartsWith("Microsoft.", StringComparison.Ordinal) ||
+                declaringTypeName.StartsWith(LoggerTypeName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // Formatted like a line of Exception.StackTrace; empty for a frame hidden from stack traces.
+            var formattedFrame = FormatFirstFrame(new StackTrace(frame).ToString());
+            if (formattedFrame is not null)
+            {
+                return formattedFrame;
+            }
         }
 
+        return null;
+    }
+
+    private static string GetThrowingFrame(Exception exception)
+    {
+        // At first chance the exception's stack trace holds only the throwing frame. Without file
+        // information no symbols are loaded on the throwing thread.
+        return FormatFirstFrame(new StackTrace(exception, fNeedFileInfo: false).ToString()) ?? UnknownFrame;
+    }
+
+    /// <summary>Returns the method of the first line of a formatted stack trace, with async state machines resolved to their method.</summary>
+    private static string? FormatFirstFrame(string stackTrace)
+    {
         var frame = stackTrace.AsSpan();
         var lineEnd = frame.IndexOfAny('\r', '\n');
         if (lineEnd >= 0)
@@ -223,10 +262,12 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
             frame = frame[..lineEnd];
         }
 
+        // Drops the leading "at", whatever the language of the runtime's resources.
         frame = frame.TrimStart();
-        if (frame.StartsWith("at ", StringComparison.Ordinal))
+        var wordEnd = frame.IndexOf(' ');
+        if (wordEnd >= 0)
         {
-            frame = frame[3..];
+            frame = frame[(wordEnd + 1)..];
         }
 
         // Drops anything after the parameters, such as the native offset that Native AOT appends.
@@ -236,7 +277,7 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
             frame = frame[..(parametersEnd + 1)];
         }
 
-        return frame.IsEmpty ? UnknownThrowSite : frame.ToString();
+        return frame.IsEmpty ? null : frame.ToString();
     }
 
     /// <summary>Returns the state of the key when an entry is due, or null when the exception is skipped.</summary>
@@ -319,7 +360,7 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
         _isHandling = true;
         try
         {
-            if (entry.Exception is null)
+            if (entry.IsKeyLimitReached)
             {
                 LogKeyLimitReached(_logger, _maximumKeyCount, null);
             }
@@ -327,11 +368,12 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
             {
                 LogException(
                     _logger,
-                    entry.ExceptionType!,
-                    entry.ThrowSite!,
+                    entry.ExceptionType,
+                    entry.ThrowSite,
+                    entry.ThrowingFrame,
                     entry.Exception.Message,
                     entry.SkippedCount,
-                    entry.CallStack!.ToString(),
+                    entry.CallStack.ToString(),
                     entry.Exception);
             }
 
@@ -351,15 +393,40 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
         }
     }
 
-    private readonly record struct Entry(
-        Exception? Exception,
-        StackTrace? CallStack,
-        string? ExceptionType,
-        string? ThrowSite,
-        int SkippedCount)
+    private readonly struct Entry
     {
-        /// <summary>Gets the entry reporting that the key limit was reached, the only one without an exception.</summary>
-        public static Entry KeyLimitReached => default;
+        public Entry(Exception exception, StackTrace callStack, string exceptionType, string throwSite, string throwingFrame, int skippedCount)
+        {
+            Exception = exception;
+            CallStack = callStack;
+            ExceptionType = exceptionType;
+            ThrowSite = throwSite;
+            ThrowingFrame = throwingFrame;
+            SkippedCount = skippedCount;
+        }
+
+        private Entry(bool isKeyLimitReached)
+        {
+            IsKeyLimitReached = isKeyLimitReached;
+        }
+
+        public static Entry KeyLimitReached => new(isKeyLimitReached: true);
+
+        /// <summary>Gets a value indicating whether the entry reports that the key limit was reached rather than an exception.</summary>
+        [MemberNotNullWhen(false, nameof(Exception), nameof(CallStack), nameof(ExceptionType), nameof(ThrowSite), nameof(ThrowingFrame))]
+        public bool IsKeyLimitReached { get; }
+
+        public Exception? Exception { get; }
+
+        public StackTrace? CallStack { get; }
+
+        public string? ExceptionType { get; }
+
+        public string? ThrowSite { get; }
+
+        public string? ThrowingFrame { get; }
+
+        public int SkippedCount { get; }
     }
 
     private sealed class KeyState(long lastEntryTimestamp)
