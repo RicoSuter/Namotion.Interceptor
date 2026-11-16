@@ -59,7 +59,7 @@ To see which exceptions are thrown, set the log level of `HomeBlaze.Services.Dia
 - **CallStack:** the stack of the thread at the throw, which for code after an `await` shows the throwing method above thread pool frames only. The exception attached to the entry carries its own stack trace, which usually also lists the methods it passed through on the way up.
 - **Counting:** an exception rethrown or passing through `await`s is logged and counted once, where it was first thrown, and an exception object that is thrown again and again (a cached instance) is logged once while the process runs. At most one entry per exception type and throw site is written per minute; the next one reports how many were skipped meanwhile. The counts are kept while the process runs, so a skipped count can include exceptions from an earlier time Debug was on.
 - **Limits:** up to 1024 combinations of type and site are tracked; others are not logged until restart, which a single entry reports. Entries are written in the background; once 256 are waiting, new ones are dropped, a separate entry reports how many, and each dropped one counts as skipped for its type and site.
-- **Cost:** with Debug off, nothing beyond counting the exception. With Debug on, the stack of every exception is captured to find its throw site, including skipped ones, and formatted as text when it has only framework frames.
+- **Cost:** with Debug off, nothing beyond counting the exception. With Debug on, the stack of every exception is captured to find its throw site, including skipped ones.
 
 The SQLite history store reports `OpenConnectionCount` and `SqliteMemorySize`, the memory all SQLite databases in the process hold.
 

@@ -507,12 +507,38 @@ public class FirstChanceExceptionLoggerTests
     }
 
     [Fact]
+    public async Task WhenHiddenThrowHelperOutsideTheFrameworkThrows_ThenThrowSiteIsItsCaller()
+    {
+        // Arrange
+        var message = $"Hidden helper {Guid.NewGuid()}";
+        var logger = new RecordingLogger(LogLevel.Debug);
+        using var firstChanceLogger = new FirstChanceExceptionLogger(logger);
+
+        // Act
+        await firstChanceLogger.StartingAsync(CancellationToken.None);
+        try
+        {
+            ThrowThroughHiddenHelper(message);
+            await AsyncTestHelpers.WaitUntilAsync(() => logger.Entries.Any(entry => HasMessage(entry, message)));
+        }
+        finally
+        {
+            await firstChanceLogger.StoppedAsync(CancellationToken.None);
+        }
+
+        // Assert
+        var entry = Assert.Single(logger.Entries, candidate => HasMessage(candidate, message));
+        Assert.Equal($"{TestClassName}.{nameof(ThrowThroughHiddenHelper)}(String message)", entry.Properties["ThrowSite"]);
+    }
+
+    [Fact]
     public async Task WhenFrameworkCodeAwaitsACanceledTask_ThenThrowSiteIsNotAHiddenAwaiterFrame()
     {
         // Arrange
         var logger = new RecordingLogger(LogLevel.Debug);
         using var firstChanceLogger = new FirstChanceExceptionLogger(logger);
-        using var reader = new StreamReader(new CanceledReadStream());
+        var stream = new CanceledReadStream();
+        using var reader = new StreamReader(stream);
 
         // Act
         await firstChanceLogger.StartingAsync(CancellationToken.None);
@@ -539,25 +565,10 @@ public class FirstChanceExceptionLoggerTests
         Assert.DoesNotContain("System.Runtime.ExceptionServices.InternalCalls.", throwSite);
         Assert.Contains("StreamReader", throwSite);
 
-        static bool IsReadCancellation(LogEntry candidate) =>
-            candidate.Exception is TaskCanceledException &&
-            ((string?)candidate.Properties.GetValueOrDefault("CallStack"))?.Contains("StreamReader") == true;
+        bool IsReadCancellation(LogEntry candidate) =>
+            candidate.Exception is TaskCanceledException { Task: { } task } && task == stream.CanceledRead;
     }
 
-    [Theory]
-    [InlineData("System.Runtime.EH", true)]
-    [InlineData("System.Runtime.ExceptionServices.InternalCalls", true)]
-    [InlineData("System.Runtime.ExceptionServices.ExceptionDispatchInfo", false)]
-    [InlineData("System.Net.Sockets.Socket+AwaitableSocketAsyncEventArgs", false)]
-    [InlineData(null, false)]
-    public void WhenDeclaringTypeIsChecked_ThenOnlyTheRuntimeExceptionDispatchTypesMatch(string? declaringTypeName, bool expected)
-    {
-        // Act
-        var isDispatchType = FirstChanceExceptionLogger.IsExceptionDispatchType(declaringTypeName);
-
-        // Assert
-        Assert.Equal(expected, isDispatchType);
-    }
 
     [Fact]
     public async Task WhenConsumerIsBlockedAndStopTokenIsCanceled_ThenStoppedAsyncCompletes()
@@ -788,6 +799,18 @@ public class FirstChanceExceptionLoggerTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowThroughHiddenHelper(string message)
+    {
+        try
+        {
+            HiddenThrowHelper.ThrowInvalidOperation(message);
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowAndCatch(string message)
     {
         try
@@ -797,6 +820,13 @@ public class FirstChanceExceptionLoggerTests
         catch (ArgumentException)
         {
         }
+    }
+
+    private static class HiddenThrowHelper
+    {
+        [StackTraceHidden]
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static void ThrowInvalidOperation(string message) => throw new InvalidOperationException(message);
     }
 
     private sealed class CanceledReadStream : Stream
@@ -815,8 +845,11 @@ public class FirstChanceExceptionLoggerTests
             set => throw new NotSupportedException();
         }
 
+        /// <summary>Gets the task every read returns, which the awaiter puts into the exception it creates.</summary>
+        public Task<int> CanceledRead { get; } = Task.FromCanceled<int>(new CancellationToken(canceled: true));
+
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
-            ValueTask.FromCanceled<int>(new CancellationToken(canceled: true));
+            new(CanceledRead);
 
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 

@@ -187,6 +187,10 @@ public partial class PushoverService :
 
     internal void RequestValidation()
     {
+        // Release fences through its lock; without this fence the configuration written before this call could
+        // become visible after a stale count is read, and the validation that consumed it would miss the change.
+        Interlocked.MemoryBarrier();
+
         // Checked first so an already pending validation does not throw, which would raise a first-chance
         // exception on most configuration changes.
         if (_validationSignal.CurrentCount != 0)
