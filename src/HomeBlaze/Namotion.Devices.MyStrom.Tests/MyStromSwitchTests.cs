@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using HomeBlaze.Abstractions;
@@ -249,6 +250,76 @@ public class MyStromSwitchTests
         }
     }
 
+    [Fact]
+    public void WhenHttpClientIsCreated_ThenTimeoutIsTenSeconds()
+    {
+        // Arrange
+        var subject = CreateSwitch();
+
+        // Act
+        using var client = subject.CreateHttpClient();
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(10), client.Timeout);
+    }
+
+    [Fact]
+    public async Task WhenPollingAndOperating_ThenEveryClientHasTheShortTimeout()
+    {
+        // Arrange
+        var device = new FakeDevice(uptimes: [100], versions: ["4.0.7"]);
+        var factory = new FakeHttpClientFactory(device);
+        var subject = new MyStromSwitch(factory, NullLogger<MyStromSwitch>.Instance)
+        {
+            HostAddress = "switch.test",
+            PollingInterval = TimeSpan.FromMilliseconds(1)
+        };
+
+        // Act
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => device.ReportRequestCount >= 2);
+            await subject.TurnOnAsync(CancellationToken.None);
+            await subject.TurnOffAsync(CancellationToken.None);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+        }
+
+        // Assert
+        var timeouts = factory.Timeouts;
+        Assert.True(timeouts.Length >= 3);
+        Assert.All(timeouts, timeout => Assert.Equal(TimeSpan.FromSeconds(10), timeout));
+    }
+
+    [Fact]
+    public async Task WhenARequestTimesOut_ThenTheSwitchIsInErrorAndReconnects()
+    {
+        // Arrange
+        var device = new FakeDevice(uptimes: [100], versions: ["4.0.7"]) { TimeOutReportRequestNumber = 2 };
+        var subject = new MyStromSwitch(new FakeHttpClientFactory(device), NullLogger<MyStromSwitch>.Instance)
+        {
+            HostAddress = "switch.test",
+            PollingInterval = TimeSpan.FromMilliseconds(1),
+            RetryInterval = TimeSpan.FromMilliseconds(1)
+        };
+
+        // Act
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => device.InformationRequestCount >= 2 && subject.IsConnected);
+            Assert.Equal(ServiceStatus.Running, subject.Status);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+        }
+    }
+
     private class TestHttpClientFactory : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new();
@@ -256,7 +327,16 @@ public class MyStromSwitchTests
 
     private sealed class FakeHttpClientFactory(FakeDevice device) : IHttpClientFactory
     {
-        public HttpClient CreateClient(string name) => new(device, disposeHandler: false);
+        private readonly ConcurrentQueue<HttpClient> _clients = new();
+
+        public TimeSpan[] Timeouts => _clients.Select(client => client.Timeout).ToArray();
+
+        public HttpClient CreateClient(string name)
+        {
+            var client = new HttpClient(device, disposeHandler: false);
+            _clients.Enqueue(client);
+            return client;
+        }
     }
 
     /// <summary>
@@ -267,12 +347,21 @@ public class MyStromSwitchTests
         private int _informationRequestCount;
         private int _reportRequestCount;
 
+        public int TimeOutReportRequestNumber { get; init; }
+
         public int InformationRequestCount => Volatile.Read(ref _informationRequestCount);
 
         public int ReportRequestCount => Volatile.Read(ref _reportRequestCount);
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (request.RequestUri!.AbsolutePath == "/report" && TimeOutReportRequestNumber > 0 &&
+                Volatile.Read(ref _reportRequestCount) == TimeOutReportRequestNumber - 1)
+            {
+                Interlocked.Increment(ref _reportRequestCount);
+                throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.", new TimeoutException());
+            }
+
             var json = request.RequestUri!.AbsolutePath switch
             {
                 "/info" => $$"""{"version":"{{Next(versions, ref _informationRequestCount)}}"}""",

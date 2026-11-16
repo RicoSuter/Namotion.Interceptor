@@ -33,6 +33,9 @@ public partial class MyStromSwitch : BackgroundService,
     INetworkHost,
     IUptimeState
 {
+    // Without it a switch that stops answering holds the last values for the 100 seconds of the HttpClient default.
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<MyStromSwitch> _logger;
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
@@ -159,10 +162,17 @@ public partial class MyStromSwitch : BackgroundService,
         Uptime = null;
     }
 
+    internal HttpClient CreateHttpClient()
+    {
+        var client = _httpClientFactory.CreateClient();
+        client.Timeout = RequestTimeout;
+        return client;
+    }
+
     [Operation(Title = "Turn On", Icon = "PowerSettingsNew", Position = 1)]
     public async Task TurnOnAsync(CancellationToken cancellationToken)
     {
-        using var client = _httpClientFactory.CreateClient();
+        using var client = CreateHttpClient();
         await client.GetAsync($"http://{HostAddress}/relay?state=1", cancellationToken);
         await RefreshReportAsync(client, cancellationToken);
     }
@@ -173,7 +183,7 @@ public partial class MyStromSwitch : BackgroundService,
         if (!AllowTurnOff)
             return;
 
-        using var client = _httpClientFactory.CreateClient();
+        using var client = CreateHttpClient();
         await client.GetAsync($"http://{HostAddress}/relay?state=0", cancellationToken);
         await RefreshReportAsync(client, cancellationToken);
     }
@@ -202,7 +212,7 @@ public partial class MyStromSwitch : BackgroundService,
                 Status = ServiceStatus.Starting;
                 StatusMessage = "Connecting...";
 
-                using var client = _httpClientFactory.CreateClient();
+                using var client = CreateHttpClient();
                 await FetchInformationAsync(client, stoppingToken);
 
                 Status = ServiceStatus.Running;
