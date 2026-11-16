@@ -312,7 +312,7 @@ public class CustomMqttValueConverter : IMqttValueConverter
 
 ### Write Retry Queue
 
-Write retry queue behavior (ring buffer, reconcile by commit order when the connection loop restarts; the client's internal reconnect does not reconcile but replays queued writes once it has resubscribed, and the broker's echo of each replayed message brings the model back to it. At `AtMostOnce` the replayed publish or its echo can be lost while the write still counts as delivered, so use `AtLeastOnce` or higher where a write must survive a reconnect, see [Connectors: Known Limitations](connectors.md#known-limitations)) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
+The write retry queue is provided by `SubjectSourceBase`, see [Connectors: Write Retry Queue](connectors.md#write-retry-queue). The client has no initial load of its own, and retained messages usually arrive through the normal message handler after the source reports `Synchronized`, so parked writes are usually sent as they are after a reconnect and the broker's echo brings the model back to them; see [Connectors: Known Limitations](connectors.md#known-limitations) for `AtMostOnce`. Configure via `WriteRetryQueueSize`:
 
 ```csharp
 new MqttClientConfiguration

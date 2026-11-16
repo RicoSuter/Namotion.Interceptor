@@ -339,7 +339,7 @@ See [Subject Updates](connectors-subject-updates.md) for details on the update f
 
 ### Write Retry Queue
 
-Write retry queue behavior (ring buffer, reconcile by commit order when the connection loop restarts, replay after the client's own reconnects, where the server's broadcast of each replayed write brings the model back to it) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via the client configuration:
+The write retry queue is provided by `SubjectSourceBase`, see [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via the client configuration:
 
 ```csharp
 configuration.WriteRetryQueueSize = 1000;  // Buffer up to 1000 writes (default, 0 to disable)
@@ -383,7 +383,7 @@ The server maintains a monotonically increasing sequence counter that is increme
 Gap detected -> receive loop exits -> `RunMonitorLoopAsync` detects connection lost -> `StartBuffering` -> exponential backoff delay -> `ConnectAsync` -> Welcome with full state + new sequence -> `SubjectPropertyWriter.LoadInitialStateAndResumeAsync` calls the source's `LoadInitialStateAsync` to fetch the apply action, runs it under the buffer lock, and replays buffered updates. No new recovery logic is needed; the existing reconnection flow handles everything.
 
 **Why only server-to-client messages carry sequence numbers:**
-Client-to-server writes are covered by the write retry queue (ring buffer, oldest-dropped-when-full), which replays queued writes after the Welcome snapshot on reconnection. The server applies updates synchronously under a lock, so silent drops within the server are impossible.
+Client-to-server writes are covered by the write retry queue, which reconciles queued writes against the Welcome snapshot on reconnection. The server applies updates synchronously under a lock, so silent drops within the server are impossible.
 
 ### Heartbeat
 

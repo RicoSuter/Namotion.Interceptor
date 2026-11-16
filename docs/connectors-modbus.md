@@ -161,7 +161,7 @@ public partial class Battery
 | `UnitId` | 1 | Default unit ID |
 | `PollingInterval` | 2 s | Interval at which poll cycles start |
 | `RequestTimeout` | 5 s | Timeout of the TCP connect and of each request; a request timeout counts as a lost connection |
-| `RetryTime` | 10 s | Delay before reconnecting after a lost connection or a failed connect attempt, and the interval of the idle flush of the write retry queue, which stays empty because the client is read-only and reports every local write as accepted without sending it |
+| `RetryTime` | 10 s | Delay before reconnecting after a lost connection or a failed connect attempt |
 | `BufferTime` | 8 ms | Change queue buffer time |
 | `MaximumRegisterGap` | 0 | Unmapped registers or bits a request may span to merge neighbors, 0 to 124 |
 
