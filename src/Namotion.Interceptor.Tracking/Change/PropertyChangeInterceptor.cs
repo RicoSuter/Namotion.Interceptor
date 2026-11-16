@@ -196,34 +196,45 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     }
 
     /// <summary>
-    /// Under a lifecycle lock the delivery is queued (see <see cref="PostLockQueue"/>). A structural write reserves its
-    /// place before its chain runs, so it is delivered before the writes that the handlers of its reconciliation make.
-    /// The lock count does not change across the chain, since every lock taken in it is released in it, so a write
-    /// that reserved a slot and dispatches its change queues it in that slot (see <see cref="DispatchChange"/>).
+    /// Under a lifecycle lock, or behind a pending queued delivery, the delivery is queued (see
+    /// <see cref="PostLockQueue"/>). A structural write reserves its place before its chain runs, so it is delivered
+    /// before the writes that the handlers of its reconciliation make. A write that reserved a slot and dispatches its
+    /// change queues it in that slot (see <see cref="DispatchChange"/>). The type check comes first (a JIT constant for
+    /// a value type), so the write of a primitive, string or simple value type reads no thread-static before its chain.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int GetDeliverySlot<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
-        return PostLockQueue.IsLockHeld && context.Property.Metadata.Type.CanContainSubjects<TProperty>()
+        return !SubjectPropertyTypeExtensions.CannotContainSubjects<TProperty>() &&
+               PostLockQueue.IsDeliveryDeferred &&
+               context.Property.Metadata.Type.CanContainSubjects()
             ? PostLockQueue.ReserveDelivery()
             : PostLockQueue.UnreservedDelivery;
     }
 
     /// <summary>
-    /// Queues the delivery of a change written under a lifecycle lock until the lifecycle operation completed, outside
-    /// the lock. The change and its listeners are resolved at write time, as for an immediate delivery.
+    /// Queues the delivery of a change written under a lifecycle lock, or behind a pending queued delivery, until the
+    /// drain, outside every lifecycle lock. The change and its listeners are resolved at write time, as for an
+    /// immediate delivery. Returns false when the change is dispatched now instead (see
+    /// <see cref="PostLockQueue.IsDeliveryQueued"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void QueueChange(
+    private static bool TryQueueChange(
         int deliverySlot,
         PropertyChangeQueueSubscription[] subscriptions,
         ISubject<SubjectPropertyChange>? syncSubject,
         PropertyChangeSubscription[]? listeners,
         SubjectPropertyChange change)
     {
-        // The drain runs outside every lifecycle lock, so the queued delivery dispatches at once.
-        PostLockQueue.EnqueueDelivery(
-            deliverySlot, () => DispatchChange(PostLockQueue.UnreservedDelivery, subscriptions, syncSubject, listeners, in change));
+        if (!PostLockQueue.IsDeliveryQueued(deliverySlot))
+        {
+            return false;
+        }
+
+        // The drain runs the queued deliveries in write order, outside every lifecycle lock, so it delivers the change
+        // directly.
+        PostLockQueue.EnqueueDelivery(deliverySlot, () => Deliver(subscriptions, syncSubject, listeners, in change));
+        return true;
     }
 
     private static void DispatchChange(
@@ -233,12 +244,21 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         PropertyChangeSubscription[]? listeners,
         in SubjectPropertyChange change)
     {
-        if (PostLockQueue.IsLockHeld)
+        if ((deliverySlot != PostLockQueue.UnreservedDelivery || PostLockQueue.IsDeliveryDeferred) &&
+            TryQueueChange(deliverySlot, subscriptions, syncSubject, listeners, change))
         {
-            QueueChange(deliverySlot, subscriptions, syncSubject, listeners, change);
             return;
         }
 
+        Deliver(subscriptions, syncSubject, listeners, in change);
+    }
+
+    private static void Deliver(
+        PropertyChangeQueueSubscription[] subscriptions,
+        ISubject<SubjectPropertyChange>? syncSubject,
+        PropertyChangeSubscription[]? listeners,
+        in SubjectPropertyChange change)
+    {
         for (var i = 0; i < subscriptions.Length; i++)
         {
             subscriptions[i].Enqueue(in change);

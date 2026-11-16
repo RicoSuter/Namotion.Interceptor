@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Reactive.Concurrency;
-using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -131,8 +130,9 @@ public class DerivedPropertyProtocolTests
         using var subscription = RecordPublications(result, published);
 
         // Act: a recalculation from before the detach evaluates the value 1 and reaches its commit while the
-        // attach of the new attachment evaluates. The attach found the property owned by that recalculation, so it
-        // set the request flag, which the recalculation hands off to the attach.
+        // attach of the new attachment evaluates. The attach finds the property owned by that recalculation, so it
+        // requests a recalculation after it; the recalculation finds the attach count moved at its commit and
+        // releases the property without committing its value.
         recalculationGate.Arm();
         var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
         var isRecalculationPaused = recalculationGate.Paused.Wait(Timeout);
@@ -147,7 +147,8 @@ public class DerivedPropertyProtocolTests
         attachGate.Resume.Set();
         await attach.WaitAsync(Timeout);
 
-        // Assert: the attach commits its first value 2 without publishing it, then answers the request it took over.
+        // Assert: the attach commits its first value 2 without publishing it, then the recalculation it requested
+        // publishes the value that includes the external state.
         Assert.True(isRecalculationPaused);
         Assert.True(isAttachPaused);
         Assert.True(isRecalculationDone);
@@ -160,11 +161,11 @@ public class DerivedPropertyProtocolTests
     [Fact]
     public async Task WhenObserverThrowsOnThePublicationAfterAnAttach_ThenTheAttachCompletesAndLaterDerivedPropertiesFollowTheirSources()
     {
-        // Arrange: as in WhenAttachRunsWhileRecalculationEvaluates_..., the attach takes over the request of a
-        // recalculation from before the detach and publishes its answer on the attaching thread, where an observer
-        // throws. The worker's second derived property attaches after the first one. The recalculation is queued
-        // under the lifecycle lock, so it publishes after the attach completed, and the observer's exception
-        // propagates from the structural write.
+        // Arrange: as in WhenAttachRunsWhileRecalculationEvaluates_..., a recalculation from before the detach owns
+        // the property during the attach, so the attach requests a recalculation after it, which publishes on the
+        // attaching thread, where an observer throws. The worker's second derived property attaches after the first
+        // one. The recalculation is queued under the lifecycle lock, so it publishes after the attach completed, and
+        // the observer's exception propagates from the structural write.
         var context = CreateContext();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -944,11 +945,13 @@ public class DerivedPropertyProtocolTests
     [Theory]
     [InlineData(nameof(Person.Mother))]
     [InlineData(nameof(Person.FirstName))]
-    public void WhenObserverOfQueuedChangeAttachesSubject_ThenOuterEntriesAreNotDrainedEarly(string attachingOn)
+    public void WhenObserverOfQueuedChangeAttachesSubject_ThenOlderChangesAreDeliveredFirstAndOuterRecalculationsWait(string attachingOn)
     {
         // Arrange: attaching the mother queues two writes of the root and its derived changes. An observer attaches
         // another subject to the context, whose handler writes the marker, either while the structural write is
-        // announced (before the drain) or while the first queued change is delivered (during the drain).
+        // announced (before the drain) or while the first queued change is delivered (during the drain). The release
+        // of that attach delivers the root's older queued changes before the marker's, and leaves the root's
+        // recalculations to the drain of the structural write.
         var context = CreateContext();
         var root = new Person(context);
         var marker = new Person(context);
@@ -981,11 +984,13 @@ public class DerivedPropertyProtocolTests
         root.Mother = mother;
 
         // Assert
-        string[] markerEntries = ["marker.FirstName", "marker.FullName", "marker.FullNameWithPrefix"];
-        string[] expected = attachingOn == nameof(Person.Mother)
-            ? ["root.Mother", .. markerEntries, "root.FirstName", "root.LastName", "root.FullName", "root.FullNameWithPrefix"]
-            : ["root.Mother", "root.FirstName", .. markerEntries, "root.LastName", "root.FullName", "root.FullNameWithPrefix"];
-        Assert.Equal(expected, deliveries);
+        Assert.Equal(
+            [
+                "root.Mother", "root.FirstName", "root.LastName",
+                "marker.FirstName", "marker.FullName", "marker.FullNameWithPrefix",
+                "root.FullName", "root.FullNameWithPrefix"
+            ],
+            deliveries);
     }
 
     private static IInterceptorSubjectContext CreateContext()

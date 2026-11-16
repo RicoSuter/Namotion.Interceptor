@@ -347,7 +347,7 @@ sequenceDiagram
     Note over A,B: No deadlock: lock(data) is never held during a getter or a publication
 ```
 
-Every evaluation except the first at attach, and every publication, runs outside the lifecycle lock (see [Post-Lock Queue](tracking-lifecycle.md#post-lock-queue)).
+Every evaluation except those of the attach (the first value and the re-evaluations that follow it), and every publication, runs outside the lifecycle lock (see [Post-Lock Queue](tracking-lifecycle.md#post-lock-queue)).
 
 ## Correctness Guarantees
 
@@ -390,7 +390,7 @@ Every dependency belongs to an attached derived property: D's detach removes D f
 | Write of a property nobody read, on a type with derived property data | Zero | Above, plus one data lookup (W3) |
 | Write of a property with dependents | Zero | Above, plus `Interlocked.Increment` (W4), a used-by snapshot read, and a request per dependent |
 | Request for an owned property | Zero | One brief `lock(data)` |
-| Request under a lifecycle lock | Zero in steady state (segments reused per thread) | One queue entry per derived property; a change delivery queued under the lock allocates its closure |
+| Request under a lifecycle lock | Zero in steady state (segments reused per thread) | One queue entry per derived property; a queued change delivery allocates its closure |
 | Recalculation, dependencies unchanged | Zero (beyond the getter) | Brief `lock(data)` for the request, the commit and after the publication, the getter, a full fence and a version read per dependency (R5) |
 | Recalculation, dependencies changed | A `PropertyReference[]` and a `DerivedPropertyData?[]` when the buffer grows | Above, plus used-by adds and removes |
 | Attach | Zero (beyond the getter) | Two brief `lock(data)`, the getter, R5 |
