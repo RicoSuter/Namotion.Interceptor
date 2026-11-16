@@ -318,6 +318,8 @@ namespace HomeBlaze.Services.Diagnostics
         public long? GcHeapSize { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=414, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         public decimal? GcPauseTime { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=431, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long? Gen2FragmentedSize { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=419, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
         public long? Gen2Size { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=423)]
