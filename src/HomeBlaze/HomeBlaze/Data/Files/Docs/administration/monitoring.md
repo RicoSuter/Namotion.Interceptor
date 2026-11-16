@@ -52,6 +52,15 @@ All of them are recorded in history, so a trend shows where memory or CPU goes:
 | `ThreadPoolQueueLength` stays above zero while `Process.CpuUsage` is low | Blocked threads: work waits for a thread although the CPU is idle |
 | `ExceptionRate` or `LockContentionRate` stays high | A retry loop or contended lock that costs CPU |
 
+To see which exceptions are thrown, set the log level of `HomeBlaze.Services.Diagnostics.FirstChanceExceptionLogger` to `Debug`, then look at the log server, for example [Seq](#seq), and remove the setting again when done. The key `Logging:LogLevel:HomeBlaze.Services.Diagnostics.FirstChanceExceptionLogger` in `appsettings.json` applies as soon as the file is saved, the environment variable `Logging__LogLevel__HomeBlaze.Services.Diagnostics.FirstChanceExceptionLogger=Debug` after a restart, and `Logging:LogLevel:Default` set to `Debug` turns it on as well. Each entry carries several kilobytes of stack and also goes to the console.
+
+- **Throw site:** the first method on the stack outside the .NET framework (namespaces `System` and `Microsoft`), so exceptions thrown by shared framework helpers, such as an `await` of a canceled task, are told apart by the code that called them. When the stack has only framework frames, it is the first frame the runtime shows, which is the framework method that awaited or called the throwing helper.
+- **ThrowingFrame:** the method that executed the throw: user code when user code throws, a framework helper otherwise, `unknown` when no frame is available.
+- **CallStack:** the stack of the thread at the throw, which for code after an `await` shows the throwing method above thread pool frames only. The exception attached to the entry carries its own stack trace, which usually also lists the methods it passed through on the way up.
+- **Counting:** an exception rethrown or passing through `await`s is logged and counted once, where it was first thrown, and an exception object that is thrown again and again (a cached instance) is logged once while the process runs. At most one entry per exception type and throw site is written per minute; the next one reports how many were skipped meanwhile. The counts are kept while the process runs, so a skipped count can include exceptions from an earlier time Debug was on.
+- **Limits:** up to 1024 combinations of type and site are tracked; others are not logged until restart, which a single entry reports. Entries are written in the background; once 256 are waiting, new ones are dropped, a separate entry reports how many, and each dropped one counts as skipped for its type and site.
+- **Cost:** with Debug off, nothing beyond counting the exception. With Debug on, the stack of every exception is captured to find its throw site, including skipped ones.
+
 The SQLite history store reports `OpenConnectionCount` and `SqliteMemorySize`, the memory all SQLite databases in the process hold.
 
 Inside a container the host values describe the machine running the container, and the container limits sit beside them. `Process.CpuUsage` is measured against the processors available to HomeBlaze, which is the container CPU limit rounded up.
