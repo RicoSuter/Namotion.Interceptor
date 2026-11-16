@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
@@ -117,6 +118,134 @@ public class SubjectSourceRetryQueueTests
                     return receivedWrites.Contains("FirstName=John");
                 }
             }, message: "The parked write was not sent while the model was idle.");
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAReloadInsideTheConnectorOverwritesAParkedWrite_ThenTheWriteIsReplayedAfterTheLoadAndReadBack()
+    {
+        // Arrange: a peer that holds FirstName and reads every accepted write back through the property writer,
+        // as a subscription does. The long retry time leaves the replay to the wake on Synchronized.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        var firstName = new PropertyReference(person, nameof(Person.FirstName));
+
+        var gate = new object();
+        var peerIsDown = false;
+        var peerFirstName = "Initial";
+        var events = new List<string>();
+        SubjectPropertyWriter? propertyWriter = null;
+
+        TestSubjectSource source = null!;
+        source = new TestSubjectSource(person, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(8),
+            retryTime: TimeSpan.FromMinutes(1))
+        {
+            StartListeningOverride = (writer, _) =>
+            {
+                propertyWriter = writer;
+                return Task.FromResult<IAsyncDisposable?>(null);
+            },
+            LoadInitialStateOverride = _ =>
+            {
+                string loadedValue;
+                lock (gate)
+                {
+                    loadedValue = peerFirstName;
+                }
+
+                return Task.FromResult<Action?>(() =>
+                {
+                    firstName.SetValueFromSource(source, null, null, loadedValue);
+                    lock (gate)
+                    {
+                        events.Add("Load=" + loadedValue);
+                    }
+                });
+            },
+            WriteChangesOverride = (changes, _) =>
+            {
+                string? acceptedValue = null;
+                lock (gate)
+                {
+                    foreach (var change in changes.Span)
+                    {
+                        if (change.Property.Name != nameof(Person.FirstName))
+                        {
+                            continue;
+                        }
+
+                        if (peerIsDown)
+                        {
+                            return ValueTask.FromResult(WriteResult.Failure(changes, new InvalidOperationException("Peer is down")));
+                        }
+
+                        acceptedValue = change.GetNewValue<string?>();
+                        peerFirstName = acceptedValue!;
+                        events.Add("Write=" + acceptedValue);
+                    }
+                }
+
+                if (acceptedValue is not null)
+                {
+                    propertyWriter!.Write((firstName, source, acceptedValue),
+                        static state => state.firstName.SetValueFromSource(state.source, null, null, state.acceptedValue));
+                }
+
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        firstName.SetSource(source);
+
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.State == SourceState.Synchronized,
+                message: "The source did not synchronize.");
+
+            lock (gate)
+            {
+                peerIsDown = true;
+            }
+            person.FirstName = "Written";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.Depth > 0,
+                message: "The write made while the peer was down was not parked.");
+
+            // Act: the peer comes back and the connector reloads its state, which moves the model off the
+            // parked write. No further local write follows.
+            lock (gate)
+            {
+                peerIsDown = false;
+            }
+            propertyWriter!.StartBuffering();
+            await propertyWriter.LoadInitialStateAndResumeAsync(CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                lock (gate)
+                {
+                    return peerFirstName == "Written" && person.FirstName == "Written";
+                }
+            }, message: "The parked write was not replayed and read back after the reload.");
+
+            lock (gate)
+            {
+                var reloadIndex = events.LastIndexOf("Load=Initial");
+                Assert.True(reloadIndex > 0, "The reload did not apply the peer's older value.");
+                Assert.Equal("Write=Written", events[reloadIndex + 1]);
+            }
         }
         finally
         {
