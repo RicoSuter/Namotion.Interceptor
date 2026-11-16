@@ -54,7 +54,7 @@ The speakers send events to `http://<EventCallbackHost>:<EventPort>/event/...`, 
 | `Status` | When | `StatusMessage` |
 |----------|------|-----------------|
 | Starting | Selecting the seed, starting the listener, first reconciliation | empty |
-| Running | Connected | empty, or "Reconciliation failed (n of 3): ..." while another speaker is tried |
+| Running | Connected | empty, "Reconciliation failed (n of 3): ..." while another speaker is tried, or "Events unavailable: port ... could not be bound ..." while the event listener cannot listen, see [Event Subscriptions](#event-subscriptions) |
 | Error | The attempt failed; retried after `RetryInterval` | for example "No Sonos speaker found. ..." or "The SeedHost '...' did not answer, and no other Sonos speaker was found." |
 
 `IsConnected` turns true after the first successful reconciliation. The system widget shows **Connected** and **Events: live** or **Events: polling only**, see [Event Subscriptions](#event-subscriptions).
@@ -308,7 +308,7 @@ Subscriptions request a 30 minute lifetime and are renewed at half the lifetime 
 
 The local Sonos API has no authentication: anything that reaches port 1400 can control the speakers.
 
-On Windows, `HttpListener` binds all interfaces only with administrator rights or a URL reservation; without either, the system polls only. Reserve the port once in an elevated prompt:
+On Windows, `HttpListener` binds all interfaces only with administrator rights or a URL reservation; without either, the system polls only and says so in `StatusMessage`. Reserve the port once in an elevated prompt:
 
 ```
 netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
@@ -319,6 +319,7 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 - **"No Sonos speaker found":** multicast discovery is blocked (VLAN, Docker bridge, firewall, access point). Set `SeedHost`.
 - **"The SeedHost '...' did not answer":** check that HomeBlaze reaches `http://<speaker>:1400/xml/device_description.xml`. Give the speaker a DHCP reservation.
 - **Rooms of another household show up:** SSDP found a speaker of another household. Set `SeedHost`.
+- **"Events unavailable: port ... could not be bound":** another process holds `EventPort`, or on Windows the URL reservation is missing. The system polls only, logs a Warning once and tries the port again at every poll, so events start once it is free; change `EventPort` to use another one.
 - **"Events: polling only":** allow inbound TCP on `EventPort` from the speakers, and under Docker bridge networking set `EventCallbackHost` and publish the port. Compare the callback address in the Warning with the host's address. On Windows, see [Network and Firewall](#network-and-firewall).
 - **Events stop after a while:** the listener stopped accepting requests (logged at Error). `Refresh` only polls; a configuration change or restart starts a new listener.
 - **"not connected":** check the `StatusMessage` of the system and the room. Coordinator operations also need the coordinator to be connected. A room that just appeared through an event is polled at the next poll, or at once with `Refresh`.

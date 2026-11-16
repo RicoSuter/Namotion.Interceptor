@@ -252,6 +252,39 @@ public class SonosSystemRuntimeTests
         Assert.Null(system.ActiveEventCallbackHost);
         Assert.Equal(0.44m, system.Players[TestFixtures.KitchenUuid].Volume);
         Assert.Null(speaker.GetCallback(AvTransportEventPath));
+        Assert.Equal(ServiceStatus.Running, system.Status);
+        Assert.Contains($"port {portBlocker.Port}", system.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenTheTakenEventPortBecomesFree_ThenTheListenerStartsAtTheNextPollAndWarnsOnce()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        await using var portBlocker = new LoopbackHttpServer(_ => Task.CompletedTask);
+        var logger = new RecordingLogger<SonosSystem>();
+        var system = ConnectedSystem.CreateSystem(speaker.Host, eventPort: portBlocker.Port, logger: logger);
+        system.PollingInterval = TimeSpan.FromMilliseconds(200);
+        await using var owner = ConnectedSystem.Own(system);
+        await system.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => system.IsConnected && logger.Entries.Count(entry => entry.Message.Contains("could not listen")) >= 3,
+            ConnectedSystem.WaitTimeout,
+            message: "The system should connect without events and try the listener again at its polls.");
+        Assert.NotNull(system.StatusMessage);
+
+        // Act
+        await portBlocker.DisposeAsync();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => system.AreEventsActive && system.StatusMessage is null,
+            ConnectedSystem.WaitTimeout,
+            message: "Once the port is free, the listener should start and the events become active.");
+        Assert.Equal("127.0.0.1", system.ActiveEventCallbackHost);
+        Assert.NotNull(speaker.GetCallback(AvTransportEventPath));
+        Assert.Single(logger.Warnings, message => message.Contains("could not listen"));
     }
 
     [Fact]

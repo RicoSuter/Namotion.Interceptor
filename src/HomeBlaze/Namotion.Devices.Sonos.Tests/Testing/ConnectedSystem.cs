@@ -11,7 +11,7 @@ internal sealed class ConnectedSystem : IAsyncDisposable
 {
     internal static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
 
-    private const int MaxStartAttempts = 3;
+    private const int MaxStartAttempts = 5;
 
     private ConnectedSystem(SonosSystem system, SonosPlayer player)
     {
@@ -23,6 +23,12 @@ internal sealed class ConnectedSystem : IAsyncDisposable
 
     internal SonosPlayer Player { get; }
 
+    /// <summary>
+    /// Returns a system for the seed that is not started. Without <paramref name="eventPort"/> it gets a port that is
+    /// free now but not bound until the system starts, so another socket can take it in between; a test that needs
+    /// events starts the system with <see cref="StartWithEventsAsync"/>, which replaces a system whose listener could
+    /// not bind its port.
+    /// </summary>
     internal static SonosSystem CreateSystem(
         string seedHost,
         int? eventPort = null,

@@ -16,6 +16,7 @@ public partial class SonosSystem
     private const string SeedHostFailureKey = "SeedHost";
     private const string FavoritesFailureKey = "Favorites";
     private const string EventDeliveryFailureKey = "EventDelivery";
+    private const string EventListenerFailureKey = "EventListener";
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan TeardownTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan SeedProbeTimeout = TimeSpan.FromSeconds(2);
@@ -42,6 +43,10 @@ public partial class SonosSystem
 
     // A persistent failure is logged at Warning once and at Debug while it lasts, see LogFailure.
     private readonly FailureTracker _failures = new();
+
+    // Why the event listener could not listen, shown as the status message while connected; null while it listens or
+    // was never tried. Written and read by the connection loop.
+    private string? _eventListenerProblem;
 
     /// <summary>
     /// The longest polling or retry interval, so a hand-edited value cannot overflow the loop's waits.
@@ -103,6 +108,7 @@ public partial class SonosSystem
                         ? "No Sonos speaker found. Set SeedHost when multicast discovery is blocked, for example under Docker bridge networking."
                         : $"The SeedHost '{SeedHost}' did not answer, and no other Sonos speaker was found.");
 
+                _eventListenerProblem = null;
                 await StartEventListenerAsync(scope.EventListener, seedUri.Host, stoppingToken);
                 reconnectImmediately = await RunConnectedAsync(scope, seedUri, stoppingToken);
             }
@@ -366,11 +372,15 @@ public partial class SonosSystem
         {
             eventListener.Start(callbackHost, EventPort, EventListenHost);
             ActiveEventCallbackHost = callbackHost;
+            _eventListenerProblem = null;
+            _failures.ReportSuccess(EventListenerFailureKey);
         }
         catch (HttpListenerException exception)
         {
-            // On Windows, listening on all interfaces needs a URL ACL or elevation.
-            _logger.LogWarning(exception, "The Sonos event listener could not listen on port {Port}; continuing with polling only.", EventPort);
+            // Another process holds the port, or on Windows, listening on all interfaces needs a URL ACL or elevation.
+            LogFailure(_failures.ReportFailure(EventListenerFailureKey, exception.Message), exception,
+                "The Sonos event listener could not listen on port {Port}; polling only, and trying again at every poll.", EventPort);
+            _eventListenerProblem = $"Events unavailable: port {EventPort} could not be bound ({exception.Message}); polling only.";
         }
     }
 
@@ -424,6 +434,8 @@ public partial class SonosSystem
                 continue;
             }
 
+            await RetryFailedEventListenerAsync(scope, seedUri, stoppingToken);
+
             try
             {
                 await PollAsync(stoppingToken);
@@ -453,6 +465,27 @@ public partial class SonosSystem
         }
     }
 
+    // Starts the listener again when it could not listen: the port may be free now, and the poll that follows
+    // subscribes once it runs. Under the reconcile lock, so a command's reconciliation does not subscribe while the
+    // listener is half started.
+    private async Task RetryFailedEventListenerAsync(SonosConnectionScope scope, Uri seedUri, CancellationToken stoppingToken)
+    {
+        if (_eventListenerProblem is null)
+        {
+            return;
+        }
+
+        await _reconcileLock.WaitAsync(stoppingToken);
+        try
+        {
+            await StartEventListenerAsync(scope.EventListener, GetSeedUri()?.Host ?? seedUri.Host, stoppingToken);
+        }
+        finally
+        {
+            _reconcileLock.Release();
+        }
+    }
+
     // Subscriptions live 30 minutes, which a long polling interval would let lapse, so the loop also wakes to renew
     // them, without a full poll.
     private TimeSpan GetLoopWait(long nextPollAt, out bool isSubscriptionWake)
@@ -478,7 +511,7 @@ public partial class SonosSystem
         _failures.ReportSuccess(ConnectionFailureKey);
         IsConnected = true;
         Status = ServiceStatus.Running;
-        StatusMessage = null;
+        StatusMessage = _eventListenerProblem;
     }
 
     // Called by the connection loop, which owns the scope while it is open.

@@ -416,11 +416,10 @@ public class SonosEventListenerTests
         // Arrange
         using var httpClient = new HttpClient();
         await using var listener = CreateListener(httpClient);
-        LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
+        var port = LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() =>
-            listener.Start("127.0.0.1", LoopbackPorts.GetFreePort(), listenHost: "127.0.0.1"));
+        Assert.Throws<InvalidOperationException>(() => listener.Start("127.0.0.1", port, listenHost: "127.0.0.1"));
     }
 
     [Fact]
@@ -624,12 +623,11 @@ public class SonosEventListenerTests
         // Arrange
         using var httpClient = new HttpClient();
         var listener = CreateListener(httpClient);
-        LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
+        var port = LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         await listener.DisposeAsync();
 
         // Act & Assert
-        Assert.Throws<ObjectDisposedException>(() =>
-            listener.Start("127.0.0.1", LoopbackPorts.GetFreePort(), listenHost: "127.0.0.1"));
+        Assert.Throws<ObjectDisposedException>(() => listener.Start("127.0.0.1", port, listenHost: "127.0.0.1"));
         await Assert.ThrowsAsync<ObjectDisposedException>(() =>
             listener.SubscribeAsync("RINCON_X/AVTransport", new Uri("http://127.0.0.1:1/Event"), _ => { }, CancellationToken.None));
     }
