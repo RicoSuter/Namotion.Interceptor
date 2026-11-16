@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
@@ -162,6 +163,33 @@ public class OpcUaResponseMismatchTests
 
         // Assert
         Assert.Equal(2, CountFullStateSyncs(logger));
+    }
+
+    [Fact]
+    public async Task WhenAFullStateSyncAfterAMismatchFails_ThenNotificationsAreAppliedWithoutWaitingForTheRetry()
+    {
+        // Arrange
+        var source = CreateSourceWhoseLoadFails();
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var sessionManager = new SessionManager(
+            source,
+            propertyWriter,
+            CreateConfigurationWithoutBackgroundReads(),
+            source.PollingMetrics,
+            source.ReadAfterWriteMetrics,
+            NullLogger.Instance,
+            new ManualTimeProvider());
+        var root = (TestRoot)source.RootSubject;
+
+        sessionManager.ScheduleFullStateSyncAfterResponseMismatch();
+        await sessionManager.PerformFullStateSyncIfNeededAsync(CancellationToken.None);
+
+        // Act
+        propertyWriter.Write(root, static subject => subject.Name = "AfterFailedSync");
+
+        // Assert
+        Assert.Equal("AfterFailedSync", root.Name);
+        Assert.Equal(SourceState.Synchronizing, source.State);
     }
 
     /// <summary>

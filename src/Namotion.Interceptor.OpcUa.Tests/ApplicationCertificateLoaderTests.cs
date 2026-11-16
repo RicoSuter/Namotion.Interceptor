@@ -498,6 +498,24 @@ public class ApplicationCertificateLoaderTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(_storePath, "own")));
     }
 
+    [Fact]
+    public async Task WhenTheCertificateIsPinned_ThenCleaningTheStoreKeepsIt()
+    {
+        // Arrange
+        var configuration = CreateConfiguration();
+        configuration.ApplicationUri = "urn:test:client";
+        using var pinned = await AddSelfSignedCertificateAsync(configuration, ageInDays: 1);
+        var application = await configuration.CreateApplicationInstanceAsync();
+        var identifier = application.ApplicationConfiguration!.SecurityConfiguration.ApplicationCertificate!;
+        identifier.Thumbprint = pinned.Thumbprint;
+
+        // Act
+        await ApplicationCertificateLoader.CleanStoreAsync(identifier, NullLogger.Instance, CancellationToken.None);
+
+        // Assert
+        Assert.Contains(pinned.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
+    }
+
     private OpcUaClientConfiguration CreateConfiguration() =>
         ClientSourceTestFactory.CreateConfiguration(certificateStoreBasePath: _storePath);
 
