@@ -534,11 +534,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         {
             if (_disposed)
             {
-                return new HistorySeries(
-                    query.PropertyPath,
-                    ImmutableArray<HistoryPoint>.Empty,
-                    false,
-                    ImmutableArray<HistoryCoverage>.Empty);
+                return EmptySeries(query.PropertyPath);
             }
 
             // The bucket reader's look-backs (the TWA carry seed and the Delta reading) read directly through the
@@ -557,6 +553,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             };
         }
     }
+
+    // A series without points or coverage: the answer of a store that holds no history.
+    internal static HistorySeries EmptySeries(string propertyPath) =>
+        new(propertyPath, ImmutableArray<HistoryPoint>.Empty, false, ImmutableArray<HistoryCoverage>.Empty);
 
     public HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf)
     {
@@ -897,7 +897,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_connectionLock)
         {
-            // Checked here rather than left to OpenPartition, whose throw would mark the partition unreadable.
+            // Defensive: queries already return before reading once disposed, and they hold this lock throughout.
+            // Left to OpenPartition, the throw would mark the partition unreadable.
             if (_disposed || _unreadablePartitions.Contains(key))
             {
                 return null;

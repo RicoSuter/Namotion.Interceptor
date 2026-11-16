@@ -29,7 +29,7 @@ The `Host system` subject reports the machine HomeBlaze runs on and the HomeBlaz
 | `Process.GcCommittedSize` | Memory the garbage collector held from the operating system at the last garbage collection, including free space it keeps for reuse |
 | `Process.GcFragmentedSize` | Free space between objects in the .NET heap at the last garbage collection |
 | `Process.Gen2Size`, `Process.LargeObjectHeapSize` | Long-lived objects and objects of 85,000 bytes or more after the last full garbage collection, including the free space between them |
-| `Process.Gen2FragmentedSize` | Free space between the long-lived objects after the last full garbage collection, the part of `Gen2Size` no live object uses |
+| `Process.Gen2FragmentedSize` | Free space between the long-lived objects after the last full garbage collection, the part of `Gen2Size` no live object uses; `Gen2Size` minus this is the live long-lived objects |
 | `Process.ResidentAnonymousMemory`, `Process.ResidentFileMemory` | Physical memory not backed by a file (heaps, stacks) and backed by one (executable, libraries); Linux only |
 | `Process.HandleCount` | Open file descriptors on Linux, kernel handles on Windows; empty on macOS |
 | `Process.TimerCount` | Active .NET timers, including the ones behind `Task.Delay` and `CancelAfter` |
@@ -45,8 +45,8 @@ All of them are recorded in history, so a trend shows where memory or CPU goes:
 
 | Trend | Points to |
 |-------|-----------|
-| `Gen2Size` rises over days while `Gen2FragmentedSize` stays flat | A managed leak: long-lived objects that are never released |
-| `Gen2Size` rises over days along with `Gen2FragmentedSize` | Fragmentation: free space between long-lived objects. Under Server GC most full collections run in the background and do not compact; `Collect garbage` compacts, after which both drop back |
+| `Gen2Size` minus `Gen2FragmentedSize` rises over days | A managed leak: the difference is the live long-lived objects, so its growth is objects that are never released, however much free space grows beside it |
+| `Gen2FragmentedSize` rises over days while `Gen2Size` minus `Gen2FragmentedSize` does not | Fragmentation: free space between long-lived objects. Under Server GC most full collections run in the background and do not compact; `Collect garbage` compacts, after which the free space drops back |
 | `LargeObjectHeapSize` rises over days | A managed leak of large objects, such as buffers, or free space between them. It is measured after the last full garbage collection and includes free space, which only a compacting collection removes; run `Collect garbage` and compare the value right after it over days to tell a leak from fragmentation |
 | `GcCommittedSize` keeps growing over days while `GcHeapSize` does not | Free memory the garbage collector keeps instead of returning it to the operating system; `Collect garbage` returns it. Staying far above `GcHeapSize` is normal under Server GC, so only a persistent growth matters |
 | `ResidentAnonymousMemory` grows while `GcCommittedSize` does not | Native memory outside .NET, such as SQLite or a device driver. If `SqliteMemorySize` of the SQLite history store stays flat meanwhile, the growth is not in memory SQLite currently holds, though the C library may still keep heap SQLite freed; a rising `OpenConnectionCount` points to databases the store keeps open |

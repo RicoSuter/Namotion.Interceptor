@@ -1,6 +1,7 @@
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Sqlite;
 using Microsoft.Data.Sqlite;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.History.Sqlite.Tests;
 
@@ -434,7 +435,7 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenTheStoreIsDisposedWhileAQueryRuns_ThenTheQueryCompletesAndNoConnectionStaysOpen()
+    public async Task WhenTheStoreIsDisposedWhileAQueryRuns_ThenDisposeWaitsForTheQueryAndNoConnectionStaysOpen()
     {
         // Arrange - the clock is read under the connection lock when the query opens its partition, so blocking it
         // there holds the query in the middle of its read.
@@ -459,15 +460,19 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
         var queryTask = Task.Run(() => core.Query(new HistoryQuery("/a/Value", Base, Base.AddSeconds(10))));
         Assert.True(queryEntered.Wait(TimeSpan.FromSeconds(30)), "The query never opened its partition.");
 
-        // Act
-        var disposeTask = Task.Run(core.Dispose);
-        var disposedWhileQueryRan = disposeTask.IsCompleted;
+        // Act - a dedicated thread, so its state shows when Dispose blocks on the connection lock.
+        var disposeThread = new Thread(core.Dispose) { IsBackground = true };
+        disposeThread.Start();
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => (disposeThread.ThreadState & (ThreadState.WaitSleepJoin | ThreadState.Stopped)) != 0,
+            message: "Dispose neither blocked nor completed.");
+        var disposeWaitedForQuery = disposeThread.IsAlive;
         releaseQuery.Set();
         var series = await queryTask;
-        await disposeTask;
+        Assert.True(disposeThread.Join(TimeSpan.FromSeconds(30)), "Dispose did not complete after the query.");
 
         // Assert
-        Assert.False(disposedWhileQueryRan);
+        Assert.True(disposeWaitedForQuery, "Dispose completed while the query still held its connection.");
         Assert.Equal(1d, Assert.Single(series.Points).Number);
         Assert.Equal(0, core.OpenConnectionCount);
         Assert.False(core.IsPartitionOpen(SqlitePartition.PartitionKey(Base, PartitionInterval.Weekly)));
