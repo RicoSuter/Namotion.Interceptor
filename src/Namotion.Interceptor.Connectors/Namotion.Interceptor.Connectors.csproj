@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<ItemGroup>
+		<InternalsVisibleTo Include="Namotion.Interceptor.OpcUa" />
 		<InternalsVisibleTo Include="Namotion.Interceptor.Connectors.Tests" />
 		<InternalsVisibleTo Include="Namotion.Interceptor.WebSocket.Tests" />
 		<InternalsVisibleTo Include="Namotion.Interceptor.Mqtt.Tests" />

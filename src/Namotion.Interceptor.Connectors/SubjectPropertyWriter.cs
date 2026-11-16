@@ -187,7 +187,7 @@ public sealed class SubjectPropertyWriter
     /// The generation changes as well, so a load still running from before cannot apply its snapshot over the
     /// updates applied here.
     /// </remarks>
-    public void ResumeWithoutLoad()
+    internal void ResumeWithoutLoad()
     {
         lock (_lock)
         {
