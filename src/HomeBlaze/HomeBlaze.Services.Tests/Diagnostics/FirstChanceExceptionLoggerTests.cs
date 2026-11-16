@@ -506,6 +506,44 @@ public class FirstChanceExceptionLoggerTests
         Assert.DoesNotContain("System.Runtime.ExceptionServices.InternalCalls.", callStack);
     }
 
+    [Fact]
+    public async Task WhenFrameworkCodeAwaitsACanceledTask_ThenThrowSiteIsNotAHiddenAwaiterFrame()
+    {
+        // Arrange
+        var logger = new RecordingLogger(LogLevel.Debug);
+        using var firstChanceLogger = new FirstChanceExceptionLogger(logger);
+        using var reader = new StreamReader(new CanceledReadStream());
+
+        // Act
+        await firstChanceLogger.StartingAsync(CancellationToken.None);
+        try
+        {
+            // The reader awaits the canceled read itself, and Task.Run of a method group keeps this assembly off
+            // the stack, so the awaiter creates a new TaskCanceledException under framework frames only.
+            var read = Task.Run(reader.ReadToEndAsync);
+            await AsyncTestHelpers.WaitUntilAsync(() => logger.Entries.Any(IsReadCancellation));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read);
+        }
+        finally
+        {
+            await firstChanceLogger.StoppedAsync(CancellationToken.None);
+        }
+
+        // Assert
+        var entry = logger.Entries.First(IsReadCancellation);
+        var throwSite = (string)entry.Properties["ThrowSite"]!;
+        Assert.StartsWith("System.", throwSite);
+        Assert.DoesNotContain(TestClassName, throwSite);
+        Assert.DoesNotContain("TaskAwaiter.", throwSite);
+        Assert.DoesNotContain("System.Runtime.EH.", throwSite);
+        Assert.DoesNotContain("System.Runtime.ExceptionServices.InternalCalls.", throwSite);
+        Assert.Contains("StreamReader", throwSite);
+
+        static bool IsReadCancellation(LogEntry candidate) =>
+            candidate.Exception is TaskCanceledException &&
+            ((string?)candidate.Properties.GetValueOrDefault("CallStack"))?.Contains("StreamReader") == true;
+    }
+
     [Theory]
     [InlineData("System.Runtime.EH", true)]
     [InlineData("System.Runtime.ExceptionServices.InternalCalls", true)]
@@ -759,6 +797,38 @@ public class FirstChanceExceptionLoggerTests
         catch (ArgumentException)
         {
         }
+    }
+
+    private sealed class CanceledReadStream : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            ValueTask.FromCanceled<int>(new CancellationToken(canceled: true));
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed record LogEntry(

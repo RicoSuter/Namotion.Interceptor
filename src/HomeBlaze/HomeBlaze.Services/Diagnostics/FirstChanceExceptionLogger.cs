@@ -181,13 +181,14 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
 
             // At first chance the exception's own stack trace holds only the throwing frame, so the
             // current stack provides the callers; the first frame skipped is this method. It can only
-            // be captured here, formatting it is left to the consumer.
+            // be captured here, formatting it is left to the consumer unless finding the throw site needs it.
             var callStack = new StackTrace(1 + skippedCallerFrames, fNeedFileInfo: false);
             var dispatchFrameCount = CountLeadingDispatchFrames(callStack);
             string? throwingFrame = null;
+            string? formattedCallStack = null;
             var throwSite =
                 FindCallerOutsideFramework(callStack, dispatchFrameCount) ??
-                FindFirstVisibleFrame(callStack, dispatchFrameCount) ??
+                FindFirstVisibleFrame(callStack, dispatchFrameCount, out formattedCallStack) ??
                 (throwingFrame = GetThrowingFrame(exception));
 
             var exceptionType = exception.GetType().FullName ?? exception.GetType().Name;
@@ -198,7 +199,7 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
             }
 
             throwingFrame ??= GetThrowingFrame(exception);
-            if (!TryEnqueue(new Entry(exception, callStack, dispatchFrameCount, exceptionType, throwSite, throwingFrame, skippedCount)))
+            if (!TryEnqueue(new Entry(exception, callStack, dispatchFrameCount, formattedCallStack, exceptionType, throwSite, throwingFrame, skippedCount)))
             {
                 // The dropped entry and the skips it carried are reported by the next entry of its key.
                 Interlocked.Add(ref state.SkippedCount, skippedCount + 1);
@@ -271,26 +272,15 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
     }
 
     /// <summary>
-    /// Returns the first frame from <paramref name="startIndex"/> that formats to text, or null when there is none.
+    /// Returns the first frame from <paramref name="startIndex"/> that the formatted stack shows, or null when
+    /// there is none. Frames hidden from stack traces, such as the awaiter helpers, are skipped, except that the
+    /// last frame of a stack is always shown.
     /// </summary>
-    private static string? FindFirstVisibleFrame(StackTrace callStack, int startIndex)
+    private static string? FindFirstVisibleFrame(StackTrace callStack, int startIndex, out string formattedCallStack)
     {
-        for (var index = startIndex; index < callStack.FrameCount; index++)
-        {
-            var frame = callStack.GetFrame(index);
-            if (frame is null)
-            {
-                continue;
-            }
-
-            var formattedFrame = FormatFirstFrame(new StackTrace(frame).ToString());
-            if (formattedFrame is not null)
-            {
-                return formattedFrame;
-            }
-        }
-
-        return null;
+        // A frame formatted alone is the last frame and therefore always shown, so the stack is formatted as a whole.
+        formattedCallStack = FormatCallStack(callStack, startIndex);
+        return FormatFirstFrame(formattedCallStack);
     }
 
     private static string GetThrowingFrame(Exception exception)
@@ -303,7 +293,7 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
     /// <summary>Returns the method of the first line of a formatted stack trace, as the runtime formats it. Async state machine names are not resolved to their method on Native AOT, where the throw site key stays correct but the fields degrade.</summary>
     private static string? FormatFirstFrame(string stackTrace)
     {
-        var frame = stackTrace.AsSpan();
+        var frame = stackTrace.AsSpan().TrimStart();
         var lineEnd = frame.IndexOfAny('\r', '\n');
         if (lineEnd >= 0)
         {
@@ -421,7 +411,7 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
                     entry.ThrowingFrame,
                     entry.Exception.Message,
                     entry.SkippedCount,
-                    FormatCallStack(entry.CallStack, entry.DispatchFrameCount),
+                    entry.FormattedCallStack ?? FormatCallStack(entry.CallStack, entry.DispatchFrameCount),
                     entry.Exception);
             }
 
@@ -450,11 +440,12 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
 
     private readonly struct Entry
     {
-        public Entry(Exception exception, StackTrace callStack, int dispatchFrameCount, string exceptionType, string throwSite, string throwingFrame, int skippedCount)
+        public Entry(Exception exception, StackTrace callStack, int dispatchFrameCount, string? formattedCallStack, string exceptionType, string throwSite, string throwingFrame, int skippedCount)
         {
             Exception = exception;
             CallStack = callStack;
             DispatchFrameCount = dispatchFrameCount;
+            FormattedCallStack = formattedCallStack;
             ExceptionType = exceptionType;
             ThrowSite = throwSite;
             ThrowingFrame = throwingFrame;
@@ -478,6 +469,9 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDis
 
         /// <summary>Gets the number of runtime exception dispatch frames at the start of <see cref="CallStack"/>, left out when it is written.</summary>
         public int DispatchFrameCount { get; }
+
+        /// <summary>Gets <see cref="CallStack"/> without its dispatch frames when it was already formatted to find the throw site.</summary>
+        public string? FormattedCallStack { get; }
 
         public string? ExceptionType { get; }
 
