@@ -109,7 +109,7 @@ public partial class SonosSystem
                         : $"The SeedHost '{SeedHost}' did not answer, and no other Sonos speaker was found.");
 
                 _eventListenerProblem = null;
-                await StartEventListenerAsync(scope.EventListener, seedUri.Host, stoppingToken);
+                StartEventListener(scope.EventListener, await ResolveCallbackHostAsync(seedUri.Host, stoppingToken), seedUri.Host);
                 reconnectImmediately = await RunConnectedAsync(scope, seedUri, stoppingToken);
             }
             catch (Exception exception) when (stoppingToken.IsCancellationRequested)
@@ -356,15 +356,20 @@ public partial class SonosSystem
         }
     }
 
-    private async Task StartEventListenerAsync(SonosEventListener eventListener, string seedHost, CancellationToken cancellationToken)
-    {
-        var callbackHost = string.IsNullOrWhiteSpace(EventCallbackHost)
+    private async Task<string?> ResolveCallbackHostAsync(string seedHost, CancellationToken cancellationToken) =>
+        string.IsNullOrWhiteSpace(EventCallbackHost)
             ? await SonosDiscovery.DetectLocalAddressAsync(seedHost, cancellationToken)
             : EventCallbackHost.Trim();
 
+    // Records why the listener does not run in _eventListenerProblem, which the status message shows and which makes
+    // the connection loop try again at every poll; a persistent problem is a Warning once.
+    private void StartEventListener(SonosEventListener eventListener, string? callbackHost, string seedHost)
+    {
         if (callbackHost is null)
         {
-            _logger.LogWarning("No local IPv4 address routes to the Sonos speaker {Host}; continuing with polling only.", seedHost);
+            LogFailure(_failures.ReportFailure(EventListenerFailureKey, "NoRoute"), null,
+                "No local IPv4 address routes to the Sonos speaker {Host}; polling only, and trying again at every poll.", seedHost);
+            _eventListenerProblem = $"Events unavailable: no local IPv4 address routes to the speaker {seedHost}; polling only.";
             return;
         }
 
@@ -465,20 +470,31 @@ public partial class SonosSystem
         }
     }
 
-    // Starts the listener again when it could not listen: the port may be free now, and the poll that follows
-    // subscribes once it runs. Under the reconcile lock, so a command's reconciliation does not subscribe while the
-    // listener is half started.
+    // Starts the listener again when it could not listen or its accept loop failed: the port or route may be back,
+    // and the poll that follows subscribes once it runs, or renews the subscriptions, which keep their callback URI.
+    // The callback host is resolved first, since a DNS lookup must not hold the reconcile lock, which keeps a
+    // command's reconciliation from subscribing while the listener is half started.
     private async Task RetryFailedEventListenerAsync(SonosConnectionScope scope, Uri seedUri, CancellationToken stoppingToken)
     {
+        var eventListener = scope.EventListener;
+        if (eventListener.HasAcceptFailed)
+        {
+            LogFailure(_failures.ReportFailure(EventListenerFailureKey, "AcceptFailed"), null,
+                "The Sonos event listener stopped accepting requests; polling only, and listening again at every poll.");
+            _eventListenerProblem = "Events unavailable: the event listener stopped accepting requests; polling only.";
+        }
+
         if (_eventListenerProblem is null)
         {
             return;
         }
 
+        var seedHost = GetSeedUri()?.Host ?? seedUri.Host;
+        var callbackHost = await ResolveCallbackHostAsync(seedHost, stoppingToken);
         await _reconcileLock.WaitAsync(stoppingToken);
         try
         {
-            await StartEventListenerAsync(scope.EventListener, GetSeedUri()?.Host ?? seedUri.Host, stoppingToken);
+            StartEventListener(eventListener, callbackHost, seedHost);
         }
         finally
         {

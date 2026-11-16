@@ -7,6 +7,7 @@ using HomeBlaze.Abstractions.Networking;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Sonos.Client;
+using Namotion.Devices.Sonos.Events;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -209,6 +210,11 @@ public partial class SonosSystem : BackgroundService,
     /// them. Tests change it.
     /// </summary>
     internal TimeSpan FullReconcileInterval { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// The event listener of the current connection, null between connections. Tests use it.
+    /// </summary>
+    internal SonosEventListener? CurrentEventListener => GetEventListener();
 
     public SonosSystem(IHttpClientFactory httpClientFactory, ILogger<SonosSystem> logger)
     {

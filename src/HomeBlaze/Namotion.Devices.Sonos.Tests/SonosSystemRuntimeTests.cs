@@ -288,6 +288,43 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
+    public async Task WhenTheEventListenerStopsAccepting_ThenItListensAgainAtTheNextPollAndEventsResume()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        var logger = new RecordingLogger<SonosSystem>();
+        await using var connected = await ConnectedSystem.StartAsync(speaker, logger: logger, configure: system =>
+            system.PollingInterval = TimeSpan.FromMilliseconds(200));
+        var system = connected.System;
+        var listener = system.CurrentEventListener!;
+        var failures = 0;
+        listener.AcceptContextAsync = httpListener => Interlocked.Exchange(ref failures, 1) == 0
+            ? Task.FromException<HttpListenerContext>(new HttpListenerException(995, "The accept failed."))
+            : httpListener.GetContextAsync();
+
+        // Act
+        // The NOTIFY is answered by the waiting accept; the next accept fails and ends the loop.
+        Assert.Equal(HttpStatusCode.OK, await speaker.NotifyAsync(AvTransportEventPath, SonosEventBodies.AvTransport(("TransportState", "PLAYING"))));
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => logger.Errors.Any(message => message.Contains("stopped accepting requests")),
+            ConnectedSystem.WaitTimeout,
+            message: "The accept loop should fail.");
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => !listener.HasAcceptFailed && listener.IsListening && system.ActiveEventCallbackHost is not null && system.StatusMessage is null,
+            ConnectedSystem.WaitTimeout,
+            message: "The next poll should listen again.");
+        Assert.Equal(HttpStatusCode.OK, await speaker.NotifyAsync(AvTransportEventPath, SonosEventBodies.AvTransport(("TransportState", "PAUSED_PLAYBACK"))));
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => connected.Player.PlaybackState == MediaPlaybackState.Paused && system.AreEventsActive,
+            ConnectedSystem.WaitTimeout,
+            message: "Events should reach the player again through the subscription made before the failure.");
+        Assert.Single(logger.Warnings, message => message.Contains("stopped accepting requests"));
+        Assert.Equal(1, speaker.Subscribed.Count(path => path == AvTransportEventPath));
+    }
+
+    [Fact]
     public async Task WhenStopped_ThenSubscriptionsAreCancelledAndStatusIsStopped()
     {
         // Arrange

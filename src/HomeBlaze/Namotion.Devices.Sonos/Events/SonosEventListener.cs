@@ -60,6 +60,16 @@ internal sealed class SonosEventListener : IAsyncDisposable
     internal bool IsListening => !_disposing && !_acceptFailed && _listener?.IsListening == true;
 
     /// <summary>
+    /// Waits for the next request of the listener. Tests replace it to make the accept loop fail.
+    /// </summary>
+    internal Func<HttpListener, Task<HttpListenerContext>> AcceptContextAsync { get; set; } = static listener => listener.GetContextAsync();
+
+    /// <summary>
+    /// Whether the accept loop stopped on a failure, which it logs; <see cref="Start"/> binds the port again.
+    /// </summary>
+    internal bool HasAcceptFailed => _acceptFailed;
+
+    /// <summary>
     /// The current subscriptions, enumerated without a lock or a copy, so one added or removed meanwhile may or may not
     /// be seen.
     /// </summary>
@@ -85,14 +95,16 @@ internal sealed class SonosEventListener : IAsyncDisposable
     internal string? CallbackBaseUri => _callbackBaseUri;
 
     /// <summary>
-    /// Starts listening. Throws <see cref="HttpListenerException"/> when the port is taken or cannot be bound,
-    /// <see cref="InvalidOperationException"/> when already started and <see cref="ObjectDisposedException"/> after disposal.
+    /// Starts listening, or after <see cref="HasAcceptFailed"/> listens again, keeping the subscriptions. Throws
+    /// <see cref="HttpListenerException"/> when the port is taken or cannot be bound, <see cref="InvalidOperationException"/>
+    /// when already listening and <see cref="ObjectDisposedException"/> after disposal.
     /// </summary>
+    /// <remarks>Not thread-safe: the caller serializes starts.</remarks>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S5332", Justification = "Sonos speakers deliver UPnP events only over plain HTTP.")]
     internal void Start(string callbackHost, int port, string listenHost = "+")
     {
         ObjectDisposedException.ThrowIf(_disposing, this);
-        if (_listener is not null)
+        if (_listener is not null && !_acceptFailed)
         {
             throw new InvalidOperationException("The Sonos event listener is already started.");
         }
@@ -109,9 +121,11 @@ internal sealed class SonosEventListener : IAsyncDisposable
             throw;
         }
 
+        // The failed listener was closed by its accept loop, which has ended, so DisposeAsync only waits for this one.
         _listener = listener;
         _callbackBaseUri = $"http://{callbackHost}:{port}{EventPathPrefix}";
         _acceptLoop = AcceptLoopAsync(listener);
+        _acceptFailed = false;
     }
 
     /// <summary>
@@ -297,7 +311,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
         {
             while (listener.IsListening)
             {
-                var context = await listener.GetContextAsync();
+                var context = await AcceptContextAsync(listener);
                 _ = HandleAsync(context);
             }
         }
@@ -308,8 +322,8 @@ internal sealed class SonosEventListener : IAsyncDisposable
                 return;
             }
 
-            // Ending the loop is deliberate: retrying a failing listener would spin.
-            _acceptFailed = true;
+            // Ending the loop is deliberate: retrying a failing listener would spin. The flag is set once the listener
+            // is closed, so Start, which it allows to bind the port again, does not find the port still held.
             _logger.LogError(exception, "The Sonos event listener stopped accepting requests.");
             try
             {
@@ -319,6 +333,8 @@ internal sealed class SonosEventListener : IAsyncDisposable
             {
                 _logger.LogDebug(closeException, "Closing the failed Sonos event listener failed.");
             }
+
+            _acceptFailed = true;
         }
     }
 
