@@ -33,10 +33,6 @@ public partial class MyStromSwitch : BackgroundService,
     INetworkHost,
     IUptimeState
 {
-    internal const string HttpClientName = "Namotion.Devices.MyStrom";
-
-    internal static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
-
     // Bounds the polling reads only, because operations may be blocking calls that legitimately take longer.
     // Without it a switch that accepts the connection but never answers holds the last values for the 100 seconds of the HttpClient default.
     internal TimeSpan PollRequestTimeout { get; init; } = TimeSpan.FromSeconds(10);
@@ -167,14 +163,10 @@ public partial class MyStromSwitch : BackgroundService,
         Uptime = null;
     }
 
-    internal HttpClient CreateHttpClient() => _httpClientFactory.CreateClient(HttpClientName);
-
-    internal static SocketsHttpHandler CreateHttpHandler() => new() { ConnectTimeout = ConnectTimeout };
-
     [Operation(Title = "Turn On", Icon = "PowerSettingsNew", Position = 1)]
     public async Task TurnOnAsync(CancellationToken cancellationToken)
     {
-        using var client = CreateHttpClient();
+        using var client = _httpClientFactory.CreateClient();
         await client.GetAsync($"http://{HostAddress}/relay?state=1", cancellationToken);
         await RefreshReportAsync(client, cancellationToken);
     }
@@ -185,7 +177,7 @@ public partial class MyStromSwitch : BackgroundService,
         if (!AllowTurnOff)
             return;
 
-        using var client = CreateHttpClient();
+        using var client = _httpClientFactory.CreateClient();
         await client.GetAsync($"http://{HostAddress}/relay?state=0", cancellationToken);
         await RefreshReportAsync(client, cancellationToken);
     }
@@ -214,7 +206,7 @@ public partial class MyStromSwitch : BackgroundService,
                 Status = ServiceStatus.Starting;
                 StatusMessage = "Connecting...";
 
-                using var client = CreateHttpClient();
+                using var client = _httpClientFactory.CreateClient();
                 using (var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
                 {
                     connectTimeout.CancelAfter(PollRequestTimeout);
@@ -236,7 +228,7 @@ public partial class MyStromSwitch : BackgroundService,
                 _logger.LogError(exception, "MyStrom switch {HostAddress} connection failed", HostAddress);
                 IsConnected = false;
                 Status = ServiceStatus.Error;
-                StatusMessage = exception.Message;
+                StatusMessage = GetFailureMessage(exception);
                 IsOn = null;
                 MeasuredPower = null;
                 Temperature = null;
@@ -248,6 +240,11 @@ public partial class MyStromSwitch : BackgroundService,
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
     }
+
+    // Only the poll timeout cancels a request while the service keeps running, as operations do not take part in polling.
+    private string GetFailureMessage(Exception exception) => exception is OperationCanceledException
+        ? $"The device did not answer within {PollRequestTimeout.TotalSeconds:0.#} seconds."
+        : exception.Message;
 
     private async Task RunPollingLoopAsync(HttpClient client, CancellationToken stoppingToken)
     {
@@ -286,7 +283,7 @@ public partial class MyStromSwitch : BackgroundService,
                 _logger.LogWarning(exception, "MyStrom switch {HostAddress} poll failed", HostAddress);
                 IsConnected = false;
                 Status = ServiceStatus.Error;
-                StatusMessage = exception.Message;
+                StatusMessage = GetFailureMessage(exception);
                 return; // Exit polling loop to trigger reconnect
             }
 

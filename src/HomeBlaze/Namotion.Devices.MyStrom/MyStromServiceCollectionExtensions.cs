@@ -10,11 +10,5 @@ public static class MyStromServiceCollectionExtensions
         this IServiceCollection services,
         Action<MyStromSwitch>? configure = null,
         Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
-    {
-        services
-            .AddHttpClient(MyStromSwitch.HttpClientName)
-            .ConfigurePrimaryHttpMessageHandler(MyStromSwitch.CreateHttpHandler);
-
-        return services.AddHostedSubject(configure, contextResolver);
-    }
+        => services.AddHostedSubject(configure, contextResolver);
 }

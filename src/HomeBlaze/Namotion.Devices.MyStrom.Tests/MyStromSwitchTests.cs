@@ -251,17 +251,7 @@ public class MyStromSwitchTests
     }
 
     [Fact]
-    public void WhenHandlerIsCreated_ThenConnectTimeoutIsTenSeconds()
-    {
-        // Act
-        using var handler = MyStromSwitch.CreateHttpHandler();
-
-        // Assert
-        Assert.Equal(TimeSpan.FromSeconds(10), handler.ConnectTimeout);
-    }
-
-    [Fact]
-    public async Task WhenOperating_ThenTheNamedClientWithoutRequestTimeoutIsUsed()
+    public async Task WhenOperating_ThenThePollTimeoutAndNoRequestTimeoutApply()
     {
         // Arrange
         var device = new FakeDevice(uptimes: [100], versions: ["4.0.7"]);
@@ -278,7 +268,6 @@ public class MyStromSwitchTests
 
         // Assert
         Assert.Equal(2, factory.Clients.Length);
-        Assert.All(factory.Names, name => Assert.Equal("Namotion.Devices.MyStrom", name));
         Assert.All(factory.Clients, client => Assert.Equal(TimeSpan.FromSeconds(100), client.Timeout));
         Assert.Equal(true, subject.IsOn);
     }
@@ -293,7 +282,7 @@ public class MyStromSwitchTests
             HostAddress = "switch.test",
             PollingInterval = TimeSpan.FromMilliseconds(1),
             RetryInterval = TimeSpan.FromMilliseconds(1),
-            PollRequestTimeout = TimeSpan.FromMilliseconds(50)
+            PollRequestTimeout = TimeSpan.FromMilliseconds(500)
         };
 
         // Act
@@ -301,8 +290,37 @@ public class MyStromSwitchTests
         try
         {
             // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => device.InformationRequestCount >= 2 && subject.IsConnected);
-            Assert.Equal(ServiceStatus.Running, subject.Status);
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+                device.InformationRequestCount >= 2 && subject.IsConnected && subject.Status == ServiceStatus.Running);
+            Assert.Null(subject.StatusMessage);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheDeviceDoesNotAnswer_ThenTheStatusMessageSaysSo()
+    {
+        // Arrange
+        var device = new FakeDevice(uptimes: [100], versions: ["4.0.7"]) { HangReportRequestNumber = 2, HangInformationRequestNumber = 2 };
+        var subject = new MyStromSwitch(new FakeHttpClientFactory(device), NullLogger<MyStromSwitch>.Instance)
+        {
+            HostAddress = "switch.test",
+            PollingInterval = TimeSpan.FromMilliseconds(1),
+            RetryInterval = TimeSpan.FromHours(1),
+            PollRequestTimeout = TimeSpan.FromMilliseconds(500)
+        };
+
+        // Act
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Error);
+            Assert.Equal("The device did not answer within 0.5 seconds.", subject.StatusMessage);
+            Assert.False(subject.IsConnected);
         }
         finally
         {
@@ -319,17 +337,12 @@ public class MyStromSwitchTests
     {
         private readonly ConcurrentQueue<HttpClient> _clients = new();
 
-        private readonly ConcurrentQueue<string> _names = new();
-
         public HttpClient[] Clients => _clients.ToArray();
-
-        public string[] Names => _names.ToArray();
 
         public HttpClient CreateClient(string name)
         {
             var client = new HttpClient(device, disposeHandler: false);
             _clients.Enqueue(client);
-            _names.Enqueue(name);
             return client;
         }
     }
@@ -344,6 +357,8 @@ public class MyStromSwitchTests
 
         public int HangReportRequestNumber { get; init; }
 
+        public int HangInformationRequestNumber { get; init; }
+
         public int InformationRequestCount => Volatile.Read(ref _informationRequestCount);
 
         public int ReportRequestCount => Volatile.Read(ref _reportRequestCount);
@@ -354,6 +369,13 @@ public class MyStromSwitchTests
                 Volatile.Read(ref _reportRequestCount) == HangReportRequestNumber - 1)
             {
                 Interlocked.Increment(ref _reportRequestCount);
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+
+            if (request.RequestUri!.AbsolutePath == "/info" && HangInformationRequestNumber > 0 &&
+                Volatile.Read(ref _informationRequestCount) == HangInformationRequestNumber - 1)
+            {
+                Interlocked.Increment(ref _informationRequestCount);
                 await Task.Delay(Timeout.Infinite, cancellationToken);
             }
 
