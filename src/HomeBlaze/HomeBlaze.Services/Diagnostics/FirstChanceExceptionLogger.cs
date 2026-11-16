@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
+using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -10,9 +11,10 @@ namespace HomeBlaze.Services.Diagnostics;
 /// <summary>
 /// Writes a <see cref="LogLevel.Debug"/> entry per first-chance exception in the process, at most one
 /// per exception type and throw site per minute. Does nothing unless Debug is enabled for its category.
-/// Entries are written by a background thread, so the throwing thread never calls into a logging provider.
+/// Entries are written by a background task, so the throwing thread never writes to a logging provider.
+/// An instance runs once: it is not started again after it was stopped or disposed.
 /// </summary>
-internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService
+internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService, IDisposable
 {
     internal const int DefaultMaximumKeyCount = 1024;
 
@@ -49,19 +51,13 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService
     private readonly ILogger _logger;
     private readonly TimeProvider _timeProvider;
     private readonly int _maximumKeyCount;
-    private readonly int _queueCapacity;
     private readonly ConcurrentDictionary<(string ExceptionType, string ThrowSite), KeyState> _keys = new();
     private readonly ConditionalWeakTable<Exception, object> _seenExceptions = new();
-    private readonly ConcurrentQueue<Entry> _queue = new();
-    private readonly SemaphoreSlim _signal = new(0);
-    private readonly TaskCompletionSource _consumerCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly Lock _consumerLock = new();
+    private readonly Channel<Entry> _channel;
+    private Task? _consumer;
     private int _keyCount;
     private int _keyLimitReported;
-    private int _queuedCount;
     private int _droppedCount;
-    private volatile bool _isConsumerStarted;
-    private volatile bool _isStopped;
 
     public FirstChanceExceptionLogger(
         ILogger<FirstChanceExceptionLogger> logger,
@@ -72,11 +68,23 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _maximumKeyCount = maximumKeyCount;
-        _queueCapacity = queueCapacity;
+        _channel = Channel.CreateBounded<Entry>(new BoundedChannelOptions(queueCapacity)
+        {
+            // TryWrite returns false when full, which drops the entry instead of blocking the throwing thread.
+            FullMode = BoundedChannelFullMode.Wait,
+            // Otherwise TryWrite could run the consumer, and with it the logging providers, on the throwing thread.
+            AllowSynchronousContinuations = false,
+            SingleReader = true
+        });
     }
+
+    internal int QueuedCount => _channel.Reader.Count;
+
+    internal int KeyCount => Volatile.Read(ref _keyCount);
 
     public Task StartingAsync(CancellationToken cancellationToken)
     {
+        StartConsumer();
         AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
         return Task.CompletedTask;
     }
@@ -92,28 +100,43 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService
     public async Task StoppedAsync(CancellationToken cancellationToken)
     {
         AppDomain.CurrentDomain.FirstChanceException -= OnFirstChanceException;
-
-        bool isConsumerStarted;
-        lock (_consumerLock)
-        {
-            _isStopped = true;
-            isConsumerStarted = _isConsumerStarted;
-        }
-
-        if (!isConsumerStarted)
+        _channel.Writer.TryComplete();
+        if (_consumer is null)
         {
             return;
         }
 
-        _signal.Release();
         try
         {
             // Queued entries are written while the logging providers are still alive.
-            await _consumerCompletion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await _consumer.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            // The host gave up waiting; the background consumer thread does not keep the process alive.
+            // The host gave up waiting; the remaining entries are not written.
+        }
+    }
+
+    /// <summary>Unsubscribes from first-chance exceptions and stops accepting entries, without waiting for queued ones.</summary>
+    public void Dispose()
+    {
+        AppDomain.CurrentDomain.FirstChanceException -= OnFirstChanceException;
+        _channel.Writer.TryComplete();
+    }
+
+    /// <summary>Starts the task that writes queued entries.</summary>
+    internal void StartConsumer()
+    {
+        // The consumer must not inherit the caller's execution context, whose current activity would tag
+        // every entry with that trace. SuppressFlow throws when flow is already suppressed.
+        var flowControl = ExecutionContext.IsFlowSuppressed() ? (AsyncFlowControl?)null : ExecutionContext.SuppressFlow();
+        try
+        {
+            _consumer = Task.Run(ConsumeEntriesAsync);
+        }
+        finally
+        {
+            flowControl?.Undo();
         }
     }
 
@@ -126,8 +149,9 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService
 
     /// <summary>
     /// Queues an entry for the exception unless Debug is disabled, the thread is already inside this method
-    /// or is the consumer thread, the exception instance was seen before, or an entry for the same exception
-    /// type and throw site was queued within the last minute. Never throws and never calls a logging provider.
+    /// or writing an entry, the exception instance was seen before, or an entry for the same exception type
+    /// and throw site was queued within the last minute. Never throws and never writes to a logging provider,
+    /// only <see cref="ILogger.IsEnabled"/> is called on the calling thread.
     /// </summary>
     /// <param name="exception">The exception being thrown.</param>
     /// <param name="skippedCallerFrames">The frames between this method and the throwing method, left out of the call stack.</param>
@@ -143,7 +167,7 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService
         _isHandling = true;
         try
         {
-            if (!_logger.IsEnabled(LogLevel.Debug) || _isStopped)
+            if (!_logger.IsEnabled(LogLevel.Debug))
             {
                 return;
             }
@@ -156,7 +180,8 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService
 
             var exceptionType = exception.GetType().FullName ?? exception.GetType().Name;
             var throwSite = GetThrowSite(exception);
-            if (!TryBeginEntry(exceptionType, throwSite, out var skippedCount))
+            var state = TryBeginEntry(exceptionType, throwSite, out var skippedCount);
+            if (state is null)
             {
                 return;
             }
@@ -165,7 +190,11 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService
             // current stack provides the callers; the first frame skipped is this method. It can only
             // be captured here, formatting it is left to the consumer.
             var callStack = new StackTrace(1 + skippedCallerFrames, fNeedFileInfo: false);
-            Enqueue(new Entry(exception, callStack, exceptionType, throwSite, skippedCount));
+            if (!TryEnqueue(new Entry(exception, callStack, exceptionType, throwSite, skippedCount)))
+            {
+                // The dropped entry and the skips it carried are reported by the next entry of its key.
+                Interlocked.Add(ref state.SkippedCount, skippedCount + 1);
+            }
         }
         catch
         {
@@ -210,7 +239,8 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService
         return frame.IsEmpty ? UnknownThrowSite : frame.ToString();
     }
 
-    private bool TryBeginEntry(string exceptionType, string throwSite, out int skippedCount)
+    /// <summary>Returns the state of the key when an entry is due, or null when the exception is skipped.</summary>
+    private KeyState? TryBeginEntry(string exceptionType, string throwSite, out int skippedCount)
     {
         skippedCount = 0;
         var key = (exceptionType, throwSite);
@@ -222,17 +252,18 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService
             if (Interlocked.Increment(ref _keyCount) > _maximumKeyCount)
             {
                 Interlocked.Decrement(ref _keyCount);
-                if (Interlocked.Exchange(ref _keyLimitReported, 1) == 0)
+                if (Interlocked.Exchange(ref _keyLimitReported, 1) == 0 && !TryEnqueue(Entry.KeyLimitReached))
                 {
-                    Enqueue(Entry.KeyLimitReached);
+                    Volatile.Write(ref _keyLimitReported, 0);
                 }
 
-                return false;
+                return null;
             }
 
-            if (_keys.TryAdd(key, new KeyState(now)))
+            var newState = new KeyState(now);
+            if (_keys.TryAdd(key, newState))
             {
-                return true;
+                return newState;
             }
 
             Interlocked.Decrement(ref _keyCount);
@@ -245,7 +276,7 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService
             if (_timeProvider.GetElapsedTime(lastEntryTimestamp, now) < Window)
             {
                 Interlocked.Increment(ref state.SkippedCount);
-                return false;
+                return null;
             }
 
             if (Interlocked.CompareExchange(ref state.LastEntryTimestamp, now, lastEntryTimestamp) == lastEntryTimestamp)
@@ -253,76 +284,39 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService
                 // A skip counted by another thread between the exchange above and this one goes into this
                 // entry instead of the next, so the total over all entries stays exact.
                 skippedCount = Interlocked.Exchange(ref state.SkippedCount, 0);
-                return true;
+                return state;
             }
         }
     }
 
-    private void Enqueue(Entry entry)
+    private bool TryEnqueue(Entry entry)
     {
-        if (Interlocked.Increment(ref _queuedCount) > _queueCapacity)
+        if (_channel.Writer.TryWrite(entry))
         {
-            Interlocked.Decrement(ref _queuedCount);
-            Interlocked.Increment(ref _droppedCount);
-            return;
+            return true;
         }
 
-        _queue.Enqueue(entry);
-        EnsureConsumerStarted();
-        _signal.Release();
+        Interlocked.Increment(ref _droppedCount);
+        return false;
     }
 
-    private void EnsureConsumerStarted()
+    private async Task ConsumeEntriesAsync()
     {
-        if (_isConsumerStarted)
+        var reader = _channel.Reader;
+        while (await reader.WaitToReadAsync().ConfigureAwait(false))
         {
-            return;
-        }
-
-        lock (_consumerLock)
-        {
-            if (_isConsumerStarted || _isStopped)
+            while (reader.TryRead(out var entry))
             {
-                return;
+                Write(entry);
             }
-
-            // UnsafeStart does not flow the throwing thread's execution context, whose current activity
-            // would otherwise tag every later entry with that thread's trace.
-            new Thread(ConsumeEntries) { IsBackground = true, Name = "First-chance exception logger" }.UnsafeStart();
-            _isConsumerStarted = true;
-        }
-    }
-
-    private void ConsumeEntries()
-    {
-        // Set for the lifetime of the thread: an exception thrown while writing raises the first-chance
-        // event on this thread, and queuing it would feed the consumer its own failures.
-        _isHandling = true;
-        try
-        {
-            while (true)
-            {
-                // One release per queued entry plus one on stop, so an empty queue after a wake means stopped.
-                _signal.Wait();
-                if (_queue.TryDequeue(out var entry))
-                {
-                    Interlocked.Decrement(ref _queuedCount);
-                    Write(entry);
-                }
-                else if (_isStopped)
-                {
-                    return;
-                }
-            }
-        }
-        finally
-        {
-            _consumerCompletion.TrySetResult();
         }
     }
 
     private void Write(Entry entry)
     {
+        // Set per write because continuations run on any pool thread: an exception thrown while writing
+        // raises the first-chance event on this thread, and queuing it would feed the consumer its own failures.
+        _isHandling = true;
         try
         {
             if (entry.Exception is null)
@@ -350,6 +344,10 @@ internal sealed class FirstChanceExceptionLogger : IHostedLifecycleService
         catch
         {
             // A failing logger must not stop the consumer.
+        }
+        finally
+        {
+            _isHandling = false;
         }
     }
 

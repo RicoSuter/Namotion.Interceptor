@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using HomeBlaze.Services.Diagnostics;
 using Microsoft.Extensions.Logging;
@@ -19,15 +20,25 @@ public class FirstChanceExceptionLoggerTests
     {
         // Arrange
         var logger = new RecordingLogger(LogLevel.Information);
-        var firstChanceLogger = new FirstChanceExceptionLogger(logger, new FakeTimeProvider());
+        using var firstChanceLogger = CreateStarted(logger, new FakeTimeProvider());
+        var exception = ThrowFromSiteA();
+        firstChanceLogger.Log(exception);
 
         // Act
-        firstChanceLogger.Log(ThrowFromSiteA());
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        firstChanceLogger.Log(exception);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        var queuedCount = firstChanceLogger.QueuedCount;
+        var keyCount = firstChanceLogger.KeyCount;
         logger.MinimumLevel = LogLevel.Debug;
         firstChanceLogger.Log(ThrowFromSiteB());
         await WaitForEntryCountAsync(logger, 1);
 
         // Assert
+        Assert.Equal(0, allocated);
+        Assert.Equal(0, queuedCount);
+        Assert.Equal(0, keyCount);
+        // Entries are written in order, so one queued while disabled would show up before this one.
         var entry = Assert.Single(logger.Entries);
         Assert.Equal("Site B", entry.Properties["ExceptionMessage"]);
     }
@@ -37,7 +48,7 @@ public class FirstChanceExceptionLoggerTests
     {
         // Arrange
         var logger = new RecordingLogger(LogLevel.Debug);
-        var firstChanceLogger = new FirstChanceExceptionLogger(logger, new FakeTimeProvider());
+        using var firstChanceLogger = CreateStarted(logger, new FakeTimeProvider());
         var exception = ThrowFromSiteA();
 
         // Act
@@ -62,7 +73,7 @@ public class FirstChanceExceptionLoggerTests
     {
         // Arrange
         var logger = new RecordingLogger(LogLevel.Debug);
-        var firstChanceLogger = new FirstChanceExceptionLogger(logger, new FakeTimeProvider());
+        using var firstChanceLogger = CreateStarted(logger, new FakeTimeProvider());
         var throwingThreadId = Environment.CurrentManagedThreadId;
 
         // Act
@@ -79,7 +90,7 @@ public class FirstChanceExceptionLoggerTests
     {
         // Arrange
         var logger = new RecordingLogger(LogLevel.Debug);
-        var firstChanceLogger = new FirstChanceExceptionLogger(logger, new FakeTimeProvider());
+        using var firstChanceLogger = CreateStarted(logger, new FakeTimeProvider());
 
         // Act
         firstChanceLogger.Log(new InvalidOperationException("Never thrown"));
@@ -96,7 +107,7 @@ public class FirstChanceExceptionLoggerTests
         // Arrange
         var logger = new RecordingLogger(LogLevel.Debug);
         var timeProvider = new FakeTimeProvider();
-        var firstChanceLogger = new FirstChanceExceptionLogger(logger, timeProvider);
+        using var firstChanceLogger = CreateStarted(logger, timeProvider);
         firstChanceLogger.Log(ThrowFromSiteA());
 
         // Act
@@ -118,7 +129,7 @@ public class FirstChanceExceptionLoggerTests
         // Arrange
         var logger = new RecordingLogger(LogLevel.Debug);
         var timeProvider = new FakeTimeProvider();
-        var firstChanceLogger = new FirstChanceExceptionLogger(logger, timeProvider);
+        using var firstChanceLogger = CreateStarted(logger, timeProvider);
         var exception = ThrowFromSiteA();
         firstChanceLogger.Log(exception);
 
@@ -141,7 +152,7 @@ public class FirstChanceExceptionLoggerTests
         const int exceptionsPerThread = 50;
         var logger = new RecordingLogger(LogLevel.Debug);
         var timeProvider = new FakeTimeProvider();
-        var firstChanceLogger = new FirstChanceExceptionLogger(logger, timeProvider);
+        using var firstChanceLogger = CreateStarted(logger, timeProvider);
         using var barrier = new Barrier(threadCount);
 
         // Act
@@ -170,7 +181,7 @@ public class FirstChanceExceptionLoggerTests
     {
         // Arrange
         var logger = new RecordingLogger(LogLevel.Debug);
-        var firstChanceLogger = new FirstChanceExceptionLogger(logger, new FakeTimeProvider());
+        using var firstChanceLogger = CreateStarted(logger, new FakeTimeProvider());
 
         // Act
         firstChanceLogger.Log(ThrowFromSiteA());
@@ -205,11 +216,12 @@ public class FirstChanceExceptionLoggerTests
                 throw new InvalidOperationException("Logger failed");
             }
         });
-        firstChanceLogger = new FirstChanceExceptionLogger(logger, new FakeTimeProvider());
+        using var startedLogger = CreateStarted(logger, new FakeTimeProvider());
+        firstChanceLogger = startedLogger;
 
         // Act
-        var exception = Record.Exception(() => firstChanceLogger.Log(ThrowFromSiteA()));
-        firstChanceLogger.Log(ThrowTimeoutFromSiteA());
+        var exception = Record.Exception(() => startedLogger.Log(ThrowFromSiteA()));
+        startedLogger.Log(ThrowTimeoutFromSiteA());
         await WaitForEntryCountAsync(logger, 1);
 
         // Assert
@@ -220,7 +232,7 @@ public class FirstChanceExceptionLoggerTests
     }
 
     [Fact]
-    public async Task WhenQueueIsFull_ThenDropsEntriesAndReportsDroppedCount()
+    public async Task WhenQueueIsFull_ThenDropsEntriesAndReportsDroppedCountAndSkips()
     {
         // Arrange
         using var consumerBlocked = new ManualResetEventSlim();
@@ -234,7 +246,8 @@ public class FirstChanceExceptionLoggerTests
                 releaseConsumer.Wait(TestTimeouts.Default);
             }
         });
-        var firstChanceLogger = new FirstChanceExceptionLogger(logger, new FakeTimeProvider(), queueCapacity: 2);
+        var timeProvider = new FakeTimeProvider();
+        using var firstChanceLogger = CreateStarted(logger, timeProvider, queueCapacity: 2);
         firstChanceLogger.Log(Thrown(new InvalidOperationException("Written while blocking")));
         Assert.True(consumerBlocked.Wait(TestTimeouts.Default));
 
@@ -244,14 +257,18 @@ public class FirstChanceExceptionLoggerTests
         firstChanceLogger.Log(Thrown(new FormatException("Dropped 1")));
         firstChanceLogger.Log(Thrown(new NotSupportedException("Dropped 2")));
         releaseConsumer.Set();
-        await WaitForEntryCountAsync(logger, 4);
+        timeProvider.Advance(FirstChanceExceptionLogger.Window);
+        firstChanceLogger.Log(Thrown(new FormatException("After window")));
+        await WaitForEntryCountAsync(logger, 5);
 
         // Assert
         // The drops are reported after the entry that was being written when they happened.
         Assert.Equal(
-            ["Written while blocking", "FirstChanceExceptionEntriesDropped", "Queued 1", "Queued 2"],
+            ["Written while blocking", "FirstChanceExceptionEntriesDropped", "Queued 1", "Queued 2", "After window"],
             logger.Entries.Select(entry => entry.EventName == ExceptionEvent ? entry.Properties["ExceptionMessage"] : entry.EventName));
         Assert.Equal(2, logger.Entries[1].Properties["DroppedCount"]);
+        // The dropped entry of the same type and throw site counts as skipped.
+        Assert.Equal(1, logger.Entries[4].Properties["SkippedCount"]);
     }
 
     [Fact]
@@ -260,7 +277,7 @@ public class FirstChanceExceptionLoggerTests
         // Arrange
         var logger = new RecordingLogger(LogLevel.Debug);
         var timeProvider = new FakeTimeProvider();
-        var firstChanceLogger = new FirstChanceExceptionLogger(logger, timeProvider, maximumKeyCount: 2);
+        using var firstChanceLogger = CreateStarted(logger, timeProvider, maximumKeyCount: 2);
         firstChanceLogger.Log(ThrowFromSiteA());
         firstChanceLogger.Log(ThrowFromSiteB());
 
@@ -288,7 +305,7 @@ public class FirstChanceExceptionLoggerTests
         var messageWhileStarted = $"While started {Guid.NewGuid()}";
         var messageAfterStop = $"After stop {Guid.NewGuid()}";
         var logger = new RecordingLogger(LogLevel.Debug);
-        var firstChanceLogger = new FirstChanceExceptionLogger(logger);
+        using var firstChanceLogger = new FirstChanceExceptionLogger(logger);
 
         // Act
         await firstChanceLogger.StartingAsync(CancellationToken.None);
@@ -299,13 +316,15 @@ public class FirstChanceExceptionLoggerTests
         }
         finally
         {
-            // Stopped even when the wait fails, so no handler stays on the process-wide event.
             await firstChanceLogger.StoppedAsync(CancellationToken.None);
         }
 
+        // The consumer has finished, so only a handler still subscribed can call IsEnabled.
+        var isEnabledCallCount = logger.IsEnabledCallCount;
         ThrowAndCatch(messageAfterStop);
 
         // Assert
+        Assert.Equal(isEnabledCallCount, logger.IsEnabledCallCount);
         var entries = logger.Entries;
         var entry = Assert.Single(entries, candidate => HasMessage(candidate, messageWhileStarted));
         Assert.DoesNotContain(entries, candidate => HasMessage(candidate, messageAfterStop));
@@ -319,7 +338,7 @@ public class FirstChanceExceptionLoggerTests
         // Arrange
         var logger = new RecordingLogger(LogLevel.Debug);
         var timeProvider = new FakeTimeProvider();
-        var firstChanceLogger = new FirstChanceExceptionLogger(logger, timeProvider);
+        using var firstChanceLogger = new FirstChanceExceptionLogger(logger, timeProvider);
         // The async method itself, not its state machine, and the same at every await it passes through.
         var throwSite = $"{TestClassName}.{nameof(ThrowAfterYieldAsync)}(String message)";
 
@@ -341,6 +360,53 @@ public class FirstChanceExceptionLoggerTests
         var entries = logger.Entries.Where(entry => Equals(entry.Properties.GetValueOrDefault("ThrowSite"), throwSite)).ToArray();
         Assert.Equal(["First", "Second"], entries.Select(entry => entry.Properties["ExceptionMessage"]));
         Assert.Equal([0, 0], entries.Select(entry => entry.Properties["SkippedCount"]));
+    }
+
+    [Fact]
+    public async Task WhenDisposedWithoutStop_ThenHandlerIsRemoved()
+    {
+        // Arrange
+        var logger = new RecordingLogger(LogLevel.Debug);
+        var firstChanceLogger = new FirstChanceExceptionLogger(logger);
+        await firstChanceLogger.StartingAsync(CancellationToken.None);
+
+        // Act
+        firstChanceLogger.Dispose();
+        var isEnabledCallCount = logger.IsEnabledCallCount;
+        ThrowAndCatch($"After dispose {Guid.NewGuid()}");
+
+        // Assert
+        Assert.Equal(isEnabledCallCount, logger.IsEnabledCallCount);
+    }
+
+    [Fact]
+    public async Task WhenThrowingThreadHasActivity_ThenEntryIsWrittenWithoutIt()
+    {
+        // Arrange
+        var logger = new RecordingLogger(LogLevel.Debug);
+        using var activity = new Activity("Throwing thread").Start();
+        using var firstChanceLogger = CreateStarted(logger, new FakeTimeProvider());
+
+        // Act
+        firstChanceLogger.Log(ThrowFromSiteA());
+        await WaitForEntryCountAsync(logger, 1);
+
+        // Assert
+        Assert.Same(activity, Activity.Current);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Null(entry.Activity);
+    }
+
+    private static FirstChanceExceptionLogger CreateStarted(
+        RecordingLogger logger,
+        TimeProvider timeProvider,
+        int maximumKeyCount = FirstChanceExceptionLogger.DefaultMaximumKeyCount,
+        int queueCapacity = FirstChanceExceptionLogger.DefaultQueueCapacity)
+    {
+        // Starts the consumer without subscribing, so exceptions thrown by tests running in parallel stay out.
+        var firstChanceLogger = new FirstChanceExceptionLogger(logger, timeProvider, maximumKeyCount, queueCapacity);
+        firstChanceLogger.StartConsumer();
+        return firstChanceLogger;
     }
 
     private static bool HasMessage(LogEntry entry, string message)
@@ -447,12 +513,14 @@ public class FirstChanceExceptionLoggerTests
         string? EventName,
         IReadOnlyDictionary<string, object?> Properties,
         Exception? Exception,
-        int ThreadId);
+        int ThreadId,
+        Activity? Activity);
 
     private sealed class RecordingLogger(LogLevel minimumLevel, Action? onLog = null) : ILogger<FirstChanceExceptionLogger>
     {
         private readonly ConcurrentQueue<LogEntry> _entries = new();
         private volatile int _minimumLevel = (int)minimumLevel;
+        private int _isEnabledCallCount;
 
         public LogLevel MinimumLevel
         {
@@ -462,9 +530,15 @@ public class FirstChanceExceptionLoggerTests
 
         public IReadOnlyList<LogEntry> Entries => _entries.ToArray();
 
+        public int IsEnabledCallCount => Volatile.Read(ref _isEnabledCallCount);
+
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
-        public bool IsEnabled(LogLevel logLevel) => logLevel >= MinimumLevel;
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            Interlocked.Increment(ref _isEnabledCallCount);
+            return logLevel >= MinimumLevel;
+        }
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
@@ -472,7 +546,7 @@ public class FirstChanceExceptionLoggerTests
             var properties = state is IEnumerable<KeyValuePair<string, object?>> pairs
                 ? pairs.ToDictionary(pair => pair.Key, pair => pair.Value)
                 : new Dictionary<string, object?>();
-            _entries.Enqueue(new LogEntry(logLevel, eventId.Name, properties, exception, Environment.CurrentManagedThreadId));
+            _entries.Enqueue(new LogEntry(logLevel, eventId.Name, properties, exception, Environment.CurrentManagedThreadId, Activity.Current));
         }
     }
 }
