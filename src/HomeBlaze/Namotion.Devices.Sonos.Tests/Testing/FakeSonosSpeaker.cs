@@ -24,6 +24,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     private readonly ConcurrentQueue<string> _subscribed = new();
     private readonly ConcurrentQueue<(string Path, DateTimeOffset At)> _renewed = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource> _holds = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> _initialEvents = new(StringComparer.Ordinal);
 
     internal FakeSonosSpeaker()
     {
@@ -98,6 +99,12 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     /// The SID this speaker grants for the event path, unique per speaker as on real ones.
     /// </summary>
     private string SidFor(string eventPath) => $"uuid:{_server.Port}-{eventPath.Trim('/').Replace('/', '-')}";
+
+    /// <summary>
+    /// Sends the body as the initial event of every new subscription to the event path, before answering the
+    /// SUBSCRIBE, so the event has been applied once the subscription is made.
+    /// </summary>
+    internal void SendInitialEventBeforeAnswering(string eventPath, string body) => _initialEvents[eventPath] = body;
 
     internal string? GetCallback(string eventPath) =>
         _callbacks.TryGetValue(eventPath, out var callback) ? callback : null;
@@ -305,9 +312,14 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
             }
         }
 
+        if (request.Headers["CALLBACK"] is { } awaitedCallback && _initialEvents.TryGetValue(path, out var initialBody))
+        {
+            await SendNotifyAsync(NotifyClient, awaitedCallback.Trim('<', '>'), SidFor(path), initialBody);
+        }
+
         response.Headers["SID"] = SidFor(path);
         response.Headers["TIMEOUT"] = $"Second-{SubscriptionTimeoutSeconds}";
-        if (SendInitialEvents && request.Headers["CALLBACK"] is { } newCallback)
+        if (SendInitialEvents && request.Headers["CALLBACK"] is { } newCallback && !_initialEvents.ContainsKey(path))
         {
             // Not awaited: Sonos sends the initial NOTIFY around its SUBSCRIBE response, often before it.
             _ = SendInitialEventAsync(newCallback.Trim('<', '>'), SidFor(path));

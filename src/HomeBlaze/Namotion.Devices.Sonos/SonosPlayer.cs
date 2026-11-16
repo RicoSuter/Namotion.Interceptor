@@ -423,7 +423,11 @@ public partial class SonosPlayer : SonosDevice,
 
     /// <param name="reading">The values the poll read.</param>
     /// <param name="pollStartedAt">When the poll started, from <see cref="SonosSystem.NextOrder"/>.</param>
-    internal void ApplyPoll(SonosPlayerReading reading, long pollStartedAt)
+    /// <returns>
+    /// Whether the transport, rendering control and sleep timer values all applied; false when an event or a later
+    /// poll replaced any of them.
+    /// </returns>
+    internal bool ApplyPoll(SonosPlayerReading reading, long pollStartedAt)
     {
         lock (_stateLock)
         {
@@ -431,14 +435,15 @@ public partial class SonosPlayer : SonosDevice,
             // poll that started before the latest event read state the event has since replaced. That includes the
             // position, which belongs to the track the poll read.
             var appliesAvTransport = _avTransportOrder.TryApplyPoll(pollStartedAt);
-            var appliesPosition = _positionOrder.TryApplyPoll(pollStartedAt) && appliesAvTransport;
+            // Recorded only when answered, so a faulted read leaves the read after an event pending.
+            var appliesPosition = reading.HasPosition && _positionOrder.TryApplyPoll(pollStartedAt) && appliesAvTransport;
             var appliesRenderingControl = _renderingControlOrder.TryApplyPoll(pollStartedAt);
             var appliesSleepTimer = _sleepTimerOrder.TryApplyPoll(pollStartedAt);
 
             if (appliesAvTransport)
             {
                 ApplyAvTransport(KeepSessionEventValues(reading.AvTransport), isPoll: true);
-                if (appliesPosition && reading.HasPosition)
+                if (appliesPosition)
                 {
                     ReportedTrackPosition = reading.Position;
                 }
@@ -453,6 +458,8 @@ public partial class SonosPlayer : SonosDevice,
             {
                 ReportedSleepTimerRemaining = reading.SleepTimerRemaining;
             }
+
+            return appliesAvTransport && appliesRenderingControl && appliesSleepTimer;
         }
     }
 

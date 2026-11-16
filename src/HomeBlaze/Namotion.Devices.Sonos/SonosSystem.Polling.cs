@@ -246,9 +246,10 @@ public partial class SonosSystem
         foreach (var player in players)
         {
             var isCoordinator = groups.ContainsKey(player.Uuid);
-            if (eventListener is null || !AreEventsLive(player, isCoordinator, eventListener, now))
+            var hasMissedEvents = false;
+            if (eventListener is null || !AreEventsLive(player, isCoordinator, eventListener, now, out hasMissedEvents))
             {
-                polls.Add(PollPlayerAsync(player, pollStartedAt, cancellationToken));
+                polls.Add(PollPlayerAsync(player, pollStartedAt, cancellationToken, hasMissedEvents ? eventListener : null));
             }
             else if (isCoordinator && player.GetProgressReads() is var (readsPosition, readsSleepTimer) && (readsPosition || readsSleepTimer))
             {
@@ -263,12 +264,12 @@ public partial class SonosSystem
     /// Returns whether events deliver the state of the player now, so a poll skips what they deliver: it is connected,
     /// its last poll succeeded, its static data is read, it needs no new subscriptions, its AVTransport,
     /// RenderingControl and, as a coordinator, GroupRenderingControl subscriptions are live, and none of them missed
-    /// an event since the last call. Caller holds _reconcileLock.
+    /// an event since the last call, which <paramref name="hasMissedEvents"/> reports. Caller holds _reconcileLock.
     /// </summary>
-    private static bool AreEventsLive(SonosPlayer player, bool isCoordinator, SonosEventListener eventListener, long now)
+    private static bool AreEventsLive(SonosPlayer player, bool isCoordinator, SonosEventListener eventListener, long now, out bool hasMissedEvents)
     {
         // Taken from every subscription whatever the outcome: one full poll covers what each of them missed.
-        var hasMissedEvents = TakeMissedEvents(eventListener, player.AvTransportSubscriptionKey);
+        hasMissedEvents = TakeMissedEvents(eventListener, player.AvTransportSubscriptionKey);
         hasMissedEvents |= TakeMissedEvents(eventListener, player.RenderingControlSubscriptionKey);
         if (isCoordinator)
         {
@@ -323,7 +324,15 @@ public partial class SonosSystem
         }
     }
 
-    private Task PollPlayerAsync(SonosPlayer player, long pollStartedAt, CancellationToken cancellationToken) =>
+    /// <param name="player">The player to poll.</param>
+    /// <param name="pollStartedAt">When the poll started, from <see cref="NextOrder"/>.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <param name="missedEventsListener">
+    /// The listener whose subscriptions of the player missed events the poll repairs, or null. When an event replaced
+    /// part of the poll, a value only the missed event changed may still be stale, so the missed events are reported
+    /// again for the next poll.
+    /// </param>
+    private Task PollPlayerAsync(SonosPlayer player, long pollStartedAt, CancellationToken cancellationToken, SonosEventListener? missedEventsListener = null) =>
         PollDeviceAsync(
             player,
             async (connection, newFaults, token) =>
@@ -340,10 +349,15 @@ public partial class SonosSystem
                 // Applied outside _connectionsLock: the apply takes the subjects' state locks and fires change
                 // notifications, whose subscribers may issue commands that take _connectionsLock. Stale values on a
                 // device that teardown already marked offline are harmless.
-                player.ApplyPoll(reading, pollStartedAt);
+                var isComplete = player.ApplyPoll(reading, pollStartedAt);
                 if (groupReading is not null)
                 {
-                    group!.ApplyGroupRenderingControlPoll(groupReading, pollStartedAt);
+                    isComplete &= group!.ApplyGroupRenderingControlPoll(groupReading, pollStartedAt);
+                }
+
+                if (!isComplete && missedEventsListener?.TryGetSubscription(player.AvTransportSubscriptionKey, out var subscription) == true)
+                {
+                    subscription.ReportMissedEvents();
                 }
             },
             "No connection to the player.",

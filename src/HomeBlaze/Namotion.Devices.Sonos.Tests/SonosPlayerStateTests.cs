@@ -84,6 +84,22 @@ public class SonosPlayerStateTests
         Assert.Equal(TimeSpan.FromSeconds(50), player.CurrentTrackPosition);
     }
 
+    [Fact]
+    public void WhenAFullPollAfterAnEventGetsNoPosition_ThenThePositionIsStillReadOnce()
+    {
+        // Arrange
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        var paused = QueueTrackPlaying() with { TransportState = "PAUSED_PLAYBACK" };
+        player.ApplyPoll(new SonosPlayerReading(paused, TimeSpan.FromSeconds(5), null, EmptyRenderingControl), T0);
+        player.ApplyAvTransportEvent(paused, T0 + 1);
+
+        // Act
+        player.ApplyPoll(new SonosPlayerReading(paused, null, null, EmptyRenderingControl, HasPosition: false), T0 + 2);
+
+        // Assert
+        Assert.True(player.GetProgressReads().ReadsPosition);
+    }
+
     [Theory]
     [InlineData("PLAYING", null, true, true)]
     [InlineData("TRANSITIONING", null, true, true)]

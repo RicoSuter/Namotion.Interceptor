@@ -192,7 +192,7 @@ public class SonosSystemPollingTests
         Assert.Equal(PlayerPollCalls, household.Office.Calls.Count);
         Assert.Contains(AvTransportEventPath, household.Office.Unsubscribed);
         Assert.Equal(2, household.Office.Subscribed.Count(path => path == AvTransportEventPath));
-        Assert.Equal(2, household.Kitchen.Subscribed.Count(path => path == TopologyEventPath));
+        Assert.Equal(1, household.Kitchen.Subscribed.Count(path => path == TopologyEventPath));
         Assert.Equal(1, household.Kitchen.Subscribed.Count(path => path == AvTransportEventPath));
         Assert.Equal(["GetZoneGroupState"], household.Kitchen.Calls.Select(call => call.Action));
         Assert.True(household.OfficePlayer.IsConnected);
@@ -333,7 +333,59 @@ public class SonosSystemPollingTests
         // Assert
         Assert.Equal(PlayerPollCalls, household.Office.Calls.Count);
         Assert.Equal(2, household.Office.Subscribed.Count(path => path == AvTransportEventPath));
+        Assert.Equal(1, household.Kitchen.Subscribed.Count(path => path == TopologyEventPath));
         Assert.Equal(["GetZoneGroupState"], household.Kitchen.Calls.Select(call => call.Action));
+    }
+
+    [Fact]
+    public async Task WhenTheRebootedSeedStartsItsNewTopologySubscriptionWithPartOfTheHousehold_ThenNoPlayerIsTakenOffline()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        var kitchenMember = (TestFixtures.KitchenUuid, "Küche", household.Kitchen.BaseUri);
+        var allRooms = SonosEventBodies.CreateStandaloneTopology(kitchenMember, (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri));
+        var kitchenOnly = SonosEventBodies.CreateStandaloneTopology(kitchenMember);
+        string WithKitchenBootSequence(string bootSequence) => SonosEventBodies.Properties(("ZoneGroupState",
+            allRooms.Replace($"UUID=\"{TestFixtures.KitchenUuid}\"", $"UUID=\"{TestFixtures.KitchenUuid}\" BootSeq=\"{bootSequence}\"", StringComparison.Ordinal)));
+        await household.Kitchen.NotifyAsync(TopologyEventPath, WithKitchenBootSequence("1"));
+        await household.PollAsync();
+
+        // The seed rebooted: it reports a new boot sequence, then part of the household to the poll and to the initial
+        // event of the topology subscription made again for its reboot.
+        await household.Kitchen.NotifyAsync(TopologyEventPath, WithKitchenBootSequence("2"));
+        household.Kitchen.RespondWithTopology(kitchenMember);
+        household.Kitchen.SendInitialEventBeforeAnswering(TopologyEventPath, SonosEventBodies.Properties(("ZoneGroupState", kitchenOnly)));
+
+        // Act
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(2, household.Kitchen.Subscribed.Count(path => path == TopologyEventPath));
+        Assert.True(household.OfficePlayer.IsConnected);
+    }
+
+    [Fact]
+    public async Task WhenAnEventReplacesPartOfAPollThatRepairsMissedEvents_ThenTheNextPollIsFullAgain()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        await household.Office.NotifyAsync(RenderingControlEventPath, SonosEventBodies.Properties(), sequence: 3);
+        var hold = household.Office.HoldAction("GetVolume");
+        var poll = household.PollAsync();
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => household.Office.Calls.Any(call => call.Action == "GetVolume"),
+            ConnectedSystem.WaitTimeout,
+            message: "The repairing poll should read the volume.");
+        await household.Office.NotifyAsync(RenderingControlEventPath, SonosEventBodies.RenderingControl(("Volume", "Master", "20")));
+        hold.SetResult();
+        await poll;
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(PlayerPollCalls, household.Office.Calls.Count);
     }
 
     private sealed class PolledHousehold : IAsyncDisposable
