@@ -475,15 +475,16 @@ public partial class SonosPlayer : SonosDevice,
     }
 
     /// <summary>
-    /// Returns which values a progress poll reads while events deliver the rest: the position of a playing group and
-    /// the sleep timer of one that plays or has a timer running, whose remaining time is not evented either.
+    /// Returns which values a progress poll reads while events deliver the rest: the position of a playing group, and
+    /// once after an AVTransport event that may have paused, stopped or changed the track, and the sleep timer of a
+    /// group that plays or has a timer running, whose remaining time is not evented either.
     /// </summary>
     internal (bool ReadsPosition, bool ReadsSleepTimer) GetProgressReads()
     {
         lock (_stateLock)
         {
             var isPlaying = ReportedPlaybackState is MediaPlaybackState.Playing or MediaPlaybackState.Buffering;
-            return (isPlaying, isPlaying || ReportedSleepTimerRemaining is not null);
+            return (isPlaying || _positionOrder.HasEventSinceLastPoll, isPlaying || ReportedSleepTimerRemaining is not null);
         }
     }
 

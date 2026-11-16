@@ -13,6 +13,38 @@ namespace Namotion.Devices.Sonos.Tests;
 
 public class SonosEventListenerTests
 {
+    [Fact]
+    public void WhenTheEventSequenceWrapsFromItsMaximumToOne_ThenNoEventIsMissed()
+    {
+        // Arrange
+        var subscription = new SonosEventSubscription("RINCON_X/AVTransport", new Uri("http://127.0.0.1:1400/"), _ => { });
+        subscription.RecordSequence(uint.MaxValue - 1);
+        subscription.TakeMissedEvents();
+        subscription.RecordSequence(uint.MaxValue);
+
+        // Act
+        subscription.RecordSequence(1);
+
+        // Assert
+        Assert.False(subscription.TakeMissedEvents());
+    }
+
+    [Fact]
+    public void WhenMissedEventsAreTaken_ThenTheReportIsCleared()
+    {
+        // Arrange
+        var subscription = new SonosEventSubscription("RINCON_X/AVTransport", new Uri("http://127.0.0.1:1400/"), _ => { });
+        subscription.RecordSequence(5);
+
+        // Act
+        var first = subscription.TakeMissedEvents();
+        var second = subscription.TakeMissedEvents();
+
+        // Assert
+        Assert.True(first);
+        Assert.False(second);
+    }
+
     private static readonly TimeSpan WaitTimeout = TestTimeouts.Default;
     private static readonly TimeSpan NegativeCheckDuration = TimeSpan.FromMilliseconds(300);
 

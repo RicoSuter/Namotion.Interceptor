@@ -10,6 +10,11 @@ internal struct PollEventOrder
     private long _lastEventAt;
 
     /// <summary>
+    /// Whether an event was applied after the start of the last poll that was recorded.
+    /// </summary>
+    internal readonly bool HasEventSinceLastPoll => _lastEventAt > _lastPollStartedAt;
+
+    /// <summary>
     /// Records an event applied at <paramref name="order"/>.
     /// </summary>
     internal void RecordEvent(long order) => _lastEventAt = Math.Max(_lastEventAt, order);

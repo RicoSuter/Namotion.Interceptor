@@ -74,9 +74,12 @@ public partial class SonosSystem
                 RunSubscriptionRequestAsync(() => eventListener.SubscribeAsync(pair.Key, pair.Value.EventUri, pair.Value.Handler, cancellationToken), pair.Key, cancellationToken)));
 
             // A replacement that failed left no subscription, which the next upkeep subscribes again.
-            foreach (var (player, handled) in requests ?? [])
+            if (requests is not null)
             {
-                player.CompleteNewSubscriptionsRequests(handled);
+                foreach (var (player, handled) in requests)
+                {
+                    player.CompleteNewSubscriptionsRequests(handled);
+                }
             }
 
             UpdateAreEventsActive();

@@ -36,8 +36,8 @@ public class SonosSystemPollingTests
         var calls = await household.CountCallsAsync(polls: 20);
 
         // Assert
+        // 60 calls per minute.
         Assert.Equal(20 * FullReconcileCalls, calls);
-        Assert.Equal(60.0, calls / 10.0);
     }
 
     [Fact]
@@ -64,9 +64,9 @@ public class SonosSystemPollingTests
         var calls = await household.CountCallsAsync(polls: 20);
 
         // Assert
-        // The polls at 5 and 10 minutes are full reconciliations; the 18 others read the topology alone.
+        // The polls at 5 and 10 minutes are full reconciliations; the 18 others read the topology alone. 7.8 calls per
+        // minute.
         Assert.Equal((2 * FullReconcileCalls) + 18, calls);
-        Assert.Equal(7.8, calls / 10.0);
     }
 
     [Fact]
@@ -82,9 +82,8 @@ public class SonosSystemPollingTests
 
         // Assert
         // The 18 polls between the full reconciliations read the topology, and the position and the sleep timer of
-        // the playing kitchen.
+        // the playing kitchen. 11.4 calls per minute.
         Assert.Equal((2 * FullReconcileCalls) + (18 * 3), calls);
-        Assert.Equal(11.4, calls / 10.0);
         Assert.Equal(TimeSpan.FromSeconds(75), household.KitchenPlayer.CurrentTrackPosition);
         Assert.Equal(TimeSpan.FromMinutes(20), household.KitchenPlayer.SleepTimerRemaining);
     }
@@ -173,7 +172,8 @@ public class SonosSystemPollingTests
         await household.PollAsync();
 
         // Assert
-        Assert.Empty(household.Office.Calls);
+        // The position once, which the initial AVTransport event of the new subscription asks for.
+        Assert.Equal(["GetPositionInfo"], household.Office.Calls.Select(call => call.Action));
     }
 
     [Fact]
@@ -196,6 +196,144 @@ public class SonosSystemPollingTests
         Assert.Equal(1, household.Kitchen.Subscribed.Count(path => path == AvTransportEventPath));
         Assert.Equal(["GetZoneGroupState"], household.Kitchen.Calls.Select(call => call.Action));
         Assert.True(household.OfficePlayer.IsConnected);
+    }
+
+    [Fact]
+    public async Task WhenAPollFails_ThenTheNextPollIsAFullReconciliation()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        household.Kitchen.RespondWithServerError("GetZoneGroupState");
+        await Assert.ThrowsAnyAsync<Exception>(() => household.PollAsync());
+        household.Kitchen.ClearServerError("GetZoneGroupState");
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(FullReconcileCalls, household.Kitchen.Calls.Count + household.Office.Calls.Count);
+    }
+
+    [Fact]
+    public async Task WhenAProgressPollFails_ThenTheNextPollIsAFullReconciliation()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true, kitchenPlays: true);
+        household.Kitchen.RespondWithServerError("GetPositionInfo");
+        await household.PollAsync();
+        household.Kitchen.ClearServerError("GetPositionInfo");
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(FullReconcileCalls, household.Kitchen.Calls.Count + household.Office.Calls.Count);
+    }
+
+    [Fact]
+    public async Task WhenAPlayingGroupPauses_ThenThePositionIsReadOnceMore()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true, kitchenPlays: true);
+        household.Kitchen.Respond("GetPositionInfo", ("RelTime", "0:01:40"));
+        await household.Kitchen.NotifyAsync(AvTransportEventPath, SonosEventBodies.AvTransport(("TransportState", "PAUSED_PLAYBACK")));
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+        var callsAfterPause = household.Kitchen.Calls.Select(call => call.Action).ToArray();
+        household.ClearCalls();
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(["GetPositionInfo", "GetZoneGroupState"], callsAfterPause.Order());
+        Assert.Equal(TimeSpan.FromSeconds(100), household.KitchenPlayer.CurrentTrackPosition);
+        Assert.Equal(["GetZoneGroupState"], household.Kitchen.Calls.Select(call => call.Action));
+    }
+
+    [Fact]
+    public async Task WhenTheTrackChangesWhilePaused_ThenThePositionOfTheNewTrackIsRead()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        household.Kitchen.Respond("GetPositionInfo", ("RelTime", "0:00:00"));
+        await household.Kitchen.NotifyAsync(AvTransportEventPath, SonosEventBodies.AvTransport(("CurrentTrackURI", "x-file-cifs://nas/music/song-b.mp3")));
+        Assert.Null(household.KitchenPlayer.CurrentTrackPosition);
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(TimeSpan.Zero, household.KitchenPlayer.CurrentTrackPosition);
+        Assert.Equal(["GetPositionInfo", "GetZoneGroupState"], household.Kitchen.Calls.Select(call => call.Action).Order());
+    }
+
+    [Fact]
+    public async Task WhenAnEventCannotBeApplied_ThenThePlayerIsPolledFullyOnce()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        await household.Office.NotifyAsync(RenderingControlEventPath, SonosEventBodies.Properties(("LastChange", "<Event><InstanceID")));
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+        var callsAfterBrokenEvent = household.Office.Calls.Count;
+        household.ClearCalls();
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(PlayerPollCalls, callsAfterBrokenEvent);
+        Assert.Empty(household.Office.Calls);
+    }
+
+    [Theory]
+    [InlineData(new uint[] { 0, 1, 2 }, false)]
+    [InlineData(new uint[] { 0, 2 }, true)]
+    [InlineData(new uint[] { 0, 1, 0 }, true)]
+    [InlineData(new uint[] { 3 }, true)]
+    public async Task WhenTheEventSequenceHasAGap_ThenThePlayerIsPolledFully(uint[] sequences, bool isPolledFully)
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        foreach (var sequence in sequences)
+        {
+            await household.Office.NotifyAsync(RenderingControlEventPath, SonosEventBodies.Properties(), sequence);
+        }
+
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(isPolledFully ? PlayerPollCalls : 0, household.Office.Calls.Count);
+    }
+
+    [Fact]
+    public async Task WhenAPlayerRebooted_ThenItIsPolledFullyAndSubscribedAgain()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        var topology = SonosEventBodies.CreateStandaloneTopology(
+            (TestFixtures.KitchenUuid, "Küche", household.Kitchen.BaseUri), (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri));
+        string WithOfficeBootSequence(string bootSequence) => SonosEventBodies.Properties(("ZoneGroupState",
+            topology.Replace($"UUID=\"{TestFixtures.OfficeUuid}\"", $"UUID=\"{TestFixtures.OfficeUuid}\" BootSeq=\"{bootSequence}\"", StringComparison.Ordinal)));
+        await household.Kitchen.NotifyAsync(TopologyEventPath, WithOfficeBootSequence("7"));
+        await household.PollAsync();
+
+        // Act
+        await household.Kitchen.NotifyAsync(TopologyEventPath, WithOfficeBootSequence("8"));
+        household.ClearCalls();
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(PlayerPollCalls, household.Office.Calls.Count);
+        Assert.Equal(2, household.Office.Subscribed.Count(path => path == AvTransportEventPath));
+        Assert.Equal(["GetZoneGroupState"], household.Kitchen.Calls.Select(call => call.Action));
     }
 
     private sealed class PolledHousehold : IAsyncDisposable
@@ -286,6 +424,9 @@ public class SonosSystemPollingTests
                 {
                     await household.SendEventsAsync(kitchen, AvTransportEventPath, RenderingControlEventPath, GroupRenderingControlEventPath, TopologyEventPath);
                     await household.SendEventsAsync(office, AvTransportEventPath, RenderingControlEventPath, GroupRenderingControlEventPath);
+
+                    // Reads the position once for each coordinator, which the AVTransport events just sent ask for.
+                    await household.PollAsync();
                 }
 
                 return household;

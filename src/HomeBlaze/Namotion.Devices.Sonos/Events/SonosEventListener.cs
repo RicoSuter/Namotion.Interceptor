@@ -395,6 +395,12 @@ internal sealed class SonosEventListener : IAsyncDisposable
             catch (Exception exception)
             {
                 _logger.LogWarning(exception, "Applying the Sonos event {Key} failed.", subscription.Key);
+                subscription.ReportMissedEvents();
+            }
+
+            if (uint.TryParse(request.Headers["SEQ"], NumberStyles.None, CultureInfo.InvariantCulture, out var sequence))
+            {
+                subscription.RecordSequence(sequence);
             }
 
             // Any NOTIFY proves that the speaker reaches the callback, also one whose body failed to apply.

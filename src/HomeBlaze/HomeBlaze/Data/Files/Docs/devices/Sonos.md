@@ -151,7 +151,7 @@ The speakers do not report `SubnetMask`, `Gateway`, `SignalStrength` or `Availab
 | `CurrentTrackTitle`, `CurrentTrackArtist`, `CurrentTrackAlbum`, `CurrentTrackUri` | | The track of the room's group, see [Track Details](#track-details) |
 | `CurrentTrackImageUri` | URI | Album art; Sonos's relative `/getaa?...` paths are resolved against the coordinator, which serves it |
 | `CurrentTrackDuration` | TimeSpan | Empty for streams, TV and line-in |
-| `CurrentTrackPosition` | TimeSpan | As of the last poll or command read-back; Sonos does not event it, so every poll reads it while the group plays |
+| `CurrentTrackPosition` | TimeSpan | As of the last poll or command read-back; Sonos does not event it, so every poll reads it while the group plays, and the next poll after an AVTransport event of the coordinator, such as a pause or a track change, reads it once |
 | `Source` | | `None` (nothing loaded), `Tv`, `LineIn`, `SpotifyConnect`, `AirPlay`, `Radio`, `Queue` or `Other`, from the coordinator's transport URI; empty until it was read. `Other` may be refined into new values later |
 | `SourceTitle` | | The station, playlist or album the group plays, not the track. For a queue it is the playlist or album enqueued last, which the current track need not come from |
 | `Shuffle`, `Repeat` | | Group play mode; `Repeat` is `Off`, `All` or `One` |
@@ -273,13 +273,13 @@ A full reconciliation reads the topology, polls every player in parallel (about 
 | What | While events are live | Otherwise |
 |------|-----------------------|-----------|
 | Topology (`GetZoneGroupState` from the seed) | every poll | every poll |
-| Position (`GetPositionInfo`) | every poll, of each playing or buffering group | every poll |
+| Position (`GetPositionInfo`) | every poll, of each playing or buffering group, and once after each AVTransport event of a coordinator | every poll |
 | Sleep timer (`GetRemainingSleepTimerDuration`) | every poll, of each group that plays or has a timer running | every poll |
 | Everything else a player reports, see [Event Subscriptions](#event-subscriptions) | every full reconciliation | every poll |
 | Favorites | every full reconciliation | every poll |
 | Satellite and player identity and firmware | when a unit appears, after a firmware or address change and after a reconnect | the same |
 
-The events of a player are live while it answered its last poll, its identity is read, and its AVTransport, RenderingControl and, for a coordinator, GroupRenderingControl subscriptions are live. A subscription is live while the speaker has accepted it, an event arrived through it, its last renewal was answered, and the lifetime the speaker granted has not ended. Favorites follow the topology subscription. Anything else is polled fully from the next poll on: a player whose subscription failed, lapsed or whose renewal went unanswered or was rejected, a new player until its first event, a player whose poll failed, and every player while the event listener does not run.
+The events of a player are live while it answered its last poll, its identity is read, and its AVTransport, RenderingControl and, for a coordinator, GroupRenderingControl subscriptions are live. A subscription is live while the speaker has accepted it, an event arrived through it, its last renewal was answered, and the lifetime the speaker granted has not ended. Favorites follow the topology subscription. Anything else is polled fully from the next poll on: a player whose subscription failed, lapsed or whose renewal went unanswered or was rejected, a new player until its first event, a player whose poll failed, and every player while the event listener does not run. A player is also polled fully once when one of its events could not be applied, or when the `SEQ` numbers of its events show a gap or start over, since an event was lost. A poll that fails, or in which a player does not answer the position or sleep timer read, makes the next poll a full reconciliation, because events sent meanwhile may be lost.
 
 Speakers do not report that they dropped a subscription. A player that is missing from a topology, also one that is not applied yet, or whose boot sequence (`BootSeq`) changed may have rebooted or failed to send events, so it is polled fully and subscribed again, which makes it send its full state; the topology subscription is made again with it. The topology is read at every poll because a single request notices a seed that stopped answering or rebooted, which no event reports. The full reconciliation every 5 minutes repairs whatever a lost event left behind, including events that stop reaching HomeBlaze while the speakers still accept the renewals.
 

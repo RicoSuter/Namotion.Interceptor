@@ -16,6 +16,10 @@ public partial class SonosSystem
     // The first poll of a connection is one anyway.
     private long _fullReconcileDueAt = long.MinValue;
 
+    // Whether a progress poll of the current poll failed. Written by the progress polls, which run while the poll that
+    // started them holds _reconcileLock, and read by that poll once they completed.
+    private bool _hasFailedProgressPoll;
+
     /// <summary>
     /// Returns the connection for a command to the player. Throws <see cref="InvalidOperationException"/> when the
     /// system or the player is not connected and <see cref="ObjectDisposedException"/> after disposal.
@@ -181,6 +185,7 @@ public partial class SonosSystem
         {
             var startedAt = Clock.GetTimestamp();
             var isFullReconcile = forcesFullReconcile || startedAt >= _fullReconcileDueAt;
+            _hasFailedProgressPoll = false;
 
             // Read at every poll: it is a single request, finds out that the seed stopped answering or rebooted, which
             // no event reports, and confirms players missing from a topology event.
@@ -195,6 +200,11 @@ public partial class SonosSystem
             var now = Clock.GetTimestamp();
             var players = Players.Values.Where(player => player.IsInTopology).ToArray();
             await Task.WhenAll(StartPlayerPolls(players, eventListener, now, cancellationToken));
+            if (_hasFailedProgressPoll)
+            {
+                // A speaker that did not answer may not have reached HomeBlaze with its events either.
+                _fullReconcileDueAt = long.MinValue;
+            }
             await Task.WhenAll(players
                 .SelectMany(player => player.Satellites.Values)
                 .Where(satellite => satellite.IsInTopology && satellite.NeedsStaticData)
@@ -212,6 +222,12 @@ public partial class SonosSystem
             }
 
             LastUpdated = Clock.GetLocalNow();
+        }
+        catch
+        {
+            // Events sent while the speakers or the network did not answer are lost, so the next poll reads everything.
+            _fullReconcileDueAt = long.MinValue;
+            throw;
         }
         finally
         {
@@ -245,13 +261,27 @@ public partial class SonosSystem
 
     /// <summary>
     /// Returns whether events deliver the state of the player now, so a poll skips what they deliver: it is connected,
-    /// its last poll succeeded, its static data is read, it needs no new subscriptions, and its AVTransport,
-    /// RenderingControl and, as a coordinator, GroupRenderingControl subscriptions are live. Caller holds
-    /// _reconcileLock.
+    /// its last poll succeeded, its static data is read, it needs no new subscriptions, its AVTransport,
+    /// RenderingControl and, as a coordinator, GroupRenderingControl subscriptions are live, and none of them missed
+    /// an event since the last call. Caller holds _reconcileLock.
     /// </summary>
-    private static bool AreEventsLive(SonosPlayer player, bool isCoordinator, SonosEventListener eventListener, long now) =>
-        player is { IsConnected: true, HasFailedPolls: false, NeedsStaticData: false, NewSubscriptionsRequests: 0 } &&
-        AreSubscriptionsLive(player, isCoordinator, eventListener, now);
+    private static bool AreEventsLive(SonosPlayer player, bool isCoordinator, SonosEventListener eventListener, long now)
+    {
+        // Taken from every subscription whatever the outcome: one full poll covers what each of them missed.
+        var hasMissedEvents = TakeMissedEvents(eventListener, player.AvTransportSubscriptionKey);
+        hasMissedEvents |= TakeMissedEvents(eventListener, player.RenderingControlSubscriptionKey);
+        if (isCoordinator)
+        {
+            hasMissedEvents |= TakeMissedEvents(eventListener, player.GroupRenderingControlSubscriptionKey);
+        }
+
+        return !hasMissedEvents &&
+               player is { IsConnected: true, HasFailedPolls: false, NeedsStaticData: false, NewSubscriptionsRequests: 0 } &&
+               AreSubscriptionsLive(player, isCoordinator, eventListener, now);
+    }
+
+    private static bool TakeMissedEvents(SonosEventListener eventListener, string key) =>
+        eventListener.TryGetSubscription(key, out var subscription) && subscription.TakeMissedEvents();
 
     private static bool AreSubscriptionsLive(SonosPlayer player, bool isCoordinator, SonosEventListener eventListener, long now) =>
         IsSubscriptionLive(eventListener, player.AvTransportSubscriptionKey, now) &&
@@ -321,8 +351,9 @@ public partial class SonosSystem
             player.RoomName,
             cancellationToken);
 
-    private Task PollProgressAsync(SonosPlayer player, bool readsPosition, bool readsSleepTimer, long pollStartedAt, CancellationToken cancellationToken) =>
-        PollDeviceAsync(
+    private async Task PollProgressAsync(SonosPlayer player, bool readsPosition, bool readsSleepTimer, long pollStartedAt, CancellationToken cancellationToken)
+    {
+        await PollDeviceAsync(
             player,
             async (connection, newFaults, token) =>
             {
@@ -333,6 +364,12 @@ public partial class SonosSystem
             "Polling the Sonos player in {Room} failed.",
             player.RoomName,
             cancellationToken);
+
+        if (player.HasFailedPolls)
+        {
+            _hasFailedProgressPoll = true;
+        }
+    }
 
     private Task PollSatelliteAsync(SonosSatellite satellite, CancellationToken cancellationToken) =>
         PollDeviceAsync(
