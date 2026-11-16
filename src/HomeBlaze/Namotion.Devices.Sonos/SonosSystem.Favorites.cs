@@ -12,6 +12,10 @@ public partial class SonosSystem
     // 1 while a favorites refresh runs, so events start at most one.
     private int _isFavoritesRefreshRunning;
 
+    // Whether the last event-triggered read failed, so the next poll reads the favorites once more. Guarded by
+    // _reconcileLock.
+    private bool _retriesFavoritesRead;
+
     /// <summary>
     /// Whether a favorites read requested by an event is pending or running. Tests use it.
     /// </summary>
@@ -80,7 +84,7 @@ public partial class SonosSystem
         {
             if (Volatile.Read(ref _favoritesRefreshRequests) != 0)
             {
-                await RefreshFavoritesAsync(Players.Values.Where(player => player.IsInTopology).ToArray(), scopeCancellation.Token);
+                _retriesFavoritesRead = !await RefreshFavoritesAsync(Players.Values.Where(player => player.IsInTopology).ToArray(), scopeCancellation.Token);
             }
         }
         finally

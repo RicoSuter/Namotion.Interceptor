@@ -16,7 +16,7 @@ public class SonosSystemPollingTests
     private const string RenderingControlEventPath = "/MediaRenderer/RenderingControl/Event";
     private const string GroupRenderingControlEventPath = "/MediaRenderer/GroupRenderingControl/Event";
     private const string TopologyEventPath = "/ZoneGroupTopology/Event";
-    private const string ContentDirectoryEventPath = "/MediaServer/ContentDirectory/Event";
+    private const string ContentDirectoryEventPath = ConnectedSystem.ContentDirectoryEventPath;
 
     private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(SonosSystem.DefaultIntervalSeconds);
 
@@ -579,6 +579,67 @@ public class SonosSystemPollingTests
         // Assert
         Assert.Null(household.Kitchen.GetCallback(ContentDirectoryEventPath));
         Assert.Equal(2, CountBrowseCalls(household));
+    }
+
+    [Fact]
+    public async Task WhenTheFavoritesSubscriptionIsMade_ThenItsInitialEventCostsNoReadOfItsOwn()
+    {
+        // Act
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+
+        // Assert
+        // The first reconciliation reads the favorites after subscribing, which covers the initial event.
+        Assert.Equal(1, CountBrowseCalls(household));
+    }
+
+    [Fact]
+    public async Task WhenAReadAfterAFavoritesEventFails_ThenTheNextPollReadsThemOnce()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        household.Kitchen.RespondWithServerError("Browse");
+        household.Office.RespondWithServerError("Browse");
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2"));
+        await household.WaitForFavoritesAsync();
+        household.Kitchen.ClearServerError("Browse");
+        household.Office.ClearServerError("Browse");
+        RespondWithFavorite(household.Kitchen, "Radio Swiss Jazz");
+        RespondWithFavorite(household.Office, "Radio Swiss Jazz");
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+        var browsesAtRetry = CountBrowseCalls(household);
+        household.ClearCalls();
+        await household.PollAsync();
+
+        // Assert
+        Assert.Equal(1, browsesAtRetry);
+        Assert.Equal(["Radio Swiss Jazz"], household.System.Favorites.Select(favorite => favorite.Title));
+        Assert.Equal(0, CountBrowseCalls(household));
+    }
+
+    [Fact]
+    public async Task WhenReadingFavoritesKeepsFailingAfterAnEvent_ThenOnlyOnePollTriesAgain()
+    {
+        // Arrange
+        await using var household = await PolledHousehold.StartAsync(sendsEvents: true);
+        household.Kitchen.RespondWithServerError("Browse");
+        household.Office.RespondWithServerError("Browse");
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2"));
+        await household.WaitForFavoritesAsync();
+        household.ClearCalls();
+
+        // Act
+        await household.PollAsync();
+        var browsesAtRetry = CountBrowseCalls(household);
+        household.ClearCalls();
+        await household.PollAsync();
+
+        // Assert
+        // The retry asks each player once.
+        Assert.Equal(2, browsesAtRetry);
+        Assert.Equal(0, CountBrowseCalls(household));
     }
 
     [Fact]

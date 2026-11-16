@@ -104,8 +104,8 @@ public partial class SonosSystem
     }
 
     // Caller holds _reconcileLock. Returns the players with pending requests and how many each had, and the keys of
-    // the subscriptions to replace for them; both null for none. The topology subscription is replaced with those of
-    // the seed, which holds it.
+    // the subscriptions to replace for them; both null for none. The topology and ContentDirectory subscriptions are
+    // replaced with those of the player that holds them.
     private List<(SonosPlayer Player, int Handled)>? GetNewSubscriptionsRequests(out HashSet<string>? replaced)
     {
         List<(SonosPlayer Player, int Handled)>? requests = null;
@@ -123,6 +123,10 @@ public partial class SonosSystem
                 if (IsSeed(player))
                 {
                     replaced.Add(TopologySubscriptionKey);
+                }
+
+                if (HoldsContentDirectorySubscription(player))
+                {
                     replaced.Add(ContentDirectorySubscriptionKey);
                 }
             }
@@ -132,8 +136,40 @@ public partial class SonosSystem
     }
 
     private bool IsSeed(SonosPlayer player) =>
-        player.BaseUri is { } baseUri && GetSeedUri() is { } seedUri &&
-        baseUri.Port == seedUri.Port && string.Equals(baseUri.Host, seedUri.Host, StringComparison.OrdinalIgnoreCase);
+        player.BaseUri is { } baseUri && GetSeedUri() is { } seedUri && IsSameDevice(baseUri, seedUri);
+
+    private bool HoldsContentDirectorySubscription(SonosPlayer player) =>
+        player.BaseUri is { } baseUri && GetSeedUri() is { } seedUri && IsSameDevice(baseUri, GetContentDirectoryBaseUri(seedUri));
+
+    private static bool IsSameDevice(Uri first, Uri second) =>
+        first.Port == second.Port && string.Equals(first.Host, second.Host, StringComparison.OrdinalIgnoreCase);
+
+    // The seed reports favorites changes made through any speaker, but a seed that is no visible player, such as a
+    // satellite, may not, so then the connected player with the lowest RINCON id holds the subscription, a choice that
+    // regrouping does not change.
+    private Uri GetContentDirectoryBaseUri(Uri seedUri)
+    {
+        SonosPlayer? fallback = null;
+        foreach (var player in Players.Values)
+        {
+            if (!player.IsInTopology || player.BaseUri is not { } baseUri)
+            {
+                continue;
+            }
+
+            if (IsSameDevice(baseUri, seedUri))
+            {
+                return seedUri;
+            }
+
+            if (player.IsConnected && (fallback is null || string.CompareOrdinal(player.Uuid, fallback.Uuid) < 0))
+            {
+                fallback = player;
+            }
+        }
+
+        return fallback?.BaseUri ?? seedUri;
+    }
 
     /// <summary>
     /// Returns whether the subscription delivers events now: the speaker accepted it, an event arrived, its last
@@ -255,7 +291,8 @@ public partial class SonosSystem
         if (GetSeedUri() is { } seedUri)
         {
             desired[TopologySubscriptionKey] = new SubscriptionTarget(new Uri(seedUri, "/ZoneGroupTopology/Event"), Handler: null, CanSubscribe: true);
-            desired[ContentDirectorySubscriptionKey] = new SubscriptionTarget(new Uri(seedUri, "/MediaServer/ContentDirectory/Event"), Handler: null, CanSubscribe: true);
+            desired[ContentDirectorySubscriptionKey] = new SubscriptionTarget(
+                new Uri(GetContentDirectoryBaseUri(seedUri), "/MediaServer/ContentDirectory/Event"), Handler: null, CanSubscribe: true);
         }
 
         return desired;
@@ -281,12 +318,12 @@ public partial class SonosSystem
         }
     }
 
-    // One handler per subscription. Its first event, the full state the seed sends right after accepting, follows the
-    // poll that subscribed within milliseconds, so it must not count as the second read that takes missing players
-    // offline: a seed that just rebooted answers both with the same part of the household.
     private Action<string> CreateSeedHandler(string key) =>
         key == ContentDirectorySubscriptionKey ? CreateContentDirectoryHandler() : CreateTopologyHandler();
 
+    // One handler per subscription. Its first event, the full state the seed sends right after accepting, follows the
+    // poll that subscribed within milliseconds, so it must not count as the second read that takes missing players
+    // offline: a seed that just rebooted answers both with the same part of the household.
     private Action<string> CreateTopologyHandler()
     {
         var isInitialEvent = 1;

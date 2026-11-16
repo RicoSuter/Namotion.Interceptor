@@ -528,6 +528,42 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
+    public async Task WhenTheSeedIsASatellite_ThenAPlayerHoldsTheFavoritesSubscription()
+    {
+        // Arrange
+        const string subwooferUuid = "RINCON_A0000000000201400";
+        await using var subwoofer = new FakeSonosSpeaker();
+        await using var kitchen = new FakeSonosSpeaker();
+        subwoofer.RespondAsIdlePlayer(subwooferUuid, "Küche");
+        kitchen.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        foreach (var speaker in new[] { subwoofer, kitchen })
+        {
+            speaker.RespondWithHomeTheater(kitchen.BaseUri, subwooferUuid, subwoofer.BaseUri);
+            speaker.SendInitialEventBeforeAnswering(ConnectedSystem.ContentDirectoryEventPath, SonosEventBodies.Properties());
+        }
+
+        subwoofer.RespondWithServerError("Browse");
+
+        // Act
+        var system = await ConnectedSystem.StartWithEventsAsync(
+            () => ConnectedSystem.CreateSystem(subwoofer.Host),
+            system => system.IsConnected && kitchen.GetCallback(ConnectedSystem.ContentDirectoryEventPath) is not null && !system.HasPendingFavoritesRefresh,
+            "The system should subscribe to the favorites of the kitchen.");
+        await using var owner = ConnectedSystem.Own(system);
+        kitchen.Respond("Browse", ("Result", TestFixtures.Read("favorites.xml")), ("NumberReturned", "4"), ("TotalMatches", "3"), ("UpdateID", "2"));
+        await kitchen.NotifyAsync(ConnectedSystem.ContentDirectoryEventPath, SonosEventBodies.Properties(
+            ("ContainerUpdateIDs", "R:0,2,FV:2,2"), ("FavoritesUpdateID", "RINCON_C43875930F2801400,12")));
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => !system.HasPendingFavoritesRefresh && kitchen.Calls.Count(call => call.Action == "Browse") >= 2,
+            ConnectedSystem.WaitTimeout,
+            message: "The event of the kitchen should read the favorites again.");
+        Assert.Null(subwoofer.GetCallback(ConnectedSystem.ContentDirectoryEventPath));
+        Assert.NotNull(subwoofer.GetCallback("/ZoneGroupTopology/Event"));
+    }
+
+    [Fact]
     public async Task WhenTheSeedIsASatellite_ThenFavoritesAreReadFromAPlayer()
     {
         // Arrange
