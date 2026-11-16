@@ -260,6 +260,7 @@ person.LastName = "Doe";
 **How it works:**
 
 - When a derived property attaches, its getter is evaluated and every intercepted property it reads is recorded as a dependency
+- The attach does not publish its first value, unless the value changed while the subject attached: the getter is also evaluated before any lifecycle handler runs for the subject, so before the registry makes it resolvable and before context inheritance publishes its writes, and when the attached value differs from that one, the change from it is published after the structural write that attached the subject. A source written while the subject attaches is not a dependency yet, so this is how a reader that read the value then, and a consumer of the source's change, learn the derived value. A getter that reads graph state, such as its parents or its registration, gets a different value once attached and so publishes a change on attach, and so does a getter that builds a new object whose type does not override equality
 - When a dependency is written, the derived property is recalculated once the write completed, and its dependencies are recorded again
 - If the derived value changes, a change event is published through the derived property's own subject, with a local origin
 
@@ -275,6 +276,7 @@ A derived property also follows the structure of a subject its getter reads thro
 
 Not followed:
 
+- A write to a plain property of a subject that attaches, after the registry registered the subject and before it inherits the context: the write publishes no change, although a reader may have found the subject through its parent's registered property already. A derived property that reads the property still publishes its own change on attach
 - State outside the model, such as external services, static state, or plain fields and properties that are not intercepted
 - Context services read directly, such as `subject.Context.TryGetService<T>()`
 - Registry resolution changed by a fallback context added to a subject that is already attached, or replaced by application code

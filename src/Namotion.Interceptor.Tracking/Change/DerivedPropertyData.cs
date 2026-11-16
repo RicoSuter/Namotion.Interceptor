@@ -44,6 +44,15 @@ internal sealed class DerivedPropertyData
     internal object? LastKnownValue;
 
     /// <summary>
+    /// The value of the getter before its subject's attach made the subject observable, valid while
+    /// <see cref="HasAttachBaseline"/> is set; the attach takes both. Read and written under lock(this).
+    /// </summary>
+    internal object? AttachBaseline;
+
+    /// <summary><see cref="AttachBaseline"/> holds a value. Read and written under lock(this).</summary>
+    internal bool HasAttachBaseline;
+
+    /// <summary>
     /// Incremented by every landed write of this property (source role), after the value landed and a full fence;
     /// read by evaluations to detect a write between a read and the commit of its dependency.
     /// </summary>

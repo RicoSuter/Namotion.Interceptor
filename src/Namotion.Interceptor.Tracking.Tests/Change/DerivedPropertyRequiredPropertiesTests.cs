@@ -47,6 +47,11 @@ public class DerivedPropertyRequiredPropertiesTests
         machine.Worker.Evaluator = _ =>
         {
             var value = root.Anchor;
+            if (DerivedPropertyTestHelpers.IsAttachBaseline)
+            {
+                return value;
+            }
+
             evaluations++;
             otherRoot.Machine = new EvaluatorMachine();
 

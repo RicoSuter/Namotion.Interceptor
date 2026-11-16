@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -442,6 +443,34 @@ public class AutomationPropertyTriggerTests
         // Assert
         Assert.Equal("On: Armed", statusThroughTheChild);
         Assert.Equal("On: Unknown since 2026-11-06 12:00:00, missing /Weather/Gust", host.Rule("retract").Status);
+    }
+
+    [Fact]
+    public async Task WhenADerivedPropertyIsReadWhileItsSubjectAttachesAndItsSourcesAreWrittenBeforeItIsAttached_ThenTheTriggerBecomesKnown()
+    {
+        // Arrange
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("disk", On("Disk", When("/Volume/Usage > 0.7"), Invoke("/Blinds/Close")))));
+        var volume = new TestVolume();
+        string? statusWhileAttaching = null;
+        host.Graph.Context.AddService<ILifecycleHandler>(new AttachHook(volume, () =>
+        {
+            // The worker activates the rule again and reads the usage while the volume attaches, before its sources are written.
+            host.ResetAsync().GetAwaiter().GetResult();
+            statusWhileAttaching = host.Rule("disk").Status;
+            volume.FreeSpace = 300;
+            volume.TotalSize = 1000;
+        }));
+
+        // Act
+        host.Graph.Add("Volume", volume);
+        await host.FlushAsync();
+
+        // Assert
+        Assert.Equal("On: Unknown since 2026-11-06 12:00:00, missing /Volume/Usage", statusWhileAttaching);
+        Assert.Equal(0.7m, volume.Usage);
+        Assert.Equal("On: Armed", host.Rule("disk").Status);
+        Assert.Equal("The trigger 1 (/Volume/Usage > 0.7) of rule Disk in automation Storm is known again.", host.Logger.Messages[^1]);
     }
 
     private sealed class CountingListener(IAutomationChangeListener inner) : IAutomationChangeListener

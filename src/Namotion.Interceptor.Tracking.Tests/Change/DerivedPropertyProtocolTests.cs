@@ -5,6 +5,7 @@ using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using static Namotion.Interceptor.Tracking.Tests.Change.DerivedPropertyTestHelpers;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
@@ -843,7 +844,11 @@ public class DerivedPropertyProtocolTests
         worker.Evaluator = _ =>
         {
             var value = machine.Configuration.Value * 10 + Volatile.Read(ref external);
-            gate.PauseIfArmed();
+            if (!IsAttachBaseline)
+            {
+                gate.PauseIfArmed();
+            }
+
             return value;
         };
         var result = GetResult(machine);
@@ -887,6 +892,11 @@ public class DerivedPropertyProtocolTests
         {
             var parent = evaluatedWorker.TryGetFirstParent<EvaluatorMachine>();
             var anchor = root.Anchor;
+            if (IsAttachBaseline)
+            {
+                return anchor;
+            }
+
             var evaluation = Interlocked.Increment(ref evaluations);
             if (evaluation == 1 && detachingEvaluation == 2)
             {
@@ -925,7 +935,11 @@ public class DerivedPropertyProtocolTests
         worker.Evaluator = _ =>
         {
             var anchor = root.Anchor;
-            gate.PauseIfArmed();
+            if (!IsAttachBaseline)
+            {
+                gate.PauseIfArmed();
+            }
+
             return anchor;
         };
         var result = GetResult(machine);

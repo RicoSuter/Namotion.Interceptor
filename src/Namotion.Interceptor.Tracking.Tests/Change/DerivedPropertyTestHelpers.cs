@@ -11,6 +11,12 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 
 internal static class DerivedPropertyTestHelpers
 {
+    /// <summary>
+    /// Whether the getter runs to record the value before its subject's attach. A test that counts, pauses or writes
+    /// in the attach evaluation returns its value without doing so then.
+    /// </summary>
+    public static bool IsAttachBaseline => DerivedPropertyOwnership.IsCapturingAttachBaseline;
+
     public static List<SubjectPropertyChange> SubscribeToChanges(IInterceptorSubjectContext context)
     {
         var changes = new List<SubjectPropertyChange>();
