@@ -136,8 +136,8 @@ public class DerivedRegistryStructureTests
         // Act
         root.Child = child;
 
-        // Assert
-        Assert.Equal(2, evaluations);
+        // Assert: once for the value before the attach, once by the attach and once more after it.
+        Assert.Equal(3, evaluations);
         Assert.Equal("1", child.Reader.Value);
     }
 
@@ -401,8 +401,8 @@ public class DerivedRegistryStructureTests
         other.TryGetRegisteredSubject()!.AddProperty<int>("Added", _ => 1);
         other.OtherTarget = other.Target;
 
-        // Assert
-        Assert.Equal(1, evaluations);
+        // Assert: once for the value before the attach and once by the attach, and not for the structure changes.
+        Assert.Equal(2, evaluations);
     }
 
     private static (Func<string?> Read, Action Change) CreateScenario(

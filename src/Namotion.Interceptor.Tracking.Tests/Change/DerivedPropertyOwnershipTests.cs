@@ -295,6 +295,11 @@ public class DerivedPropertyOwnershipTests
         machine.Worker.Evaluator = _ =>
         {
             var value = root.Anchor;
+            if (IsAttachBaseline)
+            {
+                return value;
+            }
+
             if (++evaluations <= attachIterationLimit)
             {
                 areWritesCompleted &= DedicatedThreadTestHelpers
@@ -318,10 +323,10 @@ public class DerivedPropertyOwnershipTests
         root.Machine = machine;
 
         // Assert: the attach commits its last evaluation (99), which is not published, and the recalculation
-        // requested after the attach publishes the value of the last write (100).
+        // requested after the attach publishes the value of the last write (100) from the value before the attach (0).
         Assert.True(areWritesCompleted);
         var change = Assert.Single(changes);
-        Assert.Equal((attachIterationLimit - 1, attachIterationLimit), (change.GetOldValue<int>(), change.GetNewValue<int>()));
+        Assert.Equal((0, attachIterationLimit), (change.GetOldValue<int>(), change.GetNewValue<int>()));
         Assert.Equal(attachIterationLimit, machine.Worker.Result);
         Assert.Contains("exhausted while attaching", traceCapture.Text);
     }
@@ -338,6 +343,11 @@ public class DerivedPropertyOwnershipTests
         var evaluations = 0;
         machine.Worker.Evaluator = _ =>
         {
+            if (IsAttachBaseline)
+            {
+                return root.Anchor;
+            }
+
             Interlocked.Increment(ref evaluations);
             var summary = new EvaluatorConfiguration();
             summary.Value += root.Anchor;
@@ -404,6 +414,11 @@ public class DerivedPropertyOwnershipTests
         machine.Worker.Evaluator = _ =>
         {
             var value = root.Anchor;
+            if (IsAttachBaseline)
+            {
+                return value;
+            }
+
             if (++evaluations == 1)
             {
                 root.Anchor = value + 1;
@@ -415,8 +430,9 @@ public class DerivedPropertyOwnershipTests
         // Act
         root.Machine = machine;
 
-        // Assert
-        Assert.Equal(2, evaluations);
+        // Assert: the value differs from the one before the attach (0), so a recalculation after the attach
+        // evaluates a third time and publishes the difference.
+        Assert.Equal(3, evaluations);
         Assert.Equal(1, machine.Worker.Result);
         Assert.Equal(1, new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).TryGetDerivedPropertyData()?.LastKnownValue);
     }
