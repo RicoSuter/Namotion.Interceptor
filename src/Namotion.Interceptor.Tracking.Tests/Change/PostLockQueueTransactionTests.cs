@@ -1,4 +1,5 @@
 using System.Reactive.Concurrency;
+using System.Threading.Tasks.Sources;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -480,24 +481,34 @@ public class PostLockQueueTransactionTests
         Assert.Contains("unrelated observer", traceCapture.Text);
     }
 
-    private sealed class GatedWriter : ITransactionWriter
+    private sealed class GatedWriter : ITransactionWriter, IValueTaskSource<SourceWriteResult>
     {
-        // Without RunContinuationsAsynchronously: the commit continues inline in Complete's caller.
-        private readonly TaskCompletionSource<SourceWriteResult> _result = new();
+        // Continuations run inline: the commit continues in Complete's caller.
+        private ManualResetValueTaskSourceCore<SourceWriteResult> _result = new();
         private SubjectPropertyChange[] _changes = [];
 
+        // Set once the commit awaits the write, so that Complete always continues the commit inline.
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public ValueTask<SourceWriteResult> WriteToSourcesAsync(Memory<SubjectPropertyChange> changes, TransactionRequirement requirement, CancellationToken cancellationToken)
         {
             _changes = changes.ToArray();
-            Started.TrySetResult();
-            return new ValueTask<SourceWriteResult>(_result.Task);
+            return new ValueTask<SourceWriteResult>(this, _result.Version);
         }
 
-        public void Complete() => _result.TrySetResult(new SourceWriteResult(_changes, [], [], null));
+        public void Complete() => _result.SetResult(new SourceWriteResult(_changes, [], [], null));
 
         public ValueTask<SourceRevertResult> RevertSourceWritesAsync(IReadOnlyList<SubjectPropertyChange> written, object? revertState, CancellationToken cancellationToken)
             => ValueTask.FromResult(new SourceRevertResult([], []));
+
+        public SourceWriteResult GetResult(short token) => _result.GetResult(token);
+
+        public ValueTaskSourceStatus GetStatus(short token) => _result.GetStatus(token);
+
+        public void OnCompleted(Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags)
+        {
+            _result.OnCompleted(continuation, state, token, flags);
+            Started.TrySetResult();
+        }
     }
 }
