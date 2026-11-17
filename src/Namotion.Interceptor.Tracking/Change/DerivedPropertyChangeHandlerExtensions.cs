@@ -37,12 +37,12 @@ public static class DerivedPropertyChangeHandlerExtensions
         // A commit rewrites the dependency buffer in place under lock(data).
         lock (data)
         {
-            // The structures the getter read are dependencies, but not properties.
+            // Graph dependencies are dependencies, but not properties.
             var dependencies = data.RequiredPropertiesSpan;
             var count = 0;
             foreach (ref readonly var dependency in dependencies)
             {
-                if (!DerivedStructureDependencies.IsStructureDependency(dependency))
+                if (!DerivedGraphDependencies.IsGraphDependency(dependency))
                 {
                     count++;
                 }
@@ -57,7 +57,7 @@ public static class DerivedPropertyChangeHandlerExtensions
             var index = 0;
             foreach (ref readonly var dependency in dependencies)
             {
-                if (!DerivedStructureDependencies.IsStructureDependency(dependency))
+                if (!DerivedGraphDependencies.IsGraphDependency(dependency))
                 {
                     properties[index++] = dependency;
                 }

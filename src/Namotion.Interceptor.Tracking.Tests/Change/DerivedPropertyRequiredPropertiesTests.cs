@@ -96,7 +96,7 @@ public class DerivedPropertyRequiredPropertiesTests
     }
 
     [Fact]
-    public void WhenGetterReadsParentsAndAProperty_ThenRequiredPropertiesExcludeTheStructureDependency()
+    public void WhenGetterReadsParentsAndAProperty_ThenRequiredPropertiesExcludeTheGraphDependency()
     {
         // Arrange
         var context = InterceptorSubjectContext

@@ -418,7 +418,7 @@ public class DerivedPropertyAttachOrderTests
     {
         // Arrange: the getter walks two levels up, so it reads the parents of the worker and of the machine, which
         // attaches the worker while it attaches itself. Searching a type that is not on the path also reads the
-        // parents of the root. The structure of the machine is reported after all of its lifecycle handlers ran, so
+        // parents of the root. The graph state of the machine is reported after all of its lifecycle handlers ran, so
         // after the worker's attach evaluation read it.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var machine = new EvaluatorMachine();

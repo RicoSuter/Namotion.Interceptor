@@ -75,72 +75,72 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     }
 
     /// <summary>
-    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the structure of
-    /// <paramref name="subject"/> (<see cref="DerivedStructureDependencies"/>). Called after the structure changed.
+    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the graph state of
+    /// <paramref name="subject"/> (<see cref="DerivedGraphDependencies"/>). Called after the graph state changed.
     /// </summary>
-    internal static void OnStructureChanged(IInterceptorSubject subject, bool hasFailed = false)
+    internal static void OnGraphChanged(IInterceptorSubject subject, bool hasFailed = false)
     {
-        // No structure dependency has data while the structure gate is not raised, see "Structure gate" in
+        // No graph dependency has data while the graph gate is not raised, see "Graph gate" in
         // docs/design/tracking-derived-properties.md.
-        if (!DerivedStructureDependencies.IsGateRaised)
+        if (!DerivedGraphDependencies.IsGateRaised)
         {
             return;
         }
 
-        // W2: the structure changed before its data is looked up.
+        // W2: the graph state changed before its data is looked up.
         Interlocked.MemoryBarrier();
-        RequestStructureRecalculations(DerivedStructureDependencies.Of(subject), hasFailed);
+        RequestGraphRecalculations(DerivedGraphDependencies.Of(subject), hasFailed);
     }
 
     /// <summary>
-    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the structure of
+    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the graph state of
     /// <paramref name="subject"/> and of the children of <paramref name="holder"/>
-    /// (<see cref="DerivedStructureDependencies"/>). Called after a subject was attached or detached through a property
+    /// (<see cref="DerivedGraphDependencies"/>). Called after a subject was attached or detached through a property
     /// of <paramref name="holder"/>, once both changed.
     /// </summary>
-    internal static void OnStructureChanged(IInterceptorSubject subject, IInterceptorSubject holder)
+    internal static void OnGraphChanged(IInterceptorSubject subject, IInterceptorSubject holder)
     {
-        if (!DerivedStructureDependencies.IsGateRaised)
+        if (!DerivedGraphDependencies.IsGateRaised)
         {
             return;
         }
 
-        // W2, once for every structure dependency: all of them changed before the first data lookup.
+        // W2, once for every graph dependency: all of them changed before the first data lookup.
         Interlocked.MemoryBarrier();
-        RequestStructureRecalculations(DerivedStructureDependencies.Of(subject), hasFailed: false);
-        RequestStructureRecalculations(DerivedStructureDependencies.ChildrenOf(holder), hasFailed: false);
+        RequestGraphRecalculations(DerivedGraphDependencies.Of(subject), hasFailed: false);
+        RequestGraphRecalculations(DerivedGraphDependencies.ChildrenOf(holder), hasFailed: false);
     }
 
     /// <summary>
-    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the structure of
+    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the graph state of
     /// every subject in <paramref name="children"/> and of the children of <paramref name="holder"/>
-    /// (<see cref="DerivedStructureDependencies"/>). Called after the children moved within a property of
+    /// (<see cref="DerivedGraphDependencies"/>). Called after the children moved within a property of
     /// <paramref name="holder"/>.
     /// </summary>
     internal static void OnChildrenMoved(ReadOnlySpan<SubjectChild> children, IInterceptorSubject holder)
     {
-        if (!DerivedStructureDependencies.IsGateRaised)
+        if (!DerivedGraphDependencies.IsGateRaised)
         {
             return;
         }
 
-        // W2, once for every structure dependency: all of them changed before the first data lookup.
+        // W2, once for every graph dependency: all of them changed before the first data lookup.
         Interlocked.MemoryBarrier();
         foreach (var child in children)
         {
-            RequestStructureRecalculations(DerivedStructureDependencies.Of(child.Subject), hasFailed: false);
+            RequestGraphRecalculations(DerivedGraphDependencies.Of(child.Subject), hasFailed: false);
         }
 
-        RequestStructureRecalculations(DerivedStructureDependencies.ChildrenOf(holder), hasFailed: false);
+        RequestGraphRecalculations(DerivedGraphDependencies.ChildrenOf(holder), hasFailed: false);
     }
 
-    private static void RequestStructureRecalculations(PropertyReference structure, bool hasFailed)
+    private static void RequestGraphRecalculations(PropertyReference graph, bool hasFailed)
     {
-        var data = structure.TryGetDerivedPropertyData();
+        var data = graph.TryGetDerivedPropertyData();
         if (data is not null)
         {
             RequestRecalculations(
-                new PropertyWriteObservation(structure, isWritten: true, rawTimestamp: 0, isDerivedRecalculation: false, depth: 0, hasFailed: hasFailed),
+                new PropertyWriteObservation(graph, isWritten: true, rawTimestamp: 0, isDerivedRecalculation: false, depth: 0, hasFailed: hasFailed),
                 data, segment: null);
         }
     }

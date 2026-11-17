@@ -167,7 +167,7 @@ public static class ParentsHandlerExtensions
     /// </summary>
     public static ImmutableArray<SubjectParent> GetParents(this IInterceptorSubject subject)
     {
-        DerivedStructureDependencies.RecordRead(subject);
+        DerivedGraphDependencies.RecordRead(subject);
         if (subject.Data.TryGetValue((null, ParentsKey), out var parents))
         {
             return ((ParentsSet)parents!).ToImmutableArray();
