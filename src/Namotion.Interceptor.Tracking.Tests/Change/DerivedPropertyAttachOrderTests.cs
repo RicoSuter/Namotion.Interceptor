@@ -414,7 +414,7 @@ public class DerivedPropertyAttachOrderTests
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(true, true)]
-    public void WhenDerivedPropertyBuildsItsValueAnew_ThenAttachPublishesTheUnchangedValueOnceMore(bool attachRootToContext, bool walkToTheRoot)
+    public void WhenDerivedPropertyBuildsItsValueAnew_ThenAttachPublishesOneChangeFromTheValueBeforeTheAttach(bool attachRootToContext, bool walkToTheRoot)
     {
         // Arrange: the getter walks two levels up, so it reads the parents of the worker and of the machine, which
         // attaches the worker while it attaches itself. Searching a type that is not on the path also reads the
@@ -446,10 +446,13 @@ public class DerivedPropertyAttachOrderTests
             root.Machine = machine;
         }
 
-        // Assert: an array does not override equality, so the evaluation of the report publishes the unchanged value.
-        Assert.Equal(2, evaluations);
+        // Assert: one change, from the value before the attach. Searching the root, that value was computed without the
+        // worker's parents, so it differs. Walking to the root, it is an equal array, and since an array does not
+        // override equality, the unchanged value is published once more. The report and the difference are evaluated
+        // once together.
+        Assert.Equal(3, evaluations);
         var change = Assert.Single(changes, c => c.Property.Name == nameof(EvaluatorWorker.ObjectResult));
-        Assert.Equal([true], change.GetOldValue<bool[]>());
+        Assert.Equal([walkToTheRoot], change.GetOldValue<bool[]>());
         Assert.Equal([true], change.GetNewValue<bool[]>());
         Assert.Equal([true], (bool[])machine.Worker.ObjectResult!);
     }
