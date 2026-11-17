@@ -18,7 +18,7 @@ public static class LifecycleInterceptorExtensions
     /// </summary>
     public static int GetReferenceCount(this IInterceptorSubject subject)
     {
-        DerivedStructureDependencies.RecordRead(subject);
+        DerivedGraphDependencies.RecordRead(subject);
         return SubjectLifecycleAttachments.GetReferenceCount(subject);
     }
 

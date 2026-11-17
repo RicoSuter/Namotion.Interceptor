@@ -15,15 +15,15 @@ public partial class RegistryTarget
 }
 
 [InterceptorSubject]
-public partial class StructureHolder
+public partial class GraphStateHolder
 {
-    public StructureHolder()
+    public GraphStateHolder()
     {
         Targets = [];
         TargetsByKey = [];
     }
 
-    public partial StructureReader? Reader { get; set; }
+    public partial GraphStateReader? Reader { get; set; }
 
     public partial RegistryTarget? Target { get; set; }
 
@@ -31,7 +31,7 @@ public partial class StructureHolder
 
     public partial RegistryTarget[] Targets { get; set; }
 
-    public partial StructureHolder? Child { get; set; }
+    public partial GraphStateHolder? Child { get; set; }
 
     public partial Dictionary<string, RegistryTarget> TargetsByKey { get; set; }
 }
@@ -40,7 +40,7 @@ public partial class StructureHolder
 /// Evaluates its derived property with a delegate, so that a test decides what the getter reads and does.
 /// </summary>
 [InterceptorSubject]
-public partial class StructureReader
+public partial class GraphStateReader
 {
     public Func<string?>? Read;
 
@@ -48,7 +48,7 @@ public partial class StructureReader
     public string? Value => Read?.Invoke();
 }
 
-public class DerivedRegistryStructureTests
+public class DerivedRegistryGraphTests
 {
     [Theory]
     [InlineData("TryGetRegisteredSubject")]
@@ -68,14 +68,14 @@ public class DerivedRegistryStructureTests
     [InlineData("RekeyedChild")]
     [InlineData("ContextDetach")]
     [InlineData("AddPropertyUnderLifecycleLock")]
-    public void WhenStructureReadThroughApiChanges_ThenDerivedPropertyPublishesTheChange(string api)
+    public void WhenGraphStateReadThroughApiChanges_ThenDerivedPropertyPublishesTheChange(string api)
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var root = new StructureHolder(context);
+        var root = new GraphStateHolder(context);
         var target = new RegistryTarget();
         var (read, change) = CreateScenario(api, context, root, target);
-        root.Reader = new StructureReader { Read = read };
+        root.Reader = new GraphStateReader { Read = read };
         var initialValue = root.Reader.Value;
         var changes = new List<SubjectPropertyChange>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
@@ -95,11 +95,11 @@ public class DerivedRegistryStructureTests
     {
         // Arrange: the reader attaches before the targets of its holder, and reads the registered children.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var root = new StructureHolder(context);
-        var child = new StructureHolder { Targets = [new RegistryTarget(), new RegistryTarget()] };
-        child.Reader = new StructureReader
+        var root = new GraphStateHolder(context);
+        var child = new GraphStateHolder { Targets = [new RegistryTarget(), new RegistryTarget()] };
+        child.Reader = new GraphStateReader
         {
-            Read = () => child.TryGetRegisteredSubject()?.TryGetProperty(nameof(StructureHolder.Targets))?.Children.Length.ToString()
+            Read = () => child.TryGetRegisteredSubject()?.TryGetProperty(nameof(GraphStateHolder.Targets))?.Children.Length.ToString()
         };
         var changes = new List<SubjectPropertyChange>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
@@ -119,16 +119,16 @@ public class DerivedRegistryStructureTests
         // Arrange: the reader attaches with the child, after the registry added the child to the root's children and
         // before the children of the root are reported.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var root = new StructureHolder(context);
+        var root = new GraphStateHolder(context);
         var evaluations = 0;
-        var child = new StructureHolder
+        var child = new GraphStateHolder
         {
-            Reader = new StructureReader
+            Reader = new GraphStateReader
             {
                 Read = () =>
                 {
                     evaluations++;
-                    return root.TryGetRegisteredSubject()!.TryGetProperty(nameof(StructureHolder.Child))!.Children.Length.ToString();
+                    return root.TryGetRegisteredSubject()!.TryGetProperty(nameof(GraphStateHolder.Child))!.Children.Length.ToString();
                 }
             }
         };
@@ -142,14 +142,14 @@ public class DerivedRegistryStructureTests
     }
 
     [Fact]
-    public void WhenChildIsAttachedToHolder_ThenDerivedPropertyThatReadsOnlyTheStructureOfTheHolderIsNotRecalculated()
+    public void WhenChildIsAttachedToHolder_ThenDerivedPropertyThatReadsOnlyTheGraphStateOfTheHolderIsNotRecalculated()
     {
         // Arrange: the children of the holder are a dependency of their own, so a getter that walks up through the
         // holder does not follow them.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var root = new StructureHolder(context);
+        var root = new GraphStateHolder(context);
         var evaluations = 0;
-        root.Reader = new StructureReader
+        root.Reader = new GraphStateReader
         {
             Read = () =>
             {
@@ -172,11 +172,11 @@ public class DerivedRegistryStructureTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var root = new StructureHolder(context);
+        var root = new GraphStateHolder(context);
         var target = new RegistryTarget();
         root.Target = target;
         var registered = target.TryGetRegisteredSubject()!;
-        root.Reader = new StructureReader { Read = () => registered.Properties.Length.ToString() };
+        root.Reader = new GraphStateReader { Read = () => registered.Properties.Length.ToString() };
         var changes = new List<SubjectPropertyChange>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
@@ -203,11 +203,11 @@ public class DerivedRegistryStructureTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var root = new StructureHolder(context);
+        var root = new GraphStateHolder(context);
         var target = new RegistryTarget();
         root.Target = target;
         var registered = target.TryGetRegisteredSubject()!;
-        root.Reader = new StructureReader { Read = () => registered.Properties.Length.ToString() };
+        root.Reader = new GraphStateReader { Read = () => registered.Properties.Length.ToString() };
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
         {
             if (change.Property.Name == "Doubled")
@@ -240,11 +240,11 @@ public class DerivedRegistryStructureTests
     [InlineData("ReferenceRemoved")]
     [InlineData("ReferenceRemovedBySubjectDetaching")]
     [InlineData("MovedChild")]
-    public void WhenHandlerAfterTheRegistryThrows_ThenDerivedPropertyFollowsTheStructureTheRegistryChanged(string operation)
+    public void WhenHandlerAfterTheRegistryThrows_ThenDerivedPropertyFollowsTheGraphStateTheRegistryChanged(string operation)
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var root = new StructureHolder(context);
+        var root = new GraphStateHolder(context);
         var target = new RegistryTarget();
         ThrowingHandlerBase handler = operation switch
         {
@@ -256,7 +256,7 @@ public class DerivedRegistryStructureTests
         context.WithService(() => handler);
         var targetContext = ((IInterceptorSubject)target).Context;
         var registry = context.GetService<ISubjectRegistry>();
-        var holder = new StructureHolder { Target = target };
+        var holder = new GraphStateHolder { Target = target };
         Func<string?> read = () => (target.TryGetRegisteredSubject() is not null).ToString();
         Action act = operation switch
         {
@@ -305,7 +305,7 @@ public class DerivedRegistryStructureTests
             read = () => registered.Parents[0].Index?.ToString();
         }
 
-        root.Reader = new StructureReader { Read = read };
+        root.Reader = new GraphStateReader { Read = read };
         var initialValue = root.Reader.Value;
         var changes = new List<SubjectPropertyChange>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
@@ -327,10 +327,10 @@ public class DerivedRegistryStructureTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var root = new StructureHolder(context);
+        var root = new GraphStateHolder(context);
         var registry = context.GetService<ISubjectRegistry>();
-        var holder = new StructureHolder { Target = new RegistryTarget() };
-        root.Reader = new StructureReader { Read = () => (registry.TryGetRegisteredSubject(holder) is not null).ToString() };
+        var holder = new GraphStateHolder { Target = new RegistryTarget() };
+        root.Reader = new GraphStateReader { Read = () => (registry.TryGetRegisteredSubject(holder) is not null).ToString() };
         var changes = new List<SubjectPropertyChange>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
 
@@ -344,16 +344,16 @@ public class DerivedRegistryStructureTests
     }
 
     [Fact]
-    public void WhenSubjectDetachingSubscriberThrowsOnContextDetach_ThenDerivedPropertyReadingTheStructureIsEvaluatedAgain()
+    public void WhenSubjectDetachingSubscriberThrowsOnContextDetach_ThenDerivedPropertyReadingTheGraphStateIsEvaluatedAgain()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var root = new StructureHolder(context);
+        var root = new GraphStateHolder(context);
         var target = new RegistryTarget();
         var targetContext = ((IInterceptorSubject)target).Context;
         targetContext.AddFallbackContext(context);
         var evaluations = 0;
-        root.Reader = new StructureReader
+        root.Reader = new GraphStateReader
         {
             Read = () =>
             {
@@ -384,10 +384,10 @@ public class DerivedRegistryStructureTests
         // Arrange: each evaluation assigns a new target to another holder, whose reconciliation looks up the
         // holder's registered properties and registers the target on the evaluating thread.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var root = new StructureHolder(context);
-        var other = new StructureHolder(context);
+        var root = new GraphStateHolder(context);
+        var other = new GraphStateHolder(context);
         var evaluations = 0;
-        root.Reader = new StructureReader
+        root.Reader = new GraphStateReader
         {
             Read = () =>
             {
@@ -397,7 +397,7 @@ public class DerivedRegistryStructureTests
             }
         };
 
-        // Act: the structure of the holder, then of the target changes.
+        // Act: the graph state of the holder, then of the target changes.
         other.TryGetRegisteredSubject()!.AddProperty<int>("Added", _ => 1);
         other.OtherTarget = other.Target;
 
@@ -406,7 +406,7 @@ public class DerivedRegistryStructureTests
     }
 
     private static (Func<string?> Read, Action Change) CreateScenario(
-        string api, IInterceptorSubjectContext context, StructureHolder root, RegistryTarget target)
+        string api, IInterceptorSubjectContext context, GraphStateHolder root, RegistryTarget target)
     {
         if (api is "TryGetRegisteredSubject" or "ISubjectRegistry.TryGetRegisteredSubject")
         {
@@ -431,9 +431,9 @@ public class DerivedRegistryStructureTests
         if (api == "RegisteredSubjectProperty.Children")
         {
             // The registry clears the children of a property when its subject detaches, without a write of the property.
-            var child = new StructureHolder { Targets = [target] };
+            var child = new GraphStateHolder { Targets = [target] };
             root.Child = child;
-            var targets = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(StructureHolder.Targets))!;
+            var targets = child.TryGetRegisteredSubject()!.TryGetProperty(nameof(GraphStateHolder.Targets))!;
             return (() => targets.Children.Length.ToString(), () => root.Child = null);
         }
 

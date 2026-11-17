@@ -45,7 +45,7 @@ public class RegisteredSubject
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            DerivedStructureDependencies.RecordRead(Subject);
+            DerivedGraphDependencies.RecordRead(Subject);
             var snapshot = Volatile.Read(ref _parentsSnapshot);
             return snapshot is not null
                 ? ImmutableCollectionsMarshal.AsImmutableArray(snapshot)
@@ -96,7 +96,7 @@ public class RegisteredSubject
     {
         get
         {
-            DerivedStructureDependencies.RecordRead(Subject);
+            DerivedGraphDependencies.RecordRead(Subject);
             return _properties.Values;
         }
     }
@@ -107,7 +107,7 @@ public class RegisteredSubject
     public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
     {
         // Recorded when called, not when enumerated: a getter may enumerate the result after it returned.
-        DerivedStructureDependencies.RecordRead(Subject);
+        DerivedGraphDependencies.RecordRead(Subject);
         return GetPropertyAttributes(_properties, propertyName);
     }
 
@@ -131,7 +131,7 @@ public class RegisteredSubject
     /// <returns>The attribute property.</returns>
     public RegisteredSubjectProperty? TryGetPropertyAttribute(string propertyName, string attributeName)
     {
-        DerivedStructureDependencies.RecordRead(Subject);
+        DerivedGraphDependencies.RecordRead(Subject);
         foreach (var property in _properties.Values)
         {
             if (property.IsAttribute &&
@@ -152,7 +152,7 @@ public class RegisteredSubject
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectProperty? TryGetProperty(string propertyName)
     {
-        DerivedStructureDependencies.RecordRead(Subject);
+        DerivedGraphDependencies.RecordRead(Subject);
         return _properties.GetValueOrDefault(propertyName);
     }
 
@@ -365,7 +365,7 @@ public class RegisteredSubject
         {
             // Reported once the property is attached: outside the lifecycle lock, this recalculates and publishes
             // the derived properties that read the registered properties, which can throw.
-            DerivedStructureDependencies.Changed(Subject, hasFailed);
+            DerivedGraphDependencies.Changed(Subject, hasFailed);
         }
     }
 
