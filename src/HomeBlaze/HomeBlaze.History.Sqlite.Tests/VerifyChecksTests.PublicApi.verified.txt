@@ -19,6 +19,7 @@ namespace HomeBlaze.History.Sqlite
         public long EstimatedStorageBytes { get; }
         public string? LastError { get; }
         public System.DateTimeOffset? LastFlushUtc { get; }
+        public int OpenConnectionCount { get; }
         public long OversizeCount { get; }
         public int Priority { get; }
         public int QueueDepth { get; }
@@ -71,6 +72,8 @@ namespace HomeBlaze.History.Sqlite
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public int MaxJsonSize { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        public int OpenConnectionCount { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
         [System.ComponentModel.Category("Statistics")]
         public long OversizeCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
@@ -85,6 +88,8 @@ namespace HomeBlaze.History.Sqlite
         [HomeBlaze.Abstractions.Attributes.State]
         [System.ComponentModel.Category("Statistics")]
         public long RecordedCount { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long SqliteMemorySize { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
         public string Status { get; set; }
         public System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }

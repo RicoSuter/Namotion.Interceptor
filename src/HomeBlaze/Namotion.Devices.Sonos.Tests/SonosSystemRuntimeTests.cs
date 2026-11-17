@@ -252,6 +252,76 @@ public class SonosSystemRuntimeTests
         Assert.Null(system.ActiveEventCallbackHost);
         Assert.Equal(0.44m, system.Players[TestFixtures.KitchenUuid].Volume);
         Assert.Null(speaker.GetCallback(AvTransportEventPath));
+        Assert.Equal(ServiceStatus.Running, system.Status);
+        Assert.Contains($"port {portBlocker.Port}", system.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenTheTakenEventPortBecomesFree_ThenTheListenerStartsAtTheNextPollAndWarnsOnce()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        await using var portBlocker = new LoopbackHttpServer(_ => Task.CompletedTask);
+        var logger = new RecordingLogger<SonosSystem>();
+        var system = ConnectedSystem.CreateSystem(speaker.Host, eventPort: portBlocker.Port, logger: logger);
+        system.PollingInterval = TimeSpan.FromMilliseconds(200);
+        await using var owner = ConnectedSystem.Own(system);
+        await system.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => system.IsConnected && logger.Entries.Count(entry => entry.Message.Contains("could not listen")) >= 3,
+            ConnectedSystem.WaitTimeout,
+            message: "The system should connect without events and try the listener again at its polls.");
+        Assert.NotNull(system.StatusMessage);
+
+        // Act
+        await portBlocker.DisposeAsync();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => system.AreEventsActive && system.StatusMessage is null,
+            ConnectedSystem.WaitTimeout,
+            message: "Once the port is free, the listener should start and the events become active.");
+        Assert.Equal("127.0.0.1", system.ActiveEventCallbackHost);
+        Assert.NotNull(speaker.GetCallback(AvTransportEventPath));
+        Assert.Single(logger.Warnings, message => message.Contains("could not listen"));
+    }
+
+    [Fact]
+    public async Task WhenTheEventListenerStopsAccepting_ThenItListensAgainAtTheNextPollAndEventsResume()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        var logger = new RecordingLogger<SonosSystem>();
+        await using var connected = await ConnectedSystem.StartAsync(speaker, logger: logger, configure: system =>
+            system.PollingInterval = TimeSpan.FromMilliseconds(200));
+        var system = connected.System;
+        var listener = system.CurrentEventListener!;
+        var failures = 0;
+        listener.AcceptContextAsync = httpListener => Interlocked.Exchange(ref failures, 1) == 0
+            ? Task.FromException<HttpListenerContext>(new HttpListenerException(995, "The accept failed."))
+            : httpListener.GetContextAsync();
+
+        // Act
+        // The NOTIFY is answered by the waiting accept; the next accept fails and ends the loop.
+        Assert.Equal(HttpStatusCode.OK, await speaker.NotifyAsync(AvTransportEventPath, SonosEventBodies.AvTransport(("TransportState", "PLAYING"))));
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => logger.Errors.Any(message => message.Contains("stopped accepting requests")),
+            ConnectedSystem.WaitTimeout,
+            message: "The accept loop should fail.");
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => !listener.HasAcceptFailed && listener.IsListening && system.ActiveEventCallbackHost is not null && system.StatusMessage is null,
+            ConnectedSystem.WaitTimeout,
+            message: "The next poll should listen again.");
+        Assert.Equal(HttpStatusCode.OK, await speaker.NotifyAsync(AvTransportEventPath, SonosEventBodies.AvTransport(("TransportState", "PAUSED_PLAYBACK"))));
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => connected.Player.PlaybackState == MediaPlaybackState.Paused && system.AreEventsActive,
+            ConnectedSystem.WaitTimeout,
+            message: "Events should reach the player again through the subscription made before the failure.");
+        Assert.Single(logger.Warnings, message => message.Contains("stopped accepting requests"));
+        Assert.Equal(1, speaker.Subscribed.Count(path => path == AvTransportEventPath));
     }
 
     [Fact]
@@ -266,7 +336,7 @@ public class SonosSystemRuntimeTests
 
         // Assert
         Assert.Equal(
-            new[] { AvTransportEventPath, "/MediaRenderer/GroupRenderingControl/Event", "/MediaRenderer/RenderingControl/Event", "/ZoneGroupTopology/Event" },
+            new[] { AvTransportEventPath, "/MediaRenderer/GroupRenderingControl/Event", "/MediaRenderer/RenderingControl/Event", "/MediaServer/ContentDirectory/Event", "/ZoneGroupTopology/Event" },
             speaker.Unsubscribed.Order(StringComparer.Ordinal));
         Assert.Equal(ServiceStatus.Stopped, connected.System.Status);
         Assert.False(connected.System.IsConnected);
@@ -455,6 +525,102 @@ public class SonosSystemRuntimeTests
         // Assert
         Assert.Equal(2, logger.Warnings.Count(message => message.Contains("favorites")));
         Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Debug && entry.Message.Contains("favorites"));
+    }
+
+    [Fact]
+    public async Task WhenTheSeedIsASatellite_ThenAPlayerHoldsTheFavoritesSubscription()
+    {
+        // Arrange
+        const string subwooferUuid = "RINCON_A0000000000201400";
+        await using var subwoofer = new FakeSonosSpeaker();
+        await using var kitchen = new FakeSonosSpeaker();
+        subwoofer.RespondAsIdlePlayer(subwooferUuid, "Küche");
+        kitchen.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        foreach (var speaker in new[] { subwoofer, kitchen })
+        {
+            speaker.RespondWithHomeTheater(kitchen.BaseUri, subwooferUuid, subwoofer.BaseUri);
+            speaker.SendInitialEventBeforeAnswering(ConnectedSystem.ContentDirectoryEventPath, SonosEventBodies.Properties());
+        }
+
+        subwoofer.RespondWithServerError("Browse");
+
+        // Act
+        var system = await ConnectedSystem.StartWithEventsAsync(
+            () => ConnectedSystem.CreateSystem(subwoofer.Host),
+            system => system.IsConnected && kitchen.GetCallback(ConnectedSystem.ContentDirectoryEventPath) is not null && !system.HasPendingFavoritesRefresh,
+            "The system should subscribe to the favorites of the kitchen.");
+        await using var owner = ConnectedSystem.Own(system);
+        kitchen.Respond("Browse", ("Result", TestFixtures.Read("favorites.xml")), ("NumberReturned", "4"), ("TotalMatches", "3"), ("UpdateID", "2"));
+        await kitchen.NotifyAsync(ConnectedSystem.ContentDirectoryEventPath, SonosEventBodies.Properties(
+            ("ContainerUpdateIDs", "R:0,2,FV:2,2"), ("FavoritesUpdateID", "RINCON_C43875930F2801400,12")));
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => !system.HasPendingFavoritesRefresh && kitchen.Calls.Count(call => call.Action == "Browse") >= 2,
+            ConnectedSystem.WaitTimeout,
+            message: "The event of the kitchen should read the favorites again.");
+        Assert.Null(subwoofer.GetCallback(ConnectedSystem.ContentDirectoryEventPath));
+        Assert.NotNull(subwoofer.GetCallback("/ZoneGroupTopology/Event"));
+    }
+
+    [Fact]
+    public async Task WhenThePlayerHoldingTheFavoritesSubscriptionIsUnreachable_ThenTheSubscriptionMovesAndReturns()
+    {
+        // Arrange
+        const string subwooferUuid = "RINCON_A0000000000201400";
+        const string contentDirectoryPath = ConnectedSystem.ContentDirectoryEventPath;
+        await using var subwoofer = new FakeSonosSpeaker();
+        await using var kitchen = new FakeSonosSpeaker();
+        await using var office = new FakeSonosSpeaker();
+        subwoofer.RespondAsIdlePlayer(subwooferUuid, "Küche");
+        kitchen.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        office.RespondAsIdlePlayer(TestFixtures.OfficeUuid, "Büro");
+        var channelMap = $"{TestFixtures.KitchenUuid}:LF,RF;{subwooferUuid}:SW";
+        var topology =
+            "<ZoneGroupState><ZoneGroups>" +
+            $"""<ZoneGroup Coordinator="{TestFixtures.KitchenUuid}" ID="{TestFixtures.KitchenUuid}:1">""" +
+            $"""<ZoneGroupMember UUID="{TestFixtures.KitchenUuid}" Location="{kitchen.BaseUri}xml/device_description.xml" ZoneName="Küche" SoftwareVersion="97.1-80312" HTSatChanMapSet="{channelMap}" EthLink="0" MoreInfo="">""" +
+            $"""<Satellite UUID="{subwooferUuid}" Location="{subwoofer.BaseUri}xml/device_description.xml" ZoneName="Küche" Invisible="1" SoftwareVersion="97.1-80312" HTSatChanMapSet="{channelMap}" EthLink="0" MoreInfo="" />""" +
+            "</ZoneGroupMember></ZoneGroup>" +
+            $"""<ZoneGroup Coordinator="{TestFixtures.OfficeUuid}" ID="{TestFixtures.OfficeUuid}:1">""" +
+            $"""<ZoneGroupMember UUID="{TestFixtures.OfficeUuid}" Location="{office.BaseUri}xml/device_description.xml" ZoneName="Büro" SoftwareVersion="97.1-80312" EthLink="0" MoreInfo="" />""" +
+            "</ZoneGroup></ZoneGroups></ZoneGroupState>";
+        foreach (var speaker in new[] { subwoofer, kitchen, office })
+        {
+            speaker.Respond("GetZoneGroupState", ("ZoneGroupState", topology));
+            speaker.SendInitialEventBeforeAnswering(contentDirectoryPath, SonosEventBodies.Properties());
+        }
+
+        var system = await ConnectedSystem.StartWithEventsAsync(
+            () => ConnectedSystem.CreateSystem(subwoofer.Host, configure: system => system.PollingInterval = TimeSpan.FromHours(1)),
+            system => system.IsConnected && system.Players.Count == 2 && kitchen.GetCallback(contentDirectoryPath) is not null &&
+                      !system.HasPendingFavoritesRefresh,
+            "The kitchen, the lowest RINCON id, should hold the favorites subscription.");
+        await using var owner = ConnectedSystem.Own(system);
+
+        // Act
+        kitchen.RespondWithServerError("GetTransportInfo");
+        await system.RefreshAsync(CancellationToken.None);
+        var officeSubscribe = office.HoldSubscribe(contentDirectoryPath);
+        var refresh = system.RefreshAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => office.GetCallback(contentDirectoryPath) is not null,
+            ConnectedSystem.WaitTimeout,
+            message: "The office should be subscribed once the kitchen is unreachable.");
+        var isKitchenUnsubscribedFirst = kitchen.Unsubscribed.Contains(contentDirectoryPath);
+        officeSubscribe.SetResult();
+        await refresh;
+        var isKitchenConnected = system.Players[TestFixtures.KitchenUuid].IsConnected;
+        kitchen.ClearServerError("GetTransportInfo");
+        await system.RefreshAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(isKitchenConnected);
+        Assert.True(isKitchenUnsubscribedFirst);
+        Assert.Contains(contentDirectoryPath, office.Unsubscribed);
+        Assert.Equal(2, kitchen.Subscribed.Count(path => path == contentDirectoryPath));
+        Assert.Equal(1, office.Subscribed.Count(path => path == contentDirectoryPath));
+        Assert.Null(subwoofer.GetCallback(contentDirectoryPath));
     }
 
     [Fact]
@@ -723,8 +889,8 @@ public class SonosSystemRuntimeTests
         await system.RefreshAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(4, logger.Warnings.Count(message => message.Contains("subscription")));
-        Assert.Equal(8, logger.Entries.Count(entry => entry.Level == LogLevel.Debug && entry.Message.Contains("subscription")));
+        Assert.Equal(5, logger.Warnings.Count(message => message.Contains("subscription")));
+        Assert.Equal(10, logger.Entries.Count(entry => entry.Level == LogLevel.Debug && entry.Message.Contains("subscription")));
         Assert.False(system.AreEventsActive);
     }
 

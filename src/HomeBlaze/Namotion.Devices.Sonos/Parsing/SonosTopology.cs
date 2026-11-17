@@ -14,7 +14,8 @@ internal sealed record SonosTopologyPlayer(
     string? SoftwareVersion,
     bool? IsWireless,
     string? MoreInfo,
-    IReadOnlyList<SonosTopologySatellite> Satellites);
+    IReadOnlyList<SonosTopologySatellite> Satellites,
+    string? BootSequence = null);
 
 internal sealed record SonosTopologySatellite(
     string Uuid,

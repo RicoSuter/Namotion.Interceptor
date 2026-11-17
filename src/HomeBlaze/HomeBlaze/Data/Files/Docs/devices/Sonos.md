@@ -5,7 +5,7 @@ icon: LibraryMusic
 
 # Sonos
 
-Controls a Sonos household over the speakers' local UPnP API on port 1400, without a Sonos account or cloud connection. One `SonosSystem` finds the speakers, shows every room as a `SonosPlayer` with its bonded units as `SonosSatellite` children and, for a soundbar, its home theater settings as a `SonosHomeTheater` child, and the current groups as `SonosGroup` subjects. UPnP events keep the state live, and a poll every 30 seconds reconciles anything the events missed.
+Controls a Sonos household over the speakers' local UPnP API on port 1400, without a Sonos account or cloud connection. One `SonosSystem` finds the speakers, shows every room as a `SonosPlayer` with its bonded units as `SonosSatellite` children and, for a soundbar, its home theater settings as a `SonosHomeTheater` child, and the current groups as `SonosGroup` subjects. UPnP events keep the state live. A poll every 30 seconds reads what events do not deliver, such as the position of a playing track, and every 5 minutes a full reconciliation repairs anything the events missed.
 
 ## Supported Systems
 
@@ -30,7 +30,7 @@ Create a `SonosSystem` in the UI (group "Media") or as a JSON file such as `Devi
 | `SeedHost` | string | null | Any speaker of the household, as `host`, `host:port`, an IPv6 literal or `[IPv6]:port`, without a scheme (port 1400 by default). Empty tries the speakers found since HomeBlaze started, then SSDP discovery. |
 | `EventCallbackHost` | string | null | The address the speakers send events to. Empty detects the local IPv4 address that routes to the seed. |
 | `EventPort` | int | 6329 | The port the event listener binds on all interfaces. |
-| `PollingInterval` | TimeSpan | 30 seconds | How often topology, player state and favorites are reconciled. |
+| `PollingInterval` | TimeSpan | 30 seconds | How often the system polls. While events are live, a poll reads only what they do not deliver, see [Polling](#polling). |
 | `RetryInterval` | TimeSpan | 30 seconds | The delay before reconnecting after a failed connection. |
 
 Both intervals accept 5 seconds to 1 hour; values outside that range set in JSON are clamped, and zero or less uses 30 seconds. A long `PollingInterval` does not let events lapse, since subscriptions are renewed on their own schedule. Every change restarts the connection at once and keeps the players.
@@ -54,7 +54,7 @@ The speakers send events to `http://<EventCallbackHost>:<EventPort>/event/...`, 
 | `Status` | When | `StatusMessage` |
 |----------|------|-----------------|
 | Starting | Selecting the seed, starting the listener, first reconciliation | empty |
-| Running | Connected | empty, or "Reconciliation failed (n of 3): ..." while another speaker is tried |
+| Running | Connected | empty, "Reconciliation failed (n of 3): ..." while another speaker is tried, or "Events unavailable: ..." while the event listener does not run: its port could not be bound, no local IPv4 address routes to the seed, or it stopped accepting requests. Each is logged as a Warning once and the listener is tried again at every poll, see [Troubleshooting](#troubleshooting) |
 | Error | The attempt failed; retried after `RetryInterval` | for example "No Sonos speaker found. ..." or "The SeedHost '...' did not answer, and no other Sonos speaker was found." |
 
 `IsConnected` turns true after the first successful reconciliation. The system widget shows **Connected** and **Events: live** or **Events: polling only**, see [Event Subscriptions](#event-subscriptions).
@@ -100,9 +100,9 @@ A group reports its coordinator's playback, track, source, play mode and sleep t
 ### Offline Handling
 
 - A player that leaves the topology keeps its subject and last state with `IsConnected = false` until it returns; only a restart removes it. A topology that misses players is applied only when the next one misses them too, since a rebooting seed can report part of the household. The topology reads a grouping command waits with are skipped while they miss players and do not count toward the two.
-- While a player is not connected, its `PlaybackState` and `IsPlaying` are empty (unknown), so an unplugged speaker never keeps reporting that it plays, and its going offline does not read as playback that stopped. The same holds for a grouped member while its coordinator is not connected, and a group follows its coordinator. Everything else keeps its last value, including the track, source, volume and settings, and `IsConnected` tells that it may be stale. The playback state returns with the next successful poll that reads it; the one from before the outage is forgotten.
-- A new player is offline until its first poll succeeds. One found through a topology event is polled at the next reconciliation.
-- A transport failure (timeout, connection refused) of two polls in a row takes a unit offline with the error in `StatusMessage`. A single failed poll changes nothing and is logged at Debug, so a lost request neither blanks the playback state nor disables operations. A UPnP fault answer counts as answered; the values of that read keep their last state. So does a single value that an answer leaves out or holds in a form that cannot be read.
+- While a player is not connected, its `PlaybackState` and `IsPlaying` are empty (unknown), so an unplugged speaker does not keep reporting that it plays once it is offline, and its going offline does not read as playback that stopped. The same holds for a grouped member while its coordinator is not connected, and a group follows its coordinator. Everything else keeps its last value, including the track, source, volume and settings, and `IsConnected` tells that it may be stale. The playback state returns with the next successful poll that reads it; the one from before the outage is forgotten.
+- A new player is offline until its first poll succeeds. One found through a topology event is polled at the next poll.
+- A transport failure (timeout, connection refused) of two polls in a row takes a unit offline with the error in `StatusMessage`. While events are live, a poll contacts only the seed and the coordinators of playing groups, see [Polling](#polling), so a speaker that loses power unnoticed by events, for example a member of a playing group or an idle room, keeps its last state, `Playing` included, until Sonos drops it from the topology or the full reconciliation polls it. The full reconciliation runs at the first poll at or after 5 minutes since the last one, and the second failed poll follows one polling interval later, so this takes at most 5 minutes plus two polling intervals, about 5.5 minutes with the defaults, where 30 seconds divides 5 minutes. A single failed poll changes nothing and is logged at Debug, so a lost request neither blanks the playback state nor disables operations. A UPnP fault answer counts as answered; the values of that read keep their last state. So does a single value that an answer leaves out or holds in a form that cannot be read.
 - When the connection is torn down, every unit reports "The Sonos system is disconnected."
 
 ## Widgets
@@ -139,7 +139,7 @@ The speakers do not report `SubnetMask`, `Gateway`, `SignalStrength` or `Availab
 | `Players`, `Groups`, `Favorites` | See [Subject Model](#subject-model) and [Favorites](#favorites) |
 | `AreEventsActive` | True once at least one subscription delivered an event |
 | `ActiveEventCallbackHost` | The host the speakers were told to send events to; empty when the listener could not start or no local address routes to the seed |
-| `LastUpdated` | When the last reconciliation completed |
+| `LastUpdated` | When the last poll completed |
 
 ### SonosPlayer
 
@@ -151,11 +151,11 @@ The speakers do not report `SubnetMask`, `Gateway`, `SignalStrength` or `Availab
 | `CurrentTrackTitle`, `CurrentTrackArtist`, `CurrentTrackAlbum`, `CurrentTrackUri` | | The track of the room's group, see [Track Details](#track-details) |
 | `CurrentTrackImageUri` | URI | Album art; Sonos's relative `/getaa?...` paths are resolved against the coordinator, which serves it |
 | `CurrentTrackDuration` | TimeSpan | Empty for streams, TV and line-in |
-| `CurrentTrackPosition` | TimeSpan | As of the last poll or command read-back; Sonos does not event it |
+| `CurrentTrackPosition` | TimeSpan | As of the last poll or command read-back; Sonos does not event it, so every poll reads it while the group plays, and the next poll after an AVTransport event of the coordinator, such as a pause or a track change, reads it once |
 | `Source` | | `None` (nothing loaded), `Tv`, `LineIn`, `SpotifyConnect`, `AirPlay`, `Radio`, `Queue` or `Other`, from the coordinator's transport URI; empty until it was read. `Other` may be refined into new values later |
 | `SourceTitle` | | The station, playlist or album the group plays, not the track. For a queue it is the playlist or album enqueued last, which the current track need not come from |
 | `Shuffle`, `Repeat` | | Group play mode; `Repeat` is `Off`, `All` or `One` |
-| `SleepTimerRemaining` | TimeSpan | Group sleep timer as of the last poll; empty when none runs |
+| `SleepTimerRemaining` | TimeSpan | Group sleep timer as of the last poll; empty when none runs. Sonos does not event it, so while events are live every poll reads it only while the group plays or a timer runs, and a timer set on a paused group shows with the next full reconciliation |
 | `Bass`, `Treble` | -10..10 | Equalizer of this room |
 | `Loudness` | | Loudness compensation of this room |
 | `HomeTheater` | | The [home theater](#home-theater) settings; empty on other players |
@@ -220,7 +220,7 @@ Both are empty until first read and keep their last value while the player is of
 
 | Operation | Parameters | Description |
 |-----------|------------|-------------|
-| `Refresh` | | Reconciles now instead of at the next poll |
+| `Refresh` | | Runs a full reconciliation now |
 | `GroupAll` | `room` | Groups every connected room with the given room, which becomes coordinator |
 | `UngroupAll` | | Makes every connected room standalone |
 
@@ -230,7 +230,7 @@ Operations are disabled while the system, the target or, for coordinator operati
 
 ### Favorites
 
-`Favorites` lists the household's "My Sonos" favorites, read once per reconciliation.
+`Favorites` lists the household's "My Sonos" favorites. While the ContentDirectory subscription is live, a favorite added or removed in the Sonos app shows within seconds: the speaker that holds the subscription sends an event whenever the favorites change, also when they were changed through another speaker, and the system reads them again. Renames are expected to work the same way, but that has not been confirmed. The seed holds the subscription. When the seed does not match the address of a visible player, because it is a satellite, which may not send these events, or `SeedHost` names it by a DNS name, the connected player with the lowest RINCON id holds it instead, and it moves to the next one while that player is not connected. The app can take a moment to save a change to the speakers. The favorites are also read at every full reconciliation, so every 5 minutes, as a safety net for a lost event, and with `Refresh`. While that subscription is not live, they are read at every full reconciliation, and at every poll while the topology subscription is not live either, so a change can take up to 5 minutes to show and to be found by `PlayFavorite`.
 
 - Satellites answer the favorites `Browse` (`FV:2`) with HTTP 500, so the list is read through a connected room player, coordinators first, trying the next one on failure. When none answers, the previous list stays.
 - Favorites are read in pages of 100, so large lists are complete, up to 20 pages, which is far more than a household has. A speaker that still reports more to come after that is logged as a Warning once, and the favorites read so far are used.
@@ -264,11 +264,26 @@ Everything else is kept. A `SourceTitle` that equals the end of the URL stays, s
 
 ### Seed Selection
 
-The seed is the speaker the household topology (`GetZoneGroupState`) is read from. Each connection attempt tries `SeedHost` (5 second timeout), then the speakers known since startup (2 seconds each, those in the last topology first), then an SSDP M-SEARCH for `urn:schemas-upnp-org:device:ZonePlayer:1` on every IPv4 interface for 5 seconds, accepting the first `uuid:RINCON_` answer. While connected, a failed reconciliation moves to another connected player; three failures in a row tear the connection down and rebuild it.
+The seed is the speaker the household topology (`GetZoneGroupState`) is read from. Each connection attempt tries `SeedHost` (5 second timeout), then the speakers known since startup (2 seconds each, those in the last topology first), then an SSDP M-SEARCH for `urn:schemas-upnp-org:device:ZonePlayer:1` on every IPv4 interface for 5 seconds, accepting the first `uuid:RINCON_` answer. While connected, a failed poll moves to another connected player; three failures in a row tear the connection down and rebuild it.
 
 ### Polling
 
-Each reconciliation reads the topology, polls every player in parallel (about ten SOAP requests per room), reads satellite identity when needed, reads the favorites and maintains the subscriptions. Polling is the fallback when events cannot reach HomeBlaze and repairs anything an event missed. Position and sleep timer are never evented, so polls and command read-backs are their only source. Events and polls share one monotonic sequence, so a poll that started before a newer event never overwrites it.
+A full reconciliation reads the topology, polls every player in parallel (about a dozen SOAP requests per room), reads satellite identity when needed, reads the favorites and maintains the subscriptions. The first poll of a connection, every poll at least 5 minutes after the last full reconciliation, `Refresh` and the grouping commands are full reconciliations. Every other poll reads only what events do not deliver:
+
+| What | While events are live | Otherwise |
+|------|-----------------------|-----------|
+| Topology (`GetZoneGroupState` from the seed) | every poll | every poll |
+| Position (`GetPositionInfo`) | every poll, of each playing or buffering group, and once after each AVTransport event of a coordinator | every poll |
+| Sleep timer (`GetRemainingSleepTimerDuration`) | every poll, of each group that plays or has a timer running | every poll |
+| Everything else a player reports, see [Event Subscriptions](#event-subscriptions) | every full reconciliation | every poll |
+| Favorites | after each ContentDirectory event that reports a change, and every full reconciliation | every full reconciliation, and every poll while the topology subscription is not live |
+| Satellite and player identity and firmware | when a unit appears, after a firmware or address change and after a reconnect | the same |
+
+The events of a player are live while it answered its last poll, its identity is read, and its AVTransport, RenderingControl and, for a coordinator, GroupRenderingControl subscriptions are live. A subscription is live while the speaker has accepted it, an event arrived through it, its last renewal was answered, and the lifetime the speaker granted has not ended. Favorites follow the ContentDirectory subscription, see [Favorites](#favorites); a gap in its `SEQ` numbers, an event that could not be applied, or a read after an event that no player answered makes the next poll read them, once. Anything else is polled fully from the next poll on: a player whose subscription failed, lapsed or whose renewal went unanswered or was rejected, a new player until its first event, a player whose poll failed, and every player while the event listener does not run. A player is also polled fully once when one of its events could not be applied, or when the `SEQ` numbers of its events show a gap or start over, since an event was lost. A poll that fails, or in which a player does not answer the position or sleep timer read, makes the next poll a full reconciliation, because events sent meanwhile may be lost.
+
+Speakers do not report that they dropped a subscription. A player that is missing from a topology, also one that is not applied yet, or whose boot sequence (`BootSeq`) changed may have rebooted or failed to send events, so it is polled fully and subscribed again, which makes it send its full state; for the seed that includes the topology and ContentDirectory subscriptions. The first event of a topology subscription follows the poll that made it within milliseconds, so it never counts as the second read that takes missing players offline. The topology is read at every poll because a single request notices a seed that stopped answering or rebooted, which no event reports. The full reconciliation every 5 minutes repairs whatever a lost event left behind, including events that stop reaching HomeBlaze while the speakers still accept the renewals.
+
+Position and sleep timer are never evented, so polls and command read-backs are their only source. Events and polls share one monotonic sequence, so a poll that started before a newer event never overwrites it.
 
 ### Event Subscriptions
 
@@ -278,6 +293,7 @@ Each reconciliation reads the topology, polls every player in parallel (about te
 | RenderingControl | every player | volume, mute, equalizer, night mode, dialog level |
 | GroupRenderingControl | every coordinator | group volume and mute |
 | ZoneGroupTopology | the seed | the whole topology on every change |
+| ContentDirectory | the seed, or the connected player with the lowest RINCON id when the seed matches no visible player's address (a satellite or a DNS name) | `FavoritesUpdateID` (the speaker that made the change and a count per household) and `ContainerUpdateIDs` (with an `FV:2` entry for the favorites); the favorites are read again when either changes and after the first event of a subscription, see [Favorites](#favorites) |
 
 Subscriptions request a 30 minute lifetime and are renewed at half the lifetime the speaker grants, independent of `PollingInterval`. A rejected renewal subscribes again; an unanswered one is retried after 30 seconds. A subscription only proves the speaker accepted it, so **Events: live** (`AreEventsActive`) means at least one event actually arrived. When no event arrives within 15 seconds of an accepted subscription, a Warning names the callback address. On stop, removal or any configuration change, all subscriptions are cancelled with `UNSUBSCRIBE` within 2 seconds; one that cannot be cancelled expires on the speaker. The listener answers unknown subscriptions with 412 so speakers drop stale ones.
 
@@ -293,7 +309,7 @@ Subscriptions request a 30 minute lifetime and are renewed at half the lifetime 
 
 The local Sonos API has no authentication: anything that reaches port 1400 can control the speakers.
 
-On Windows, `HttpListener` binds all interfaces only with administrator rights or a URL reservation; without either, the system polls only. Reserve the port once in an elevated prompt:
+On Windows, `HttpListener` binds all interfaces only with administrator rights or a URL reservation; without either, the system polls only and says so in `StatusMessage`. Reserve the port once in an elevated prompt:
 
 ```
 netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
@@ -304,9 +320,10 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 - **"No Sonos speaker found":** multicast discovery is blocked (VLAN, Docker bridge, firewall, access point). Set `SeedHost`.
 - **"The SeedHost '...' did not answer":** check that HomeBlaze reaches `http://<speaker>:1400/xml/device_description.xml`. Give the speaker a DHCP reservation.
 - **Rooms of another household show up:** SSDP found a speaker of another household. Set `SeedHost`.
+- **"Events unavailable: port ... could not be bound":** another process holds `EventPort`, or on Windows the URL reservation is missing. The system polls only, logs a Warning once and tries the port again at every poll, so events start once it is free; change `EventPort` to use another one.
 - **"Events: polling only":** allow inbound TCP on `EventPort` from the speakers, and under Docker bridge networking set `EventCallbackHost` and publish the port. Compare the callback address in the Warning with the host's address. On Windows, see [Network and Firewall](#network-and-firewall).
-- **Events stop after a while:** the listener stopped accepting requests (logged at Error). `Refresh` only polls; a configuration change or restart starts a new listener.
-- **"not connected":** check the `StatusMessage` of the system and the room. Coordinator operations also need the coordinator to be connected. A room that just appeared through an event is polled at the next reconciliation, or at once with `Refresh`.
+- **Events stop after a while:** the listener stopped accepting requests (logged at Error). The system polls only and says so in `StatusMessage`, and the next poll binds the port again; the existing subscriptions keep their callback, so events resume, and a gap in their sequence numbers makes the affected players poll fully once.
+- **"not connected":** check the `StatusMessage` of the system and the room. Coordinator operations also need the coordinator to be connected. A room that just appeared through an event is polled at the next poll, or at once with `Refresh`.
 - **`Next`, `Previous` or `SetShuffle` fail on TV or radio:** Sonos answers them with a UPnP fault for sources without a queue.
 - **`PlayNotification` plays nothing:** the speaker must be S2, reach the sound URL itself and be reachable on TCP 1443. A rejected clip is not reported.
 - **Album art does not show:** the browser loads it from the speaker over plain HTTP, so it fails when the browser cannot reach the speakers or blocks it as mixed content on an HTTPS page. The widget shows a placeholder icon.
@@ -324,7 +341,6 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 
 - Alarms as state, with enable and disable operations (`AlarmClockService`).
 - Shortcut favorites through the Sonos local websocket favorites API.
-- Refreshing favorites on `FavoritesUpdateID` changes of a ContentDirectory subscription instead of at every poll.
 - Queue editing, Sonos playlists and music library browsing.
 - Queue position (`CurrentTrack`, `NumberOfTracks`) and next track (`NextTrackURI`, `NextTrackMetaData`).
 - Crossfade (`Get/SetCrossfadeMode`, already evented).
@@ -342,7 +358,7 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 - LED state, button lock, and home theater TV power state.
 - A widget for `SonosSatellite`.
 - Live track progress in the widgets, counted up from the last polled position while playing, since the position is empty for up to one polling interval after a track starts.
-- A lean poll while events are live that reads only position and sleep timer, and a read-back after a command limited to the affected player instead of its whole group.
+- A read-back after a command limited to the affected player instead of its whole group.
 - Satellite reads overlapped with the player polls, and known seed speakers probed concurrently instead of one after another.
 - NOTIFY bodies parsed with an `XmlReader` without the intermediate string copies.
 - Opt-in read-only live integration tests (`Category=Integration`).

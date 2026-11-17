@@ -11,7 +11,14 @@ internal sealed class ConnectedSystem : IAsyncDisposable
 {
     internal static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
 
-    private const int MaxStartAttempts = 3;
+    private const int MaxStartAttempts = 5;
+
+    /// <summary>
+    /// The event path of the ContentDirectory subscription, whose initial event asks for a favorites read. The helpers
+    /// have speakers send it before answering the SUBSCRIBE, so a started system has no read pending that a test
+    /// would count.
+    /// </summary>
+    internal const string ContentDirectoryEventPath = "/MediaServer/ContentDirectory/Event";
 
     private ConnectedSystem(SonosSystem system, SonosPlayer player)
     {
@@ -23,6 +30,12 @@ internal sealed class ConnectedSystem : IAsyncDisposable
 
     internal SonosPlayer Player { get; }
 
+    /// <summary>
+    /// Returns a system for the seed that is not started. Without <paramref name="eventPort"/> it gets a port that is
+    /// free now but not bound until the system starts, so another socket can take it in between; a test that needs
+    /// events starts the system with <see cref="StartWithEventsAsync"/>, which replaces a system whose listener could
+    /// not bind its port.
+    /// </summary>
     internal static SonosSystem CreateSystem(
         string seedHost,
         int? eventPort = null,
@@ -56,13 +69,20 @@ internal sealed class ConnectedSystem : IAsyncDisposable
         TimeProvider? clock = null)
     {
         speaker.RespondAsIdlePlayer(uuid, room);
+        speaker.SendInitialEventBeforeAnswering(ContentDirectoryEventPath, SonosEventBodies.Properties());
         var system = await StartWithEventsAsync(
             () => CreateSystem(speaker.Host, logger: logger, clock: clock, configure: configure),
-            system => system.IsConnected && system.Players.TryGetValue(uuid, out var player) && player.Model is not null && system.AreEventsActive,
+            system => IsSettled(system) && system.Players.TryGetValue(uuid, out var player) && player.Model is not null,
             "The system should connect to the fake speaker and subscribe to its events.");
 
         return new ConnectedSystem(system, system.Players[uuid]);
     }
+
+    /// <summary>
+    /// Whether the system is connected, an event arrived, and no favorites read an event asked for is pending.
+    /// </summary>
+    internal static bool IsSettled(SonosSystem system) =>
+        system.IsConnected && system.AreEventsActive && !system.HasPendingFavoritesRefresh;
 
     /// <summary>
     /// Starts a system from <paramref name="create"/> and waits until it is ready. The system binds its event port

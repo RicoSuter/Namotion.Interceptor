@@ -97,7 +97,8 @@ internal static class ZoneGroupStateParser
             (string?)member.Attribute("SoftwareVersion"),
             GetIsWireless(member),
             (string?)member.Attribute("MoreInfo"),
-            satellites);
+            satellites,
+            (string?)member.Attribute("BootSeq"));
     }
 
     private static void AddHomeTheaterSatellites(XElement member, List<SonosTopologySatellite> satellites)

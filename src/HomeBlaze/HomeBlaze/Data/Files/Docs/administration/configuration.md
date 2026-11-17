@@ -25,13 +25,18 @@ Standard ASP.NET Core logging configuration:
   "Logging": {
     "LogLevel": {
       "Default": "Information",
-      "Microsoft.AspNetCore": "Warning"
+      "Microsoft.AspNetCore": "Warning",
+      "System.Net.Http.HttpClient": "Warning"
     }
   }
 }
 ```
 
 Category-level overrides use the fully qualified type name (or prefix) as the key.
+
+`System.Net.Http.HttpClient` is set to `Warning` because devices are polled over HTTP every few seconds, and at `Information` every request writes four log entries. To see the requests of a device while troubleshooting, set it to `Information`, for example with the environment variable `Logging__LogLevel__System.Net.Http.HttpClient=Information`.
+
+The shared HTTP clients of HomeBlaze give up connecting after 10 seconds, so an unreachable device is detected quickly. Ecowitt, MyStrom, Shelly, Sonos, Wallbox, Pushover and the update check use them; FritzBox, Hue and Nuki create their own connections. A request that is connected has no further limit unless the device sets one.
 
 ---
 

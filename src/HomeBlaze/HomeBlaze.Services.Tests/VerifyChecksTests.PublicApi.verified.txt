@@ -124,6 +124,7 @@ namespace HomeBlaze.Services
     }
     public static class ServiceCollectionExtensions
     {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeHttpClients(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeServices(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
     }
     public sealed class SkippedConfigurationProperty : System.IEquatable<HomeBlaze.Services.SkippedConfigurationProperty>
@@ -308,16 +309,46 @@ namespace HomeBlaze.Services.Diagnostics
         public decimal? AllocationRate { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=410, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         public decimal? CpuUsage { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=428)]
+        public decimal? ExceptionRate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=417, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long? GcCommittedSize { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=418, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long? GcFragmentedSize { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=412, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
         public long? GcHeapSize { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=414, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         public decimal? GcPauseTime { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=431, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long? Gen2FragmentedSize { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=419, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long? Gen2Size { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=423)]
+        public int? HandleCount { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=430)]
+        public long? JitCompiledMethodCount { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=420, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long? LargeObjectHeapSize { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=427)]
+        public decimal? LockContentionRate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=421, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long? ResidentAnonymousMemory { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=422, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long? ResidentFileMemory { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=429, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Byte)]
+        public long? ResidentSharedMemory { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=400)]
         public string RuntimeVersion { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=415)]
         public int? ThreadCount { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=426)]
+        public long? ThreadPoolQueueLength { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=425)]
+        public int? ThreadPoolThreadCount { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=424)]
+        public long? TimerCount { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string Title { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=416)]

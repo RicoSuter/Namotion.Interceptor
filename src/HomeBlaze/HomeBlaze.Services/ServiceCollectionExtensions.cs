@@ -1,4 +1,5 @@
 using HomeBlaze.Services.Clients;
+using HomeBlaze.Services.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -37,8 +38,32 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System,
             serviceProvider.GetService<ILogger<ClientConnectionService>>() ?? NullLogger<ClientConnectionService>.Instance));
         services.AddScoped<ITimeZoneDisplay, TimeZoneDisplayService>();
+        // It subscribes before any hosted service starts and unsubscribes after all have stopped. Registered
+        // ahead of the HomeBlaze services so it also covers their lifecycle callbacks, but not those of
+        // services registered earlier, such as by AddServiceDefaults.
+        services.AddHostedService(serviceProvider => new FirstChanceExceptionLogger(
+            serviceProvider.GetService<ILogger<FirstChanceExceptionLogger>>() ?? NullLogger<FirstChanceExceptionLogger>.Instance,
+            serviceProvider.GetService<TimeProvider>()));
         services.AddHostedService(sp => sp.GetRequiredService<RootManager>());
 
+        return services;
+    }
+
+    /// <summary>
+    /// Adds <see cref="IHttpClientFactory"/> whose clients give up connecting after 10 seconds, so that a device that is
+    /// not reachable fails fast. Requests that are connected have no limit besides the one of the client.
+    /// </summary>
+    public static IServiceCollection AddHomeBlazeHttpClients(this IServiceCollection services)
+    {
+        services.AddHttpClient();
+        services.ConfigureHttpClientDefaults(builder => builder.ConfigurePrimaryHttpMessageHandler((handler, _) =>
+        {
+            // Only the timeout is set, so the primary handler and its pooling stay those of the factory.
+            if (handler is SocketsHttpHandler socketsHandler)
+            {
+                socketsHandler.ConnectTimeout = TimeSpan.FromSeconds(10);
+            }
+        }));
         return services;
     }
 }

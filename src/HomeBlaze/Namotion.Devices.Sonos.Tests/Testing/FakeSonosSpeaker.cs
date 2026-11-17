@@ -24,6 +24,9 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     private readonly ConcurrentQueue<string> _subscribed = new();
     private readonly ConcurrentQueue<(string Path, DateTimeOffset At)> _renewed = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource> _holds = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> _initialEvents = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, bool> _failedSubscriptionPaths = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, bool> _abortedRenewalPaths = new(StringComparer.Ordinal);
 
     internal FakeSonosSpeaker()
     {
@@ -38,6 +41,11 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     internal string DeviceDescription { get; set; }
 
     internal IReadOnlyCollection<SoapCall> Calls => _calls.ToArray();
+
+    /// <summary>
+    /// Forgets the SOAP requests recorded so far, so <see cref="Calls"/> lists only later ones.
+    /// </summary>
+    internal void ClearCalls() => _calls.Clear();
 
     /// <summary>
     /// How often the household topology was read from this speaker.
@@ -93,6 +101,22 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     /// The SID this speaker grants for the event path, unique per speaker as on real ones.
     /// </summary>
     private string SidFor(string eventPath) => $"uuid:{_server.Port}-{eventPath.Trim('/').Replace('/', '-')}";
+
+    /// <summary>
+    /// Sends the body as the initial event of every new subscription to the event path, before answering the
+    /// SUBSCRIBE, so the event has been applied once the subscription is made.
+    /// </summary>
+    internal void SendInitialEventBeforeAnswering(string eventPath, string body) => _initialEvents[eventPath] = body;
+
+    /// <summary>
+    /// Fails every renewal of the event path with a dropped connection, as <see cref="AbortRenewals"/> does for all.
+    /// </summary>
+    internal void AbortRenewalsTo(string eventPath) => _abortedRenewalPaths[eventPath] = true;
+
+    /// <summary>
+    /// Answers every SUBSCRIBE to the event path, new or renewal, with HTTP 500.
+    /// </summary>
+    internal void FailSubscriptionsTo(string eventPath) => _failedSubscriptionPaths[eventPath] = true;
 
     internal string? GetCallback(string eventPath) =>
         _callbacks.TryGetValue(eventPath, out var callback) ? callback : null;
@@ -177,25 +201,33 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     }
 
     /// <summary>
-    /// Sends a NOTIFY with the body to the callback of the event path, as the speaker that holds the subscription.
+    /// Sends a NOTIFY with the body to the callback of the event path, as the speaker that holds the subscription,
+    /// with a SEQ header when <paramref name="sequence"/> is given.
     /// </summary>
-    internal Task<HttpStatusCode> NotifyAsync(string eventPath, string body) =>
+    internal Task<HttpStatusCode> NotifyAsync(string eventPath, string body, uint? sequence = null) =>
         SendNotifyAsync(
             NotifyClient,
             GetCallback(eventPath) ?? throw new InvalidOperationException($"Nothing subscribed to {eventPath}."),
             SidFor(eventPath),
-            body);
+            body,
+            sequence);
 
     /// <summary>
-    /// Sends a NOTIFY with the body and SID to a callback URI, as a speaker does.
+    /// Sends a NOTIFY with the body and SID to a callback URI, as a speaker does, with a SEQ header when
+    /// <paramref name="sequence"/> is given.
     /// </summary>
-    internal static async Task<HttpStatusCode> SendNotifyAsync(HttpClient httpClient, string callback, string sid, string body)
+    internal static async Task<HttpStatusCode> SendNotifyAsync(HttpClient httpClient, string callback, string sid, string body, uint? sequence = null)
     {
         using var request = new HttpRequestMessage(new HttpMethod("NOTIFY"), callback)
         {
             Content = new StringContent(body)
         };
         request.Headers.TryAddWithoutValidation("SID", sid);
+        if (sequence is { } value)
+        {
+            request.Headers.TryAddWithoutValidation("SEQ", value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
         request.Headers.TryAddWithoutValidation("NT", "upnp:event");
         request.Headers.TryAddWithoutValidation("NTS", "upnp:propchange");
         using var response = await httpClient.SendAsync(request);
@@ -244,7 +276,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
                 await WriteAsync(response, DeviceDescription);
                 return;
 
-            case "SUBSCRIBE" when FailSubscriptions:
+            case "SUBSCRIBE" when FailSubscriptions || _failedSubscriptionPaths.ContainsKey(path):
                 response.StatusCode = (int)HttpStatusCode.InternalServerError;
                 return;
 
@@ -281,7 +313,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
         if (request.Headers["SID"] is not null)
         {
             _renewed.Enqueue((path, DateTimeOffset.UtcNow));
-            if (AbortRenewals)
+            if (AbortRenewals || _abortedRenewalPaths.ContainsKey(path))
             {
                 // A bare Abort still answers 200 here, so the body is cut short to make the request fail.
                 response.ContentLength64 = 10;
@@ -292,9 +324,14 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
             }
         }
 
+        if (request.Headers["CALLBACK"] is { } awaitedCallback && _initialEvents.TryGetValue(path, out var initialBody))
+        {
+            await SendNotifyAsync(NotifyClient, awaitedCallback.Trim('<', '>'), SidFor(path), initialBody);
+        }
+
         response.Headers["SID"] = SidFor(path);
         response.Headers["TIMEOUT"] = $"Second-{SubscriptionTimeoutSeconds}";
-        if (SendInitialEvents && request.Headers["CALLBACK"] is { } newCallback)
+        if (SendInitialEvents && request.Headers["CALLBACK"] is { } newCallback && !_initialEvents.ContainsKey(path))
         {
             // Not awaited: Sonos sends the initial NOTIFY around its SUBSCRIBE response, often before it.
             _ = SendInitialEventAsync(newCallback.Trim('<', '>'), SidFor(path));
