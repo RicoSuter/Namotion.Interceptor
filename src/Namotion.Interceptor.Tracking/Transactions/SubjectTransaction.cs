@@ -1320,6 +1320,48 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
+    /// <summary>
+    /// The transaction state of a thread when a change delivery is queued or a segment of queued recalculations opens
+    /// (see <see cref="PostLockQueue"/>): the ambient transaction of its flow and the transaction whose commit scope it
+    /// runs. Queued work runs with the state of its write, not with the one of the drain that runs it.
+    /// </summary>
+    internal readonly record struct DeliveryState(SubjectTransaction? Transaction, SubjectTransaction? CommitScopeTransaction)
+    {
+        /// <summary>Gets the state of this thread; reads no async-local value while no transaction is active.</summary>
+        internal static DeliveryState Capture() => new(HasActiveTransaction ? CurrentTransaction.Value : null, _commitScopeTransaction);
+
+        /// <summary>
+        /// Gets whether this thread runs the commit of a transaction other than the one of this state: a commit that
+        /// started after the delivery was queued and drains it at an apply write. A delivery that a commit's apply
+        /// queued can run after that commit finished, with its scope.
+        /// </summary>
+        internal bool PrecedesRunningCommit => _commitScopeTransaction is { IsCommitting: true } scope && !ReferenceEquals(scope, CommitScopeTransaction);
+
+        /// <summary>
+        /// Makes this state the thread's when its transaction is not the ambient one, and returns whether it did, with
+        /// the state to restore. A delivery of a write made in the ambient transaction keeps the drain's commit scope:
+        /// outside it, that transaction's reads and writes throw while it commits.
+        /// </summary>
+        internal bool TryEnter(out DeliveryState previous)
+        {
+            previous = Capture();
+            if (ReferenceEquals(previous.Transaction, Transaction))
+            {
+                return false;
+            }
+
+            MakeCurrent();
+            return true;
+        }
+
+        /// <summary>Makes this state the thread's, also to restore the one <see cref="TryEnter"/> returned.</summary>
+        internal void MakeCurrent()
+        {
+            CurrentTransaction.Value = Transaction;
+            _commitScopeTransaction = CommitScopeTransaction;
+        }
+    }
+
     private SubjectTransactionException CreateBestEffortFailureException(
         IReadOnlyList<SubjectPropertyChange> successful,
         IReadOnlyList<SubjectPropertyChange> failed,

@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
@@ -16,8 +17,9 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// Anchors nest, so the requests are a stack of segments, one per anchor that has queued work; an anchor drains only
 /// its own segment's requests. The deliveries of a thread are one list in write order: while a queued delivery is
 /// pending, a delivery made without a lifecycle lock is queued behind it. A drain runs the pending deliveries until
-/// none is left, then the requests of its segment, each property once. See docs/design/tracking-lifecycle.md
-/// (Post-Lock Queue).
+/// none is left, then the requests of its segment, each property once. A queued delivery runs with the transaction
+/// state of its write (see <see cref="PropertyChangeInterceptor"/>), and the requests of a segment with the state when
+/// the segment opened, in the chain of its anchor. See docs/design/tracking-lifecycle.md (Post-Lock Queue).
 /// </remarks>
 internal static class PostLockQueue
 {
@@ -71,6 +73,12 @@ internal static class PostLockQueue
 
         /// <summary>The index of each queued property's entry in <see cref="Requests"/>.</summary>
         public readonly Dictionary<PropertyReference, int> RequestIndex = new(PropertyReference.Comparer);
+
+        /// <summary>
+        /// The transaction state when the segment opened, in the chain of its anchor. The segment's recalculations run
+        /// with it, also those that the anchor write adds when it completes.
+        /// </summary>
+        public SubjectTransaction.DeliveryState TransactionState;
     }
 
     /// <summary>
@@ -156,6 +164,7 @@ internal static class PostLockQueue
         var segment = _pool ?? new Segment();
         _pool = segment.Next;
         segment.AnchorDepth = _lockAnchorDepth;
+        segment.TransactionState = SubjectTransaction.DeliveryState.Capture();
         segment.Next = _innermost;
         _innermost = segment;
         return segment;
@@ -318,7 +327,18 @@ internal static class PostLockQueue
         try
         {
             RunDeliveries(ref firstException);
-            RunRequests(segment.Requests, rawTimestamp, ref firstException);
+            var isEntered = segment.TransactionState.TryEnter(out var previous);
+            try
+            {
+                RunRequests(segment.Requests, rawTimestamp, ref firstException);
+            }
+            finally
+            {
+                if (isEntered)
+                {
+                    previous.MakeCurrent();
+                }
+            }
         }
         finally
         {
@@ -419,6 +439,7 @@ internal static class PostLockQueue
 
         segment.Requests.Clear();
         segment.RequestIndex.Clear();
+        segment.TransactionState = default;
         segment.Next = _pool;
         _pool = segment;
     }

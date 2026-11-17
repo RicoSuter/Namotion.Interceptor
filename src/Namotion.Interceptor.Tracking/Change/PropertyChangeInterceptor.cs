@@ -214,8 +214,8 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
     /// <summary>
     /// Queues the delivery of a change written under a lifecycle lock, or behind a pending queued delivery, until the
-    /// drain, outside every lifecycle lock. The change and its listeners are resolved at write time, as for an
-    /// immediate delivery. Returns false when the change is dispatched now instead (see
+    /// drain, outside every lifecycle lock. The change, its listeners and its transaction state are taken at write
+    /// time, as for an immediate delivery. Returns false when the change is dispatched now instead (see
     /// <see cref="PostLockQueue.IsDeliveryQueued"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -232,8 +232,9 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         }
 
         // The drain runs the queued deliveries in write order, outside every lifecycle lock, so it delivers the change
-        // directly.
-        PostLockQueue.EnqueueDelivery(deliverySlot, () => Deliver(subscriptions, syncSubject, listeners, in change));
+        // directly, with the transaction state of the write.
+        var transactionState = SubjectTransaction.DeliveryState.Capture();
+        PostLockQueue.EnqueueDelivery(deliverySlot, () => DeliverQueued(transactionState, subscriptions, syncSubject, listeners, in change));
         return true;
     }
 
@@ -251,6 +252,37 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         }
 
         Deliver(subscriptions, syncSubject, listeners, in change);
+    }
+
+    /// <summary>
+    /// Delivers a queued change with the transaction state of its write: a transaction that an observer of an earlier
+    /// change began, or a commit that drains the queue at an apply write, started after the write. The exception of a
+    /// delivery queued before a running commit is traced, so the commit does not report a change that landed as failed.
+    /// </summary>
+    private static void DeliverQueued(
+        SubjectTransaction.DeliveryState transactionState,
+        PropertyChangeQueueSubscription[] subscriptions,
+        ISubject<SubjectPropertyChange>? syncSubject,
+        PropertyChangeSubscription[]? listeners,
+        in SubjectPropertyChange change)
+    {
+        var precedesRunningCommit = transactionState.PrecedesRunningCommit;
+        var isEntered = transactionState.TryEnter(out var previous);
+        try
+        {
+            Deliver(subscriptions, syncSubject, listeners, in change);
+        }
+        catch (Exception exception) when (precedesRunningCommit)
+        {
+            DerivedPropertyOwnership.TraceDropped("an observer of a change queued before a transaction commit threw during its apply", exception);
+        }
+        finally
+        {
+            if (isEntered)
+            {
+                previous.MakeCurrent();
+            }
+        }
     }
 
     private static void Deliver(
