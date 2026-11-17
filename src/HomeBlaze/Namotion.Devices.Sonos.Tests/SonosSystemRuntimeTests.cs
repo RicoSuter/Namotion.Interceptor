@@ -297,10 +297,22 @@ public class SonosSystemRuntimeTests
             system.PollingInterval = TimeSpan.FromMilliseconds(200));
         var system = connected.System;
         var listener = system.CurrentEventListener!;
-        var failures = 0;
-        listener.AcceptContextAsync = httpListener => Interlocked.Exchange(ref failures, 1) == 0
-            ? Task.FromException<HttpListenerContext>(new HttpListenerException(995, "The accept failed."))
-            : httpListener.GetContextAsync();
+        HttpListener? failedListener = null;
+        HttpListener? restartedListener = null;
+        listener.AcceptContextAsync = httpListener =>
+        {
+            if (Interlocked.CompareExchange(ref failedListener, httpListener, null) is null)
+            {
+                return Task.FromException<HttpListenerContext>(new HttpListenerException(995, "The accept failed."));
+            }
+
+            if (!ReferenceEquals(httpListener, failedListener))
+            {
+                Volatile.Write(ref restartedListener, httpListener);
+            }
+
+            return httpListener.GetContextAsync();
+        };
 
         // Act
         // The NOTIFY is answered by the waiting accept; the next accept fails and ends the loop.
@@ -311,6 +323,11 @@ public class SonosSystemRuntimeTests
             message: "The accept loop should fail.");
 
         // Assert
+        // Between the logged error and the flag the failed listener still listens, so only an accept on a new listener proves the restart.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Volatile.Read(ref restartedListener) is not null,
+            ConnectedSystem.WaitTimeout,
+            message: "The next poll should accept on a new listener.");
         await AsyncTestHelpers.WaitUntilAsync(
             () => !listener.HasAcceptFailed && listener.IsListening && system.ActiveEventCallbackHost is not null && system.StatusMessage is null,
             ConnectedSystem.WaitTimeout,
