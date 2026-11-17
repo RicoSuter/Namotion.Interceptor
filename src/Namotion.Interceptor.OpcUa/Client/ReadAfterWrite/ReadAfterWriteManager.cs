@@ -365,6 +365,12 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     {
                         return;
                     }
+                    catch (Exception exception) when (sessionLifetime.IsCancellationRequested && exception is not OpcUaResponseMismatchException)
+                    {
+                        // Not a read failure: every session change is followed by a full state read.
+                        _logger.LogDebug(exception, "Skipped {Count} read-after-writes because their session is no longer current.", dueCount - offset);
+                        return;
+                    }
 
                     var receivedTimestamp = DateTimeOffset.UtcNow;
 

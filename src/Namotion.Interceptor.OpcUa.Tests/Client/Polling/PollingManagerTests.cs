@@ -139,6 +139,96 @@ public class PollingManagerTests
     }
 
     [Fact]
+    public async Task WhenTheSessionLifetimeEndsDuringAPoll_ThenTheReadEndsAndIsSkippedQuietly()
+    {
+        // Arrange
+        await using var source = CreateClientSource();
+        var readStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readEnded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        using var sessionLifetime = new CancellationTokenSource();
+        var pollCount = 0;
+
+        // Ends only through the request's token, as the SDK does for a request on a channel the client disposed.
+        async Task<ReadResponse> WaitForCancellationAsync(CancellationToken cancellationToken)
+        {
+            readStarted.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                throw new InvalidOperationException("The cancellation wait completed without cancellation.");
+            }
+            catch (OperationCanceledException)
+            {
+                readEnded.TrySetResult();
+                throw new ServiceResultException(StatusCodes.BadRequestInterrupted);
+            }
+        }
+
+        var session = new Mock<ISession>();
+        session.SetupGet(value => value.Connected).Returns(true);
+        session
+            .Setup(value => value.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection _, CancellationToken cancellationToken) =>
+                WaitForCancellationAsync(cancellationToken));
+
+        var configuration = CreateConfiguration();
+        configuration.PollingInterval = TimeSpan.FromMilliseconds(1);
+        configuration.PollingCircuitBreakerThreshold = 1;
+        configuration.PollingDisposalTimeout = TestTimeouts.Default;
+
+        var property = new RegisteredSubject((TestRoot)source.RootSubject)
+            .TryGetProperty(nameof(TestRoot.Name))!;
+        var item = new MonitoredItem(NullTelemetryContext.Instance)
+        {
+            StartNodeId = new NodeId("Name", 2),
+            AttributeId = Opc.Ua.Attributes.Value,
+            Handle = property
+        };
+
+        var metrics = new PollingMetrics();
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var manager = new PollingManager(
+            source,
+            sessionProvider: () =>
+            {
+                Interlocked.Increment(ref pollCount);
+                return (session.Object, sessionLifetime.Token);
+            },
+            propertyWriter,
+            configuration,
+            metrics,
+            reportedErrors.Enqueue,
+            NullLogger.Instance);
+        manager.AddItem(item);
+        manager.Start();
+        await readStarted.Task.WaitAsync(TestTimeouts.Default);
+
+        // Act
+        await sessionLifetime.CancelAsync();
+        await readEnded.Task.WaitAsync(TestTimeouts.Default);
+
+        // The poll that issued the read has finished once the next one asks for the session.
+        var pollCountAtReadEnd = Volatile.Read(ref pollCount);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Volatile.Read(ref pollCount) > pollCountAtReadEnd,
+            message: "No poll followed the one whose session ended.");
+        await manager.DisposeAsync();
+
+        // Assert
+        Assert.Equal(
+            (FailedReads: 0L, SlowPolls: 0L, CircuitBreakerTrips: 0L, IsCircuitOpen: false),
+            (metrics.FailedReads, metrics.SlowPolls, metrics.CircuitBreakerTrips, manager.IsCircuitOpen));
+        Assert.Empty(reportedErrors);
+        Assert.Null(source.Diagnostics.LastError);
+    }
+
+    [Fact]
     public async Task WhenBatchReadThrows_ThenSourceReportsFailureOnceAndKeepsItAfterRecovery()
     {
         // Arrange

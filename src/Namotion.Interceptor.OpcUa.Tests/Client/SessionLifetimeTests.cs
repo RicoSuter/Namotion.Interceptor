@@ -85,9 +85,8 @@ public class SessionLifetimeTests
         await sessionLifetime.CancelAsync();
 
         // Assert
-        var exception = await Record.ExceptionAsync(() => read.WaitAsync(TestTimeouts.Default));
-        Assert.IsNotType<TimeoutException>(exception);
-        Assert.NotNull(exception);
+        var exception = await Assert.ThrowsAsync<ServiceResultException>(() => read.WaitAsync(TestTimeouts.Default));
+        Assert.Equal(StatusCodes.BadRequestInterrupted, exception.StatusCode);
     }
 
     [Fact]

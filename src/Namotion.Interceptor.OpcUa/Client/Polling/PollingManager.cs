@@ -242,6 +242,7 @@ internal sealed class PollingManager : IAsyncDisposable
         var startTime = DateTimeOffset.UtcNow;
         var pollSucceeded = false;
         var pollCancelled = false;
+        var sessionEnded = false;
 
         try
         {
@@ -251,15 +252,17 @@ internal sealed class PollingManager : IAsyncDisposable
             // Each batch is one read, so it may not exceed the server's read limit.
             var batchLimit = OpcUaValueReader.GetNodesPerRead(session, _configuration.PollingBatchSize);
 
-            // Process in batches using direct indexing
-            for (int i = 0; i < itemsToRead.Length; i += batchLimit)
+            // Stops once the session is no longer current: its remaining batches would fail at once, and the next
+            // poll detects the session change and reads every item again.
+            for (int i = 0; i < itemsToRead.Length && !sessionLifetime.IsCancellationRequested; i += batchLimit)
             {
                 var batchSize = Math.Min(batchLimit, itemsToRead.Length - i);
                 var batch = new ArraySegment<PollingItem>(itemsToRead, i, batchSize);
                 await ReadBatchAsync(session, sessionLifetime, batch, cancellationToken).ConfigureAwait(false);
             }
 
-            pollSucceeded = true;
+            sessionEnded = sessionLifetime.IsCancellationRequested;
+            pollSucceeded = !sessionEnded;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -279,7 +282,7 @@ internal sealed class PollingManager : IAsyncDisposable
             {
                 _circuitBreaker.RecordSuccess();
             }
-            else if (!pollCancelled && _circuitBreaker.RecordFailure())
+            else if (!pollCancelled && !sessionEnded && _circuitBreaker.RecordFailure())
             {
                 _metrics.RecordCircuitBreakerTrip();
                 _logger.LogError("Circuit breaker opened after consecutive failures. Polling suspended temporarily.");
@@ -287,7 +290,7 @@ internal sealed class PollingManager : IAsyncDisposable
 
             // Detect slow polls that exceed the polling interval
             var duration = DateTimeOffset.UtcNow - startTime;
-            if (!pollCancelled && duration > _configuration.PollingInterval)
+            if (!pollCancelled && !sessionEnded && duration > _configuration.PollingInterval)
             {
                 _metrics.RecordSlowPoll();
                 _logger.LogWarning("Slow poll detected: polling took {Duration}ms, which exceeds interval of {Interval}ms. Consider increasing polling interval or batch size.",
@@ -365,6 +368,10 @@ internal sealed class PollingManager : IAsyncDisposable
         catch (Exception) when (cancellationToken.IsCancellationRequested)
         {
             throw new OperationCanceledException(cancellationToken);
+        }
+        catch (Exception ex) when (sessionLifetime.IsCancellationRequested && ex is not OpcUaResponseMismatchException)
+        {
+            _logger.LogDebug(ex, "Skipped a batch of {Count} polled items because its session is no longer current.", batch.Count);
         }
         catch (Exception ex)
         {

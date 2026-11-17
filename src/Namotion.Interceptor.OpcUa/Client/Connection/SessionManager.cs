@@ -1030,8 +1030,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Kills a session's transport channel immediately (synchronous), which stops its traffic.
     /// The SDK drops the requests in flight on the channel without completing them, so they end only at
-    /// their operation timeout or through their cancellation token; the client's requests observe the
-    /// session lifetime that <see cref="SetSession"/> cancels.
+    /// their operation timeout or through their cancellation token; the client's value reads and writes
+    /// observe the session lifetime that <see cref="SetSession"/> cancels.
     /// </summary>
     private void KillTransportChannel(Session session)
     {
@@ -1117,7 +1117,17 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             try { pendingSession.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing pending old session."); }
         }
 
-        var sessionToDispose = CurrentSession;
+        // Cleared before the close, as in ClearSessionAsync, so no reader takes a closing session and its
+        // requests in flight are canceled even when the close times out.
+        Session? sessionToDispose;
+        lock (_reconnectingLock)
+        {
+            sessionToDispose = CurrentSession;
+            SetSession(null);
+        }
+
+        DrainPendingSessionTransitions();
+
         if (sessionToDispose is not null)
         {
             var timeout = _configuration.SessionDisposalTimeout;
@@ -1136,11 +1146,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 // Force immediate disposal without waiting for server acknowledgment
                 try { sessionToDispose.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error force-disposing session."); }
             }
-
-            SetSession(null);
         }
-
-        DrainPendingSessionTransitions();
     }
 
     /// <summary>
