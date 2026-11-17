@@ -370,8 +370,8 @@ public class OpcUaClientDiagnosticsTests
 
     private static void SetCurrentSession(SessionManager sessionManager, Session? session) =>
         typeof(SessionManager)
-            .GetField("_session", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .SetValue(sessionManager, session);
+            .GetMethod("SetSession", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(sessionManager, [session]);
 
     private static async Task<(bool CompletedWhileLocked, int[] Results)> ReadCountsWhileDictionaryLocksAreHeldAsync(
         (object Owner, string FieldName, Func<int> Getter)[] cases)

@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal sealed class OutboundWriter
 {
-    private readonly Func<ISession?> _sessionProvider;
+    private readonly Func<(ISession? Session, CancellationToken Lifetime)> _sessionProvider;
     private readonly ReadAfterWriteManager? _readAfterWriteManager;
     private readonly Action _onResponseMismatch;
     private readonly OpcUaClientConfiguration _configuration;
@@ -19,7 +19,7 @@ internal sealed class OutboundWriter
     private readonly ThroughputCounter _outgoingThroughput;
     private readonly ILogger _logger;
 
-    /// <param name="sessionProvider">Returns the current session.</param>
+    /// <param name="sessionProvider">Returns the current session with a token that is canceled once it stops being current.</param>
     /// <param name="readAfterWriteManager">Schedules reads after successful writes, or <c>null</c> when read-after-write is off.</param>
     /// <param name="onResponseMismatch">Called after a write received the response to a different request.</param>
     /// <param name="configuration">The client configuration.</param>
@@ -27,7 +27,7 @@ internal sealed class OutboundWriter
     /// <param name="outgoingThroughput">Counts the writes the server accepted.</param>
     /// <param name="logger">The logger.</param>
     public OutboundWriter(
-        Func<ISession?> sessionProvider,
+        Func<(ISession? Session, CancellationToken Lifetime)> sessionProvider,
         ReadAfterWriteManager? readAfterWriteManager,
         Action onResponseMismatch,
         OpcUaClientConfiguration configuration,
@@ -44,14 +44,14 @@ internal sealed class OutboundWriter
         _logger = logger;
     }
 
-    public int WriteBatchSize => (int)(_sessionProvider()?.OperationLimits?.MaxNodesPerWrite ?? 0);
+    public int WriteBatchSize => (int)(_sessionProvider().Session?.OperationLimits?.MaxNodesPerWrite ?? 0);
 
     public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         try
         {
-            var session = _sessionProvider();
-            if (session is null || !session.Connected)
+            var (session, sessionLifetime) = _sessionProvider();
+            if (session is null || !session.Connected || sessionLifetime.IsCancellationRequested)
             {
                 return WriteResult.Failure(changes, new InvalidOperationException("OPC UA session is not connected."));
             }
@@ -64,9 +64,13 @@ internal sealed class OutboundWriter
 
             var requestHeader = new RequestHeader();
             WriteResponse writeResponse;
+
+            // Without the session's lifetime, a write on a session whose channel the client disposed would hold
+            // the write retry queue until the operation timeout, see SessionManager.CurrentSessionWithLifetime.
+            using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, sessionLifetime);
             try
             {
-                writeResponse = await session.WriteAsync(requestHeader, writeValues, cancellationToken).ConfigureAwait(false);
+                writeResponse = await session.WriteAsync(requestHeader, writeValues, requestCancellation.Token).ConfigureAwait(false);
             }
             catch (InvalidCastException exception)
             {

@@ -19,7 +19,7 @@ internal sealed class PollingManager : IAsyncDisposable
 {
     private readonly OpcUaSubjectClientSource _source;
     private readonly ILogger _logger;
-    private readonly Func<ISession?> _sessionProvider;
+    private readonly Func<(ISession? Session, CancellationToken Lifetime)> _sessionProvider;
     private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly CircuitBreaker _circuitBreaker;
@@ -38,7 +38,7 @@ internal sealed class PollingManager : IAsyncDisposable
     private int _disposed;
 
     public PollingManager(OpcUaSubjectClientSource source,
-        Func<ISession?> sessionProvider,
+        Func<(ISession? Session, CancellationToken Lifetime)> sessionProvider,
         SubjectPropertyWriter propertyWriter,
         OpcUaClientConfiguration configuration,
         PollingMetrics metrics,
@@ -220,7 +220,7 @@ internal sealed class PollingManager : IAsyncDisposable
             return;
         }
 
-        var session = _sessionProvider();
+        var (session, sessionLifetime) = _sessionProvider();
         if (session is null || !session.Connected)
         {
             _logger.LogDebug("No active session available for polling (null: {IsNull}, connected: {Connected})",
@@ -256,7 +256,7 @@ internal sealed class PollingManager : IAsyncDisposable
             {
                 var batchSize = Math.Min(batchLimit, itemsToRead.Length - i);
                 var batch = new ArraySegment<PollingItem>(itemsToRead, i, batchSize);
-                await ReadBatchAsync(session, batch, cancellationToken).ConfigureAwait(false);
+                await ReadBatchAsync(session, sessionLifetime, batch, cancellationToken).ConfigureAwait(false);
             }
 
             pollSucceeded = true;
@@ -323,7 +323,7 @@ internal sealed class PollingManager : IAsyncDisposable
         return Equals(a, b);
     }
 
-    private async Task ReadBatchAsync(ISession session, ArraySegment<PollingItem> batch, CancellationToken cancellationToken)
+    private async Task ReadBatchAsync(ISession session, CancellationToken sessionLifetime, ArraySegment<PollingItem> batch, CancellationToken cancellationToken)
     {
         try
         {
@@ -339,7 +339,7 @@ internal sealed class PollingManager : IAsyncDisposable
             }
 
             var results = await OpcUaValueReader.ReadAsync(
-                session, nodesToRead, TimestampsToReturn.Both, cancellationToken).ConfigureAwait(false);
+                session, sessionLifetime, nodesToRead, TimestampsToReturn.Both, cancellationToken).ConfigureAwait(false);
 
             // Process results - count metrics per item for accurate monitoring
             for (var i = 0; i < results.Count; i++)

@@ -30,7 +30,7 @@ public class PollingManagerTests
         };
         await using var manager = new PollingManager(
             source,
-            sessionProvider: () => null,
+            sessionProvider: () => default,
             new SubjectPropertyWriter(source, NullLogger.Instance),
             CreateConfiguration(),
             new PollingMetrics(),
@@ -114,7 +114,7 @@ public class PollingManagerTests
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
         await using var manager = new PollingManager(
             source,
-            sessionProvider: () => session.Object,
+            sessionProvider: () => (session.Object, CancellationToken.None),
             propertyWriter,
             configuration,
             metrics,
@@ -199,7 +199,7 @@ public class PollingManagerTests
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
         await using var manager = new PollingManager(
             source,
-            sessionProvider: () => session.Object,
+            sessionProvider: () => (session.Object, CancellationToken.None),
             propertyWriter,
             configuration,
             metrics,
@@ -269,7 +269,7 @@ public class PollingManagerTests
         var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
         await using var manager = new PollingManager(
             source,
-            sessionProvider: () => session.Object,
+            sessionProvider: () => (session.Object, CancellationToken.None),
             new SubjectPropertyWriter(source, NullLogger.Instance),
             configuration,
             metrics,
