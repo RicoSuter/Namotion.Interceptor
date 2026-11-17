@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -43,6 +44,20 @@ internal sealed class DerivedPropertyBaselineHandler : ILifecycleHandler
             return;
         }
 
+        // The dictionaries of generated and dynamic subjects are frozen, whose values enumerate without allocating.
+        if (properties is FrozenDictionary<string, SubjectPropertyMetadata> frozen)
+        {
+            foreach (var metadata in frozen.Values)
+            {
+                if (IsCaptured(metadata))
+                {
+                    DerivedPropertyOwnership.CaptureAttachBaseline(new PropertyReference(subject, metadata.Name));
+                }
+            }
+
+            return;
+        }
+
         foreach (var (name, metadata) in properties)
         {
             if (IsCaptured(metadata))
@@ -75,18 +90,20 @@ internal sealed class DerivedPropertyBaselineHandler : ILifecycleHandler
 
         public Type Type { get; } = type;
 
-        // The names when the dictionary is the one cached for the type, or null. The first dictionary seen, and one that
-        // replaces a collected one, is cached: a type's static dictionary is never collected, so it stays.
+        // The names when the dictionary is the one cached for the type, or null. The first dictionary seen is cached: for
+        // a generated subject that is the type's static dictionary, which is never collected. One of a subject with
+        // properties of its own, such as a dynamic subject, is not replaced once collected, so subjects whose dictionaries
+        // differ allocate nothing here.
         public string[]? TryGetNames(IReadOnlyDictionary<string, SubjectPropertyMetadata> properties)
         {
             var snapshot = Volatile.Read(ref _snapshot);
-            if (snapshot is not null && snapshot.Properties.TryGetTarget(out var cached))
+            if (snapshot is not null)
             {
-                return ReferenceEquals(cached, properties) ? snapshot.Names : null;
+                return snapshot.Properties.TryGetTarget(out var cached) && ReferenceEquals(cached, properties) ? snapshot.Names : null;
             }
 
             var names = FindNames(properties);
-            Volatile.Write(ref _snapshot, new Snapshot(new WeakReference<IReadOnlyDictionary<string, SubjectPropertyMetadata>>(properties), names));
+            Interlocked.CompareExchange(ref _snapshot, new Snapshot(new WeakReference<IReadOnlyDictionary<string, SubjectPropertyMetadata>>(properties), names), null);
             return names;
         }
 
