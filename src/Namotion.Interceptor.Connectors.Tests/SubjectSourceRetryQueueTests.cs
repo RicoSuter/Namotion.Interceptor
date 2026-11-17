@@ -330,22 +330,14 @@ public class SubjectSourceRetryQueueTests
     [Fact]
     public async Task WhenIdleFlushesKeepFailing_ThenTheIntervalBacksOffToEightTimesAndResetsOnSuccessAndWake()
     {
-        // Arrange
+        // Arrange: the idle flush's timer is the only timer on the clock. Write attempts are not counted, because
+        // the reconcile on the startup wake can run before or after the write below is parked.
         var retryTime = TimeSpan.FromSeconds(1);
         var clock = new ManualTeardownClock();
         var failFirstName = false;
-        var failedAttempts = 0;
         SubjectPropertyWriter? propertyWriter = null;
         var (person, source, gate, receivedWrites) = CreateSource(
-            () =>
-            {
-                if (failFirstName)
-                {
-                    failedAttempts++;
-                }
-
-                return failFirstName;
-            },
+            () => failFirstName,
             retryTime: retryTime,
             startListening: (writer, _) =>
             {
@@ -370,17 +362,13 @@ public class SubjectSourceRetryQueueTests
             }
             person.FirstName = "John";
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.OutboundRetries.Depth > 0,
-                message: "The failed write was not parked.");
-            await WaitForIdleIntervalAsync(clock, gate, () => failedAttempts, expectedAttempts: 1, retryTime);
+                () => source.Diagnostics.OutboundRetries.Depth > 0 && clock.NextDueIn == retryTime,
+                message: "The failed write was not parked with the idle flush armed at the retry time.");
 
             // Act & Assert: each failed idle flush doubles the interval up to eight times the retry time.
-            var attempts = 1;
             foreach (var factor in new[] { 2, 4, 8, 8 })
             {
-                clock.Advance(clock.NextDueIn!.Value);
-                attempts++;
-                await WaitForIdleIntervalAsync(clock, gate, () => failedAttempts, attempts, retryTime * factor);
+                await FireAndWaitForIdleIntervalAsync(clock, retryTime * factor);
             }
 
             // A successful flush resets it.
@@ -388,15 +376,11 @@ public class SubjectSourceRetryQueueTests
             {
                 failFirstName = false;
             }
-            clock.Advance(clock.NextDueIn!.Value);
-            await AsyncTestHelpers.WaitUntilAsync(() =>
+            await FireAndWaitForIdleIntervalAsync(clock, retryTime);
+            lock (gate)
             {
-                lock (gate)
-                {
-                    return receivedWrites.Contains("FirstName=John");
-                }
-            }, message: "The parked write was not sent once the peer accepted it.");
-            await AsyncTestHelpers.WaitUntilAsync(() => clock.NextDueIn == retryTime, message: "A successful flush did not reset the interval.");
+                Assert.Contains("FirstName=John", receivedWrites);
+            }
 
             // A wake on Synchronized resets it.
             lock (gate)
@@ -404,22 +388,16 @@ public class SubjectSourceRetryQueueTests
                 failFirstName = true;
             }
             person.FirstName = "Jane";
-            attempts++;
-            await AsyncTestHelpers.WaitUntilAsync(() =>
-            {
-                lock (gate)
-                {
-                    return failedAttempts == attempts;
-                }
-            }, message: "The second write did not fail.");
-            clock.Advance(clock.NextDueIn!.Value);
-            attempts++;
-            await WaitForIdleIntervalAsync(clock, gate, () => failedAttempts, attempts, retryTime * 2);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.Depth > 0,
+                message: "The second write was not parked.");
+            await FireAndWaitForIdleIntervalAsync(clock, retryTime * 2);
 
             propertyWriter!.StartBuffering();
             await propertyWriter.LoadInitialStateAndResumeAsync(CancellationToken.None);
-            attempts++;
-            await WaitForIdleIntervalAsync(clock, gate, () => failedAttempts, attempts, retryTime);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clock.NextDueIn == retryTime,
+                message: "A wake on Synchronized did not reset the interval.");
         }
         finally
         {
@@ -428,18 +406,20 @@ public class SubjectSourceRetryQueueTests
     }
 
     /// <summary>
-    /// Waits until <paramref name="failedAttempts"/>, read under <paramref name="gate"/>, reaches
-    /// <paramref name="expectedAttempts"/> and the idle flush has armed its next interval at <paramref name="interval"/>.
+    /// Fires the idle flush's armed timer and waits until the flush that follows has armed it again at
+    /// <paramref name="interval"/>.
     /// </summary>
-    private static Task WaitForIdleIntervalAsync(
-        ManualTeardownClock clock, object gate, Func<int> failedAttempts, int expectedAttempts, TimeSpan interval) =>
-        AsyncTestHelpers.WaitUntilAsync(() =>
-        {
-            lock (gate)
-            {
-                return failedAttempts() == expectedAttempts && clock.NextDueIn == interval;
-            }
-        }, message: $"The idle flush did not arm {interval} after {expectedAttempts} failed attempts.");
+    /// <remarks>
+    /// <see cref="ManualTeardownClock.Advance"/> removes the fired timer before it returns, and only the idle
+    /// flush arms it again, after its flush, so seeing <paramref name="interval"/> afterwards means that flush ran.
+    /// </remarks>
+    private static async Task FireAndWaitForIdleIntervalAsync(ManualTeardownClock clock, TimeSpan interval)
+    {
+        clock.Advance(clock.NextDueIn ?? throw new InvalidOperationException("The idle flush timer is not armed."));
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => clock.NextDueIn == interval,
+            message: $"The idle flush did not arm {interval} after its timer fired.");
+    }
 
     [Fact]
     public async Task WhenRetryTimeIsBelowOneMillisecond_ThenWritesAreStillDelivered()
