@@ -96,6 +96,30 @@ public class DerivedPropertyRequiredPropertiesTests
     }
 
     [Fact]
+    public void WhenGetterReadsParentsAndAProperty_ThenRequiredPropertiesExcludeTheStructureDependency()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithParents()
+            .WithDerivedPropertyChangeDetection();
+
+        var person = new Person(context) { FirstName = "A", LastName = "B" };
+        var registered = person.TryGetRegisteredSubject()!;
+
+        var dynamicDerived = registered.AddDerivedProperty<string>(
+            "DynamicParentCount",
+            s => ((Person)s).GetParents().Length + ((Person)s).FirstName);
+
+        // Act
+        var deps = dynamicDerived.Reference.GetRequiredProperties().ToArray();
+
+        // Assert
+        Assert.Equal([new PropertyReference(person, nameof(Person.FirstName))], deps);
+    }
+
+    [Fact]
     public void WhenNestedDynamicDerivedPropertiesAreEvaluated_ThenNeitherContainsItself()
     {
         // Arrange
