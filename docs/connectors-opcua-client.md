@@ -552,6 +552,8 @@ If the session dies without the SDK handler being active (e.g., after `KillAsync
 2. Triggers manual reconnection: fresh session, new subscriptions, full state read
 3. Full consistency is restored
 
+In every flow, the reads and writes still in flight on a session that is abandoned, replaced or cleared are canceled. The SDK does not complete a request on a transport channel the client disposes, so such a write would otherwise wait for `OperationTimeout` and hold up every later write. A canceled write fails and is parked in the write retry queue.
+
 #### Stall Detection
 
 When the SDK's reconnection handler gets stuck (e.g., server never responds), the client automatically detects the stall and forces a reconnection reset. Configure via `MaxReconnectDuration` (default: 30 seconds). If the SDK reconnection hasn't succeeded within this duration, a full session reset and manual reconnection is triggered.
