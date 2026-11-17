@@ -361,14 +361,15 @@ public class DerivedPropertyNewestTimestampTests
     [Fact]
     public async Task WhenAttachCommitsAfterTheLoopReachedTheIterationLimitAndItsRequestArrivesAfterTheTakeoverDecided_ThenTheChangeCarriesTheAttachTimestamp()
     {
-        // Arrange: while another thread writes the source the getter reads, at each evaluation, no evaluation is
-        // stable, so the owner loop ends at the iteration limit and carries a foreign request unanswered. The getter
-        // also reads state outside the model, which changes after the attach evaluation read it, so the
-        // recalculation that answers the attach publishes a change.
+        // Arrange: another thread writes the source the getter reads during its first evaluation, and the getter
+        // writes it itself at every later one, so no evaluation is stable: the owner loop ends at the iteration limit
+        // and carries the foreign request unanswered. The getter also reads state outside the model, which changes
+        // after the attach evaluation read it, so the recalculation that answers the attach publishes a change.
         var context = CreateContext();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
         var isWritingSource = false;
+        var isForeignWriteDone = false;
         var external = 0;
         var firstTimestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var attachTimestamp = firstTimestamp.AddMinutes(1);
@@ -377,7 +378,15 @@ public class DerivedPropertyNewestTimestampTests
             var anchor = root.Anchor;
             if (Volatile.Read(ref isWritingSource))
             {
-                DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = anchor + 1; }).Wait(Timeout);
+                if (isForeignWriteDone)
+                {
+                    root.Anchor = anchor + 1;
+                }
+                else
+                {
+                    isForeignWriteDone = true;
+                    DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = anchor + 1; }).Wait(Timeout);
+                }
             }
 
             return anchor + Volatile.Read(ref external);
