@@ -1030,11 +1030,21 @@ internal static class DerivedPropertyOwnership
     /// </summary>
     private static RecordingCheck CommitDependencies(DerivedPropertyData data, in PropertyReference property)
     {
-        var comparison = default(BaselineComparison);
-        return CommitComparedDependencies(data, property, ref comparison);
+        var recorder = DerivedPropertyRecorder.Current;
+        try
+        {
+            var recorded = recorder.LastRecording;
+            data.UpdateDependencies(property, recorded);
+            return CheckRecording(recorder, recorded);
+        }
+        finally
+        {
+            recorder.ClearLastRecording();
+        }
     }
 
-    // Also records in comparison whether the dependencies changed and the sum of the versions read.
+    // CommitDependencies of an attach, which also records in comparison whether the dependencies changed and the sum
+    // of the versions read.
     private static RecordingCheck CommitComparedDependencies(DerivedPropertyData data, in PropertyReference property, ref BaselineComparison comparison)
     {
         var recorder = DerivedPropertyRecorder.Current;
@@ -1043,17 +1053,23 @@ internal static class DerivedPropertyOwnership
             var recorded = recorder.LastRecording;
             comparison.HasDependenciesChanged |= data.UpdateDependencies(property, recorded);
             comparison.VersionSum = SumVersions(recorded);
-            if (HasVersionChanged(recorded))
-            {
-                return RecordingCheck.SourceMoved;
-            }
-
-            return recorder.LastRecordingHasOwnWriteAfterRead ? RecordingCheck.OwnWriteAfterRead : RecordingCheck.Current;
+            return CheckRecording(recorder, recorded);
         }
         finally
         {
             recorder.ClearLastRecording();
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static RecordingCheck CheckRecording(DerivedPropertyRecorder recorder, ReadOnlySpan<RecordedDependency> recorded)
+    {
+        if (HasVersionChanged(recorded))
+        {
+            return RecordingCheck.SourceMoved;
+        }
+
+        return recorder.LastRecordingHasOwnWriteAfterRead ? RecordingCheck.OwnWriteAfterRead : RecordingCheck.Current;
     }
 
     private static void DiscardRecording() => DerivedPropertyRecorder.Current.ClearLastRecording();
