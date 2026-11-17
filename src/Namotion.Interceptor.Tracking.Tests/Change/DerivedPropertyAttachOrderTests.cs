@@ -446,9 +446,10 @@ public class DerivedPropertyAttachOrderTests
             root.Machine = machine;
         }
 
-        // Assert: an array does not override equality, so the evaluation of the report publishes the unchanged value.
-        // It starts from the value before the attach, which, without the worker's parents, differs when the getter
-        // finds the root, and is an equal array otherwise; the report and the difference are evaluated once together.
+        // Assert: one change, from the value before the attach. Searching the root, that value was computed without the
+        // worker's parents, so it differs. Walking to the root, it is an equal array, and since an array does not
+        // override equality, the unchanged value is published once more. The report and the difference are evaluated
+        // once together.
         Assert.Equal(3, evaluations);
         var change = Assert.Single(changes, c => c.Property.Name == nameof(EvaluatorWorker.ObjectResult));
         Assert.Equal([walkToTheRoot], change.GetOldValue<bool[]>());

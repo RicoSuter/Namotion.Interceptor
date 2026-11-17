@@ -6,10 +6,10 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
-/// Records the value of each derived property of a subject that attaches, before any other lifecycle handler makes
-/// the subject observable, such as through the registry, or publishes its writes, through context inheritance. The
-/// derived properties attach only after the subject's handlers ran, and an attach whose value differs from the
-/// recorded one publishes the difference, see "Attach" in docs/design/tracking-derived-properties.md.
+/// Records the value of each derived property of a subject that attaches, as one of the first lifecycle handlers,
+/// before those that make the subject observable, such as the registry, or publish its writes, such as context
+/// inheritance. The derived properties attach only after the subject's handlers ran, and an attach whose value differs
+/// from the recorded one publishes the difference, see "Attach" in docs/design/tracking-derived-properties.md.
 /// </summary>
 [RunsFirst]
 internal sealed class DerivedPropertyBaselineHandler : ILifecycleHandler
@@ -92,18 +92,18 @@ internal sealed class DerivedPropertyBaselineHandler : ILifecycleHandler
 
         // The names when the dictionary is the one cached for the type, or null. The first dictionary seen is cached: for
         // a generated subject that is the type's static dictionary, which is never collected. One of a subject with
-        // properties of its own, such as a dynamic subject, is not replaced once collected, so subjects whose dictionaries
-        // differ allocate nothing here.
+        // properties of its own, such as a dynamic subject, is replaced by the next dictionary seen once it was
+        // collected, so subjects whose dictionaries differ allocate here at most once per collected dictionary.
         public string[]? TryGetNames(IReadOnlyDictionary<string, SubjectPropertyMetadata> properties)
         {
             var snapshot = Volatile.Read(ref _snapshot);
-            if (snapshot is not null)
+            if (snapshot is not null && snapshot.Properties.TryGetTarget(out var cached))
             {
-                return snapshot.Properties.TryGetTarget(out var cached) && ReferenceEquals(cached, properties) ? snapshot.Names : null;
+                return ReferenceEquals(cached, properties) ? snapshot.Names : null;
             }
 
             var names = FindNames(properties);
-            Interlocked.CompareExchange(ref _snapshot, new Snapshot(new WeakReference<IReadOnlyDictionary<string, SubjectPropertyMetadata>>(properties), names), null);
+            Interlocked.CompareExchange(ref _snapshot, new Snapshot(new WeakReference<IReadOnlyDictionary<string, SubjectPropertyMetadata>>(properties), names), snapshot);
             return names;
         }
 

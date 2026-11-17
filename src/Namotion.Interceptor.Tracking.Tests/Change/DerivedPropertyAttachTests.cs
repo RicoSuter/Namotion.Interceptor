@@ -263,6 +263,101 @@ public class DerivedPropertyAttachTests
         Assert.DoesNotContain(result, new PropertyReference(root, nameof(EvaluatorRoot.Anchor)).GetUsedByProperties().Items.ToArray());
     }
 
+    [Fact]
+    public async Task WhenAnotherThreadWritesASourceWhileTheValueBeforeTheAttachIsEvaluated_ThenTheAttachPublishesTheChangeFromThatValue()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context) { Anchor = 1 };
+        var machine = new EvaluatorMachine();
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var anchor = root.Anchor;
+            gate.PauseAttachBaselineIfArmed();
+            return anchor;
+        };
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordResultChanges(machine, published);
+        gate.Arm();
+
+        // Act
+        var attach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => root.Machine = machine);
+        var isPaused = gate.Paused.Wait(TestTimeouts.Default);
+        root.Anchor = 2;
+        gate.Resume.Set();
+        await attach.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Equal([(1, 2)], published.ToArray());
+        Assert.Equal(2, machine.Worker.Result);
+    }
+
+    [Fact]
+    public void WhenADetachThatKeepsAnAttachedSubjectRunsWhileTheSubjectAttaches_ThenTheAttachKeepsItsBaselineAndPublishesTheChange()
+    {
+        // Arrange: the detach stands for one of an earlier graph whose check found the subject detached before this
+        // attach attached it again.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context) { Anchor = 1 };
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = _ => root.Anchor;
+        var result = new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result));
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordResultChanges(machine, published);
+        var hadBaseline = false;
+        context.AddService<ILifecycleHandler>(new AttachingHook(machine.Worker, () =>
+        {
+            DerivedPropertyOwnership.Detach(result, onlyIfSubjectIsDetached: true);
+            hadBaseline = result.TryGetDerivedPropertyData()!.HasAttachBaseline;
+            root.Anchor = 2;
+        }));
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.True(hadBaseline);
+        Assert.Equal([(1, 2)], published.ToArray());
+    }
+
+    [Fact]
+    public void WhenAGetterEvaluatedBeforeItsAttachAttachesAnotherSubject_ThenOnlyTheBaselineEvaluationsAreReportedAsBaseline()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var otherRoot = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var nestedMachine = new EvaluatorMachine();
+        var outerEvaluations = new List<bool>();
+        var nestedEvaluations = new List<bool>();
+        nestedMachine.Worker.Evaluator = _ =>
+        {
+            nestedEvaluations.Add(IsAttachBaseline);
+            return 0;
+        };
+        machine.Worker.Evaluator = _ =>
+        {
+            if (IsAttachBaseline && otherRoot.Machine is null)
+            {
+                otherRoot.Machine = nestedMachine;
+            }
+
+            outerEvaluations.Add(IsAttachBaseline);
+            return 0;
+        };
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.Equal([true, false], outerEvaluations.ToArray());
+        Assert.Equal([true, false], nestedEvaluations.ToArray());
+    }
+
     private static IDisposable RecordResultChanges(EvaluatorMachine machine, List<(int OldValue, int NewValue)> published) =>
         new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).SubscribeInline((in SubjectPropertyChange change) =>
             published.Add((change.GetOldValue<int>(), change.GetNewValue<int>())));

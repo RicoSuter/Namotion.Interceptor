@@ -35,11 +35,16 @@ internal static class DerivedPropertyOwnership
     /// </summary>
     internal static Action<PropertyReference>? AfterTakeForTests { get; set; }
 
+    // The recording depth of the getter evaluated for its attach baseline on this thread, or 0.
     [ThreadStatic]
-    private static bool _isCapturingAttachBaseline;
+    private static int _attachBaselineDepth;
 
-    /// <summary>Whether this thread evaluates a getter for its attach baseline, see <see cref="CaptureAttachBaseline"/>.</summary>
-    internal static bool IsCapturingAttachBaseline => _isCapturingAttachBaseline;
+    /// <summary>
+    /// Whether the innermost getter evaluated on this thread runs for its attach baseline, see
+    /// <see cref="CaptureAttachBaseline"/>. Used by tests.
+    /// </summary>
+    internal static bool IsCapturingAttachBaseline =>
+        _attachBaselineDepth != 0 && _attachBaselineDepth == DerivedPropertyRecorder.CurrentDepth;
 
     /// <summary>
     /// Attaches a derived property and evaluates its first value, unless it is attached through another graph
@@ -53,8 +58,7 @@ internal static class DerivedPropertyOwnership
         Baseline baseline;
         lock (data)
         {
-            // Taken also when attached already, so that a baseline is never consumed by a later attach. Its
-            // dependencies stay: the attach evaluation compares its own with them.
+            // Taken also when attached already, so that a baseline is never consumed by a later attach.
             baseline = new Baseline(data.AttachBaseline, data.HasAttachBaseline, data.AttachBaselineVersionSum);
             data.AttachBaseline = null;
             data.HasAttachBaseline = false;
@@ -65,6 +69,7 @@ internal static class DerivedPropertyOwnership
                 return;
             }
 
+            // The dependencies of a baseline stay: the attach evaluation compares its own with them.
             data.IsAttached = true;
             Volatile.Write(ref data.IsDerived, true);
             data.HasValue = false;
@@ -104,8 +109,8 @@ internal static class DerivedPropertyOwnership
 
         // Recorded like any evaluation, so that it reads landed values and adds no dependency to an evaluation in
         // progress on this thread.
-        var wasCapturing = _isCapturingAttachBaseline;
-        _isCapturingAttachBaseline = true;
+        var previousBaselineDepth = _attachBaselineDepth;
+        _attachBaselineDepth = DerivedPropertyRecorder.CurrentDepth + 1;
         Evaluation evaluation;
         try
         {
@@ -113,7 +118,7 @@ internal static class DerivedPropertyOwnership
         }
         finally
         {
-            _isCapturingAttachBaseline = wasCapturing;
+            _attachBaselineDepth = previousBaselineDepth;
         }
 
         var recorder = DerivedPropertyRecorder.Current;
@@ -219,15 +224,16 @@ internal static class DerivedPropertyOwnership
         {
             // Decided under the lock that Attach takes as well: an interceptor that attached the
             // subject after the caller's check keeps the property attached.
+            if (onlyIfSubjectIsDetached && SubjectLifecycleAttachments.IsAttached(property.Subject))
+            {
+                // Also for a property that is not attached: a baseline belongs to the attach in progress.
+                return;
+            }
+
             if (!data.IsAttached)
             {
                 // A baseline whose attach never followed must not keep its dependencies.
                 ClearAttachBaseline(data, property);
-                return;
-            }
-
-            if (onlyIfSubjectIsDetached && SubjectLifecycleAttachments.IsAttached(property.Subject))
-            {
                 return;
             }
 

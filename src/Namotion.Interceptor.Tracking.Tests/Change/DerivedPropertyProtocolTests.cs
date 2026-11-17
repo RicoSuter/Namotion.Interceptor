@@ -845,7 +845,6 @@ public class DerivedPropertyProtocolTests
         {
             var value = machine.Configuration.Value * 10 + Volatile.Read(ref external);
             gate.PauseIfArmed();
-
             return value;
         };
         var result = GetResult(machine);
@@ -933,7 +932,6 @@ public class DerivedPropertyProtocolTests
         {
             var anchor = root.Anchor;
             gate.PauseIfArmed();
-
             return anchor;
         };
         var result = GetResult(machine);
