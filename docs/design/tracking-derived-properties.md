@@ -414,7 +414,7 @@ The recorder depth defines this model-read extent. Nested and derived-of-derived
 
 A captured write stops at the transaction interceptor and does not land, so it produces no recalculation or notification until the commit replays it. Derived property writes are never captured. When a write of a derived property with a setter lands while a transaction is open, it recalculates every dependent immediately from landed model inputs, which keeps unrelated dependents current and prevents a rollback from leaving a transaction-local value in shared tracking state.
 
-A top-level recalculation publishes after its frame ended, so synchronous subscribers perform ordinary pending-aware reads. A publication inside an outer getter, including one caused by a landed getter side-effect write, remains inside the outer model-read extent, so those subscribers read landed model values until the outer getter finishes.
+A top-level recalculation publishes after its frame ended, so synchronous subscribers perform ordinary pending-aware reads. A publication inside an outer getter, including one caused by a landed getter side-effect write, remains inside the outer model-read extent, so those subscribers read landed model values until the outer getter finishes. The exception is a getter that runs under a lifecycle lock (the evaluations during an attach): its publication is queued and delivered after the lifecycle operation, outside the getter (see [Post-Lock Queue](tracking-lifecycle.md#post-lock-queue)).
 
 `SubjectTransactionInterceptor` runs before `LifecycleInterceptor`, so a captured structural write is never reconciled and never attaches an uncommitted child, and before `PropertyChangeInterceptor`, so a captured write is never announced.
 
