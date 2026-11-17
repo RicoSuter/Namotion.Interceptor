@@ -261,7 +261,6 @@ person.LastName = "Doe";
 **How it works:**
 
 - When a derived property attaches, its getter is evaluated and every intercepted property it reads is recorded as a dependency
-- The attach does not publish its first value, unless a tracked dependency changed it while the subject attached. Among the first lifecycle handlers of the subject (`[RunsFirst]`), so before the registry makes it resolvable and before context inheritance publishes its writes, the getter is evaluated once more and what it read is recorded. The attach publishes the change from that value, after the structural write that attached the subject, when its own value differs (by the comparison of the equality check) and a property or structure the earlier evaluation read was written since, or the attach read different dependencies. A source written while the subject attaches is not a dependency yet, so this is how a reader that read the value then, and a consumer of the source's change, learn the derived value. A source written and set back (A, B, A) publishes nothing, since the value is equal again. A getter that reads graph state, such as its parents or its registration, publishes on attach, because attaching changes the subject's structure. A value that differs only because the getter builds a new object without value equality, counts, or reads a context service or other state that is not followed publishes nothing, and costs no further evaluation
 - When a dependency is written, the derived property is recalculated once the write completed, and its dependencies are recorded again
 - If the derived value changes, a change event is published through the derived property's own subject, with a local origin
 
@@ -277,8 +276,6 @@ A derived property also follows the structure of a subject its getter reads thro
 
 Not followed:
 
-- A write to a plain property of a subject that attaches, after the registry registered the subject and before it inherits the context: the write publishes no change, although a reader may have found the subject through its parent's registered property already. A derived property that reads the property still publishes its own change on attach
-- A source written while the subject attaches, behind a getter that throws when it is evaluated before the attach (for example one that needs the subject's parent): without that earlier value the attach publishes nothing, and the change stays unpublished until a dependency is written again
 - State outside the model, such as external services, static state, or plain fields and properties that are not intercepted
 - Context services read directly, such as `subject.Context.TryGetService<T>()`
 - Registry resolution changed by a fallback context added to a subject that is already attached, or replaced by application code

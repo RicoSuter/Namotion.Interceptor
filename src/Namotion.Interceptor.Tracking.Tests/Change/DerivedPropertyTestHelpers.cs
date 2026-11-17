@@ -11,12 +11,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 
 internal static class DerivedPropertyTestHelpers
 {
-    /// <summary>
-    /// Whether the getter runs to record the value before its subject's attach. A test that counts, pauses or writes
-    /// in the attach evaluation returns its value without doing so then.
-    /// </summary>
-    public static bool IsAttachBaseline => DerivedPropertyOwnership.IsCapturingAttachBaseline;
-
     public static List<SubjectPropertyChange> SubscribeToChanges(IInterceptorSubjectContext context)
     {
         var changes = new List<SubjectPropertyChange>();
@@ -131,15 +125,9 @@ internal sealed class EvaluationGate
 
     public void Arm() => Volatile.Write(ref _isArmed, 1);
 
-    // Pauses an evaluation of the attach or a recalculation, not the one that records the value before the attach.
-    public void PauseIfArmed() => PauseIfArmed(isAttachBaseline: false);
-
-    // Pauses only the evaluation that records the value before the attach.
-    public void PauseAttachBaselineIfArmed() => PauseIfArmed(isAttachBaseline: true);
-
-    private void PauseIfArmed(bool isAttachBaseline)
+    public void PauseIfArmed()
     {
-        if (DerivedPropertyTestHelpers.IsAttachBaseline == isAttachBaseline && Interlocked.Exchange(ref _isArmed, 0) == 1)
+        if (Interlocked.Exchange(ref _isArmed, 0) == 1)
         {
             Paused.Set();
             _hasTimedOut = !Resume.Wait(TestTimeouts.Default);

@@ -256,12 +256,10 @@ public class PostLockQueueTests
         root.Mother = mother;
 
         // Assert
-        // The father's name written while he attached changes his derived names from their values before the attach.
         Assert.Equal(
             [
                 ("root.Mother", true), ("root.FirstName", true), ("root.LastName", true), ("root.Father", true),
-                ("father.FirstName", true), ("father.FullName", true), ("father.FullNameWithPrefix", true),
-                ("root.FullName", true), ("root.FullNameWithPrefix", true)
+                ("father.FirstName", true), ("root.FullName", true), ("root.FullNameWithPrefix", true)
             ],
             deliveries);
         Assert.Equal("1 x", root.FullName);

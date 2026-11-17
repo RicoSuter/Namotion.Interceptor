@@ -37,9 +37,6 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
 
     public bool IsRecording => _depth > 0 && !_frames[_depth - 1].IsSuspended;
 
-    /// <summary>The number of recording frames on this thread, suspended ones included.</summary>
-    internal static int CurrentDepth => _current?._depth ?? 0;
-
     /// <summary>A getter is being evaluated on this thread, also while its recording is suspended.</summary>
     internal static bool IsEvaluatingOnThisThread => _current is { _depth: > 0 };
 

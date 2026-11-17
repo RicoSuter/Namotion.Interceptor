@@ -56,8 +56,7 @@ public static class InterceptorSubjectContextExtensions
     public static IInterceptorSubjectContext WithDerivedPropertyChangeDetection(this IInterceptorSubjectContext context)
     {
         context
-            .WithService(() => new DerivedPropertyChangeHandler())
-            .WithService<ILifecycleHandler>(() => new DerivedPropertyBaselineHandler(), handler => handler is DerivedPropertyBaselineHandler);
+            .WithService(() => new DerivedPropertyChangeHandler());
 
         return context
             .WithLifecycle();
