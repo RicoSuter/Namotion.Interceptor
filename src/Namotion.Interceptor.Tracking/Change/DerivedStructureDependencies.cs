@@ -59,10 +59,10 @@ public static class DerivedStructureDependencies
     }
 
     /// <summary>
-    /// The reference under which the structure of <paramref name="subject"/> is recorded as a dependency: it has no
-    /// property name, so it is never a property of the subject.
+    /// The reference under which the structure of <paramref name="subject"/> is recorded as a dependency: its name,
+    /// <see cref="StructureName"/>, is reserved and is never the name of a property.
     /// </summary>
-    internal static PropertyReference Of(IInterceptorSubject subject) => new(subject, null!);
+    internal static PropertyReference Of(IInterceptorSubject subject) => new(subject, StructureName);
 
     /// <summary>
     /// The reference under which the children of <paramref name="subject"/> are recorded as a dependency: its name,
@@ -70,7 +70,7 @@ public static class DerivedStructureDependencies
     /// </summary>
     internal static PropertyReference ChildrenOf(IInterceptorSubject subject) => new(subject, ChildrenName);
 
-    internal static bool IsStructureDependency(in PropertyReference reference) => reference.Name is null or ChildrenName;
+    internal static bool IsStructureDependency(in PropertyReference reference) => reference.Name is StructureName or ChildrenName;
 
     /// <summary>
     /// Raises the structure gate. Called before the data of a structure dependency is created, and returns only once the gate is
@@ -102,5 +102,9 @@ public static class DerivedStructureDependencies
         SpinWait.SpinUntil(static () => Volatile.Read(ref _gateState) == 2);
     }
 
+    /// <summary>The reserved name of the structure dependency, never the name of a property.</summary>
+    internal const string StructureName = "\0structure";
+
+    /// <summary>The reserved name of the children dependency, never the name of a property.</summary>
     internal const string ChildrenName = "\0children";
 }
