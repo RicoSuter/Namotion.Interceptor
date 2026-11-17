@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using static HomeBlaze.Automation.Tests.Testing.RuleBuilder;
 
 namespace HomeBlaze.Automation.Tests;
@@ -442,6 +443,43 @@ public class AutomationPropertyTriggerTests
         // Assert
         Assert.Equal("On: Armed", statusThroughTheChild);
         Assert.Equal("On: Unknown since 2026-11-06 12:00:00, missing /Weather/Gust", host.Rule("retract").Status);
+    }
+
+    [Fact]
+    public async Task WhenADerivedPropertyIsReadWhileItsSubjectAttachesAndItsSourcesAreWrittenBeforeItIsAttached_ThenTheTriggerBecomesKnown()
+    {
+        // Arrange: the volume attaches on a thread of its own, which waits in the attach until the worker read the
+        // usage, and then writes the sources before the usage is attached.
+        await using var host = await AutomationTestHost.StartAsync(automation => automation.Rules = Keyed(
+            ("disk", On("Disk", When("/Volume/Usage > 0.7"), Invoke("/Blinds/Close")))));
+        var volume = new TestVolume();
+        using var isAttaching = new ManualResetEventSlim();
+        using var isRead = new ManualResetEventSlim();
+        var hasWaited = false;
+        host.Graph.Context.AddService<ILifecycleHandler>(new AttachHook(volume, () =>
+        {
+            isAttaching.Set();
+            hasWaited = isRead.Wait(TestTimeouts.Default);
+            volume.FreeSpace = 300;
+            volume.TotalSize = 1000;
+        }));
+
+        // Act
+        var attach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => host.Graph.Add("Volume", volume));
+        var isAttachingInTime = isAttaching.Wait(TestTimeouts.Default);
+        await host.ResetAsync();
+        var statusWhileAttaching = host.Rule("disk").Status;
+        isRead.Set();
+        await attach.WaitAsync(TestTimeouts.Default);
+        await host.FlushAsync();
+
+        // Assert
+        Assert.True(isAttachingInTime);
+        Assert.True(hasWaited);
+        Assert.Equal("On: Unknown since 2026-11-06 12:00:00, missing /Volume/Usage", statusWhileAttaching);
+        Assert.Equal(0.7m, volume.Usage);
+        Assert.Equal("On: Armed", host.Rule("disk").Status);
+        Assert.Equal("The trigger 1 (/Volume/Usage > 0.7) of rule Disk in automation Storm is known again.", host.Logger.Messages[^1]);
     }
 
     private sealed class CountingListener(IAutomationChangeListener inner) : IAutomationChangeListener

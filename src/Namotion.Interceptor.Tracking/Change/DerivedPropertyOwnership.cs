@@ -35,6 +35,17 @@ internal static class DerivedPropertyOwnership
     /// </summary>
     internal static Action<PropertyReference>? AfterTakeForTests { get; set; }
 
+    // The recording depth of the getter evaluated for its attach baseline on this thread, or 0.
+    [ThreadStatic]
+    private static int _attachBaselineDepth;
+
+    /// <summary>
+    /// Whether the innermost getter evaluated on this thread runs for its attach baseline, see
+    /// <see cref="CaptureAttachBaseline"/>. Used by tests.
+    /// </summary>
+    internal static bool IsCapturingAttachBaseline =>
+        _attachBaselineDepth != 0 && _attachBaselineDepth == DerivedPropertyRecorder.CurrentDepth;
+
     /// <summary>
     /// Attaches a derived property and evaluates its first value, unless it is attached through another graph
     /// already.
@@ -44,14 +55,21 @@ internal static class DerivedPropertyOwnership
         var data = property.GetDerivedPropertyData();
         long attachToken;
         bool ownsData;
+        Baseline baseline;
         lock (data)
         {
+            // Taken also when attached already, so that a baseline is never consumed by a later attach.
+            baseline = new Baseline(data.AttachBaseline, data.HasAttachBaseline, data.AttachBaselineVersionSum);
+            data.AttachBaseline = null;
+            data.HasAttachBaseline = false;
+
             // Attached through another graph already: it has its value and its dependencies.
             if (data.IsAttached)
             {
                 return;
             }
 
+            // The dependencies of a baseline stay: the attach evaluation compares its own with them.
             data.IsAttached = true;
             Volatile.Write(ref data.IsDerived, true);
             data.HasValue = false;
@@ -70,8 +88,124 @@ internal static class DerivedPropertyOwnership
             }
         }
 
-        EvaluateAtAttach(data, property, attachToken, ownsData);
+        EvaluateAtAttach(data, property, attachToken, ownsData, baseline);
     }
+
+    /// <summary>
+    /// Records the value of a derived property before its subject's attach makes the subject observable, with what the
+    /// getter read and the versions it read, which the attach compares its first evaluation with, see
+    /// <see cref="DerivedPropertyBaselineHandler"/>. Does nothing for a property that is attached already. A getter that
+    /// throws leaves no baseline.
+    /// </summary>
+    internal static void CaptureAttachBaseline(PropertyReference property)
+    {
+        var data = property.GetDerivedPropertyData();
+
+        // Checked again under the lock before the baseline is stored.
+        if (Volatile.Read(ref data.IsAttached))
+        {
+            return;
+        }
+
+        // Recorded like any evaluation, so that it reads landed values and adds no dependency to an evaluation in
+        // progress on this thread.
+        var previousBaselineDepth = _attachBaselineDepth;
+        _attachBaselineDepth = DerivedPropertyRecorder.CurrentDepth + 1;
+        Evaluation evaluation;
+        try
+        {
+            evaluation = Evaluate(data, property);
+        }
+        finally
+        {
+            _attachBaselineDepth = previousBaselineDepth;
+        }
+
+        var recorder = DerivedPropertyRecorder.Current;
+        try
+        {
+            lock (data)
+            {
+                if (data.IsAttached)
+                {
+                    return;
+                }
+
+                if (evaluation.HasThrown)
+                {
+                    ClearAttachBaseline(data, property);
+                    return;
+                }
+
+                // Committed as the dependencies while the property is not attached: a write requests nothing yet, and
+                // the attach compares what its evaluation read with them.
+                var recorded = recorder.LastRecording;
+                data.UpdateDependencies(property, recorded);
+                data.AttachBaseline = evaluation.Value;
+                data.HasAttachBaseline = true;
+                data.AttachBaselineVersionSum = SumVersions(recorded);
+            }
+        }
+        finally
+        {
+            recorder.ClearLastRecording();
+        }
+    }
+
+    // Called under lock(data) for a property that is not attached: removes a baseline and the dependencies it committed.
+    private static void ClearAttachBaseline(DerivedPropertyData data, in PropertyReference property)
+    {
+        if (data.HasAttachBaseline)
+        {
+            data.RemoveDependencies(property);
+        }
+
+        data.AttachBaseline = null;
+        data.HasAttachBaseline = false;
+        data.AttachBaselineVersionSum = 0;
+    }
+
+    // Wraps on overflow, which leaves a moved version visible in practice.
+    private static long SumVersions(ReadOnlySpan<RecordedDependency> recorded)
+    {
+        var sum = 0L;
+        foreach (ref readonly var dependency in recorded)
+        {
+            sum = unchecked(sum + dependency.Version);
+        }
+
+        return sum;
+    }
+
+    // The comparison of the equality check (EqualityComparer<object>.Default on the published values). User code: called
+    // outside every lock. A comparison that throws counts as different, so the publication reports it.
+    private static bool AreEqual(object? first, object? second)
+    {
+        try
+        {
+            return EqualityComparer<object?>.Default.Equals(first, second);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The value a derived property had before its subject's attach, if one was recorded.</summary>
+    private readonly record struct Baseline(object? Value, bool HasValue, long VersionSum);
+
+    /// <summary>
+    /// What the attach evaluations read compared with the baseline's: whether a commit changed the dependencies (the
+    /// first one against the baseline's), and the version sum of the last commit.
+    /// </summary>
+    private struct BaselineComparison
+    {
+        public bool HasDependenciesChanged;
+        public long VersionSum;
+    }
+
+    /// <summary>An attach in progress: its token, whether it owns the property, and the baseline it took.</summary>
+    private readonly record struct AttachOperation(long Token, bool OwnsData, Baseline Baseline);
 
     /// <summary>
     /// Detaches a derived property: removes its dependencies, clears its value and makes an evaluation in flight
@@ -90,8 +224,16 @@ internal static class DerivedPropertyOwnership
         {
             // Decided under the lock that Attach takes as well: an interceptor that attached the
             // subject after the caller's check keeps the property attached.
-            if (!data.IsAttached || (onlyIfSubjectIsDetached && SubjectLifecycleAttachments.IsAttached(property.Subject)))
+            if (onlyIfSubjectIsDetached && SubjectLifecycleAttachments.IsAttached(property.Subject))
             {
+                // Also for a property that is not attached: a baseline belongs to the attach in progress.
+                return;
+            }
+
+            if (!data.IsAttached)
+            {
+                // A baseline whose attach never followed must not keep its dependencies.
+                ClearAttachBaseline(data, property);
                 return;
             }
 
@@ -99,6 +241,8 @@ internal static class DerivedPropertyOwnership
             data.AttachToken = 0;
             data.RemoveDependencies(property);
             data.LastKnownValue = null;
+            data.AttachBaseline = null;
+            data.HasAttachBaseline = false;
             data.HasValue = false;
             data.IsFaulted = false;
 
@@ -246,7 +390,7 @@ internal static class DerivedPropertyOwnership
     /// The attach token decides whether the commit counts: a newer attach or a detach supersedes it. Never throws:
     /// an exception is traced, so the remaining properties and lifecycle handlers of the subject still attach.
     /// </summary>
-    private static void EvaluateAtAttach(DerivedPropertyData data, PropertyReference property, long attachToken, bool ownsData)
+    private static void EvaluateAtAttach(DerivedPropertyData data, PropertyReference property, long attachToken, bool ownsData, Baseline baseline)
     {
         bool requestAfterAttach;
         long pendingTimestamp;
@@ -255,7 +399,7 @@ internal static class DerivedPropertyOwnership
         try
         {
             requestAfterAttach = RunAttachEvaluations(
-                data, property, attachToken, ownsData, out pendingTimestamp, out attachCount, out isExhausted);
+                data, property, new AttachOperation(attachToken, ownsData, baseline), out pendingTimestamp, out attachCount, out isExhausted);
         }
         catch (Exception exception)
         {
@@ -310,11 +454,15 @@ internal static class DerivedPropertyOwnership
     // an attach that increments it later evaluates after every cause of the request. isExhausted: the iteration limit
     // was reached and the last, unstable evaluation was committed.
     private static bool RunAttachEvaluations(
-        DerivedPropertyData data, PropertyReference property, long attachToken, bool ownsData, out long pendingTimestamp,
+        DerivedPropertyData data, PropertyReference property, in AttachOperation attach, out long pendingTimestamp,
         out long attachCount, out bool isExhausted)
     {
+        var attachToken = attach.Token;
+        var ownsData = attach.OwnsData;
+        var baseline = attach.Baseline;
         var requestAfterAttach = false;
         var hasEvaluatedAfterOwnWrite = false;
+        var comparison = default(BaselineComparison);
         pendingTimestamp = 0;
         attachCount = 0;
         isExhausted = false;
@@ -328,6 +476,7 @@ internal static class DerivedPropertyOwnership
             var timestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
             var evaluation = Evaluate(data, property);
             var isLastIteration = iteration == MaxStabilizationIterations - 1;
+            var differsFromBaseline = DiffersFromBaseline(baseline, evaluation);
             lock (data)
             {
                 if (data.AttachToken != attachToken)
@@ -344,28 +493,47 @@ internal static class DerivedPropertyOwnership
                     break;
                 }
 
-                var isStable = CommitAttachDependencies(data, property, ownsData, ref hasEvaluatedAfterOwnWrite);
+                var isStable = CommitAttachDependencies(data, property, ownsData, ref hasEvaluatedAfterOwnWrite, ref comparison);
                 if (!isStable && !isLastIteration)
                 {
                     continue;
                 }
 
-                CommitAttachEvaluation(data, property, evaluation, attachToken, timestamp);
+                var publishesFromBaseline = differsFromBaseline && HasTrackedChange(baseline, comparison, isStable);
+                var hasChangedSinceBaseline = CommitAttachEvaluation(data, property, evaluation, attachToken, timestamp, baseline, publishesFromBaseline);
                 isExhausted = !isStable;
-
-                // An unstable evaluation is evaluated again after the attach. So is one that found a recalculation
-                // from before the detach in flight, which this request hands over to, with the attach's timestamp
-                // unless a request that arrived since carries its own. Under the lifecycle lock the request is
-                // queued, so it does not run before the structural change is announced.
-                requestAfterAttach = TakePendingRequestIfUnowned(data, out pendingTimestamp) || !isStable || !ownsData;
-                if (!ownsData && pendingTimestamp == 0)
-                {
-                    pendingTimestamp = timestamp;
-                }
-
+                requestAfterAttach = DecideRequestAfterAttach(data, isStable, isAnswered: ownsData && !hasChangedSinceBaseline, timestamp, out pendingTimestamp);
                 attachCount = data.AttachCount;
                 break;
             }
+        }
+
+        return requestAfterAttach;
+    }
+
+    // Outside every lock, since the comparison is user code.
+    private static bool DiffersFromBaseline(Baseline baseline, Evaluation evaluation) =>
+        baseline.HasValue && !evaluation.HasThrown && !AreEqual(baseline.Value, evaluation.Value);
+
+    // Whether a tracked dependency can explain a difference from the baseline: the dependencies changed, one the baseline
+    // read was written since (versions only increase, so an equal sum over the same dependencies means none was), or
+    // the attach committed an unstable evaluation. A value that differs because it is built anew or read from state
+    // that is not followed is not published and costs nothing more.
+    private static bool HasTrackedChange(Baseline baseline, in BaselineComparison comparison, bool isStable) =>
+        comparison.HasDependenciesChanged || comparison.VersionSum != baseline.VersionSum || !isStable;
+
+    // Called under lock(data) after the attach committed. An unstable evaluation is evaluated again after the attach. So is
+    // one that found a recalculation from before the detach in flight, which this request hands over to, and one whose
+    // value differs from its baseline, which the recalculation publishes; both with the attach's timestamp unless a
+    // request that arrived since carries its own. Under the lifecycle lock the request is queued, so it does not run
+    // before the structural change is announced.
+    private static bool DecideRequestAfterAttach(
+        DerivedPropertyData data, bool isStable, bool isAnswered, long timestamp, out long pendingTimestamp)
+    {
+        var requestAfterAttach = TakePendingRequestIfUnowned(data, out pendingTimestamp) || !isStable || !isAnswered;
+        if (!isAnswered && pendingTimestamp == 0)
+        {
+            pendingTimestamp = timestamp;
         }
 
         return requestAfterAttach;
@@ -375,9 +543,10 @@ internal static class DerivedPropertyOwnership
     // the property, it takes a request that arrived during the evaluation and answers it by evaluating again;
     // otherwise the flag belongs to the owner in flight.
     private static bool CommitAttachDependencies(
-        DerivedPropertyData data, in PropertyReference property, bool ownsData, ref bool hasEvaluatedAfterOwnWrite)
+        DerivedPropertyData data, in PropertyReference property, bool ownsData, ref bool hasEvaluatedAfterOwnWrite,
+        ref BaselineComparison comparison)
     {
-        var isStable = IsStable(CommitDependencies(data, property), ref hasEvaluatedAfterOwnWrite);
+        var isStable = IsStable(CommitComparedDependencies(data, property, ref comparison), ref hasEvaluatedAfterOwnWrite);
         if (ownsData && data.RecalculationNeeded)
         {
             TakePendingRequest(data, out _);
@@ -389,16 +558,19 @@ internal static class DerivedPropertyOwnership
 
     // Called under lock(data) with a current attach token, after the last evaluation of the attach. An unstable
     // evaluation (the getter keeps changing what it reads, for example it writes a property it reads) is committed
-    // as well, and the attach requests a recalculation after it.
-    private static void CommitAttachEvaluation(
-        DerivedPropertyData data, in PropertyReference property, Evaluation evaluation, long attachToken, long timestamp)
+    // as well, and the attach requests a recalculation after it. Returns whether the value differs from the baseline.
+    private static bool CommitAttachEvaluation(
+        DerivedPropertyData data, in PropertyReference property, Evaluation evaluation, long attachToken, long timestamp,
+        Baseline baseline, bool publishesFromBaseline)
     {
-        CommitFirstValue(data, property, evaluation, timestamp);
+        var hasChangedSinceBaseline = CommitFirstValue(data, property, evaluation, timestamp, baseline, publishesFromBaseline);
         data.AttachToken = 0;
         if (data.OwnerToken == attachToken)
         {
             data.OwnerToken = 0;
         }
+
+        return hasChangedSinceBaseline;
     }
 
     // Ends a failed attach if it is still this one and releases the ownership it holds. Returns true when a
@@ -446,21 +618,28 @@ internal static class DerivedPropertyOwnership
         return true;
     }
 
-    // Called under lock(data). The first value is not published: consumers read it while the subject attaches.
-    private static void CommitFirstValue(DerivedPropertyData data, in PropertyReference property, Evaluation evaluation, long timestamp)
+    // Called under lock(data). The first value is not published: consumers read it while the subject attaches. With
+    // publishesFromBaseline, the baseline is committed instead, so the recalculation the attach requests publishes the
+    // difference: a source written after the baseline, before the evaluation recorded it, requested nothing. Returns
+    // whether the baseline was committed.
+    private static bool CommitFirstValue(
+        DerivedPropertyData data, in PropertyReference property, Evaluation evaluation, long timestamp, Baseline baseline,
+        bool publishesFromBaseline)
     {
         if (evaluation.HasThrown)
         {
             data.IsFaulted = true;
             data.HasValue = false;
-            return;
+            return false;
         }
 
-        data.LastKnownValue = evaluation.Value;
+        var hasChangedSinceBaseline = publishesFromBaseline;
+        data.LastKnownValue = hasChangedSinceBaseline ? baseline.Value : evaluation.Value;
         data.HasValue = true;
         data.IsFaulted = false;
         data.RecalculationSequence++;
         property.SetWriteTimestamp(timestamp);
+        return hasChangedSinceBaseline;
     }
 
     /// <summary>
@@ -870,17 +1049,41 @@ internal static class DerivedPropertyOwnership
         {
             var recorded = recorder.LastRecording;
             data.UpdateDependencies(property, recorded);
-            if (HasVersionChanged(recorded))
-            {
-                return RecordingCheck.SourceMoved;
-            }
-
-            return recorder.LastRecordingHasOwnWriteAfterRead ? RecordingCheck.OwnWriteAfterRead : RecordingCheck.Current;
+            return CheckRecording(recorder, recorded);
         }
         finally
         {
             recorder.ClearLastRecording();
         }
+    }
+
+    // CommitDependencies of an attach, which also records in comparison whether the dependencies changed and the sum
+    // of the versions read.
+    private static RecordingCheck CommitComparedDependencies(DerivedPropertyData data, in PropertyReference property, ref BaselineComparison comparison)
+    {
+        var recorder = DerivedPropertyRecorder.Current;
+        try
+        {
+            var recorded = recorder.LastRecording;
+            comparison.HasDependenciesChanged |= data.UpdateDependencies(property, recorded);
+            comparison.VersionSum = SumVersions(recorded);
+            return CheckRecording(recorder, recorded);
+        }
+        finally
+        {
+            recorder.ClearLastRecording();
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static RecordingCheck CheckRecording(DerivedPropertyRecorder recorder, ReadOnlySpan<RecordedDependency> recorded)
+    {
+        if (HasVersionChanged(recorded))
+        {
+            return RecordingCheck.SourceMoved;
+        }
+
+        return recorder.LastRecordingHasOwnWriteAfterRead ? RecordingCheck.OwnWriteAfterRead : RecordingCheck.Current;
     }
 
     private static void DiscardRecording() => DerivedPropertyRecorder.Current.ClearLastRecording();
