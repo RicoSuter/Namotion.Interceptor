@@ -53,7 +53,7 @@ public class RegistryHandlerOrderTests
 
         // Assert
         Assert.Equal(
-            ["DerivedPropertyBaselineHandler", nameof(SubjectRegistry), nameof(ParentTrackingHandler), nameof(ContextInheritanceHandler)],
+            [nameof(SubjectRegistry), nameof(ParentTrackingHandler), nameof(ContextInheritanceHandler)],
             handlers);
     }
 

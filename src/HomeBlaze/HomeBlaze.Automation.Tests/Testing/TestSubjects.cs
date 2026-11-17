@@ -86,21 +86,6 @@ public partial class TestSensorView
     public TestSensor? Pick => Source?.Sensor;
 }
 
-/// <summary>A volume whose usage is derived from its free space and total size, which are null until set.</summary>
-[InterceptorSubject]
-public partial class TestVolume
-{
-    [State]
-    public partial long? FreeSpace { get; set; }
-
-    [State]
-    public partial long? TotalSize { get; set; }
-
-    [Derived]
-    [State]
-    public decimal? Usage => TotalSize is { } total and > 0 && FreeSpace is { } free ? Math.Round((decimal)(total - free) / total, 3) : null;
-}
-
 /// <summary>A subject that holds the root, which gives the root a parent.</summary>
 [InterceptorSubject]
 public partial class TestRootHolder
