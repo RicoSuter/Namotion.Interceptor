@@ -20,7 +20,7 @@ internal static class DerivedPropertyOwnership
 {
     // Safety limit for stabilization loops. Prevents infinite loops from getters
     // with side effects that mutate the tracked state (a user error but shouldn't hang).
-    // In correct code, the loop runs 1-2 iterations max.
+    // The owner loop counts only the evaluations that its own thread caused, see RunOwnerLoop.
     private const int MaxStabilizationIterations = 100;
 
     /// <summary>
@@ -464,6 +464,12 @@ internal static class DerivedPropertyOwnership
 
         /// <summary>The loop evaluated again since its last commit because the getter wrote a source it had read.</summary>
         public bool HasEvaluatedAfterOwnWrite;
+
+        /// <summary>
+        /// The current iteration took a foreign request, or found a source that another thread moved without one; the
+        /// next evaluation answers another thread's write and does not count toward the iteration limit.
+        /// </summary>
+        public bool IsAnsweringForeignWrite;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -474,13 +480,22 @@ internal static class DerivedPropertyOwnership
     }
 
     // Returns true when the loop released ownership, false when the iteration limit was reached while it owns the property.
+    // An evaluation that answers another thread's request or write does not count toward the limit: a source that other
+    // threads keep writing keeps the owner evaluating without being a cycle of the getter or its observers. An evaluation
+    // that the owner's own thread requested counts, also when a foreign request taken before is still unanswered.
     private static bool RunOwnerLoop(DerivedPropertyData data, PropertyReference property, long token, ref OwnerLoopState state)
     {
-        for (var iteration = 0; iteration < MaxStabilizationIterations; iteration++)
+        var iterations = 0;
+        while (iterations < MaxStabilizationIterations)
         {
             if (RunOwnerIteration(data, property, token, ref state))
             {
                 return true;
+            }
+
+            if (!state.IsAnsweringForeignWrite)
+            {
+                iterations++;
             }
         }
 
@@ -496,6 +511,7 @@ internal static class DerivedPropertyOwnership
     /// </summary>
     private static bool RunOwnerIteration(DerivedPropertyData data, PropertyReference property, long token, ref OwnerLoopState state)
     {
+        state.IsAnsweringForeignWrite = false;
         var commit = EvaluateAndCommit(data, property, token, ref state);
         if (commit.Outcome != CommitOutcome.Committed)
         {
@@ -519,7 +535,8 @@ internal static class DerivedPropertyOwnership
 
             if (data.RecalculationNeeded && data.IsAttached && data.AttachToken == 0)
             {
-                state.Unanswered = Add(UnansweredRequest.None, TakePendingRequest(data, out state.RawTimestamp));
+                state.IsAnsweringForeignWrite = TakePendingRequest(data, out state.RawTimestamp);
+                state.Unanswered = Add(UnansweredRequest.None, state.IsAnsweringForeignWrite);
                 return false;
             }
 
@@ -601,7 +618,8 @@ internal static class DerivedPropertyOwnership
             if (data.RecalculationNeeded)
             {
                 DiscardRecording();
-                state.Unanswered = Add(state.Unanswered, TakePendingRequest(data, out state.RawTimestamp));
+                state.IsAnsweringForeignWrite = TakePendingRequest(data, out state.RawTimestamp);
+                state.Unanswered = Add(state.Unanswered, state.IsAnsweringForeignWrite);
                 return new Commit(CommitOutcome.EvaluateAgain);
             }
 
@@ -611,6 +629,7 @@ internal static class DerivedPropertyOwnership
                 // A source moved without a request (its writer read the used-by set before this dependency was committed). The
                 // recording follows this thread's own writes, so the writer is another thread.
                 state.Unanswered = UnansweredRequest.Foreign;
+                state.IsAnsweringForeignWrite = true;
                 return new Commit(CommitOutcome.EvaluateAgain);
             }
 
@@ -675,7 +694,8 @@ internal static class DerivedPropertyOwnership
             return;
         }
 
-        // Safe for boxed value types: each computation produces a distinct reference.
+        // The sequence check above is the guard: every change of LastKnownValue moves it under lock(data). This one
+        // only narrows the window between the two reads, since two evaluations can return the same reference.
         if (!ReferenceEquals(newValue, Volatile.Read(ref data.LastKnownValue)))
         {
             return;

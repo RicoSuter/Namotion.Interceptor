@@ -4,7 +4,9 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
 /// The lifecycle interceptors a subject is attached to, and its reference count. A subject can be in several graphs;
-/// its derived properties stay attached while it is attached to any of them.
+/// its derived properties stay attached while it is attached to any of them. Also the scopes a lifecycle interceptor
+/// opens on its thread while it holds its lock: the detach of a subject's properties, which detaches its derived
+/// properties when it left its last graph, and the suspension of the derived recording.
 /// </summary>
 internal static class SubjectLifecycleAttachments
 {
@@ -66,7 +68,15 @@ internal static class SubjectLifecycleAttachments
             var subjects = _detachingSubjects!;
             var subject = subjects[^1];
             subjects.RemoveAt(subjects.Count - 1);
-            DetachDerivedPropertiesIfDetached(subject);
+            try
+            {
+                DetachDerivedPropertiesIfDetached(subject);
+            }
+            catch (Exception exception)
+            {
+                // Disposed while an exception of a lifecycle handler may propagate, which this one must not replace.
+                DerivedPropertyOwnership.TraceDropped("Detaching the derived properties of a detached subject failed", exception);
+            }
         }
 
         // Property detaches issued by a lifecycle interceptor do not detach a derived property, since the subject
