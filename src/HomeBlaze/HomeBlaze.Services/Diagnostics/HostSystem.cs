@@ -4,15 +4,18 @@ using System.Runtime.InteropServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
+using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking.Parent;
 using DiagnosticsProcess = System.Diagnostics.Process;
 
 namespace HomeBlaze.Services.Diagnostics;
 
 /// <summary>
-/// The machine HomeBlaze runs on, with the HomeBlaze process as <see cref="Process"/>.
+/// The machine HomeBlaze runs on, with the HomeBlaze process as <see cref="Process"/> and its recent log entries as
+/// <see cref="Logs"/>.
 /// </summary>
 [Category("System")]
 [Description("Reports CPU, memory and uptime of the machine and the process HomeBlaze runs in")]
@@ -34,6 +37,10 @@ public partial class HostSystem : BackgroundService,
     private static readonly TimeSpan MaximumPollingDelay = TimeSpan.FromMilliseconds(int.MaxValue);
 
     private readonly ISystemMetricsReader? _reader;
+    private readonly RecentLogStore _recentLogStore;
+    // Serializes reading the recent log settings and applying them, so the store never ends up with values read
+    // before a concurrent change.
+    private readonly Lock _recentLogConfigurationLock = new();
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _pollSignal = new(0, 1);
 
@@ -47,6 +54,18 @@ public partial class HostSystem : BackgroundService,
 
     [Configuration]
     public partial TimeSpan PollingInterval { get; set; }
+
+    /// <summary>
+    /// The lowest level <see cref="Logs"/> keeps, Warning when null.
+    /// </summary>
+    [Configuration]
+    public partial LogLevel? RecentLogMinimumLevel { get; set; }
+
+    /// <summary>
+    /// The most entries <see cref="Logs"/> keeps, at most 10,000; 0 keeps none.
+    /// </summary>
+    [Configuration]
+    public partial int RecentLogCapacity { get; set; }
 
     [State(Position = 400)]
     [Category("System")]
@@ -111,6 +130,9 @@ public partial class HostSystem : BackgroundService,
     [State(Position = 430)]
     public partial HostProcess Process { get; internal set; }
 
+    [State(Position = 431)]
+    public partial HostLogs Logs { get; internal set; }
+
     [State(IsDiscrete = true)]
     public partial ServiceStatus Status { get; internal set; }
 
@@ -129,18 +151,24 @@ public partial class HostSystem : BackgroundService,
     [Derived]
     public string? IconColor => Status == ServiceStatus.Error ? "Error" : null;
 
-    public HostSystem(ILogger<HostSystem> logger)
-        : this(SystemMetricsReaderFactory.CreateForCurrentPlatform(), HostProcess.CollectAllGarbage, logger)
+    /// <param name="logger">The logger.</param>
+    /// <param name="recentLogStore">The store of recent log entries that <see cref="Logs"/> reports, registered by
+    /// <see cref="ServiceCollectionExtensions.AddHomeBlazeServices"/>; without it <see cref="Logs"/> stays empty.</param>
+    public HostSystem(ILogger<HostSystem> logger, RecentLogStore? recentLogStore = null)
+        : this(SystemMetricsReaderFactory.CreateForCurrentPlatform(), HostProcess.CollectAllGarbage, logger, recentLogStore)
     {
     }
 
-    internal HostSystem(ISystemMetricsReader? reader, Action collectGarbage, ILogger logger)
+    internal HostSystem(ISystemMetricsReader? reader, Action collectGarbage, ILogger logger, RecentLogStore? recentLogStore = null)
     {
         _reader = reader;
         _logger = logger;
+        _recentLogStore = recentLogStore ?? new RecentLogStore();
 
         Name = string.Empty;
         PollingInterval = TimeSpan.FromSeconds(15);
+        RecentLogMinimumLevel = null;
+        RecentLogCapacity = RecentLogStore.DefaultCapacity;
 
         MachineName = Environment.MachineName;
         OperatingSystemName = SystemInformation.ReadOperatingSystemName();
@@ -156,6 +184,7 @@ public partial class HostSystem : BackgroundService,
         Uptime = null;
 
         Process = new HostProcess(collectGarbage, RequestPoll);
+        Logs = new HostLogs(_recentLogStore, ChangeLogLevelAsync);
 
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
@@ -164,14 +193,47 @@ public partial class HostSystem : BackgroundService,
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
+        ApplyRecentLogConfiguration();
         RequestPoll();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Sets <see cref="RecentLogMinimumLevel"/>, applies it and saves the configuration when a storage holds it.
+    /// </summary>
+    internal async Task ChangeLogLevelAsync(LogLevel? minimumLevel, CancellationToken cancellationToken)
+    {
+        lock (_recentLogConfigurationLock)
+        {
+            RecentLogMinimumLevel = minimumLevel;
+            ApplyRecentLogConfiguration();
+        }
+
+        RequestPoll();
+
+        var configurationWriter = this.TryGetFirstParent<IConfigurationWriter>();
+        if (configurationWriter is null ||
+            !await configurationWriter.WriteConfigurationAsync(this, cancellationToken))
+        {
+            _logger.LogWarning("The recent log level was changed but not saved, so it is lost on restart");
+        }
+    }
+
+    private void ApplyRecentLogConfiguration()
+    {
+        lock (_recentLogConfigurationLock)
+        {
+            _recentLogStore.Configure(RecentLogMinimumLevel, RecentLogCapacity);
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Detaching a subject only stops it and never disposes it, so the process handle lives in this method.
         using var currentProcess = DiagnosticsProcess.GetCurrentProcess();
+
+        // Loading the configuration from its file does not apply it.
+        ApplyRecentLogConfiguration();
 
         _cpuWindow.Reset();
         Process.ResetBaseline();
@@ -228,6 +290,8 @@ public partial class HostSystem : BackgroundService,
         {
             error ??= exception;
         }
+
+        Logs.Update();
 
         if (hasUpdated)
         {
