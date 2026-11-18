@@ -1,6 +1,7 @@
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Sqlite;
 using Microsoft.Data.Sqlite;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.History.Sqlite.Tests;
 
@@ -377,6 +378,106 @@ public sealed class SqliteHistoryStorePartitionConnectionTests : IDisposable
         // Assert - the metadata database and both partitions, then only the metadata database.
         Assert.Equal(3, afterFlush);
         Assert.Equal(1, core.OpenConnectionCount);
+    }
+
+    [Fact]
+    public async Task WhenTheStoreIsDisposed_ThenQueriesReturnNothingAndOpenNoConnection()
+    {
+        // Arrange
+        var now = Base;
+        using var core = NewCore(() => now);
+        core.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
+        now = Base.AddSeconds(10);
+        await core.FlushAsync(CancellationToken.None);
+        var partition = SqlitePartition.PartitionKey(Base, PartitionInterval.Weekly);
+        Assert.True(core.IsPartitionOpen(partition));
+
+        // Act
+        core.Dispose();
+        var raw = core.Query(new HistoryQuery("/a/Value", Base, now));
+        var bucketed = core.Query(new HistoryQuery("/a/Value", Base, now,
+            HistoryBucket.Fixed(TimeSpan.FromSeconds(10)), HistoryAggregations.Maximum));
+        var sample = core.GetSampleAtOrBefore("/a/Value", Base.AddSeconds(5));
+        var reading = core.GetLastNumericSampleBefore("/a/Value", now);
+        var coverage = core.CoverageRanges;
+
+        // Assert
+        Assert.Empty(raw.Points);
+        Assert.Empty(raw.CoverageRanges);
+        Assert.Empty(bucketed.Points);
+        Assert.Empty(bucketed.CoverageRanges);
+        Assert.Null(sample);
+        Assert.Null(reading);
+        Assert.Empty(coverage);
+        Assert.Equal(0, core.OpenConnectionCount);
+        Assert.False(core.IsPartitionOpen(partition));
+        Assert.Null(core.LastError);
+    }
+
+    [Fact]
+    public async Task WhenTheStoreIsDisposed_ThenFlushingAndSweepingThrowAndOpenNoConnection()
+    {
+        // Arrange
+        var now = Base;
+        using var core = NewCore(() => now);
+        core.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
+        now = Base.AddSeconds(10);
+        await core.FlushAsync(CancellationToken.None);
+        core.Dispose();
+        core.Record("/a/Value", Base.AddSeconds(11), 2d, typeof(double));
+        now = Base.AddSeconds(20);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => core.FlushAsync(CancellationToken.None));
+        Assert.Throws<ObjectDisposedException>(core.Sweep);
+        Assert.Equal(0, core.OpenConnectionCount);
+        Assert.False(core.IsPartitionOpen(SqlitePartition.PartitionKey(Base, PartitionInterval.Weekly)));
+    }
+
+    [Fact]
+    public async Task WhenTheStoreIsDisposedWhileAQueryRuns_ThenDisposeWaitsForTheQueryAndNoConnectionStaysOpen()
+    {
+        // Arrange - the clock is read under the connection lock when the query opens its partition, so blocking it
+        // there holds the query in the middle of its read.
+        var now = Base;
+        var blockNextClockRead = 0;
+        using var queryEntered = new ManualResetEventSlim();
+        using var releaseQuery = new ManualResetEventSlim();
+        using var core = NewCore(() =>
+        {
+            if (Interlocked.Exchange(ref blockNextClockRead, 0) == 1)
+            {
+                queryEntered.Set();
+                releaseQuery.Wait();
+            }
+
+            return now;
+        });
+        core.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
+        now = Base.AddSeconds(10);
+        await core.FlushAsync(CancellationToken.None);
+        Volatile.Write(ref blockNextClockRead, 1);
+        var queryTask = Task.Run(() => core.Query(new HistoryQuery("/a/Value", Base, Base.AddSeconds(10))));
+        Assert.True(queryEntered.Wait(TimeSpan.FromSeconds(30)), "The query never opened its partition.");
+
+        // Act - a dedicated thread, so its state shows when Dispose blocks on the connection lock.
+        var disposeThread = new Thread(core.Dispose) { IsBackground = true };
+        disposeThread.Start();
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => (disposeThread.ThreadState & (ThreadState.WaitSleepJoin | ThreadState.Stopped)) != 0,
+            message: "Dispose neither blocked nor completed.");
+        var disposeWaitedForQuery = disposeThread.IsAlive;
+        releaseQuery.Set();
+        var series = await queryTask;
+        Assert.True(disposeThread.Join(TimeSpan.FromSeconds(30)), "Dispose did not complete after the query.");
+
+        // Assert
+        Assert.True(disposeWaitedForQuery, "Dispose completed while the query still held its connection.");
+        Assert.Equal(1d, Assert.Single(series.Points).Number);
+        Assert.Equal(0, core.OpenConnectionCount);
+        Assert.False(core.IsPartitionOpen(SqlitePartition.PartitionKey(Base, PartitionInterval.Weekly)));
+        Assert.Empty(core.Query(new HistoryQuery("/a/Value", Base, Base.AddSeconds(10))).Points);
+        Assert.Equal(0, core.OpenConnectionCount);
     }
 
     // A SQLite file under a partition-shaped name that this build refuses to read, as in SqliteHistorySchemaTests.

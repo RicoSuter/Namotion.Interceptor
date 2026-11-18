@@ -170,6 +170,13 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
     [State(Position = 430)]
     public partial long? JitCompiledMethodCount { get; internal set; }
 
+    /// <summary>
+    /// Free space between the objects of the oldest generation after the last full garbage collection, the part of
+    /// <see cref="Gen2Size"/> no live object uses. Empty until the first full collection.
+    /// </summary>
+    [State(Unit = StateUnit.Byte, Position = 431)]
+    public partial long? Gen2FragmentedSize { get; internal set; }
+
     internal HostProcess(Action collectGarbage, Action collected)
     {
         _collectGarbage = collectGarbage;
@@ -197,6 +204,7 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
         ExceptionRate = null;
         ResidentSharedMemory = null;
         JitCompiledMethodCount = null;
+        Gen2FragmentedSize = null;
     }
 
     [Operation(Title = "Collect garbage", Description = "Runs a full, compacting garbage collection and refreshes the values.", Icon = "DeleteSweep", RequiresConfirmation = true)]
@@ -266,6 +274,7 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
         SetLastFullCollectionValues(
             fullInfo.Index,
             generations.Length > 2 ? generations[2].SizeAfterBytes : null,
+            generations.Length > 2 ? generations[2].FragmentationAfterBytes : null,
             generations.Length > 3 ? generations[3].SizeAfterBytes : null);
 
         TimerCount = Timer.ActiveCount;
@@ -324,10 +333,12 @@ public partial class HostProcess : ITitleProvider, IIconProvider, IUptimeState
     /// Sets the generation sizes after the last full garbage collection, or empties them while no full collection
     /// has run (<paramref name="index"/> is 0).
     /// </summary>
-    internal void SetLastFullCollectionValues(long index, long? gen2Size, long? largeObjectHeapSize)
+    internal void SetLastFullCollectionValues(
+        long index, long? gen2Size, long? gen2FragmentedSize, long? largeObjectHeapSize)
     {
         var hasCollected = index > 0;
         Gen2Size = hasCollected ? gen2Size : null;
+        Gen2FragmentedSize = hasCollected ? gen2FragmentedSize : null;
         LargeObjectHeapSize = hasCollected ? largeObjectHeapSize : null;
     }
 

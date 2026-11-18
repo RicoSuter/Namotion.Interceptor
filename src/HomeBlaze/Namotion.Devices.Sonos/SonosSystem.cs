@@ -7,6 +7,7 @@ using HomeBlaze.Abstractions.Networking;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Sonos.Client;
+using Namotion.Devices.Sonos.Events;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -84,7 +85,10 @@ public partial class SonosSystem : BackgroundService,
     public partial int EventPort { get; set; }
 
     /// <summary>
-    /// The time between reconciliations of topology, state and favorites, from 5 seconds to one hour. Zero or less uses 30 seconds.
+    /// The time between polls, from 5 seconds to one hour. Zero or less uses 30 seconds. A poll reads the topology and
+    /// fully reads every player whose event subscriptions are not live; of a player with live subscriptions it reads
+    /// only what events do not deliver. Favorites and a full read of every player follow every 5 minutes while events
+    /// are live, and at every poll otherwise.
     /// </summary>
     [Configuration]
     public partial TimeSpan PollingInterval { get; set; }
@@ -137,7 +141,7 @@ public partial class SonosSystem : BackgroundService,
     public partial string? StatusMessage { get; internal set; }
 
     /// <summary>
-    /// When the last reconciliation of topology, state and favorites completed; null before the first.
+    /// When the last poll completed; null before the first.
     /// </summary>
     [State]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
@@ -200,6 +204,17 @@ public partial class SonosSystem : BackgroundService,
     /// How long a renewal that failed without an answer waits before it is tried again. Tests shorten it.
     /// </summary>
     internal TimeSpan FailedRenewalRetryDelay { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// The time from one full reconciliation to the next poll that is one, while events deliver the state between
+    /// them. Tests change it.
+    /// </summary>
+    internal TimeSpan FullReconcileInterval { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// The event listener of the current connection, null between connections. Tests use it.
+    /// </summary>
+    internal SonosEventListener? CurrentEventListener => GetEventListener();
 
     public SonosSystem(IHttpClientFactory httpClientFactory, ILogger<SonosSystem> logger)
     {

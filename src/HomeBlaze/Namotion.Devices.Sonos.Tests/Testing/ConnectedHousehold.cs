@@ -39,6 +39,7 @@ internal sealed class ConnectedHousehold : IAsyncDisposable
             office.RespondAsIdlePlayer(TestFixtures.OfficeUuid, "Büro");
             foreach (var speaker in new[] { kitchen, office })
             {
+                speaker.SendInitialEventBeforeAnswering(ConnectedSystem.ContentDirectoryEventPath, SonosEventBodies.Properties());
                 if (isGrouped)
                 {
                     speaker.RespondWithGroup((TestFixtures.OfficeUuid, "Büro", office.BaseUri), (TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri));
@@ -53,8 +54,7 @@ internal sealed class ConnectedHousehold : IAsyncDisposable
 
             var system = await ConnectedSystem.StartWithEventsAsync(
                 () => ConnectedSystem.CreateSystem(kitchen.Host, logger: logger, configure: configure),
-                system => system.IsConnected &&
-                          system.AreEventsActive &&
+                system => ConnectedSystem.IsSettled(system) &&
                           system.Players.Count == 2 &&
                           system.Players.Values.All(player => player.IsConnected && player.Model is not null),
                 "The system should connect to both speakers.");

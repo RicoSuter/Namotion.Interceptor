@@ -9,8 +9,10 @@ public partial class PushoverService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            // Consumed before validating, so only a change during the validation requests another one.
-            await _validationSignal.WaitAsync(TimeSpan.Zero, CancellationToken.None);
+            while (await _validationSignal.WaitAsync(TimeSpan.Zero, CancellationToken.None))
+            {
+                // Drained before validating, so only a change during the validation requests another one.
+            }
 
             var token = ApplicationToken;
             if (string.IsNullOrEmpty(token))

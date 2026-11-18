@@ -2,9 +2,11 @@ using System.Collections;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Derived;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "The central orchestrator of attach, detach and derived property tracking for the graph; staying under the limit would take forwarder methods or rewriting framework collection code for the coupling count alone.")]
 public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
     private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = new(ReferenceEqualityComparer.Instance);
@@ -15,6 +17,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
     [ThreadStatic]
     private static Stack<HashSet<IInterceptorSubject>>? _subjectHashSetPool;
+
+    public LifecycleInterceptor()
+    {
+        SingleAttachment = [this];
+        TrackingWriteObserver.EnsureRegistered();
+    }
+
+    /// <summary>The attachments of a subject that is attached to this interceptor only.</summary>
+    internal LifecycleInterceptor[] SingleAttachment { get; }
 
     /// <summary>
     /// Raised when a subject is attached to the object graph.
@@ -43,7 +54,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <para>
     /// The callback runs under the lock that serializes graph mutation, so it must not block, must not
     /// mutate the graph, and must not wait on anything that does. It is re-entrant on the calling
-    /// thread, so an <see cref="ILifecycleHandler"/> may reach this while being invoked.
+    /// thread, so an <see cref="ILifecycleHandler"/> may reach this while being invoked. Changes of property writes
+    /// it makes are announced, and the derived properties they affect recalculated, after the lock is released.
     /// </para>
     /// </remarks>
     /// <param name="subject">The subject.</param>
@@ -51,6 +63,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <returns>True when the subject was attached and the callback ran.</returns>
     public bool TryRunWhileAttached(IInterceptorSubject subject, Action whenAttached)
     {
+        using var lifecycleLock = SubjectLifecycleAttachments.EnterLifecycleLock(isWriteReconciliation: false);
         lock (_attachedSubjects)
         {
             if (!_attachedSubjects.ContainsKey(subject))
@@ -75,20 +88,37 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     public void AttachSubjectToContext(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
+        using var lifecycleLock = SubjectLifecycleAttachments.EnterLifecycleLock(isWriteReconciliation: false);
         try
         {
             lock (_attachedSubjects)
             {
-                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
-
-                foreach (var child in collectedSubjects)
+                var isRoot = !_attachedSubjects.ContainsKey(subject);
+                var areChildrenAttached = false;
+                try
                 {
-                    AttachToProperty(child.subject, subject.Context, child.property, child.index);
+                    using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
+                    FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
+
+                    foreach (var child in collectedSubjects)
+                    {
+                        AttachToProperty(child.subject, subject.Context, child.property, child.index);
+                    }
+
+                    areChildrenAttached = true;
+                    if (!_attachedSubjects.ContainsKey(subject))
+                    {
+                        AttachToContext(subject, subject.Context);
+                    }
                 }
-
-                if (!_attachedSubjects.ContainsKey(subject))
+                finally
                 {
-                    AttachToContext(subject, subject.Context);
+                    // The attach of a child (a handler or an attach evaluation) threw before the root attached, after a
+                    // child's registry handler may have registered it.
+                    if (isRoot && !areChildrenAttached)
+                    {
+                        TrackingWriteObserver.OnGraphChanged(subject);
+                    }
                 }
             }
         }
@@ -101,10 +131,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     public void DetachSubjectFromContext(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
+        using var lifecycleLock = SubjectLifecycleAttachments.EnterLifecycleLock(isWriteReconciliation: false);
         try
         {
             lock (_attachedSubjects)
             {
+                using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
                 FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
 
                 foreach (var child in collectedSubjects)
@@ -133,6 +165,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
+        SubjectLifecycleAttachments.Add(subject, this);
+
         var count = subject.GetReferenceCount();
         var change = new SubjectLifecycleChange
         {
@@ -142,7 +176,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         };
 
         var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
+        try
+        {
+            InvokeAddedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            TrackingWriteObserver.OnGraphChanged(subject);
+        }
 
         SubjectAttached?.Invoke(change);
         foreach (var propertyName in properties)
@@ -165,6 +206,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
+        if (isFirstAttach)
+        {
+            SubjectLifecycleAttachments.Add(subject, this);
+        }
+
         var count = subject.IncrementReferenceCount();
         var change = new SubjectLifecycleChange
         {
@@ -177,7 +223,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         };
 
         var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
+        try
+        {
+            InvokeAddedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            TrackingWriteObserver.OnGraphChanged(subject, property.Subject);
+        }
 
         if (isFirstAttach)
         {
@@ -215,14 +268,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             return;
         }
-        
-        foreach (var entry in subject.Properties)
-        {
-            var property = new PropertyReference(subject, entry.Key);
-            if (entry.Value is { IsIntercepted: true } && entry.Value.Type.CanContainSubjects())
-                _lastProcessedValues.Remove(property);
 
-            subject.DetachSubjectProperty(property);
+        using (SubjectLifecycleAttachments.BeginDetach(subject, this))
+        {
+            foreach (var entry in subject.Properties)
+            {
+                var property = new PropertyReference(subject, entry.Key);
+                if (entry.Value is { IsIntercepted: true } && entry.Value.Type.CanContainSubjects())
+                    _lastProcessedValues.Remove(property);
+
+                subject.DetachSubjectProperty(property);
+            }
         }
 
         var count = subject.GetReferenceCount();
@@ -233,8 +289,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             IsContextDetach = true
         };
 
-        SubjectDetaching?.Invoke(change);
-        InvokeRemovedLifecycleHandlers(subject, context, change);
+        try
+        {
+            SubjectDetaching?.Invoke(change);
+            InvokeRemovedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            TrackingWriteObserver.OnGraphChanged(subject);
+        }
     }
 
     /// <summary>
@@ -273,12 +336,19 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             Interceptor = this
         };
 
-        if (isLastDetach)
+        try
         {
-            SubjectDetaching?.Invoke(change);
-        }
+            if (isLastDetach)
+            {
+                SubjectDetaching?.Invoke(change);
+            }
 
-        InvokeRemovedLifecycleHandlers(subject, context, change);
+            InvokeRemovedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            TrackingWriteObserver.OnGraphChanged(subject, property.Subject);
+        }
 
         if (children is not null)
         {
@@ -294,6 +364,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private List<(IInterceptorSubject subject, PropertyReference property, object? index)>? DetachSubjectProperties(
         IInterceptorSubject subject)
     {
+        using var detach = SubjectLifecycleAttachments.BeginDetach(subject, this);
         List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
         foreach (var entry in subject.Properties)
         {
@@ -353,8 +424,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
+        using var lifecycleLock = SubjectLifecycleAttachments.EnterLifecycleLock(isWriteReconciliation: true);
         lock (_attachedSubjects)
         {
+            using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
             var lastProcessed = _lastProcessedValues.GetValueOrDefault(context.Property);
 
             // Read the actual backing store value to handle concurrent writes correctly.

@@ -2,7 +2,7 @@ using System;
 using BenchmarkDotNet.Attributes;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Derived;
 
 namespace Namotion.Interceptor.Benchmark;
 

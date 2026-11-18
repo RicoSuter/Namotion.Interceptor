@@ -53,7 +53,7 @@ This codebase prioritizes allocation reduction over micro-CPU optimization. In r
 ## Correctness and safety guard rails (non-negotiable)
 
 - Public API surface must not change unless the task explicitly requests it. If a perf change requires a public-API change, return `clarification-needed`.
-- Thread-safety guarantees must be preserved. If the task changes lock scope, lock ordering, or removes synchronization, document the new ordering guarantee in Notes and confirm via the existing test suite (especially `Namotion.Interceptor.Registry.Tests/ConcurrentStructuralWriteLeakTests.cs` and `Namotion.Interceptor.Tracking.Tests/Change/DerivedPropertyConcurrencyTests.cs`).
+- Thread-safety guarantees must be preserved. If the task changes lock scope, lock ordering, or removes synchronization, document the new ordering guarantee in Notes and confirm via the existing test suite (especially `Namotion.Interceptor.Registry.Tests/ConcurrentStructuralWriteLeakTests.cs` and `Namotion.Interceptor.Tracking.Tests/Derived/DerivedPropertyConcurrencyTests.cs`).
 - Existing semantics (subject ID assignment, parent/child symmetry, derived property reconciliation) must hold. Do not bypass invariants for speed.
 - If tests fail, return `tests-failed` and stop. Do NOT loosen tests to chase a benchmark win.
 - If you find a pre-existing bug while implementing, note it in the report; do NOT fix it in the same change.

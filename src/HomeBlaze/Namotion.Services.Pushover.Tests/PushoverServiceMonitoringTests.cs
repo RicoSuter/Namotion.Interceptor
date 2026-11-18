@@ -168,4 +168,44 @@ public class PushoverServiceMonitoringTests
         await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ValidatePath).Length == 2 && service.Status == ServiceStatus.Running);
         Assert.Equal(2, handler.RequestsTo(ValidatePath).Length);
     }
+
+    [Fact]
+    public async Task WhenValidationIsRequestedTwiceWhileOneIsPending_ThenNoExceptionIsThrownAndTheTargetsAreValidatedOnceMore()
+    {
+        // Arrange
+        var (service, handler) = PushoverTestFactory.CreateService("rico");
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.BeforeRespond = () => release.Task;
+        await using var running = await PushoverTestFactory.StartAsync(service);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ValidatePath).Length == 1);
+
+        var threadId = Environment.CurrentManagedThreadId;
+        var firstChanceExceptions = new List<Exception>();
+        void OnFirstChanceException(object? sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs eventArgs)
+        {
+            if (Environment.CurrentManagedThreadId == threadId)
+            {
+                firstChanceExceptions.Add(eventArgs.Exception);
+            }
+        }
+
+        // Act
+        AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
+        try
+        {
+            service.RequestValidation();
+            service.RequestValidation();
+        }
+        finally
+        {
+            AppDomain.CurrentDomain.FirstChanceException -= OnFirstChanceException;
+        }
+
+        release.SetResult();
+
+        // Assert
+        Assert.Empty(firstChanceExceptions);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.RequestsTo(ValidatePath).Length == 2 && service.Status == ServiceStatus.Running);
+        Assert.Equal(2, handler.RequestsTo(ValidatePath).Length);
+    }
 }
