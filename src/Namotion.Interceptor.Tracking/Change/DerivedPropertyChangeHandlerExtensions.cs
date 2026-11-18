@@ -23,12 +23,48 @@ public static class DerivedPropertyChangeHandlerExtensions
     /// <summary>
     /// Gets forward dependencies: Which properties this derived property depends on.
     /// Example: FullName.GetRequiredProperties() includes FirstName and LastName.
-    /// Returns empty span if no tracking data exists (allocation-free).
+    /// Returns a copy of the last committed dependencies, so a later recalculation does not change it. Allocates one
+    /// array when the property depends on a property, and returns an empty span otherwise.
     /// </summary>
     public static ReadOnlySpan<PropertyReference> GetRequiredProperties(this PropertyReference property)
     {
         var data = property.TryGetDerivedPropertyData();
-        return data is not null ? data.RequiredPropertiesSpan : ReadOnlySpan<PropertyReference>.Empty;
+        if (data is null)
+        {
+            return ReadOnlySpan<PropertyReference>.Empty;
+        }
+
+        // A commit rewrites the dependency buffer in place under lock(data).
+        lock (data)
+        {
+            // Graph dependencies are dependencies, but not properties.
+            var dependencies = data.RequiredPropertiesSpan;
+            var count = 0;
+            foreach (ref readonly var dependency in dependencies)
+            {
+                if (!DerivedGraphDependencies.IsGraphDependency(dependency))
+                {
+                    count++;
+                }
+            }
+
+            if (count == 0)
+            {
+                return ReadOnlySpan<PropertyReference>.Empty;
+            }
+
+            var properties = new PropertyReference[count];
+            var index = 0;
+            foreach (ref readonly var dependency in dependencies)
+            {
+                if (!DerivedGraphDependencies.IsGraphDependency(dependency))
+                {
+                    properties[index++] = dependency;
+                }
+            }
+
+            return properties;
+        }
     }
 
     /// <summary>

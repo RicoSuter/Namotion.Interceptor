@@ -93,17 +93,32 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
-                using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
-                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
-
-                foreach (var child in collectedSubjects)
+                var isRoot = !_attachedSubjects.ContainsKey(subject);
+                var areChildrenAttached = false;
+                try
                 {
-                    AttachToProperty(child.subject, subject.Context, child.property, child.index);
+                    using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
+                    FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
+
+                    foreach (var child in collectedSubjects)
+                    {
+                        AttachToProperty(child.subject, subject.Context, child.property, child.index);
+                    }
+
+                    areChildrenAttached = true;
+                    if (!_attachedSubjects.ContainsKey(subject))
+                    {
+                        AttachToContext(subject, subject.Context);
+                    }
                 }
-
-                if (!_attachedSubjects.ContainsKey(subject))
+                finally
                 {
-                    AttachToContext(subject, subject.Context);
+                    // The attach of a child (a handler or an attach evaluation) threw before the root attached, after a
+                    // child's registry handler may have registered it.
+                    if (isRoot && !areChildrenAttached)
+                    {
+                        TrackingWriteObserver.OnGraphChanged(subject);
+                    }
                 }
             }
         }
@@ -161,7 +176,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         };
 
         var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
+        try
+        {
+            InvokeAddedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            TrackingWriteObserver.OnGraphChanged(subject);
+        }
 
         SubjectAttached?.Invoke(change);
         foreach (var propertyName in properties)
@@ -201,7 +223,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         };
 
         var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
+        try
+        {
+            InvokeAddedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            TrackingWriteObserver.OnGraphChanged(subject, property.Subject);
+        }
 
         if (isFirstAttach)
         {
@@ -260,8 +289,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             IsContextDetach = true
         };
 
-        SubjectDetaching?.Invoke(change);
-        InvokeRemovedLifecycleHandlers(subject, context, change);
+        try
+        {
+            SubjectDetaching?.Invoke(change);
+            InvokeRemovedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            TrackingWriteObserver.OnGraphChanged(subject);
+        }
     }
 
     /// <summary>
@@ -300,12 +336,19 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             Interceptor = this
         };
 
-        if (isLastDetach)
+        try
         {
-            SubjectDetaching?.Invoke(change);
-        }
+            if (isLastDetach)
+            {
+                SubjectDetaching?.Invoke(change);
+            }
 
-        InvokeRemovedLifecycleHandlers(subject, context, change);
+            InvokeRemovedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            TrackingWriteObserver.OnGraphChanged(subject, property.Subject);
+        }
 
         if (children is not null)
         {

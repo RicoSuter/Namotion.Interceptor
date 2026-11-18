@@ -1,6 +1,7 @@
 ﻿using System.Linq.Expressions;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Registry;
 
@@ -94,10 +95,13 @@ public static class SubjectRegistryExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static RegisteredSubjectProperty? TryGetRegisteredProperty(this IInterceptorSubject subject, string propertyName, ISubjectRegistry? registry = null)
     {
+        // Recorded once, before the registry is resolved: a subject without a registry gains one when it is attached.
+        DerivedGraphDependencies.RecordRead(subject);
         registry ??= subject.Context.TryGetService<ISubjectRegistry>();
-        return registry?
-            .TryGetRegisteredSubject(subject)?
-            .TryGetProperty(propertyName);
+        var registeredSubject = registry is SubjectRegistry subjectRegistry
+            ? subjectRegistry.TryGetKnownSubject(subject)
+            : registry?.TryGetRegisteredSubject(subject);
+        return registeredSubject?.RegisteredProperties.GetValueOrDefault(propertyName);
     }
     
     /// <summary>
@@ -108,9 +112,7 @@ public static class SubjectRegistryExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static RegisteredSubjectProperty? TryGetRegisteredProperty(this PropertyReference propertyReference)
     {
-        return propertyReference.Subject
-            .TryGetRegisteredSubject()?
-            .TryGetProperty(propertyReference.Name);
+        return propertyReference.Subject.TryGetRegisteredProperty(propertyReference.Name);
     }
     
     /// <summary>
@@ -121,9 +123,7 @@ public static class SubjectRegistryExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static RegisteredSubjectProperty GetRegisteredProperty(this PropertyReference propertyReference)
     {
-        return propertyReference.Subject
-            .TryGetRegisteredSubject()?
-            .TryGetProperty(propertyReference.Name) 
+        return propertyReference.Subject.TryGetRegisteredProperty(propertyReference.Name)
             ?? throw new InvalidOperationException($"Property '{propertyReference.Name}' not found.");
     }
 
@@ -136,6 +136,8 @@ public static class SubjectRegistryExtensions
     public static RegisteredSubject? TryGetRegisteredSubject(this IInterceptorSubject subject)
     {
         // TODO(perf): Replace calls of TryGetRegisteredSubject with registry.TryGetRegisteredSubject to avoid multiple registry resolves
+        // Recorded before the registry is resolved: a subject without a registry gains one when it is attached.
+        DerivedGraphDependencies.RecordRead(subject);
         var registry = subject.Context.TryGetService<ISubjectRegistry>();
         return registry?.TryGetRegisteredSubject(subject);
     }

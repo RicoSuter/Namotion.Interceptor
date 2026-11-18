@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
@@ -73,6 +74,77 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
         PostLockQueue.CompleteAnchorWrite(segment, write.RawTimestamp, write.HasFailed);
     }
 
+    /// <summary>
+    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the graph state of
+    /// <paramref name="subject"/> (<see cref="DerivedGraphDependencies"/>). Called after the graph state changed.
+    /// </summary>
+    internal static void OnGraphChanged(IInterceptorSubject subject, bool hasFailed = false)
+    {
+        // No graph dependency has data while the graph gate is not raised, see "Graph gate" in
+        // docs/design/tracking-derived-properties.md.
+        if (!DerivedGraphDependencies.IsGateRaised)
+        {
+            return;
+        }
+
+        // W2: the graph state changed before its data is looked up.
+        Interlocked.MemoryBarrier();
+        RequestGraphRecalculations(DerivedGraphDependencies.Of(subject), hasFailed);
+    }
+
+    /// <summary>
+    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the graph state of
+    /// <paramref name="subject"/> and of the children of <paramref name="holder"/>
+    /// (<see cref="DerivedGraphDependencies"/>). Called after a subject was attached or detached through a property
+    /// of <paramref name="holder"/>, once both changed.
+    /// </summary>
+    internal static void OnGraphChanged(IInterceptorSubject subject, IInterceptorSubject holder)
+    {
+        if (!DerivedGraphDependencies.IsGateRaised)
+        {
+            return;
+        }
+
+        // W2, once for every graph dependency: all of them changed before the first data lookup.
+        Interlocked.MemoryBarrier();
+        RequestGraphRecalculations(DerivedGraphDependencies.Of(subject), hasFailed: false);
+        RequestGraphRecalculations(DerivedGraphDependencies.ChildrenOf(holder), hasFailed: false);
+    }
+
+    /// <summary>
+    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the graph state of
+    /// every subject in <paramref name="children"/> and of the children of <paramref name="holder"/>
+    /// (<see cref="DerivedGraphDependencies"/>). Called after the children moved within a property of
+    /// <paramref name="holder"/>.
+    /// </summary>
+    internal static void OnChildrenMoved(ReadOnlySpan<SubjectChild> children, IInterceptorSubject holder)
+    {
+        if (!DerivedGraphDependencies.IsGateRaised)
+        {
+            return;
+        }
+
+        // W2, once for every graph dependency: all of them changed before the first data lookup.
+        Interlocked.MemoryBarrier();
+        foreach (var child in children)
+        {
+            RequestGraphRecalculations(DerivedGraphDependencies.Of(child.Subject), hasFailed: false);
+        }
+
+        RequestGraphRecalculations(DerivedGraphDependencies.ChildrenOf(holder), hasFailed: false);
+    }
+
+    private static void RequestGraphRecalculations(PropertyReference graph, bool hasFailed)
+    {
+        var data = graph.TryGetDerivedPropertyData();
+        if (data is not null)
+        {
+            RequestRecalculations(
+                new PropertyWriteObservation(graph, isWritten: true, rawTimestamp: 0, isDerivedRecalculation: false, depth: 0, hasFailed: hasFailed),
+                data, segment: null);
+        }
+    }
+
     private static DerivedPropertyData? TryGetWrittenData(in PropertyWriteObservation write)
     {
         if (!write.IsWritten)
@@ -80,8 +152,8 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
             return null;
         }
 
-        // W2: the value landed before the gate and the data are read, so an evaluation that creates the data
-        // later reads this value.
+        // W2 ("The Version Protocol" in docs/design/tracking-derived-properties.md): the value landed before the gate
+        // and the data are read, so an evaluation that creates the data later reads this value.
         Interlocked.MemoryBarrier();
         var property = write.Property;
 
@@ -100,7 +172,8 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     {
         var property = write.Property;
 
-        // W4, then W5: the used-by set is read after the version moved.
+        // W4, then W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md): the used-by set is read
+        // after the version moved.
         var newVersion = Interlocked.Increment(ref data.Version);
         if (DerivedPropertyRecorder.IsEvaluatingOnThisThread)
         {

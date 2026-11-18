@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
@@ -44,6 +45,7 @@ public class RegisteredSubject
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
+            DerivedGraphDependencies.RecordRead(Subject);
             var snapshot = Volatile.Read(ref _parentsSnapshot);
             return snapshot is not null
                 ? ImmutableCollectionsMarshal.AsImmutableArray(snapshot)
@@ -84,17 +86,35 @@ public class RegisteredSubject
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void InvalidateParentsSnapshot() => Volatile.Write(ref _parentsSnapshot, null);
 
+    /// <summary>The registered properties, replaced as a whole when a property is added. Not recorded.</summary>
+    internal FrozenDictionary<string, RegisteredSubjectProperty> RegisteredProperties => _properties;
+
     /// <summary>
     /// Gets all registered properties.
     /// </summary>
-    public ImmutableArray<RegisteredSubjectProperty> Properties => _properties.Values;
+    public ImmutableArray<RegisteredSubjectProperty> Properties
+    {
+        get
+        {
+            DerivedGraphDependencies.RecordRead(Subject);
+            return _properties.Values;
+        }
+    }
 
     /// <summary>
     /// Gets all attributes that are attached to this property.
     /// </summary>
     public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
     {
-        foreach (var property in _properties.Values)
+        // Recorded when called, not when enumerated: a getter may enumerate the result after it returned.
+        DerivedGraphDependencies.RecordRead(Subject);
+        return GetPropertyAttributes(_properties, propertyName);
+    }
+
+    internal static IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(
+        FrozenDictionary<string, RegisteredSubjectProperty> properties, string propertyName)
+    {
+        foreach (var property in properties.Values)
         {
             if (property.IsAttribute && property.AttributeMetadata.PropertyName == propertyName)
             {
@@ -111,6 +131,7 @@ public class RegisteredSubject
     /// <returns>The attribute property.</returns>
     public RegisteredSubjectProperty? TryGetPropertyAttribute(string propertyName, string attributeName)
     {
+        DerivedGraphDependencies.RecordRead(Subject);
         foreach (var property in _properties.Values)
         {
             if (property.IsAttribute &&
@@ -131,6 +152,7 @@ public class RegisteredSubject
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectProperty? TryGetProperty(string propertyName)
     {
+        DerivedGraphDependencies.RecordRead(Subject);
         return _properties.GetValueOrDefault(propertyName);
     }
 
@@ -317,23 +339,34 @@ public class RegisteredSubject
             isIntercepted: true,
             isDynamic: true));
 
-        var property = AddPropertyInternal(name, type, attributes);
-
-        // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
-        if (property.Reference.Metadata.IsDerived)
+        var hasFailed = true;
+        try
         {
-            // TODO(perf): AttachProperty has already evaluated the getter and seeded LastKnownValue, yet
-            // publishing reads it again, and once more for the change notification when one is consumed.
-            // For derived-with-setter the write also re-enters RecalculateDerivedProperty, another
-            // evaluation. Consider a dedicated lifecycle notification for derived properties.
-            property.Reference.PublishInitialDerivedPropertyValue();
-        }
-        else
-        {
-            property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject), null, delegate { });
-        }
+            var property = AddPropertyInternal(name, type, attributes);
 
-        return property;
+            // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
+            if (property.Reference.Metadata.IsDerived)
+            {
+                // TODO(perf): AttachProperty has already evaluated the getter and seeded LastKnownValue, yet
+                // publishing reads it again, and once more for the change notification when one is consumed.
+                // For derived-with-setter the write also re-enters RecalculateDerivedProperty, another
+                // evaluation. Consider a dedicated lifecycle notification for derived properties.
+                property.Reference.PublishInitialDerivedPropertyValue();
+            }
+            else
+            {
+                property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject), null, delegate { });
+            }
+
+            hasFailed = false;
+            return property;
+        }
+        finally
+        {
+            // Reported once the property is attached: outside the lifecycle lock, this recalculates and publishes
+            // the derived properties that read the registered properties, which can throw.
+            DerivedGraphDependencies.Changed(Subject, hasFailed);
+        }
     }
 
     private RegisteredSubjectProperty AddPropertyInternal(string name, Type type, Attribute[] attributes)
@@ -347,11 +380,6 @@ public class RegisteredSubject
                 .ToFrozenDictionary(p => p.Key, p => p.Value);
 
             _properties = newProperties;
-
-            foreach (var property in newProperties.Values)
-            {
-                property.AttributesCache = null;
-            }
         }
 
         Subject.AttachSubjectProperty(subjectProperty.Reference);

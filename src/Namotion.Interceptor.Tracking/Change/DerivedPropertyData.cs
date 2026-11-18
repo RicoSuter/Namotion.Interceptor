@@ -3,7 +3,8 @@ using System.Runtime.CompilerServices;
 namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
-/// Consolidated per-property data for derived property tracking.
+/// Consolidated per-property data for derived property tracking, also of a subject's graph state and children
+/// (<see cref="DerivedGraphDependencies"/>), which is a dependency source like a property.
 /// Created once per (subject, property) and never removed or replaced. Stored in Subject.Data under a short key
 /// to minimize dictionary lookups (one lookup instead of separate lookups
 /// for UsedByProperties, RequiredProperties, and LastKnownValue).
@@ -113,11 +114,20 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Creates the data of <paramref name="property"/> and raises the gate of its subject's type first, so the
-    /// gate is raised before the data can be found.
+    /// gate is raised before the data can be found. The data of a graph dependency raises the graph gate instead: a
+    /// subject's graph state and children are never written through the write observer.
     /// </summary>
     internal static DerivedPropertyData Create(PropertyReference property)
     {
-        DerivedPropertyTypeGate.Of(property.Subject).Raise();
+        if (DerivedGraphDependencies.IsGraphDependency(property))
+        {
+            DerivedGraphDependencies.RaiseGate();
+        }
+        else
+        {
+            DerivedPropertyTypeGate.Of(property.Subject).Raise();
+        }
+
         return new DerivedPropertyData(property);
     }
 
@@ -136,7 +146,7 @@ internal sealed class DerivedPropertyData
     /// <summary>
     /// Returns the current dependencies as a read-only span.
     /// Returns an empty span if no dependencies exist (allocation-free).
-    /// Safe for lock-free reads (clamps count to array length to handle torn reads).
+    /// Read under lock(this): a commit rewrites the buffer in place.
     /// </summary>
     internal ReadOnlySpan<PropertyReference> RequiredPropertiesSpan
     {
@@ -149,7 +159,7 @@ internal sealed class DerivedPropertyData
                 return ReadOnlySpan<PropertyReference>.Empty;
             }
 
-            return array.AsSpan(0, Math.Min(_requiredPropertyCount, array.Length));
+            return array.AsSpan(0, _requiredPropertyCount);
         }
     }
 
