@@ -1,7 +1,8 @@
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
+using Namotion.Interceptor.Tracking.Transactions.Writers;
 
-namespace Namotion.Interceptor.Tracking.Tests.Transactions;
+namespace Namotion.Interceptor.Tracking.Tests.Transactions.Writers;
 
 /// <summary>
 /// Accepts every change except the configured failed or unwritten ones, records its calls and reverts, and optionally

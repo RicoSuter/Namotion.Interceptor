@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Tracking.Transactions;
+namespace Namotion.Interceptor.Tracking.Transactions.Writers;
 
 /// <summary>
 /// Result of writing source-bound changes to their sources during a commit, from which the transaction applies the

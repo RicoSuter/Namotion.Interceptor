@@ -1,10 +1,11 @@
 using System.Reactive.Concurrency;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using Namotion.Interceptor.Tracking.Tests.Transactions.Writers;
 using Namotion.Interceptor.Tracking.Transactions;
 using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestContext;
 
-namespace Namotion.Interceptor.Tracking.Tests.Transactions;
+namespace Namotion.Interceptor.Tracking.Tests.Transactions.Handlers;
 
 /// <summary>
 /// Covers the pre-apply check: the handler check that runs again after the source writes, right before the local apply.

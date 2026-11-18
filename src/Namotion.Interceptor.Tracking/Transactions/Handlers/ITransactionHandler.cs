@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Tracking.Transactions;
+namespace Namotion.Interceptor.Tracking.Transactions.Handlers;
 
 /// <summary>
 /// Takes part in the transactions that begin on the context it is registered on, or that write a subject of that

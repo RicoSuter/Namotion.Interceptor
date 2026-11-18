@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Tracking.Transactions;
+namespace Namotion.Interceptor.Tracking.Transactions.Writers;
 
 /// <summary>
 /// Writes transaction changes to their sources during a commit. Register an implementation as a service of the
