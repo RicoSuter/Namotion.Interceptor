@@ -1,3 +1,5 @@
+@using System.Reactive.Concurrency
+@using System.Reactive.Linq
 @using Microsoft.AspNetCore.WebUtilities
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Services.Metadata
@@ -126,6 +128,12 @@
     private IJSObjectReference? _paneFitting;
     private ISubjectRegistry? _subjectRegistry;
 
+    // Read by the filter of the subscription inside every property write of the graph, so it is replaced and never
+    // changed, see PublishPaneLinks.
+    private SubjectChainLinks _paneLinks = SubjectChainLinks.Empty;
+    private IDisposable? _changeSubscription;
+    private int _isFollowQueued;
+
     protected override void OnInitialized()
     {
         base.OnInitialized();
@@ -248,6 +256,7 @@
     {
         var previousPaneCount = _panes.Count + _placeholderCount;
         BuildPanesFromPath();
+        OnPanesChanged();
 
         // A shorter path leaves placeholders behind like closed panes do, see RemovePanesFrom.
         _placeholderCount = Math.Max(0, previousPaneCount - _panes.Count);
@@ -403,6 +412,7 @@
         // The new pane takes the place of the first pane it replaced.
         _placeholderCount = Math.Max(0, _placeholderCount - 1);
         ScrollToLastPaneAfterRender();
+        OnPanesChanged();
         UpdateUrl();
         StateHasChanged();
     }
@@ -413,6 +423,7 @@
         if (paneIndex <= 0) return; // Can't close the root pane
 
         RemovePanesFrom(paneIndex);
+        OnPanesChanged();
         UpdateUrl();
         StateHasChanged();
     }
@@ -457,6 +468,7 @@
             if (paneIndex > 0)
             {
                 RemovePanesFrom(paneIndex);
+                OnPanesChanged();
                 UpdateUrl();
                 StateHasChanged();
             }
@@ -509,7 +521,11 @@
         _lastNavigatedUrl = url;
         NavigationManager.NavigateTo(url, replace: true);
 
-        // Rebuild breadcrumbs
+        RebuildBreadcrumbs();
+    }
+
+    private void RebuildBreadcrumbs()
+    {
         _breadcrumbs.Clear();
         _breadcrumbs.Add(new BreadcrumbItem("Root", "/browser"));
 
@@ -542,6 +558,121 @@
         }
     }
 
+    // Called after every change of the panes. A write that replaced a subject of the panes before their links were
+    // published passed the filter unnoticed, so the panes are checked against the graph after each publish.
+    private void OnPanesChanged()
+    {
+        do
+        {
+            PublishPaneLinks();
+        }
+        while (FollowReplacedSubjects());
+    }
+
+    private void PublishPaneLinks()
+    {
+        if (_changeSubscription is null && !_disposed && RootContext is { } context)
+        {
+            // The filter runs inside every property write of the graph and only compares references. What passes is
+            // handled off the write, which every other writer of the subject waits for.
+            _changeSubscription = context
+                .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+                .Where(change => Volatile.Read(ref _paneLinks).Contains(change.Property))
+                .Subscribe(_ => QueueFollowReplacedSubjects());
+        }
+
+        // Exchanged rather than assigned: the full fence keeps the reads of the graph that follow, in
+        // FollowReplacedSubjects, after the links are visible to the filter of a write on another thread.
+        Interlocked.Exchange(ref _paneLinks, SubjectChainLinks.Create(_panes, static pane => pane.Subject, static pane => pane.PropertyName!));
+    }
+
+    private void QueueFollowReplacedSubjects()
+    {
+        // One check covers all writes until it starts, such as the replacement of every nested subject of a reload.
+        if (Interlocked.Exchange(ref _isFollowQueued, 1) == 0)
+        {
+            ThreadPool.UnsafeQueueUserWorkItem(static browser => _ = browser.FollowReplacedSubjectsOnRendererAsync(), this, preferLocal: false);
+        }
+    }
+
+    private async Task FollowReplacedSubjectsOnRendererAsync()
+    {
+        try
+        {
+            await InvokeAsync(() =>
+            {
+                // Reset with a full fence before the graph is read, so that a later write queues another check.
+                Interlocked.Exchange(ref _isFollowQueued, 0);
+                var paneCount = _panes.Count;
+                if (!_disposed && FollowReplacedSubjects())
+                {
+                    OnPanesChanged();
+
+                    // Closed like a deleted subject's pane, so that the URL and a reload show what is left.
+                    if (_panes.Count < paneCount)
+                    {
+                        UpdateUrl();
+                    }
+
+                    StateHasChanged();
+                }
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // The circuit is gone, and the panes with it.
+        }
+    }
+
+    // Puts the subject that each pane is reached through now in the place of the one it shows, and closes the panes
+    // from the first whose subject is gone, like a path that no longer resolves fully. Returns whether a pane changed.
+    private bool FollowReplacedSubjects()
+    {
+        var hasChanged = false;
+        for (var i = 1; i < _panes.Count; i++)
+        {
+            var pane = _panes[i];
+            var property = _panes[i - 1].Subject.TryGetRegisteredSubject()?.TryGetProperty(pane.PropertyName!);
+            var subject = property is { CanContainSubjects: true } ? FindChild(property, pane.Index) : null;
+            if (ReferenceEquals(subject, pane.Subject))
+            {
+                continue;
+            }
+
+            hasChanged = true;
+            if (subject is null || property is null)
+            {
+                RemovePanesFrom(i);
+
+                // The highlighted property is one of the last pane, which is closed now.
+                _highlightedProperty = null;
+                break;
+            }
+
+            // Same path and so the same element: the row keeps its scroll position.
+            _panes[i] = new SubjectPane
+            {
+                Subject = subject,
+                DisplayName = GetChildDisplayName(property, subject, pane.Index),
+                Path = pane.Path,
+                PropertyName = pane.PropertyName,
+                Index = pane.Index
+            };
+        }
+
+        if (hasChanged)
+        {
+            RebuildBreadcrumbs();
+        }
+
+        return hasChanged;
+    }
+
+    private static IInterceptorSubject? FindChild(RegisteredSubjectProperty property, object? index)
+        => index is not null
+            ? SubjectPathResolverExtensions.FindChildByIndex(property, PathExtensions.FormatPathIndex(index))
+            : property.GetValue() as IInterceptorSubject;
+
     // Breadcrumbs and pane titles use the same label as the child list of the parent pane.
     private static string GetChildDisplayName(RegisteredSubjectProperty property, IInterceptorSubject child, object? index)
         => property.GetChildDisplayName(new SubjectPropertyChild { Subject = child, Index = index });
@@ -549,6 +680,7 @@
     public void Dispose()
     {
         _disposed = true;
+        _changeSubscription?.Dispose();
         NavigationManager.LocationChanged -= OnLocationChanged;
         RowLayout.OnChange -= OnRowLayoutChanged;
     }
