@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Tracking.Derived;
 
@@ -22,7 +23,7 @@ public static class DerivedGraphDependencies
     /// <summary>
     /// Whether a graph dependency may have data. Not raised only while no graph dependency of any subject was ever created; never lowered.
     /// </summary>
-    internal static bool IsGateRaised
+    private static bool IsGateRaised
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Volatile.Read(ref _gateState) != 0;
@@ -54,9 +55,52 @@ public static class DerivedGraphDependencies
     /// <param name="subject">The subject. Called after its graph state changed.</param>
     /// <param name="hasFailed">Whether the operation that changed the graph state threw: its exception wins, and an
     /// exception of a recalculation is traced instead of thrown.</param>
-    public static void Changed(IInterceptorSubject subject, bool hasFailed = false)
+    public static void Changed(IInterceptorSubject subject, bool hasFailed = false) => Changed(subject, holder: null, hasFailed);
+
+    /// <summary>
+    /// Recalculates the derived properties that read the graph state of <paramref name="subject"/> or, when given, the
+    /// children of <paramref name="holder"/>. Called after a subject was attached or detached through a property of
+    /// <paramref name="holder"/>, once both changed.
+    /// </summary>
+    internal static void Changed(IInterceptorSubject subject, IInterceptorSubject? holder, bool hasFailed = false)
     {
-        TrackingWriteObserver.OnGraphChanged(subject, hasFailed);
+        // No graph dependency has data while the graph gate is not raised, see "Graph gate" in
+        // docs/design/tracking-derived-properties.md.
+        if (!IsGateRaised)
+        {
+            return;
+        }
+
+        // W2 ("The Version Protocol" in docs/design/tracking-derived-properties.md), once for every graph dependency:
+        // all of them changed before the first data lookup.
+        Interlocked.MemoryBarrier();
+        TrackingWriteObserver.RequestGraphRecalculations(Of(subject), hasFailed);
+        if (holder is not null)
+        {
+            TrackingWriteObserver.RequestGraphRecalculations(ChildrenOf(holder), hasFailed);
+        }
+    }
+
+    /// <summary>
+    /// Recalculates the derived properties that read the graph state of a subject in <paramref name="children"/> or the
+    /// children of <paramref name="holder"/>. Called after the children moved within a property of
+    /// <paramref name="holder"/>.
+    /// </summary>
+    internal static void ChildrenMoved(ReadOnlySpan<SubjectChild> children, IInterceptorSubject holder)
+    {
+        if (!IsGateRaised)
+        {
+            return;
+        }
+
+        // W2, once for every graph dependency: all of them changed before the first data lookup.
+        Interlocked.MemoryBarrier();
+        foreach (var child in children)
+        {
+            TrackingWriteObserver.RequestGraphRecalculations(Of(child.Subject), hasFailed: false);
+        }
+
+        TrackingWriteObserver.RequestGraphRecalculations(ChildrenOf(holder), hasFailed: false);
     }
 
     /// <summary>

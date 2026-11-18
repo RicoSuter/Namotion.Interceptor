@@ -117,7 +117,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     // child's registry handler may have registered it.
                     if (isRoot && !areChildrenAttached)
                     {
-                        TrackingWriteObserver.OnGraphChanged(subject);
+                        DerivedGraphDependencies.Changed(subject);
                     }
                 }
             }
@@ -182,7 +182,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
-            TrackingWriteObserver.OnGraphChanged(subject);
+            DerivedGraphDependencies.Changed(subject);
         }
 
         SubjectAttached?.Invoke(change);
@@ -229,7 +229,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
-            TrackingWriteObserver.OnGraphChanged(subject, property.Subject);
+            DerivedGraphDependencies.Changed(subject, property.Subject);
         }
 
         if (isFirstAttach)
@@ -296,7 +296,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
-            TrackingWriteObserver.OnGraphChanged(subject);
+            DerivedGraphDependencies.Changed(subject);
         }
     }
 
@@ -347,7 +347,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
-            TrackingWriteObserver.OnGraphChanged(subject, property.Subject);
+            DerivedGraphDependencies.Changed(subject, property.Subject);
         }
 
         if (children is not null)

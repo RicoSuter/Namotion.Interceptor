@@ -75,66 +75,10 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     }
 
     /// <summary>
-    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the graph state of
-    /// <paramref name="subject"/> (<see cref="DerivedGraphDependencies"/>). Called after the graph state changed.
+    /// W3 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the graph
+    /// dependency <paramref name="graph"/> (<see cref="DerivedGraphDependencies"/>), after its W2.
     /// </summary>
-    internal static void OnGraphChanged(IInterceptorSubject subject, bool hasFailed = false)
-    {
-        // No graph dependency has data while the graph gate is not raised, see "Graph gate" in
-        // docs/design/tracking-derived-properties.md.
-        if (!DerivedGraphDependencies.IsGateRaised)
-        {
-            return;
-        }
-
-        // W2: the graph state changed before its data is looked up.
-        Interlocked.MemoryBarrier();
-        RequestGraphRecalculations(DerivedGraphDependencies.Of(subject), hasFailed);
-    }
-
-    /// <summary>
-    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the graph state of
-    /// <paramref name="subject"/> and of the children of <paramref name="holder"/>
-    /// (<see cref="DerivedGraphDependencies"/>). Called after a subject was attached or detached through a property
-    /// of <paramref name="holder"/>, once both changed.
-    /// </summary>
-    internal static void OnGraphChanged(IInterceptorSubject subject, IInterceptorSubject holder)
-    {
-        if (!DerivedGraphDependencies.IsGateRaised)
-        {
-            return;
-        }
-
-        // W2, once for every graph dependency: all of them changed before the first data lookup.
-        Interlocked.MemoryBarrier();
-        RequestGraphRecalculations(DerivedGraphDependencies.Of(subject), hasFailed: false);
-        RequestGraphRecalculations(DerivedGraphDependencies.ChildrenOf(holder), hasFailed: false);
-    }
-
-    /// <summary>
-    /// W2 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the graph state of
-    /// every subject in <paramref name="children"/> and of the children of <paramref name="holder"/>
-    /// (<see cref="DerivedGraphDependencies"/>). Called after the children moved within a property of
-    /// <paramref name="holder"/>.
-    /// </summary>
-    internal static void OnChildrenMoved(ReadOnlySpan<SubjectChild> children, IInterceptorSubject holder)
-    {
-        if (!DerivedGraphDependencies.IsGateRaised)
-        {
-            return;
-        }
-
-        // W2, once for every graph dependency: all of them changed before the first data lookup.
-        Interlocked.MemoryBarrier();
-        foreach (var child in children)
-        {
-            RequestGraphRecalculations(DerivedGraphDependencies.Of(child.Subject), hasFailed: false);
-        }
-
-        RequestGraphRecalculations(DerivedGraphDependencies.ChildrenOf(holder), hasFailed: false);
-    }
-
-    private static void RequestGraphRecalculations(PropertyReference graph, bool hasFailed)
+    internal static void RequestGraphRecalculations(PropertyReference graph, bool hasFailed)
     {
         var data = graph.TryGetDerivedPropertyData();
         if (data is not null)
