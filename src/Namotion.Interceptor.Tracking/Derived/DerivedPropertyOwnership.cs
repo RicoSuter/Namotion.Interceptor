@@ -219,6 +219,15 @@ internal static class DerivedPropertyOwnership
         return token;
     }
 
+    // Called under lock(data).
+    private static void ReleaseIfOwned(DerivedPropertyData data, long token)
+    {
+        if (data.OwnerToken == token)
+        {
+            data.OwnerToken = 0;
+        }
+    }
+
     // Called under lock(data) for a request while the property is owned or an attach is in progress. A request
     // raised on another thread than the owner's is foreign, and a foreign request is never dropped.
     private static void MarkRecalculationNeeded(DerivedPropertyData data)
@@ -335,11 +344,7 @@ internal static class DerivedPropertyOwnership
                 {
                     // Superseded by a newer attach or a detach (also by the getter detaching its own subject).
                     DiscardRecording();
-                    if (data.OwnerToken == attachToken)
-                    {
-                        data.OwnerToken = 0;
-                    }
-
+                    ReleaseIfOwned(data, attachToken);
                     requestAfterAttach = TakePendingRequestIfUnowned(data, out pendingTimestamp);
                     attachCount = data.AttachCount;
                     break;
@@ -351,7 +356,9 @@ internal static class DerivedPropertyOwnership
                     continue;
                 }
 
-                CommitAttachEvaluation(data, property, evaluation, attachToken, timestamp);
+                CommitFirstValue(data, property, evaluation, timestamp);
+                data.AttachToken = 0;
+                ReleaseIfOwned(data, attachToken);
                 isExhausted = !isStable;
 
                 // An unstable evaluation is evaluated again after the attach. So is one that found a recalculation
@@ -388,20 +395,6 @@ internal static class DerivedPropertyOwnership
         return isStable;
     }
 
-    // Called under lock(data) with a current attach token, after the last evaluation of the attach. An unstable
-    // evaluation (the getter keeps changing what it reads, for example it writes a property it reads) is committed
-    // as well, and the attach requests a recalculation after it.
-    private static void CommitAttachEvaluation(
-        DerivedPropertyData data, in PropertyReference property, Evaluation evaluation, long attachToken, long timestamp)
-    {
-        CommitFirstValue(data, property, evaluation, timestamp);
-        data.AttachToken = 0;
-        if (data.OwnerToken == attachToken)
-        {
-            data.OwnerToken = 0;
-        }
-    }
-
     // Ends a failed attach if it is still this one and releases the ownership it holds. Returns true when a
     // recalculation is to be requested after the attach: always for the current attach, otherwise when a request
     // is pending and nobody owns the property.
@@ -410,11 +403,7 @@ internal static class DerivedPropertyOwnership
         DiscardRecording();
         lock (data)
         {
-            if (data.OwnerToken == attachToken)
-            {
-                data.OwnerToken = 0;
-            }
-
+            ReleaseIfOwned(data, attachToken);
             attachCount = data.AttachCount;
             if (data.AttachToken != attachToken)
             {
@@ -457,11 +446,18 @@ internal static class DerivedPropertyOwnership
             return;
         }
 
-        data.LastKnownValue = evaluation.Value;
+        StoreValue(data, evaluation.Value);
+        property.SetWriteTimestamp(timestamp);
+    }
+
+    // Called under lock(data). Writes the value before it moves the sequence, the reverse of the order in which the
+    // stale-publication guard reads them.
+    private static long StoreValue(DerivedPropertyData data, object? value)
+    {
+        data.LastKnownValue = value;
         data.HasValue = true;
         data.IsFaulted = false;
-        data.RecalculationSequence++;
-        property.SetWriteTimestamp(timestamp);
+        return ++data.RecalculationSequence;
     }
 
     /// <summary>
@@ -761,10 +757,7 @@ internal static class DerivedPropertyOwnership
         var hadValue = data.HasValue;
         var oldValue = hadValue ? data.LastKnownValue : GetDefault(property.Metadata.Type);
         var shouldPublish = hadValue || data.IsFaulted;
-        data.LastKnownValue = newValue;
-        data.HasValue = true;
-        data.IsFaulted = false;
-        var sequence = ++data.RecalculationSequence;
+        var sequence = StoreValue(data, newValue);
         if (rawTimestamp != 0)
         {
             // A request without a timestamp is stamped by its publication.
