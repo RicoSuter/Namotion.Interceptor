@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using HomeBlaze.Abstractions;
@@ -249,6 +250,84 @@ public class MyStromSwitchTests
         }
     }
 
+    [Fact]
+    public async Task WhenOperating_ThenNeitherThePollTimeoutNorARequestTimeoutApplies()
+    {
+        // Arrange
+        var device = new FakeDevice(uptimes: [100], versions: ["4.0.7"]);
+        var factory = new FakeHttpClientFactory(device);
+        var subject = new MyStromSwitch(factory, NullLogger<MyStromSwitch>.Instance)
+        {
+            HostAddress = "switch.test",
+            PollRequestTimeout = TimeSpan.Zero
+        };
+
+        // Act
+        await subject.TurnOnAsync(CancellationToken.None);
+        await subject.TurnOffAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, factory.Clients.Length);
+        Assert.All(factory.Clients, client => Assert.Equal(TimeSpan.FromSeconds(100), client.Timeout));
+        Assert.Equal(true, subject.IsOn);
+    }
+
+    [Fact]
+    public async Task WhenAPollIsNotAnswered_ThenTheSwitchIsInErrorAndReconnects()
+    {
+        // Arrange
+        var device = new FakeDevice(uptimes: [100], versions: ["4.0.7"]) { HangReportRequestNumber = 2 };
+        var subject = new MyStromSwitch(new FakeHttpClientFactory(device), NullLogger<MyStromSwitch>.Instance)
+        {
+            HostAddress = "switch.test",
+            PollingInterval = TimeSpan.FromMilliseconds(1),
+            RetryInterval = TimeSpan.FromMilliseconds(1),
+            PollRequestTimeout = TimeSpan.FromMilliseconds(500)
+        };
+
+        // Act
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+                device.InformationRequestCount >= 2 && subject.IsConnected && subject.Status == ServiceStatus.Running);
+            Assert.Null(subject.StatusMessage);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheDeviceDoesNotAnswer_ThenTheStatusMessageSaysSo()
+    {
+        // Arrange
+        var device = new FakeDevice(uptimes: [100], versions: ["4.0.7"]) { HangReportRequestNumber = 2, HangInformationRequestNumber = 2 };
+        var subject = new MyStromSwitch(new FakeHttpClientFactory(device), NullLogger<MyStromSwitch>.Instance)
+        {
+            HostAddress = "switch.test",
+            PollingInterval = TimeSpan.FromMilliseconds(1),
+            RetryInterval = TimeSpan.FromHours(1),
+            PollRequestTimeout = TimeSpan.FromMilliseconds(500)
+        };
+
+        // Act
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+                subject.Status == ServiceStatus.Error && subject.StatusMessage == "The device did not answer within 0.5 seconds.");
+            Assert.False(subject.IsConnected);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+        }
+    }
+
     private class TestHttpClientFactory : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new();
@@ -256,7 +335,16 @@ public class MyStromSwitchTests
 
     private sealed class FakeHttpClientFactory(FakeDevice device) : IHttpClientFactory
     {
-        public HttpClient CreateClient(string name) => new(device, disposeHandler: false);
+        private readonly ConcurrentQueue<HttpClient> _clients = new();
+
+        public HttpClient[] Clients => _clients.ToArray();
+
+        public HttpClient CreateClient(string name)
+        {
+            var client = new HttpClient(device, disposeHandler: false);
+            _clients.Enqueue(client);
+            return client;
+        }
     }
 
     /// <summary>
@@ -267,22 +355,40 @@ public class MyStromSwitchTests
         private int _informationRequestCount;
         private int _reportRequestCount;
 
+        public int HangReportRequestNumber { get; init; }
+
+        public int HangInformationRequestNumber { get; init; }
+
         public int InformationRequestCount => Volatile.Read(ref _informationRequestCount);
 
         public int ReportRequestCount => Volatile.Read(ref _reportRequestCount);
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (request.RequestUri!.AbsolutePath == "/report" && HangReportRequestNumber > 0 &&
+                Volatile.Read(ref _reportRequestCount) == HangReportRequestNumber - 1)
+            {
+                Interlocked.Increment(ref _reportRequestCount);
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+
+            if (request.RequestUri!.AbsolutePath == "/info" && HangInformationRequestNumber > 0 &&
+                Volatile.Read(ref _informationRequestCount) == HangInformationRequestNumber - 1)
+            {
+                Interlocked.Increment(ref _informationRequestCount);
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+
             var json = request.RequestUri!.AbsolutePath switch
             {
                 "/info" => $$"""{"version":"{{Next(versions, ref _informationRequestCount)}}"}""",
                 "/report" => $$"""{"power":0,"relay":true,"energy_since_boot":0,"time_since_boot":{{Next(uptimes, ref _reportRequestCount)}}}""",
                 _ => """{"measured":20,"compensation":0,"compensated":20}"""
             };
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
-            });
+            };
         }
 
         private static T Next<T>(T[] values, ref int count)

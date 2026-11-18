@@ -25,6 +25,11 @@ internal sealed class SonosConnection
     /// </summary>
     internal const int MaximumFavoritesPages = 20;
 
+    /// <summary>
+    /// The ContentDirectory container of the favorites.
+    /// </summary>
+    internal const string FavoritesContainerId = "FV:2";
+
     private readonly HttpClient _httpClient;
     private readonly ILogger _logger;
     private readonly SonosSoapClient _soapClient;
@@ -149,7 +154,7 @@ internal sealed class SonosConnection
             SonosService.ContentDirectory,
             "Browse",
             [
-                ("ObjectID", "FV:2"),
+                ("ObjectID", FavoritesContainerId),
                 ("BrowseFlag", "BrowseDirectChildren"),
                 ("Filter", "*"),
                 ("StartingIndex", Format(startingIndex)),
@@ -201,6 +206,27 @@ internal sealed class SonosConnection
                 speechEnhancement),
             HasPosition: position is not null,
             HasSleepTimer: sleepTimer is not null);
+    }
+
+    /// <summary>
+    /// Reads the position and the sleep timer, each only when asked for, with the same fault handling as
+    /// <see cref="ReadPlayerAsync"/>.
+    /// </summary>
+    internal async Task<SonosProgressReading> ReadProgressAsync(
+        bool readsPosition, bool readsSleepTimer, List<SonosReadFault> newFaults, CancellationToken cancellationToken)
+    {
+        var position = readsPosition
+            ? await ReadOrDefaultAsync(SonosService.AvTransport, "GetPositionInfo", [Instance], newFaults, cancellationToken)
+            : null;
+        var sleepTimer = readsSleepTimer
+            ? await ReadOrDefaultAsync(SonosService.AvTransport, "GetRemainingSleepTimerDuration", [Instance], newFaults, cancellationToken)
+            : null;
+
+        return new SonosProgressReading(
+            SonosValues.ParseDuration(position?.GetString("RelTime")),
+            position is not null,
+            SonosValues.ParseDuration(sleepTimer?.GetString("RemainingSleepTimerDuration")),
+            sleepTimer is not null);
     }
 
     private static AvTransportChange CreateAvTransportChange(

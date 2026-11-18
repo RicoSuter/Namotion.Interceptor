@@ -63,6 +63,25 @@ public class ZoneGroupStateParserTests
     }
 
     [Fact]
+    public void WhenParsingMember_ThenItsBootSequenceIsRead()
+    {
+        // Arrange
+        const string xml = """
+            <ZoneGroupState><ZoneGroups>
+              <ZoneGroup Coordinator="RINCON_A0000000000601400" ID="RINCON_A0000000000601400:1">
+                <ZoneGroupMember UUID="RINCON_A0000000000601400" Location="http://10.0.0.121:1400/xml/device_description.xml" ZoneName="Küche" BootSeq="117" />
+              </ZoneGroup>
+            </ZoneGroups></ZoneGroupState>
+            """;
+
+        // Act
+        var kitchen = ZoneGroupStateParser.Parse(xml).Groups[0].Players[0];
+
+        // Assert
+        Assert.Equal("117", kitchen.BootSequence);
+    }
+
+    [Fact]
     public void WhenParsingPortable_ThenMoreInfoIsKept()
     {
         // Act

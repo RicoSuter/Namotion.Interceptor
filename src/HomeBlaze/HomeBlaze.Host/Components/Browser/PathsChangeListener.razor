@@ -1,0 +1,25 @@
+@* Renders nothing. Reads the version of the paths in its render, so that the render tracking renders only this
+   component again when the paths change, not the component that contains it. *@
+@inject SubjectPathResolver PathResolver
+@{ _renderedVersion = PathResolver.PathsVersion; }
+
+@code {
+    private long _renderedVersion;
+    private long _notifiedVersion = -1;
+
+    /// <summary>
+    /// Called on the renderer after the first render and after each render at a <see cref="SubjectPathResolver.PathsVersion"/>
+    /// other than the one of the last call.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public Action? OnPathsChanged { get; set; }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (_renderedVersion != _notifiedVersion)
+        {
+            _notifiedVersion = _renderedVersion;
+            OnPathsChanged?.Invoke();
+        }
+    }
+}

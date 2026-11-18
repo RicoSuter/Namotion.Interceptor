@@ -1,6 +1,7 @@
 ﻿using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Derived;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Recorder;
@@ -48,13 +49,14 @@ public static class InterceptorSubjectContextExtensions
     }
 
     /// <summary>
-    /// Registers the derived property change detection interceptor.
+    /// Registers the derived property change handler, which recalculates a derived property after a write of a
+    /// property it read, and the lifecycle that attaches and detaches derived properties.
     /// </summary>
     /// <param name="context">The context.</param>
     /// <returns>The context.</returns>
     public static IInterceptorSubjectContext WithDerivedPropertyChangeDetection(this IInterceptorSubjectContext context)
     {
-        context // must be before lifecycle!
+        context
             .WithService(() => new DerivedPropertyChangeHandler());
 
         return context

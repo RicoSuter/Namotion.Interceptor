@@ -283,15 +283,19 @@ public partial class SonosGroup :
 
     /// <param name="change">The values the poll read.</param>
     /// <param name="pollStartedAt">When the poll started, from <see cref="SonosSystem.NextOrder"/>.</param>
-    internal void ApplyGroupRenderingControlPoll(GroupRenderingControlChange change, long pollStartedAt)
+    /// <returns>Whether the values applied; false when an event or a later poll replaced them.</returns>
+    internal bool ApplyGroupRenderingControlPoll(GroupRenderingControlChange change, long pollStartedAt)
     {
         lock (_stateLock)
         {
             // Command refreshes poll outside the reconciliation, so an older poll can complete after a newer one.
-            if (_order.TryApplyPoll(pollStartedAt))
+            if (!_order.TryApplyPoll(pollStartedAt))
             {
-                Apply(change);
+                return false;
             }
+
+            Apply(change);
+            return true;
         }
     }
 

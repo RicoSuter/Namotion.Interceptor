@@ -87,6 +87,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     // a long query holds for its whole run.
     private int _openConnectionCount;
 
+    // Set under _connectionLock and checked under it wherever a connection opens, so nothing reopens one after
+    // Dispose closed them all. Volatile for CoverageRanges, which reads it without the lock.
+    private volatile bool _disposed;
+
     // Partitions this build refused to open, so a read skips them without retrying and logging per query.
     private readonly HashSet<string> _unreadablePartitions = new(StringComparer.Ordinal);
 
@@ -218,7 +222,11 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
 
     public string? LastError => _lastError;
 
-    public ImmutableArray<HistoryCoverage> CoverageRanges => GetEffectiveCoverageSnapshot();
+    /// <summary>
+    /// Gets the ranges this store holds complete history for, or none once the store is disposed.
+    /// </summary>
+    public ImmutableArray<HistoryCoverage> CoverageRanges =>
+        _disposed ? ImmutableArray<HistoryCoverage>.Empty : GetEffectiveCoverageSnapshot();
 
     /// <summary>
     /// Gets the number of open database connections, partitions and the metadata database together.
@@ -524,6 +532,11 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         // through the engine's OpenPartition/OpenMoves delegates, which re-enter this lock).
         lock (_connectionLock)
         {
+            if (_disposed)
+            {
+                return EmptySeries(query.PropertyPath);
+            }
+
             // The bucket reader's look-backs (the TWA carry seed and the Delta reading) read directly through the
             // same context; they run while this lock is already held, matching the original inline look-back.
             var result = query.Bucket is null
@@ -541,6 +554,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         }
     }
 
+    // A series without points or coverage: the answer of a store that holds no history.
+    internal static HistorySeries EmptySeries(string propertyPath) =>
+        new(propertyPath, ImmutableArray<HistoryPoint>.Empty, false, ImmutableArray<HistoryCoverage>.Empty);
+
     public HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf)
     {
         var coverageRanges = GetEffectiveCoverageSnapshot();
@@ -548,7 +565,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         // Serialize connection use under the re-entrant _connectionLock (see Query for the rationale).
         lock (_connectionLock)
         {
-            return GetSampleAtOrBeforeCore(propertyPath, asOf, coverageRanges);
+            return _disposed ? null : GetSampleAtOrBeforeCore(propertyPath, asOf, coverageRanges);
         }
     }
 
@@ -565,7 +582,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         // Serialize connection use under the re-entrant _connectionLock (see Query for the rationale).
         lock (_connectionLock)
         {
-            return SqliteHistoryReader.GetLastNumericSampleBefore(_readContext, propertyPath, before);
+            return _disposed ? null : SqliteHistoryReader.GetLastNumericSampleBefore(_readContext, propertyPath, before);
         }
     }
 
@@ -880,7 +897,9 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_connectionLock)
         {
-            if (_unreadablePartitions.Contains(key))
+            // Defensive: queries already return before reading once disposed, and they hold this lock throughout.
+            // Left to OpenPartition, the throw would mark the partition unreadable.
+            if (_disposed || _unreadablePartitions.Contains(key))
             {
                 return null;
             }
@@ -912,6 +931,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_connectionLock)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
             var now = _getUtcNow();
             if (_connections.TryGetValue(key, out var existing))
             {
@@ -980,6 +1001,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_connectionLock)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
             if (_connections.TryGetValue(MetadataKey, out var existing))
             {
                 return existing;
@@ -1175,10 +1198,16 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         }
     }
 
+    /// <summary>
+    /// Closes every connection. Waits for a query in progress to finish first. Afterwards the store opens no
+    /// connection again: queries return empty results and no coverage, and flushing or sweeping throws
+    /// <see cref="ObjectDisposedException"/> where it would open one.
+    /// </summary>
     public void Dispose()
     {
         lock (_connectionLock)
         {
+            _disposed = true;
             DisposeConnections();
         }
     }

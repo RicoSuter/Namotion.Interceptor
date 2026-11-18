@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
@@ -352,6 +353,112 @@ public class SqliteHistoryStoreRecordingTests
             Assert.True(
                 Assert.Single(store.CoverageRanges).To >= beforeRecording,
                 "coverage did not advance past the instant before the recorded change");
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenStartFailsAfterTheEngineIsBuilt_ThenTheStoreReportsTheErrorAndHoldsNoEngine()
+    {
+        // Arrange - a resolver but no property tracking, so subscribing to the change queue throws once the
+        // engine already exists.
+        var context = InterceptorSubjectContext.Create();
+        context.WithService<ISubjectPathResolver>(() => new SubjectPathResolver(() => null));
+        var (store, databasePath) = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        try
+        {
+            // Act
+            await hostedService.StartAsync(CancellationToken.None);
+            var exception = await Assert.ThrowsAnyAsync<Exception>(() => store.ExecuteTask!);
+
+            // Assert
+            Assert.Equal("Error", store.Status);
+            Assert.Equal(exception.Message, store.LastError);
+            Assert.Null(store.Engine);
+            Assert.Equal(0, store.OpenConnectionCount);
+            Assert.True(Directory.Exists(databasePath), "The engine was never built.");
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheStoreHasStopped_ThenQueriesReturnNothingAndOpenNoConnection()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var (store, databasePath) = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 21.5);
+            var engine = store.Engine!;
+            await hostedService.StopAsync(CancellationToken.None);
+            var from = DateTimeOffset.UtcNow.AddMinutes(-1);
+            var to = DateTimeOffset.UtcNow.AddMinutes(1);
+
+            // Act
+            var raw = await store.QueryAsync(new HistoryQuery("/Temperature", from, to), CancellationToken.None);
+            var bucketed = await store.QueryAsync(
+                new HistoryQuery("/Temperature", from, to, HistoryBucket.Fixed(TimeSpan.FromMinutes(1)), HistoryAggregations.Maximum),
+                CancellationToken.None);
+            var sample = await store.GetSampleAtOrBeforeAsync("/Temperature", to, CancellationToken.None);
+            var reading = await store.GetLastNumericSampleBeforeAsync("/Temperature", to, CancellationToken.None);
+            var coverage = store.CoverageRanges;
+
+            // Assert
+            Assert.Null(store.Engine);
+            Assert.Empty(raw.Points);
+            Assert.Empty(bucketed.Points);
+            Assert.Null(sample);
+            Assert.Null(reading);
+            Assert.Empty(coverage);
+            Assert.Equal(0, engine.OpenConnectionCount);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAStoppedStoreStartsAgain_ThenItRecordsAndQueriesAgainWithANewEngine()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var child = new TestChild(context);
+        root.Child = child;
+        var (store, databasePath) = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 21.5);
+            var firstEngine = store.Engine!;
+            await hostedService.StopAsync(CancellationToken.None);
+
+            // Act
+            await hostedService.StartAsync(CancellationToken.None);
+            var afterRestart = await RecordAndWaitForValueAsync(
+                store, "/Child/Pressure", value => child.Pressure = value, 3.3);
+            var beforeRestart = QuerySeries(store, "/Temperature");
+
+            // Assert
+            Assert.Equal("Running", store.Status);
+            Assert.NotSame(firstEngine, store.Engine);
+            Assert.Contains(afterRestart.Points, point => point.Number == 3.3);
+            Assert.Contains(beforeRestart.Points, point => point.Number == 21.5);
+            Assert.Equal(0, firstEngine.OpenConnectionCount);
         }
         finally
         {

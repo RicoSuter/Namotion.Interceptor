@@ -1,0 +1,1072 @@
+using System.Collections.Concurrent;
+using System.Reactive.Concurrency;
+using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Derived;
+using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Parent;
+using Namotion.Interceptor.Tracking.Tests.Change;
+using Namotion.Interceptor.Tracking.Tests.Models;
+
+namespace Namotion.Interceptor.Tracking.Tests.Derived;
+
+/// <summary>
+/// Places another thread's write, attach or detach at a fixed point of a derived property's evaluation, commit or
+/// publication, by parking the evaluating thread on a gate.
+/// </summary>
+[Collection(PerPropertySubscriptionCollection.Name)]
+public class DerivedPropertyProtocolTests
+{
+    public DerivedPropertyProtocolTests() => PropertyChangeSubscriptions.ResetForTests();
+
+    private static readonly TimeSpan Timeout = TestTimeouts.Default;
+
+    [Fact]
+    public async Task WhenWriteLandsBetweenReadAndCommit_ThenEvaluationRunsAgain()
+    {
+        // Arrange: the getter reads Anchor only once Data is set, so Anchor is not a dependency when it is written.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            if (root.Data is null)
+            {
+                return -1;
+            }
+
+            var anchor = root.Anchor;
+            gate.PauseIfArmed();
+            return anchor;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordPublications(result, published);
+
+        // Act
+        gate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Data = [1]; });
+        var isPaused = gate.Paused.Wait(Timeout);
+        root.Anchor = 5;
+        gate.Resume.Set();
+        await recalculation.WaitAsync(Timeout);
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Equal([(-1, 5)], published);
+        Assert.Equal(5, machine.Worker.Result);
+        Assert.Equal(5, result.TryGetDerivedPropertyData()?.LastKnownValue);
+    }
+
+    [Fact]
+    public async Task WhenGraphStateChangesBetweenReadAndCommit_ThenEvaluationRunsAgain()
+    {
+        // Arrange: the getter reads the parents of the spare only once Data is set, so its graph state is not a dependency
+        // when the spare is attached.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var spare = new EvaluatorConfiguration();
+        var machine = new EvaluatorMachine();
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            if (root.Data is null)
+            {
+                return -1;
+            }
+
+            var isAttached = spare.TryGetFirstParent<EvaluatorRoot>() is not null;
+            gate.PauseIfArmed();
+            return isAttached ? 1 : 0;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordPublications(result, published);
+
+        // Act
+        gate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Data = [1]; });
+        var isPaused = gate.Paused.Wait(Timeout);
+        root.Spare = spare;
+        gate.Resume.Set();
+        await recalculation.WaitAsync(Timeout);
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Equal([(-1, 1)], published);
+        Assert.Equal(1, machine.Worker.Result);
+    }
+
+    [Fact]
+    public async Task WhenSourceIsDetachedWrittenAndAttachedAgainBetweenReadAndCommit_ThenDerivedPropertyFollowsIt()
+    {
+        // Arrange: the getter reaches the spare configuration through a captured variable, not through Spare.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var spare = new EvaluatorConfiguration();
+        root.Spare = spare;
+        var machine = new EvaluatorMachine();
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            if (root.Anchor == 0)
+            {
+                return -1;
+            }
+
+            var value = spare.Value;
+            gate.PauseIfArmed();
+            return value;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordPublications(result, published);
+
+        // Act: the source is detached, written without a context and attached again on another thread, after
+        // the getter read it and before the evaluation commits it as a dependency.
+        gate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+        var isPaused = gate.Paused.Wait(Timeout);
+        root.Spare = null;
+        var isSourceDetached = !SubjectLifecycleAttachments.IsAttached(spare);
+        spare.Value = 5;
+        root.Spare = spare;
+        gate.Resume.Set();
+        await recalculation.WaitAsync(Timeout);
+        spare.Value = 7;
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.True(isSourceDetached);
+        Assert.Equal([(-1, 5), (5, 7)], published);
+        Assert.Equal(7, machine.Worker.Result);
+    }
+
+    [Fact]
+    public async Task WhenAttachRunsWhileRecalculationEvaluates_ThenOwnershipIsHandedOffAndChangeIsPublishedAfterTheAttach()
+    {
+        // Arrange: the getter also reads state outside the model, which changes after the attach evaluation read it,
+        // so only an evaluation after the attach sees it.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var external = 0;
+        var recalculationGate = new EvaluationGate();
+        var attachGate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor + Volatile.Read(ref external);
+            recalculationGate.PauseIfArmed();
+            attachGate.PauseIfArmed();
+            return value;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordPublications(result, published);
+
+        // Act: a recalculation from before the detach evaluates the value 1 and reaches its commit while the
+        // attach of the new attachment evaluates. The attach finds the property owned by that recalculation, so it
+        // requests a recalculation after it; the recalculation finds the attach count moved at its commit and
+        // releases the property without committing its value.
+        recalculationGate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+        var isRecalculationPaused = recalculationGate.Paused.Wait(Timeout);
+        root.Machine = null;
+        root.Anchor = 2;
+        attachGate.Arm();
+        var attach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Machine = machine; });
+        var isAttachPaused = attachGate.Paused.Wait(Timeout);
+        Volatile.Write(ref external, 100);
+        recalculationGate.Resume.Set();
+        var isRecalculationDone = await CompletesInTimeAsync(recalculation);
+        attachGate.Resume.Set();
+        await attach.WaitAsync(Timeout);
+
+        // Assert: the attach commits its first value 2 without publishing it, then the recalculation it requested
+        // publishes the value that includes the external state.
+        Assert.True(isRecalculationPaused);
+        Assert.True(isAttachPaused);
+        Assert.True(isRecalculationDone);
+        Assert.False(recalculationGate.HasTimedOut || attachGate.HasTimedOut);
+        Assert.Equal([(2, 102)], published);
+        Assert.Equal(102, machine.Worker.Result);
+        Assert.Equal(102, result.TryGetDerivedPropertyData()?.LastKnownValue);
+    }
+
+    [Fact]
+    public async Task WhenObserverThrowsOnThePublicationAfterAnAttach_ThenTheAttachCompletesAndLaterDerivedPropertiesFollowTheirSources()
+    {
+        // Arrange: as in WhenAttachRunsWhileRecalculationEvaluates_..., a recalculation from before the detach owns
+        // the property during the attach, so the attach requests a recalculation after it, which publishes on the
+        // attaching thread, where an observer throws. The worker's second derived property attaches after the first
+        // one. The recalculation is queued under the lifecycle lock, so it publishes after the attach completed, and
+        // the observer's exception propagates from the structural write.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var external = 0;
+        var isThrowing = 1;
+        var recalculationGate = new EvaluationGate();
+        var attachGate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor + Volatile.Read(ref external);
+            recalculationGate.PauseIfArmed();
+            attachGate.PauseIfArmed();
+            return value;
+        };
+        machine.Worker.ObjectEvaluator = _ => root.Data;
+        root.Machine = machine;
+        using var subscription = GetResult(machine).SubscribeInline((in SubjectPropertyChange _) =>
+        {
+            if (Volatile.Read(ref isThrowing) == 1)
+            {
+                throw new InvalidOperationException("Observer failed.");
+            }
+        });
+
+        // Act
+        recalculationGate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+        var isRecalculationPaused = recalculationGate.Paused.Wait(Timeout);
+        root.Machine = null;
+        root.Anchor = 2;
+        attachGate.Arm();
+        var attach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Machine = machine; });
+        var isAttachPaused = attachGate.Paused.Wait(Timeout);
+        Volatile.Write(ref external, 100);
+        recalculationGate.Resume.Set();
+        var isRecalculationDone = await CompletesInTimeAsync(recalculation);
+        attachGate.Resume.Set();
+        var attachException = await Record.ExceptionAsync(() => attach.WaitAsync(Timeout));
+        Volatile.Write(ref isThrowing, 0);
+        var data = new byte[1];
+        root.Data = data;
+
+        // Assert
+        Assert.True(isRecalculationPaused);
+        Assert.True(isAttachPaused);
+        Assert.True(isRecalculationDone);
+        Assert.False(recalculationGate.HasTimedOut || attachGate.HasTimedOut);
+        Assert.IsType<InvalidOperationException>(attachException);
+        Assert.Equal(102, GetResult(machine).TryGetDerivedPropertyData()?.LastKnownValue);
+        Assert.Same(data, new PropertyReference(machine.Worker, nameof(EvaluatorWorker.ObjectResult)).TryGetDerivedPropertyData()?.LastKnownValue);
+    }
+
+    [Fact]
+    public async Task WhenAttachRunsWhileRecalculationPublishes_ThenPublicationsStayInCommitOrder()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = _ => root.Anchor;
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var gate = new EvaluationGate();
+        var published = new List<(int OldValue, int NewValue)>();
+
+        // Parks the delivery of the change to 1 before it is recorded.
+        using var subscription = result.SubscribeInline((in SubjectPropertyChange change) =>
+        {
+            if (change.GetNewValue<int>() == 1)
+            {
+                gate.PauseIfArmed();
+            }
+
+            lock (published)
+            {
+                published.Add((change.GetOldValue<int>(), change.GetNewValue<int>()));
+            }
+        });
+
+        // Act: while the change to 1 is delivered, the subject is detached, attached again with the value 2,
+        // and 3 is written.
+        gate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+        var isPaused = gate.Paused.Wait(Timeout);
+        root.Machine = null;
+        root.Anchor = 2;
+        root.Machine = machine;
+        root.Anchor = 3;
+        gate.Resume.Set();
+        await recalculation.WaitAsync(Timeout);
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Equal([(0, 1), (2, 3)], published);
+        Assert.Equal(3, machine.Worker.Result);
+    }
+
+    [Fact]
+    public async Task WhenRecalculationInFlightTakesOverAnotherThreadsWrite_ThenTheChangeCarriesThatWritesTimestamp()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var anchor = root.Anchor;
+            gate.PauseIfArmed();
+            return anchor;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var firstTimestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var secondTimestamp = firstTimestamp.AddMinutes(1);
+        var published = new List<(int OldValue, int NewValue, DateTimeOffset Timestamp)>();
+        using var subscription = result.SubscribeInline((in SubjectPropertyChange change) =>
+        {
+            lock (published)
+            {
+                published.Add((change.GetOldValue<int>(), change.GetNewValue<int>(), change.ChangedTimestamp));
+            }
+        });
+
+        // Act: the recalculation of the write at the first timestamp pauses after it read Anchor, and the write at
+        // the second timestamp is left to it.
+        gate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(firstTimestamp))
+            {
+                root.Anchor = 1;
+            }
+        });
+        var isPaused = gate.Paused.Wait(Timeout);
+        using (SubjectChangeContext.WithChangedTimestamp(secondTimestamp))
+        {
+            root.Anchor = 2;
+        }
+
+        gate.Resume.Set();
+        await recalculation.WaitAsync(Timeout);
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Equal([(0, 2, secondTimestamp)], published);
+    }
+
+    [Fact]
+    public async Task WhenSubjectIsDetachedAttachedAndItsSourceWrittenWhileARecalculationIsInFlight_ThenTheChangeCarriesTheTimestampOfThatWrite()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var anchor = root.Anchor;
+            gate.PauseIfArmed();
+            return anchor;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var firstTimestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var secondTimestamp = firstTimestamp.AddMinutes(1);
+        var published = new List<(int OldValue, int NewValue, DateTimeOffset Timestamp)>();
+        using var subscription = result.SubscribeInline((in SubjectPropertyChange change) =>
+        {
+            lock (published)
+            {
+                published.Add((change.GetOldValue<int>(), change.GetNewValue<int>(), change.ChangedTimestamp));
+            }
+        });
+
+        // Act: the recalculation of the write at the first timestamp pauses after it read Anchor, while the subject
+        // is detached and attached again, and Anchor is written, at the second timestamp.
+        gate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(firstTimestamp))
+            {
+                root.Anchor = 1;
+            }
+        });
+        var isPaused = gate.Paused.Wait(Timeout);
+        using (SubjectChangeContext.WithChangedTimestamp(secondTimestamp))
+        {
+            root.Machine = null;
+            root.Machine = machine;
+            root.Anchor = 2;
+        }
+
+        gate.Resume.Set();
+        await recalculation.WaitAsync(Timeout);
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Equal([(1, 2, secondTimestamp)], published);
+        Assert.Equal(2, machine.Worker.Result);
+    }
+
+    [Fact]
+    public async Task WhenAttachCommitsWhileARecalculationFromBeforeTheDetachOwnsTheProperty_ThenTheChangeCarriesTheAttachTimestamp()
+    {
+        // Arrange: the getter also reads state outside the model, which changes after the attach evaluation read it,
+        // so the recalculation that answers the attach publishes a change.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var external = 0;
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor + Volatile.Read(ref external);
+            gate.PauseIfArmed();
+            return value;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var writeTimestamp = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var attachTimestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var published = new List<(int OldValue, int NewValue, DateTimeOffset Timestamp)>();
+        using var subscription = result.SubscribeInline((in SubjectPropertyChange change) =>
+        {
+            lock (published)
+            {
+                published.Add((change.GetOldValue<int>(), change.GetNewValue<int>(), change.ChangedTimestamp));
+            }
+        });
+
+        // Act: the recalculation of the write at the write timestamp pauses in the getter while the subject is
+        // detached and attached again at the attach timestamp; the attach commits while that recalculation still
+        // owns the property and leaves its request to it.
+        gate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(writeTimestamp))
+            {
+                root.Anchor = 1;
+            }
+        });
+        var isPaused = gate.Paused.Wait(Timeout);
+        root.Machine = null;
+        using (SubjectChangeContext.WithChangedTimestamp(attachTimestamp))
+        {
+            root.Machine = machine;
+        }
+
+        Volatile.Write(ref external, 100);
+        gate.Resume.Set();
+        await recalculation.WaitAsync(Timeout);
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Equal([(1, 101, attachTimestamp)], published);
+        Assert.Equal(101, machine.Worker.Result);
+    }
+
+    [Fact]
+    public async Task WhenRecalculationFromBeforeTheDetachCompletesWhileTheAttachHoldsTheLifecycleLock_ThenItsChangeFollowsTheStructuralChange()
+    {
+        // Arrange: a handler of the configuration, which attaches after the worker, resumes the recalculation from
+        // before the detach and waits until it completed, while the attaching thread holds the lifecycle lock.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var external = 0;
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor + Volatile.Read(ref external);
+            gate.PauseIfArmed();
+            return value;
+        };
+        root.Machine = machine;
+        Task? recalculation = null;
+        var isArmed = false;
+        var isRecalculationDoneUnderLock = false;
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (isArmed && change.IsContextAttach && change.Subject == machine.Configuration)
+            {
+                Volatile.Write(ref external, 100);
+                gate.Resume.Set();
+                isRecalculationDoneUnderLock = recalculation!.Wait(Timeout);
+            }
+        }));
+        var order = new ConcurrentQueue<string>();
+        using var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Name is nameof(EvaluatorRoot.Machine) or nameof(EvaluatorWorker.Result))
+            {
+                order.Enqueue(change.Property.Name);
+            }
+        });
+
+        // Act
+        gate.Arm();
+        recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+        var isPaused = gate.Paused.Wait(Timeout);
+        root.Machine = null;
+        order.Clear();
+        isArmed = true;
+        root.Machine = machine;
+        await recalculation.WaitAsync(Timeout);
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.True(isRecalculationDoneUnderLock);
+        Assert.Equal([nameof(EvaluatorRoot.Machine), nameof(EvaluatorWorker.Result)], order);
+        Assert.Equal(101, machine.Worker.Result);
+    }
+
+    [Fact]
+    public async Task WhenAttachCompletesBetweenTheTakeOfARequestAndItsEvaluation_ThenTheChangeFollowsTheStructuralChange()
+    {
+        // Arrange: the recalculation from before the detach waits after it took its request and before it evaluates.
+        // A handler of the configuration, which attaches after the worker, resumes it and waits until it completed,
+        // while the attaching thread holds the lifecycle lock.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var external = 0;
+        machine.Worker.Evaluator = _ => root.Anchor + Volatile.Read(ref external);
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var gate = new EvaluationGate();
+        Task? recalculation = null;
+        var isArmed = false;
+        var isRecalculationDoneUnderLock = false;
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (isArmed && change.IsContextAttach && change.Subject == machine.Configuration)
+            {
+                Volatile.Write(ref external, 100);
+                gate.Resume.Set();
+                isRecalculationDoneUnderLock = recalculation!.Wait(Timeout);
+            }
+        }));
+        var order = new ConcurrentQueue<string>();
+        using var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Name is nameof(EvaluatorRoot.Machine) or nameof(EvaluatorWorker.Result))
+            {
+                order.Enqueue(change.Property.Name);
+            }
+        });
+
+        // Act
+        bool isPaused;
+        DerivedPropertyOwnership.AfterTakeForTests = property =>
+        {
+            if (property == result)
+            {
+                gate.PauseIfArmed();
+            }
+        };
+        try
+        {
+            gate.Arm();
+            recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+            isPaused = gate.Paused.Wait(Timeout);
+            root.Machine = null;
+            order.Clear();
+            isArmed = true;
+            root.Machine = machine;
+            await recalculation.WaitAsync(Timeout);
+        }
+        finally
+        {
+            DerivedPropertyOwnership.AfterTakeForTests = null;
+        }
+
+        // Assert
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.True(isRecalculationDoneUnderLock);
+        Assert.Equal([nameof(EvaluatorRoot.Machine), nameof(EvaluatorWorker.Result)], order);
+        Assert.Equal(101, machine.Worker.Result);
+    }
+
+    [Fact]
+    public void WhenPropertyIsAttachedAgainBeforeTheHandOverOfAnEarlierAttachIsQueued_ThenTheHandOverIsDropped()
+    {
+        // Arrange: the attach under the lifecycle lock finds the recalculation from before the detach in flight, so it
+        // hands a request over. Before the request is queued, the recalculation releases the property, another thread
+        // attaches the property again directly, and an input the getter reads without tracking changes.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var external = 0;
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor + Volatile.Read(ref external);
+            gate.PauseIfArmed();
+            return value;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordPublications(result, published);
+        Task? recalculation = null;
+        var isHandOverArmed = 0;
+        var isRecalculationDone = false;
+        var isAttachedAgain = false;
+
+        // Act
+        bool isPaused;
+        DerivedPropertyOwnership.AfterTakeForTests = property =>
+        {
+            if (property == result && Interlocked.Exchange(ref isHandOverArmed, 0) == 1)
+            {
+                gate.Resume.Set();
+                isRecalculationDone = recalculation!.Wait(Timeout);
+                isAttachedAgain = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+                {
+                    machine.Worker.DetachSubjectProperty(result);
+                    machine.Worker.AttachSubjectProperty(result);
+                }).Wait(Timeout);
+                Volatile.Write(ref external, 100);
+            }
+        };
+        try
+        {
+            gate.Arm();
+            recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+            isPaused = gate.Paused.Wait(Timeout);
+            root.Machine = null;
+            Volatile.Write(ref isHandOverArmed, 1);
+            root.Machine = machine;
+        }
+        finally
+        {
+            DerivedPropertyOwnership.AfterTakeForTests = null;
+        }
+
+        // Assert: the attach on the other thread evaluated after the hand-over's cause, and answers for it.
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.True(isRecalculationDone);
+        Assert.True(isAttachedAgain);
+        Assert.Empty(published);
+        Assert.Equal(1, result.TryGetDerivedPropertyData()?.LastKnownValue);
+    }
+
+    [Fact]
+    public async Task WhenAttachFailsOutsideTheGetterWhileARecalculationFromBeforeTheDetachIsInFlight_ThenTheFirstSuccessFollowsTheStructuralChange()
+    {
+        // Arrange: the time source throws once when the worker's derived property attaches under the lifecycle lock,
+        // before its first evaluation. A handler of the configuration, which attaches after the worker, resumes the
+        // recalculation from before the detach and waits until it completed.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var external = 0;
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor + Volatile.Read(ref external);
+            gate.PauseIfArmed();
+            return value;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var testThread = Environment.CurrentManagedThreadId;
+        Task? recalculation = null;
+        var isArmed = false;
+        var isTimeSourceArmed = false;
+        var hasTimeSourceThrown = false;
+        var isRecalculationDoneUnderLock = false;
+        context.WithService(() => new CallbackLifecycleHandler(change =>
+        {
+            if (isArmed && change.IsContextAttach && change.Subject == machine.Worker)
+            {
+                isTimeSourceArmed = true;
+            }
+
+            if (isArmed && change.IsContextAttach && change.Subject == machine.Configuration)
+            {
+                Volatile.Write(ref external, 100);
+                gate.Resume.Set();
+                isRecalculationDoneUnderLock = recalculation!.Wait(Timeout);
+            }
+        }));
+        var order = new ConcurrentQueue<string>();
+        using var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Name is nameof(EvaluatorRoot.Machine) or nameof(EvaluatorWorker.Result))
+            {
+                order.Enqueue(change.Property.Name);
+            }
+        });
+        var published = new List<(int OldValue, int NewValue)>();
+        using var publications = RecordPublications(result, published);
+        var previousTimeSource = SubjectChangeContext.GetTimestampFunction;
+
+        // Act
+        bool isPaused;
+        SubjectChangeContext.GetTimestampFunction = () =>
+        {
+            if (!isTimeSourceArmed || Environment.CurrentManagedThreadId != testThread)
+            {
+                return DateTimeOffset.UtcNow;
+            }
+
+            isTimeSourceArmed = false;
+            hasTimeSourceThrown = true;
+            throw new InvalidOperationException("Time source failed.");
+        };
+        try
+        {
+            gate.Arm();
+            recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+            isPaused = gate.Paused.Wait(Timeout);
+            root.Machine = null;
+            order.Clear();
+            isArmed = true;
+            root.Machine = machine;
+            await recalculation.WaitAsync(Timeout);
+        }
+        finally
+        {
+            SubjectChangeContext.GetTimestampFunction = previousTimeSource;
+        }
+
+        root.Anchor = 2;
+
+        // Assert: the recalculation released the property at its commit, and the request after the failed attach
+        // published the first success after the structural change. A later write publishes, so nobody owns it.
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.True(hasTimeSourceThrown);
+        Assert.True(isRecalculationDoneUnderLock);
+        Assert.Equal([nameof(EvaluatorRoot.Machine), nameof(EvaluatorWorker.Result), nameof(EvaluatorWorker.Result)], order);
+        Assert.Equal([(0, 101), (101, 102)], published);
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsAttachedOutsideTheLifecycleLockWhileARecalculationIsInFlight_ThenTheRecalculationPublishesOnceAndReleasesIt()
+    {
+        // Arrange: the property is detached and attached directly while a recalculation evaluates; an input that the
+        // getter reads without tracking changes after the attach evaluated.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var external = 0;
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor + Volatile.Read(ref external);
+            gate.PauseIfArmed();
+            return value;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordPublications(result, published);
+
+        // Act
+        gate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+        var isPaused = gate.Paused.Wait(Timeout);
+        machine.Worker.DetachSubjectProperty(result);
+        machine.Worker.AttachSubjectProperty(result);
+        Volatile.Write(ref external, 100);
+        gate.Resume.Set();
+        await recalculation.WaitAsync(Timeout);
+        root.Anchor = 2;
+
+        // Assert: the attach handed its request to the recalculation in flight, which evaluated again and published
+        // once. A later write publishes, so nobody owns the property.
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Equal([(1, 101), (101, 102)], published);
+    }
+
+    [Fact]
+    public async Task WhenDerivedPropertyIsDetachedDuringItsEvaluation_ThenNothingIsPublished()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var gate = new EvaluationGate();
+        machine.Worker.Evaluator = _ =>
+        {
+            var anchor = root.Anchor;
+            gate.PauseIfArmed();
+            return anchor;
+        };
+        root.Machine = machine;
+        var result = GetResult(machine);
+        var anchorProperty = new PropertyReference(root, nameof(EvaluatorRoot.Anchor));
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordPublications(result, published);
+
+        // Act
+        gate.Arm();
+        var recalculation = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; });
+        var isPaused = gate.Paused.Wait(Timeout);
+        root.Machine = null;
+        gate.Resume.Set();
+        await recalculation.WaitAsync(Timeout);
+        root.Anchor = 2;
+
+        // Assert: the evaluation discards its result and its reads, so no dependency keeps the detached subject.
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Empty(published);
+        Assert.Empty(result.GetRequiredProperties().ToArray());
+        Assert.DoesNotContain(result, anchorProperty.GetUsedByProperties().Items.ToArray());
+        Assert.Null(result.TryGetDerivedPropertyData()?.LastKnownValue);
+    }
+
+    [Fact]
+    public async Task WhenTwoContextsAttachTheSameSubjectConcurrently_ThenDerivedPropertyIsAttachedOnce()
+    {
+        // Arrange: the getter also reads state outside the model, so a second evaluation would see it changed.
+        var firstContext = CreateContext();
+        var secondContext = CreateContext();
+        var firstRoot = new EvaluatorRoot(firstContext);
+        var secondHolder = new EvaluatorMachine(secondContext);
+        var machine = new EvaluatorMachine();
+        var worker = machine.Worker;
+        var external = 1;
+        var gate = new EvaluationGate();
+        worker.Evaluator = _ =>
+        {
+            var value = machine.Configuration.Value * 10 + Volatile.Read(ref external);
+            gate.PauseIfArmed();
+            return value;
+        };
+        var result = GetResult(machine);
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordPublications(result, published);
+
+        // Act: the second context attaches the worker while the first one evaluates its derived property.
+        gate.Arm();
+        var firstAttach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { firstRoot.Machine = machine; });
+        var isPaused = gate.Paused.Wait(Timeout);
+        Volatile.Write(ref external, 2);
+        var secondAttach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { secondHolder.Worker = worker; });
+        var isSecondAttachDoneWhileFirstEvaluates = await CompletesInTimeAsync(secondAttach);
+        gate.Resume.Set();
+        await firstAttach.WaitAsync(Timeout);
+        machine.Configuration.Value = 1;
+
+        // Assert: the value of the first attach is kept, and the write publishes the change from it once.
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.True(isSecondAttachDoneWhileFirstEvaluates);
+        Assert.True(SubjectLifecycleAttachments.IsAttached(worker));
+        Assert.Equal([(1, 12)], published);
+        Assert.Equal(12, worker.Result);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void WhenGetterDetachesItsOwnSubjectDuringAttach_ThenAncestorKeepsNoDependency(int detachingEvaluation)
+    {
+        // Arrange: for the second evaluation, another thread writes Anchor during the first one, so the attach
+        // commits Anchor as a dependency and evaluates again.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var worker = machine.Worker;
+        var evaluations = 0;
+        var isWrittenByOtherThread = true;
+        worker.Evaluator = evaluatedWorker =>
+        {
+            var parent = evaluatedWorker.TryGetFirstParent<EvaluatorMachine>();
+            var anchor = root.Anchor;
+            var evaluation = Interlocked.Increment(ref evaluations);
+            if (evaluation == 1 && detachingEvaluation == 2)
+            {
+                isWrittenByOtherThread = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Anchor = 1; }).Wait(Timeout);
+            }
+
+            if (evaluation == detachingEvaluation && parent is not null)
+            {
+                parent.Worker = new EvaluatorWorker();
+            }
+
+            return anchor;
+        };
+        var result = GetResult(machine);
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.True(isWrittenByOtherThread);
+        Assert.Equal(detachingEvaluation, evaluations);
+        Assert.NotSame(worker, machine.Worker);
+        Assert.DoesNotContain(result, new PropertyReference(root, nameof(EvaluatorRoot.Anchor)).GetUsedByProperties().Items.ToArray());
+        Assert.Empty(result.GetRequiredProperties().ToArray());
+    }
+
+    [Fact]
+    public async Task WhenAttachIsSupersededWhileItOwnsTheProperty_ThenPendingWriteIsPublished()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var worker = machine.Worker;
+        var gate = new EvaluationGate();
+        worker.Evaluator = _ =>
+        {
+            var anchor = root.Anchor;
+            gate.PauseIfArmed();
+            return anchor;
+        };
+        var result = GetResult(machine);
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordPublications(result, published);
+
+        // Act: the attach owns the property and evaluates while a direct detach and attach supersede it, and a
+        // write requests a recalculation that is left to it.
+        gate.Arm();
+        var attach = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { root.Machine = machine; });
+        var isPaused = gate.Paused.Wait(Timeout);
+        worker.DetachSubjectProperty(result);
+        root.Anchor = 1;
+        worker.AttachSubjectProperty(result);
+        root.Anchor = 2;
+        gate.Resume.Set();
+        await attach.WaitAsync(Timeout);
+
+        // Assert: the newer attach committed 1, and the superseded attach recalculated the pending write.
+        Assert.True(isPaused);
+        Assert.False(gate.HasTimedOut);
+        Assert.Equal([(1, 2)], published);
+        Assert.Equal(2, worker.Result);
+        Assert.Equal(2, result.TryGetDerivedPropertyData()?.LastKnownValue);
+    }
+
+    [Fact]
+    public void WhenSubjectWithoutContextIsWrittenDuringAttach_ThenDerivedPropertyFollowsIt()
+    {
+        // Arrange: the worker attaches before the configuration and reads its value while it has no context.
+        var context = CreateContext();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        machine.Worker.Evaluator = worker => worker.TryGetFirstParent<EvaluatorMachine>()!.Configuration.Value;
+        var isWrittenWithoutContext = false;
+        context.WithService(() => new BeforeContextInheritanceLifecycleHandler(change =>
+        {
+            if (change.IsContextAttach && change.Subject == machine.Configuration)
+            {
+                isWrittenWithoutContext = change.Subject.Context.TryGetService<LifecycleInterceptor>() is null;
+                machine.Configuration.Value = 5;
+            }
+        }));
+        var result = GetResult(machine);
+        var published = new List<(int OldValue, int NewValue)>();
+        using var subscription = RecordPublications(result, published);
+
+        // Act
+        root.Machine = machine;
+        machine.Configuration.Value = 7;
+
+        // Assert
+        Assert.True(isWrittenWithoutContext);
+        Assert.Equal([(0, 5), (5, 7)], published);
+        Assert.Equal(7, machine.Worker.Result);
+    }
+
+    [Theory]
+    [InlineData(nameof(Person.Mother))]
+    [InlineData(nameof(Person.FirstName))]
+    public void WhenObserverOfQueuedChangeAttachesSubject_ThenOlderChangesAreDeliveredFirstAndOuterRecalculationsWait(string attachingOn)
+    {
+        // Arrange: attaching the mother queues two writes of the root and its derived changes. An observer attaches
+        // another subject to the context, whose handler writes the marker, either while the structural write is
+        // announced (before the drain) or while the first queued change is delivered (during the drain). The release
+        // of that attach delivers the root's older queued changes before the marker's, and leaves the root's
+        // recalculations to the drain of the structural write.
+        var context = CreateContext();
+        var root = new Person(context);
+        var marker = new Person(context);
+        var mother = new Person();
+        var isAttachingLate = false;
+        context.WithService(() => new BeforeContextInheritanceLifecycleHandler(change =>
+        {
+            if (change.IsContextAttach && change.Subject == mother)
+            {
+                root.FirstName = "a";
+                root.LastName = "b";
+            }
+            else if (change.IsContextAttach && isAttachingLate)
+            {
+                marker.FirstName = "x";
+            }
+        }));
+        var deliveries = new List<string>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            deliveries.Add($"{(change.Property.Subject == root ? "root" : "marker")}.{change.Property.Name}");
+            if (change.Property.Subject == root && change.Property.Name == attachingOn && !isAttachingLate)
+            {
+                isAttachingLate = true;
+                _ = new Person(context);
+            }
+        });
+
+        // Act
+        root.Mother = mother;
+
+        // Assert
+        Assert.Equal(
+            [
+                "root.Mother", "root.FirstName", "root.LastName",
+                "marker.FirstName", "marker.FullName", "marker.FullNameWithPrefix",
+                "root.FullName", "root.FullNameWithPrefix"
+            ],
+            deliveries);
+    }
+
+    private static IInterceptorSubjectContext CreateContext()
+    {
+        return InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+    }
+
+    private static PropertyReference GetResult(EvaluatorMachine machine)
+    {
+        return new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result));
+    }
+
+    private static IDisposable RecordPublications(PropertyReference property, List<(int OldValue, int NewValue)> published)
+    {
+        return property.SubscribeInline((in SubjectPropertyChange change) =>
+        {
+            lock (published)
+            {
+                published.Add((change.GetOldValue<int>(), change.GetNewValue<int>()));
+            }
+        });
+    }
+
+    private static async Task<bool> CompletesInTimeAsync(Task task)
+    {
+        try
+        {
+            await task.WaitAsync(Timeout);
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            return false;
+        }
+    }
+}

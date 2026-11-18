@@ -16,6 +16,7 @@ The telemetry and health endpoint infrastructure exists today. See [Monitoring](
 
 - Logs, metrics and traces are exported over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set
 - Logs and traces are optionally sent to Seq
+- Recent warnings and errors are kept in memory and queryable on `Logs` of the `Host system` subject, see [Recent logs](../../administration/monitoring.md#recent-logs)
 - Metrics come from the standard ASP.NET Core, HTTP client and .NET runtime instrumentation, traces from ASP.NET Core and the HTTP client
 - `/health` and `/alive` report the process status for load balancers and container restart policies; they contain only a liveness check, not the health of individual subjects
 

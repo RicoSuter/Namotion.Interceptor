@@ -153,6 +153,60 @@ public class SonosSystemTopologyTests
     }
 
     [Fact]
+    public void WhenPlayerIsMissingFromOneTopologyOnly_ThenItsSubscriptionsAreMadeAgain()
+    {
+        // Arrange
+        var system = CreateSystem();
+        var household = ReadHousehold();
+        system.ApplyTopology(household);
+        ReportAllReachable(system);
+
+        // Act
+        system.ApplyTopology(WithoutKitchen(household));
+        system.ApplyTopology(household);
+
+        // Assert
+        Assert.NotEqual(0, system.Players[TestFixtures.KitchenUuid].NewSubscriptionsRequests);
+        Assert.Equal(0, system.Players[TestFixtures.LivingRoomUuid].NewSubscriptionsRequests);
+    }
+
+    [Fact]
+    public void WhenAGroupingReadMissesAPlayer_ThenItsSubscriptionsAreKept()
+    {
+        // Arrange
+        var system = CreateSystem();
+        var household = ReadHousehold();
+        system.ApplyTopology(household);
+
+        // Act
+        system.ApplyTopology(WithoutKitchen(household), confirmsMissingPlayers: false);
+
+        // Assert
+        Assert.Equal(0, system.Players[TestFixtures.KitchenUuid].NewSubscriptionsRequests);
+    }
+
+    [Theory]
+    [InlineData("12", "13", true)]
+    [InlineData("12", "12", false)]
+    [InlineData(null, "13", false)]
+    public void WhenTheBootSequenceOfAPlayerChanges_ThenItsSubscriptionsAreMadeAgain(string? before, string after, bool isRequested)
+    {
+        // Arrange
+        var system = CreateSystem();
+        system.ApplyTopology(WithBootSequence(before));
+
+        // Act
+        system.ApplyTopology(WithBootSequence(after));
+
+        // Assert
+        Assert.Equal(isRequested, system.Players[TestFixtures.KitchenUuid].NewSubscriptionsRequests != 0);
+    }
+
+    private static SonosTopology WithBootSequence(string? bootSequence) =>
+        new([new SonosTopologyGroup("1", TestFixtures.KitchenUuid,
+            [new SonosTopologyPlayer(TestFixtures.KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/"), null, null, null, [], bootSequence)])]);
+
+    [Fact]
     public void WhenPlayerIsMissingFromOneTopologyOnly_ThenNothingIsTornDown()
     {
         // Arrange

@@ -31,8 +31,13 @@ public partial class SqliteHistoryStoreSubject :
 {
     private readonly ILogger<SqliteHistoryStoreSubject> _logger;
 
-    private HistoryChangeRecorder? _recorder;
-    private SqliteHistoryStore? _engine;
+    // Null while the store is not running, so a stopped store keeps neither the disposed engine nor its unflushed
+    // samples reachable.
+    private volatile HistoryChangeRecorder? _recorder;
+
+    // Null while the store is not running, so queries never reach a disposed engine. Read once per call: a
+    // query still holding the engine when stop disposes it gets empty results (see SqliteHistoryStore.Dispose).
+    private volatile SqliteHistoryStore? _engine;
 
     public SqliteHistoryStoreSubject(ILogger<SqliteHistoryStoreSubject> logger)
     {
@@ -197,17 +202,10 @@ public partial class SqliteHistoryStoreSubject :
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_engine is null)
-        {
-            return Task.FromResult(
-                new HistorySeries(
-                    query.PropertyPath,
-                    ImmutableArray<HistoryPoint>.Empty,
-                    false,
-                    ImmutableArray<HistoryCoverage>.Empty));
-        }
-
-        return _engine.QueryAsync(query, cancellationToken);
+        var engine = _engine;
+        return engine is null
+            ? Task.FromResult(SqliteHistoryStore.EmptySeries(query.PropertyPath))
+            : engine.QueryAsync(query, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -227,9 +225,14 @@ public partial class SqliteHistoryStoreSubject :
     }
 
     /// <summary>
+    /// Test-only hook that returns the engine of the running store, or null while it is not running.
+    /// </summary>
+    internal SqliteHistoryStore? Engine => _engine;
+
+    /// <summary>
     /// Test-only hook that forces the engine to flush its pending samples immediately, so queued
     /// changes become queryable without waiting for the interval flush. Returns a completed task
-    /// (no-op) before the engine is built.
+    /// (no-op) while the store is not running.
     /// </summary>
     internal Task FlushNowAsync(CancellationToken cancellationToken = default)
     {
@@ -281,48 +284,59 @@ public partial class SqliteHistoryStoreSubject :
             return;
         }
 
-        // The change-queue subscription is live from construction, before the first await. The
-        // coverage session starts only afterwards, so no change can fall inside claimed coverage
-        // without reaching the engine.
-        var recorder = new HistoryChangeRecorder(engine, resolver);
-        _recorder = recorder;
-
-        // A recorder is not a sink that can fall behind the model, so the settled condition never holds
-        // for it. Under the other rule a source-applied value does not retire an older commit, which is
-        // what keeps both points in the series.
-        using var processor = new ChangeQueueProcessor(
-            this,
-            context,
-            HistoryChangeRecorder.IsEligible,
-            (changes, _) => recorder.RecordBatch(changes),
-            ChangeDeliveryRule.SourceValuesMayBeStale,
-            bufferTime: TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
-            maxQueueDepth: null,
-            logger: _logger);
-
-        engine.BeginCoverageSession();
-        _engine = engine;
-
-        _logger.LogInformation("Recording SQLite history to {Directory}.", directory);
-
-        LastError = null;
-        Status = "Running";
-
-        var flushTask = RunFlushLoopAsync(engine, stoppingToken);
+        // Starts right after the engine is built, so any throw from here on still disposes it.
+        HistoryChangeRecorder? recorder = null;
+        var flushTask = Task.CompletedTask;
+        var isEnginePublished = false;
+        Exception? failure = null;
         try
         {
+            // The change-queue subscription is live from construction, before the first await. The
+            // coverage session starts only afterwards, so no change can fall inside claimed coverage
+            // without reaching the engine.
+            recorder = new HistoryChangeRecorder(engine, resolver);
+            _recorder = recorder;
+
+            // A recorder is not a sink that can fall behind the model, so the settled condition never holds
+            // for it. Under the other rule a source-applied value does not retire an older commit, which is
+            // what keeps both points in the series.
+            using var processor = new ChangeQueueProcessor(
+                this,
+                context,
+                HistoryChangeRecorder.IsEligible,
+                (changes, _) => recorder.RecordBatch(changes),
+                ChangeDeliveryRule.SourceValuesMayBeStale,
+                bufferTime: TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
+                maxQueueDepth: null,
+                logger: _logger);
+
+            engine.BeginCoverageSession();
+            _engine = engine;
+            isEnginePublished = true;
+
+            _logger.LogInformation("Recording SQLite history to {Directory}.", directory);
+
+            LastError = null;
+            Status = "Running";
+
+            flushTask = RunFlushLoopAsync(engine, stoppingToken);
             await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+            throw;
         }
         finally
         {
             await flushTask.ConfigureAwait(false);
 
             // Final shutdown flush so the un-flushed tail is persisted. The stopping token is already
-            // cancelled here, so a fresh bounded token gives the flush a chance to complete (the engine
-            // keeps pending samples on failure, so a timeout simply leaves them for the next start).
+            // cancelled here, so a fresh bounded token gives the flush a chance to complete; the engine is
+            // discarded below, so samples a failed or timed-out flush leaves pending are lost.
             using var shutdownCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             try
             {
@@ -333,11 +347,29 @@ public partial class SqliteHistoryStoreSubject :
                 _logger.LogError(exception, "Final history flush on shutdown failed; pending samples were not persisted.");
             }
 
+            // Compared, so a run finishing after a restart leaves the newer run's engine, recorder, status and
+            // metrics alone.
+            var ownsState = Interlocked.CompareExchange(ref _engine, null, engine) == engine || !isEnginePublished;
             engine.Dispose();
 
-            // After disposing, so a stopped store reports no open connections.
-            RefreshMetrics(engine);
-            Status = "Stopped";
+            if (ownsState)
+            {
+                // After disposing, so a stopped store reports no open connections.
+                RefreshMetrics(engine);
+                if (failure is null)
+                {
+                    Status = "Stopped";
+                }
+                else
+                {
+                    // After the refresh, which would replace the message with the engine's own error.
+                    Status = "Error";
+                    LastError = failure.Message;
+                }
+            }
+
+            // After the refresh, which reads the rates of this run's recorder.
+            Interlocked.CompareExchange(ref _recorder, null, recorder);
         }
     }
 
@@ -410,8 +442,9 @@ public partial class SqliteHistoryStoreSubject :
         OpenConnectionCount = engine.OpenConnectionCount;
         LastFlushUtc = engine.LastFlushUtc;
         LastError = engine.LastError;
-        IncomingChangesPerSecond = _recorder?.IncomingChangesPerSecond ?? 0;
-        RecordedChangesPerSecond = _recorder?.RecordedChangesPerSecond ?? 0;
+        var recorder = _recorder;
+        IncomingChangesPerSecond = recorder?.IncomingChangesPerSecond ?? 0;
+        RecordedChangesPerSecond = recorder?.RecordedChangesPerSecond ?? 0;
 
         // Last, so a throwing native call cannot skip the values above.
         SqliteMemorySize = SQLitePCL.raw.sqlite3_memory_used();

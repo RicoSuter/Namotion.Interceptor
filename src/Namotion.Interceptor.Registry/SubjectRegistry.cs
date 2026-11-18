@@ -2,6 +2,7 @@
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Derived;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 
@@ -63,6 +64,14 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     /// <inheritdoc />
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject)
+    {
+        DerivedGraphDependencies.RecordRead(subject);
+        return TryGetKnownSubject(subject);
+    }
+
+    /// <summary>Gets the registered subject, without recording the graph state read.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal RegisteredSubject? TryGetKnownSubject(IInterceptorSubject subject)
     {
         lock (_knownSubjects)
         {

@@ -36,16 +36,15 @@ namespace Namotion.Interceptor.Validation
     [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Transactions.SubjectTransactionInterceptor)})]
     [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
-            typeof(Namotion.Interceptor.Tracking.Change.DerivedPropertyChangeHandler),
             typeof(Namotion.Interceptor.Tracking.Change.PropertyChangeInterceptor),
             typeof(Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor)})]
-    public sealed class ValidationInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor, Namotion.Interceptor.Tracking.Transactions.ITransactionHandler
+    public sealed class ValidationInterceptor : Namotion.Interceptor.Interceptors.IWriteInterceptor, Namotion.Interceptor.Tracking.Transactions.Handlers.ITransactionHandler
     {
         public ValidationInterceptor() { }
         public override bool Equals(object? obj) { }
         public override int GetHashCode() { }
-        public void OnCapturing<TProperty>(in Namotion.Interceptor.Tracking.Transactions.TransactionCaptureContext<TProperty> context) { }
-        public void OnCommitting(in Namotion.Interceptor.Tracking.Transactions.TransactionCheckContext context) { }
+        public void OnCapturing<TProperty>(in Namotion.Interceptor.Tracking.Transactions.Handlers.TransactionCaptureContext<TProperty> context) { }
+        public void OnCommitting(in Namotion.Interceptor.Tracking.Transactions.Handlers.TransactionCheckContext context) { }
         public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
     }
 }

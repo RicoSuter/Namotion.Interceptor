@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking.Derived;
 
 namespace Namotion.Interceptor.Tracking.Tests.Models;
 
