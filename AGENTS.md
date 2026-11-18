@@ -108,7 +108,7 @@ The library uses a fluent configuration API:
 - **Global Settings**: `Directory.Build.props` with nullable enabled, warnings as errors
 - **Target Frameworks**: `net10.0` for every project, set once in `src/Directory.Build.props`; the Generator assembly alone targets `netstandard2.0` because compilers built on .NET Framework load it. Package versions live in `src/Directory.Packages.props`.
 - **SDK**: `global.json` selects the newest installed .NET 10 SDK (`latestFeature`) and never a .NET 11 SDK, also where one is preinstalled.
-- **Package Version**: released on NuGet, breaking changes are fine when justified but need user approval
+- **Package Version**: released on NuGet. Breaking changes that simplify the code or improve the API are fine; do not add shims or overloads to avoid them. Ask first for behavior or contract changes. List each break with its migration step in the PR.
 - **CI/CD**: GitHub Actions with xUnit testing, coverage reporting, and NuGet publishing
 - **Native AOT**: full compatibility where possible is the target (#516). New code prefers static alternatives to runtime code generation and reflection, and existing sites are fixed when a change already touches them.
 - **InternalsVisibleTo**: only for test and benchmark projects. A library uses another library's public API; the existing exceptions are removed when that code is touched next.
