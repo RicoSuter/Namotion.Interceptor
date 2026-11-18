@@ -3,6 +3,7 @@ using System.Reactive.Linq;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Derived;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
 using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestContext;
