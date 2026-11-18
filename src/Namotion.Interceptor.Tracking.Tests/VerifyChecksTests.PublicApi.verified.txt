@@ -6,24 +6,6 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Namotion.Interceptor.Tracking.Change
 {
-    public static class DerivedGraphDependencies
-    {
-        public static void Changed(Namotion.Interceptor.IInterceptorSubject subject, bool hasFailed = false) { }
-        public static void RecordChildrenRead(Namotion.Interceptor.IInterceptorSubject subject) { }
-        public static void RecordRead(Namotion.Interceptor.IInterceptorSubject subject) { }
-    }
-    public class DerivedPropertyChangeHandler : Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
-    {
-        public DerivedPropertyChangeHandler() { }
-        public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
-        public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
-    }
-    public static class DerivedPropertyChangeHandlerExtensions
-    {
-        public static System.ReadOnlySpan<Namotion.Interceptor.PropertyReference> GetRequiredProperties(this Namotion.Interceptor.PropertyReference property) { }
-        public static Namotion.Interceptor.Tracking.Change.PropertyReferenceCollection GetUsedByProperties(this Namotion.Interceptor.PropertyReference property) { }
-        public static void RecalculateDerivedProperty(this Namotion.Interceptor.PropertyReference property) { }
-    }
     public interface IPropertyChangeObserver
     {
         void OnChange(in Namotion.Interceptor.Tracking.Change.SubjectPropertyChange change);
@@ -61,11 +43,6 @@ namespace Namotion.Interceptor.Tracking.Change
         public static System.IDisposable SubscribeToPropertyInline<TSubject, TValue>(this TSubject subject, System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> propertySelector, Namotion.Interceptor.Tracking.Change.PropertyChangeCallback callback)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
     }
-    public sealed class PropertyReferenceCollection
-    {
-        public int Count { get; }
-        public System.ReadOnlySpan<Namotion.Interceptor.PropertyReference> Items { get; }
-    }
     public sealed class ScheduledPropertySubscription : System.IDisposable
     {
         public bool IsFaulted { get; }
@@ -100,6 +77,32 @@ namespace Namotion.Interceptor.Tracking.Change
         public static Namotion.Interceptor.Tracking.Change.SubjectPropertyChange Create<TValue>(Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.ChangeOrigin origin, System.DateTimeOffset changedTimestamp, System.DateTimeOffset? receivedTimestamp, TValue oldValue, TValue newValue, long revision = 0) { }
         public static bool operator !=(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange left, Namotion.Interceptor.Tracking.Change.SubjectPropertyChange right) { }
         public static bool operator ==(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange left, Namotion.Interceptor.Tracking.Change.SubjectPropertyChange right) { }
+    }
+}
+namespace Namotion.Interceptor.Tracking.Derived
+{
+    public static class DerivedGraphDependencies
+    {
+        public static void Changed(Namotion.Interceptor.IInterceptorSubject subject, bool hasFailed = false) { }
+        public static void RecordChildrenRead(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static void RecordRead(Namotion.Interceptor.IInterceptorSubject subject) { }
+    }
+    public class DerivedPropertyChangeHandler : Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
+    {
+        public DerivedPropertyChangeHandler() { }
+        public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
+        public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
+    }
+    public static class DerivedPropertyChangeHandlerExtensions
+    {
+        public static System.ReadOnlySpan<Namotion.Interceptor.PropertyReference> GetRequiredProperties(this Namotion.Interceptor.PropertyReference property) { }
+        public static Namotion.Interceptor.Tracking.Derived.PropertyReferenceCollection GetUsedByProperties(this Namotion.Interceptor.PropertyReference property) { }
+        public static void RecalculateDerivedProperty(this Namotion.Interceptor.PropertyReference property) { }
+    }
+    public sealed class PropertyReferenceCollection
+    {
+        public int Count { get; }
+        public System.ReadOnlySpan<Namotion.Interceptor.PropertyReference> Items { get; }
     }
 }
 namespace Namotion.Interceptor.Tracking

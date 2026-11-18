@@ -1,6 +1,6 @@
 using System.Reactive.Concurrency;
 using Namotion.Interceptor.Tracking.Change;
-using Namotion.Interceptor.Tracking.Tests.Change;
+using Namotion.Interceptor.Tracking.Tests.Derived;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
 

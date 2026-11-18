@@ -2,7 +2,7 @@ using System.Collections;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Namotion.Interceptor.Interceptors;
-using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Derived;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 

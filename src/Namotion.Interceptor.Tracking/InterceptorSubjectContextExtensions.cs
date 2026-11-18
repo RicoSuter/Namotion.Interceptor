@@ -1,6 +1,7 @@
 ﻿using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Derived;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Recorder;
