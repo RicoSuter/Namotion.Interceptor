@@ -6,6 +6,7 @@ using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
+using Namotion.Interceptor.Tracking.Transactions.Writers;
 using static Namotion.Interceptor.OpcUa.Tests.Client.ClientSourceTestFactory;
 using static Namotion.Interceptor.OpcUa.Tests.Client.SubscriptionTestFactory;
 

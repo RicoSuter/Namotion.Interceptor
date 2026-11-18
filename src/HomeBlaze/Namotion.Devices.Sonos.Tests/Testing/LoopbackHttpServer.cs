@@ -110,7 +110,8 @@ internal sealed class LoopbackHttpServer : IAsyncDisposable
             return;
         }
 
-        _listener.Stop();
+        // Close without Stop first: closing a stopped HttpListener on Linux and macOS binds its port again to
+        // unregister it, which fails or tears down another listener when the port was taken in between.
         _listener.Close();
         await _loop;
     }

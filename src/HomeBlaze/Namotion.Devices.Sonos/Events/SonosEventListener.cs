@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net;
 using Microsoft.Extensions.Logging;
@@ -59,6 +60,16 @@ internal sealed class SonosEventListener : IAsyncDisposable
     internal bool IsListening => !_disposing && !_acceptFailed && _listener?.IsListening == true;
 
     /// <summary>
+    /// Waits for the next request of the listener. Tests replace it to make the accept loop fail.
+    /// </summary>
+    internal Func<HttpListener, Task<HttpListenerContext>> AcceptContextAsync { get; set; } = static listener => listener.GetContextAsync();
+
+    /// <summary>
+    /// Whether the accept loop stopped on a failure, which it logs; <see cref="Start"/> binds the port again.
+    /// </summary>
+    internal bool HasAcceptFailed => _acceptFailed;
+
+    /// <summary>
     /// The current subscriptions, enumerated without a lock or a copy, so one added or removed meanwhile may or may not
     /// be seen.
     /// </summary>
@@ -75,20 +86,25 @@ internal sealed class SonosEventListener : IAsyncDisposable
 
     internal bool HasSubscription(string key) => _subscriptionsByKey.ContainsKey(key);
 
+    internal bool TryGetSubscription(string key, [MaybeNullWhen(false)] out SonosEventSubscription subscription) =>
+        _subscriptionsByKey.TryGetValue(key, out subscription);
+
     /// <summary>
     /// The URI speakers send events to, without the subscription key; null until started.
     /// </summary>
     internal string? CallbackBaseUri => _callbackBaseUri;
 
     /// <summary>
-    /// Starts listening. Throws <see cref="HttpListenerException"/> when the port is taken or cannot be bound,
-    /// <see cref="InvalidOperationException"/> when already started and <see cref="ObjectDisposedException"/> after disposal.
+    /// Starts listening, or after <see cref="HasAcceptFailed"/> listens again, keeping the subscriptions. Throws
+    /// <see cref="HttpListenerException"/> when the port is taken or cannot be bound, <see cref="InvalidOperationException"/>
+    /// when already listening and <see cref="ObjectDisposedException"/> after disposal.
     /// </summary>
+    /// <remarks>Not thread-safe: the caller serializes starts.</remarks>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S5332", Justification = "Sonos speakers deliver UPnP events only over plain HTTP.")]
     internal void Start(string callbackHost, int port, string listenHost = "+")
     {
         ObjectDisposedException.ThrowIf(_disposing, this);
-        if (_listener is not null)
+        if (_listener is not null && !_acceptFailed)
         {
             throw new InvalidOperationException("The Sonos event listener is already started.");
         }
@@ -105,8 +121,12 @@ internal sealed class SonosEventListener : IAsyncDisposable
             throw;
         }
 
+        // The failed listener was closed by its accept loop, which has ended, so DisposeAsync only waits for this one.
         _listener = listener;
         _callbackBaseUri = $"http://{callbackHost}:{port}{EventPathPrefix}";
+
+        // Cleared before the new accept loop runs, so a failure of that loop is never overwritten.
+        _acceptFailed = false;
         _acceptLoop = AcceptLoopAsync(listener);
     }
 
@@ -150,7 +170,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
             var sid = GetHeader(response, "SID")
                 ?? throw new InvalidOperationException($"The subscription to {eventUri} returned no SID.");
             subscription.SubscribedAt = _clock.GetTimestamp();
-            subscription.RenewAt = _clock.GetTimestampAfter(GetLifetime(response) / 2);
+            SetLifetime(subscription, response);
 
             // Unsubscribed while the request was in flight: Forget found no SID, so its caller sent nothing and the
             // speaker still holds the subscription. The lock makes exactly one of the two sides own the UNSUBSCRIBE.
@@ -202,7 +222,8 @@ internal sealed class SonosEventListener : IAsyncDisposable
             return;
         }
 
-        subscription.RenewAt = _clock.GetTimestampAfter(GetLifetime(response) / 2);
+        SetLifetime(subscription, response);
+        subscription.HasFailedRenewal = false;
     }
 
     internal async Task UnsubscribeAsync(SonosEventSubscription subscription, CancellationToken cancellationToken)
@@ -292,7 +313,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
         {
             while (listener.IsListening)
             {
-                var context = await listener.GetContextAsync();
+                var context = await AcceptContextAsync(listener);
                 _ = HandleAsync(context);
             }
         }
@@ -303,17 +324,19 @@ internal sealed class SonosEventListener : IAsyncDisposable
                 return;
             }
 
-            // Ending the loop is deliberate: retrying a failing listener would spin.
-            _acceptFailed = true;
+            // Ending the loop is deliberate: retrying a failing listener would spin. The flag is set once the listener
+            // is closed, so Start, which it allows to bind the port again, does not find the port still held.
             _logger.LogError(exception, "The Sonos event listener stopped accepting requests.");
             try
             {
-                listener.Stop();
+                listener.Close();
             }
-            catch (Exception stopException)
+            catch (Exception closeException)
             {
-                _logger.LogDebug(stopException, "Stopping the failed Sonos event listener failed.");
+                _logger.LogDebug(closeException, "Closing the failed Sonos event listener failed.");
             }
+
+            _acceptFailed = true;
         }
     }
 
@@ -390,6 +413,12 @@ internal sealed class SonosEventListener : IAsyncDisposable
             catch (Exception exception)
             {
                 _logger.LogWarning(exception, "Applying the Sonos event {Key} failed.", subscription.Key);
+                subscription.ReportMissedEvents();
+            }
+
+            if (uint.TryParse(request.Headers["SEQ"], NumberStyles.None, CultureInfo.InvariantCulture, out var sequence))
+            {
+                subscription.RecordSequence(sequence);
             }
 
             // Any NOTIFY proves that the speaker reaches the callback, also one whose body failed to apply.
@@ -479,7 +508,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
     private static string? GetHeader(HttpResponseMessage response, string name) =>
         response.Headers.TryGetValues(name, out var values) ? values.FirstOrDefault() : null;
 
-    private TimeSpan GetLifetime(HttpResponseMessage response)
+    private void SetLifetime(SonosEventSubscription subscription, HttpResponseMessage response)
     {
         const string prefix = "Second-";
         var timeout = GetHeader(response, "TIMEOUT");
@@ -489,8 +518,11 @@ internal sealed class SonosEventListener : IAsyncDisposable
                 ? TimeSpan.FromSeconds(seconds)
                 : DefaultSubscriptionLifetime;
 
+        var now = _clock.GetTimestamp();
+        subscription.ExpiresAt = _clock.AddToTimestamp(now, lifetime);
+
         // A tiny grant such as Second-0 would otherwise schedule a renewal at every wake of the connection loop.
-        return lifetime > _minimumLifetime ? lifetime : _minimumLifetime;
+        subscription.RenewAt = _clock.AddToTimestamp(now, (lifetime > _minimumLifetime ? lifetime : _minimumLifetime) / 2);
     }
 
     public async ValueTask DisposeAsync()
@@ -500,7 +532,8 @@ internal sealed class SonosEventListener : IAsyncDisposable
         _listener = null;
         if (listener is not null)
         {
-            listener.Stop();
+            // Close without Stop first: closing a stopped HttpListener on Linux and macOS binds its port again to
+            // unregister it, which fails or tears down another listener when the port was taken in between.
             listener.Close();
             if (_acceptLoop is not null)
             {

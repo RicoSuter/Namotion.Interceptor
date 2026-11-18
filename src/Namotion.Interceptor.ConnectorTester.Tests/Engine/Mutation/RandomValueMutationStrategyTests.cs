@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Tracking.Transactions.Writers;
 using Xunit;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors;

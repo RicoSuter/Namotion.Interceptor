@@ -84,8 +84,7 @@ if (mcpEnabled)
 }
 
 // Add services to the container.
-builder.Services
-    .AddHttpClient();
+builder.Services.AddHomeBlazeHttpClients();
 
 builder.Services
     .AddRazorComponents()

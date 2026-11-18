@@ -110,6 +110,11 @@ public abstract partial class SonosDevice :
 
     internal bool NeedsStaticData => !_hasStaticData || _staticDataFirmwareBuild != FirmwareBuild;
 
+    /// <summary>
+    /// Whether a poll failed since the last successful one.
+    /// </summary>
+    internal bool HasFailedPolls => Volatile.Read(ref _consecutivePollFailures) > 0;
+
     internal void ApplyTopology(string roomName, Uri baseUri, string? firmwareBuild, bool? isWireless)
     {
         RoomName = roomName;
