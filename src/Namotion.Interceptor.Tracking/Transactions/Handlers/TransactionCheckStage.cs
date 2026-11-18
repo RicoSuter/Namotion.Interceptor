@@ -1,4 +1,6 @@
-namespace Namotion.Interceptor.Tracking.Transactions;
+using Namotion.Interceptor.Tracking.Transactions.Writers;
+
+namespace Namotion.Interceptor.Tracking.Transactions.Handlers;
 
 /// <summary>
 /// Specifies which check of a commit calls <see cref="ITransactionHandler.OnCommitting"/>.

@@ -5,10 +5,12 @@ using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Derived;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using Namotion.Interceptor.Tracking.Tests.Transactions.Writers;
 using Namotion.Interceptor.Tracking.Transactions;
+using Namotion.Interceptor.Tracking.Transactions.Handlers;
 using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestContext;
 
-namespace Namotion.Interceptor.Tracking.Tests.Transactions;
+namespace Namotion.Interceptor.Tracking.Tests.Transactions.Handlers;
 
 public class SubjectTransactionHandlerTests
 {

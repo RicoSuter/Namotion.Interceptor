@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Tracking.Transactions;
+namespace Namotion.Interceptor.Tracking.Transactions.Writers;
 
 /// <summary>
 /// Result of reverting previously-written changes at their external sources during transaction rollback.

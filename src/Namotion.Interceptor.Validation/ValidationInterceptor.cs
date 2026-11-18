@@ -6,6 +6,7 @@ using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Transactions;
+using Namotion.Interceptor.Tracking.Transactions.Handlers;
 
 namespace Namotion.Interceptor.Validation;
 

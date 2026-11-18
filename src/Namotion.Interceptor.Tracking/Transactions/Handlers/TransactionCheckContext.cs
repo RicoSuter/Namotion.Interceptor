@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Tracking.Transactions;
+namespace Namotion.Interceptor.Tracking.Transactions.Handlers;
 
 /// <summary>
 /// The changes a commit check passes to <see cref="ITransactionHandler.OnCommitting"/>. Valid only during that call.

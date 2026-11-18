@@ -1,8 +1,9 @@
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using Namotion.Interceptor.Tracking.Transactions.Writers;
 
-namespace Namotion.Interceptor.Tracking.Tests.Transactions;
+namespace Namotion.Interceptor.Tracking.Tests.Transactions.Writers;
 
 [CollectionDefinition(WriterContractValidationCollection.Name, DisableParallelization = true)]
 public sealed class WriterContractValidationCollection

@@ -1,10 +1,11 @@
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using Namotion.Interceptor.Tracking.Tests.Transactions.Writers;
 using Namotion.Interceptor.Tracking.Transactions;
 using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestContext;
 
-namespace Namotion.Interceptor.Tracking.Tests.Transactions;
+namespace Namotion.Interceptor.Tracking.Tests.Transactions.Handlers;
 
 /// <summary>
 /// Covers writes of an unchanged value, which the equality check drops: in Deferred mode with FailOnConflict the

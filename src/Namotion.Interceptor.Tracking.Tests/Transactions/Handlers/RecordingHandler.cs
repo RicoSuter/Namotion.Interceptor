@@ -1,7 +1,8 @@
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
+using Namotion.Interceptor.Tracking.Transactions.Handlers;
 
-namespace Namotion.Interceptor.Tracking.Tests.Transactions;
+namespace Namotion.Interceptor.Tracking.Tests.Transactions.Handlers;
 
 internal sealed class RecordingHandler : ITransactionHandler
 {

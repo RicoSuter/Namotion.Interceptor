@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Tracking.Transactions;
+namespace Namotion.Interceptor.Tracking.Transactions.Handlers;
 
 /// <summary>
 /// The write a transaction is about to capture, passed to <see cref="ITransactionHandler.OnCapturing{TProperty}"/>.

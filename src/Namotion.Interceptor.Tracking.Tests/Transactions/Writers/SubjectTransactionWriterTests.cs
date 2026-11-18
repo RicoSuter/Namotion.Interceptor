@@ -7,11 +7,14 @@ using System.Collections;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Tests.Transactions.Handlers;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using Namotion.Interceptor.Tracking.Transactions.Handlers;
+using Namotion.Interceptor.Tracking.Transactions.Writers;
 using static Namotion.Interceptor.Tracking.Tests.Transactions.TransactionTestContext;
 
-namespace Namotion.Interceptor.Tracking.Tests.Transactions;
+namespace Namotion.Interceptor.Tracking.Tests.Transactions.Writers;
 
 public class SubjectTransactionWriterTests
 {

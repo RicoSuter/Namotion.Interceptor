@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace Namotion.Interceptor.Tracking.Transactions;
+namespace Namotion.Interceptor.Tracking.Transactions.Handlers;
 
 /// <summary>
 /// The transaction handlers that take part in a transaction: those of the transaction's context, resolved when it
