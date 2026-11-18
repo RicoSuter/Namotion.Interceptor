@@ -257,23 +257,43 @@ person.LastName = "Doe";
 ```
 
 **How it works:**
-- During derived property evaluation, the handler records which properties are read
-- When a dependency changes, the derived property is recalculated
-- If the derived value changes, a change event is triggered with `Source = null` (indicating local calculation)
+
+- When a derived property attaches, its getter is evaluated and every intercepted property it reads is recorded as a dependency
+- When a dependency is written, the derived property is recalculated once the write completed, and its dependencies are recorded again
+- If the derived value changes, a change event is published through the derived property's own subject, with a local origin
+
+### What a Derived Property Follows
+
+A `[Derived]` property whose subject is attached to a context with derived change detection follows every intercepted property its getter reads, on any subject: one that is attached, not attached yet or already detached, one in another context, one without a context, and one the getter reached through a field, a captured variable or a service. Reading the property is what makes it a dependency, so it does not matter which context the subject has. This includes a subject stored in a tracked property whose declared type is a class that is not a subject, for example a non-subject base class of the subject's type: the lifecycle still does not attach the subject through such a property (no parent link, not a registry child, see issue #961), but the getter's reads of it are recorded and followed.
+
+Getters must not block or take locks. The first evaluation runs while the subject attaches, under the lifecycle lock, because consumers read the value then, and a recalculation caused by a lifecycle handler's write runs under that lock too. A getter may write properties, at a cost: a getter that writes a property it read before is evaluated once more per change, and a getter that writes a property it depends on every time it runs is stopped after a limit of evaluations, with a trace warning, and keeps its last value.
+
+A subject without a context is followed because generated code reads and writes it through `InterceptorExecutor.GetPropertyValueWithoutContext` and `InterceptorExecutor.SetPropertyValueWithoutContext`. A [hand-written subject base class](generator.md#hand-written-base-classes-and-subclasses) has to call them as well instead of reading and writing its fields directly while the subject has no context, or derived properties do not follow its subjects until they are attached.
+
+Not followed:
+
+- State outside the model, such as external services, static state, or plain fields and properties that are not intercepted
+- Graph state: parents, the registry, whether a subject is attached, and its reference count
+- Context services read directly, such as `subject.Context.TryGetService<T>()`
+- `IInterceptorSubject.Properties` and `subject.Data` read directly
+
+Use `RecalculateDerivedProperty()` (below) when such state changes.
 
 ### Reaching Other Subjects
 
-A derived property depends on the properties it reads, not on how its getter reached their subject. Detaching a subject drops the dependencies on its properties, and attaching it again restores them only when the derived property is recalculated. If the getter reaches the subject through tracked properties, the write that attaches it again triggers that recalculation. If it reaches the subject through a field, a captured variable or a service, nothing does, and the derived property keeps its old value until another dependency changes or `RecalculateDerivedProperty()` is called:
+A derived property depends on the properties it reads, not on how its getter reached their subject. Detaching the subject does not drop those dependencies: the derived property keeps following its properties, and is recalculated when they are written, also while the subject is detached and after it is attached again.
+
+How the getter reached the subject decides when the derived property switches to another subject. Through tracked properties, the getter also reads the properties that lead to the subject, so assigning another subject recalculates it. Through a field, a captured variable or a service, nothing tracked leads to the subject, so when the field or the service returns another subject, the derived property keeps following the old one until another dependency changes or `RecalculateDerivedProperty()` is called:
 
 ```csharp
 [Derived]
-public double? Temperature => _room.Sensor?.Temperature; // follows the sensor when it is attached again
+public double? Temperature => _room.Sensor?.Temperature; // follows the sensor, and switches when Room.Sensor is assigned
 
 [Derived]
-public double LastTemperature => _sensor.Temperature;   // does not, if the sensor is detached and attached again on its own
+public double LastTemperature => _sensor.Temperature;   // follows this sensor, also while it is detached
 ```
 
-A field holding an ancestor, such as an owner passed to the constructor, is fine: detaching the ancestor also detaches the derived property, and attaching it again recalculates it.
+A derived property holds on to a subject it reads only while it is attached: when its own subject leaves its last graph, its dependencies are removed.
 
 ### Manual Recalculation
 
@@ -295,7 +315,7 @@ property.RecalculateDerivedProperty();
 // Getter is re-evaluated; if the value changed, change notifications fire
 ```
 
-This goes through the same pipeline as automatic recalculation: the getter is re-evaluated, dependencies are updated, and all notifications (observable, queue, per-property subscriptions, `INotifyPropertyChanged`) fire if the value changed. It is fully thread-safe and can be called concurrently with property writes. Like automatic detection, it requires `WithDerivedPropertyChangeDetection()`.
+This goes through the same pipeline as automatic recalculation: the getter is re-evaluated, dependencies are updated, and all notifications (observable, queue, per-property subscriptions, `INotifyPropertyChanged`) fire if the value changed. It is fully thread-safe and can be called concurrently with property writes. When another thread is recalculating the property at that moment, the call returns at once and that thread evaluates the getter again before it finishes. The call does nothing for a property that is not attached. Like automatic detection, it requires `WithDerivedPropertyChangeDetection()`.
 
 > **Internal design:** For details on the dependency graph, concurrency model, and correctness guarantees, see [Derived Property Design](design/tracking-derived-properties.md).
 
@@ -444,7 +464,7 @@ These rules hold for every index the library keeps, in the registry (`Children`,
 - The index is `null` for a subject reference, the position for a collection and the key for a dictionary. A subject the value holds more than once has one entry, with the first of its positions or keys in enumeration order.
 - The handler is called once per write, after the attach and detach callbacks of that write, with each kept subject whose index changed, and not at all when none did. A subject the write attached already carries its index and is not reported, and a dictionary assigned again in another order with the same keys reports nothing, unless it holds a subject under several keys and the first of them changes.
 - An index is compared with the one the old value had. The old value is read as it is now, so a collection or dictionary mutated in place and then assigned again hides the changes the two share, and the indices stay as they were before the mutation. A subject removed in place and then assigned again counts as still attached, so it is neither attached again nor reported, and keeps its old index.
-- Keys are compared with `Equals`, and only while an `IChildIndexHandler` is registered. Two keys that are equal but different instances count as unchanged, so the stored index keeps the old instance. A key whose `Equals` throws makes the write throw after the value is stored, so the interceptors ordered before the lifecycle, which act once the value is stored, such as change notification and derived properties, miss that write, and the indices keep their old values until a later write changes them again, since that write is compared with the value that was stored.
+- Keys are compared with `Equals`, and only while an `IChildIndexHandler` is registered. Two keys that are equal but different instances count as unchanged, so the stored index keeps the old instance. A key whose `Equals` throws makes the write throw after the value is stored, so the interceptors ordered before the lifecycle, which act once the value is stored, such as change notification, miss that write (derived properties still follow it), and the indices keep their old values until a later write changes them again, since that write is compared with the value that was stored.
 - The same requirements apply as to `ILifecycleHandler` (below). The handler must not write the property that was written, and the span is only valid during the call.
 - Apart from the cases above, once concurrent writes settle, every index matches the stored value. While a write runs, a reader on another thread can see the value and the indices updated at different times.
 - On detach, remove a stored index by its property, not by `SubjectLifecycleChange.Index`: a subject held more than once is detached with one of its positions or keys, and after an in-place mutation with a position or key read from the mutated value, neither of which needs to be the stored one.
@@ -617,7 +637,7 @@ var accessedProperties = scope.GetPropertiesAndDispose();
 // accessedProperties contains references to FirstName and LastName
 ```
 
-This is primarily used internally by the derived property change detection system but can also be used for custom scenarios.
+It is independent of derived property change detection, which records the reads of its getters on its own.
 
 For synchronous code on one thread, `ReadPropertyRecorder.RecordOnCurrentThread(target)` sends the reads of the current thread to an `IReadPropertyRecorderTarget` instead. Its `OnRead` is called on the reading thread before the value of each intercepted property is read. The method returns a `ref struct` scope that restores the previous target of the thread when disposed, so targets nest, and it must be disposed on the thread that started it. While a target is set, reads on that thread go only to it and are not recorded by the async scopes of `ReadPropertyRecorder.Start`.
 

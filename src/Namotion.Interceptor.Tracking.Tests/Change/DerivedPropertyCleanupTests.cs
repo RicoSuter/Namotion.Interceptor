@@ -39,10 +39,8 @@ public class DerivedPropertyCleanupTests
     }
 
     [Fact]
-    public void WhenSourcePropertyIsDetachedStandalone_ThenItIsRemovedFromDerivedPropertiesRequiredProperties()
+    public void WhenSourcePropertyIsDetachedStandalone_ThenDerivedPropertyKeepsItsDependency()
     {
-        // Standalone detach (not inside WriteProperty) uses immediate Remove() for Case 2.
-
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
@@ -64,15 +62,15 @@ public class DerivedPropertyCleanupTests
         // Act - Standalone detach (not inside a WriteProperty call)
         person.DetachSubjectProperty(firstNameProperty);
 
-        // Assert - FirstName should be immediately removed from FullName's RequiredProperties
-        Assert.DoesNotContain(firstNameProperty, fullNameProperty.GetRequiredProperties().ToArray());
+        // Assert - Only the derived property changes its own dependencies, so FullName keeps following FirstName
+        Assert.Contains(firstNameProperty, fullNameProperty.GetRequiredProperties().ToArray());
     }
 
     [Fact]
     public void WhenCrossSubjectSourceIsReplaced_ThenRequiredPropertiesIsCleanedViaRecalculation()
     {
-        // Write-triggered detach defers Case 2 removals. After recalculation (TryReplace),
-        // the deferred Remove() calls find nothing and exit cleanly (no allocation).
+        // The write detaches the old tire, and the recalculation it requests makes the new tire's Pressure a dependency
+        // instead of the old one.
 
         // Arrange - Car.AveragePressure depends on each tire's Pressure
         var context = InterceptorSubjectContext
@@ -90,7 +88,7 @@ public class DerivedPropertyCleanupTests
         // AveragePressure depends on old tire's Pressure
         Assert.Contains(oldTirePressureProperty, averagePressureProperty.GetRequiredProperties().ToArray());
 
-        // Act - Replace tires: deferred Case 2 + recalculation + flush
+        // Act - Replace the first tire
         var newTires = new[] { new Tire(context), car.Tires[1], car.Tires[2], car.Tires[3] };
         car.Tires = newTires;
 
@@ -176,8 +174,8 @@ public class DerivedPropertyCleanupTests
     [Fact]
     public void WhenDerivedPropertyIsDetached_ThenItRemovesItselfFromDependenciesUsedByProperties()
     {
-        // This is Case 1: When a derived property is detached, it removes itself from
-        // all its dependencies' UsedByProperties to break backward references.
+        // When a derived property is detached, it removes itself from all its dependencies'
+        // UsedByProperties to break backward references.
 
         // Arrange
         var context = InterceptorSubjectContext
@@ -201,14 +199,15 @@ public class DerivedPropertyCleanupTests
         // Act - Detach just the AveragePressure property (simulates derived property detachment)
         car.DetachSubjectProperty(averagePressureProperty);
 
-        // Assert - AveragePressure should be removed from tire's UsedByProperties (Case 1)
+        // Assert - AveragePressure should be removed from tire's UsedByProperties
         Assert.DoesNotContain(averagePressureProperty, firstTirePressureProperty.GetUsedByProperties().Items.ToArray());
+        Assert.Empty(averagePressureProperty.GetRequiredProperties().ToArray());
     }
 
     [Fact]
-    public async Task WhenDerivedPropertyDetachedDuringConcurrentWrites_ThenNoZombieBacklinks()
+    public async Task WhenDerivedPropertyDetachedDuringConcurrentWrites_ThenNoZombieDependents()
     {
-        // Exercises Finding 3: concurrent detach + write should not resurrect backlinks.
+        // Exercises Finding 3: concurrent detach + write should not resurrect dependents.
 
         const int iterations = 100;
 
@@ -225,7 +224,7 @@ public class DerivedPropertyCleanupTests
             var averagePressureProperty = new PropertyReference(car, nameof(Car.AveragePressure));
             var firstTirePressureProperty = new PropertyReference(firstTire, nameof(Tire.Pressure));
 
-            // Verify initial backlink exists
+            // Verify the initial dependent exists
             Assert.Contains(averagePressureProperty, firstTirePressureProperty.GetUsedByProperties().Items.ToArray());
 
             var barrier = new Barrier(2);
@@ -250,7 +249,7 @@ public class DerivedPropertyCleanupTests
     }
 
     [Fact]
-    public void WhenDerivedPropertyDetached_ThenSubsequentSourceWriteDoesNotResurrectBacklinks()
+    public void WhenDerivedPropertyDetached_ThenSubsequentSourceWriteDoesNotResurrectDependents()
     {
         // Deterministic version: detach first, then write.
         // Without IsAttached check, the write would trigger recalculation
@@ -274,7 +273,7 @@ public class DerivedPropertyCleanupTests
         // Write to a former dependency
         firstTire.Pressure = 42;
 
-        // Verify no zombie backlinks were created
+        // Verify no zombie dependents were created
         Assert.DoesNotContain(averagePressureProperty, firstTirePressureProperty.GetUsedByProperties().Items.ToArray());
     }
 

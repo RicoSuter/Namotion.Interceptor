@@ -82,6 +82,30 @@ public class DerivedRecalculationWriteContextTests
     }
 
     [Fact]
+    public void WhenDependencyOfSettableDerivedPropertyIsWritten_ThenItsGetterIsEvaluatedOnce()
+    {
+        // Arrange
+        var (context, _) = CreateContext();
+        var person = new Person(context);
+        var evaluations = 0;
+        person.TryGetRegisteredSubject()!.AddDerivedProperty<string?>(
+            "Echo",
+            getValue: subject =>
+            {
+                evaluations++;
+                return ((Person)subject).FirstName;
+            },
+            setValue: (_, _) => { });
+        evaluations = 0;
+
+        // Act
+        person.FirstName = "Ada";
+
+        // Assert
+        Assert.Equal(1, evaluations);
+    }
+
+    [Fact]
     public void WhenDerivedPropertyIsAddedAtRuntime_ThenItsInitialPublishIsFlagged()
     {
         // Arrange

@@ -4,7 +4,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
-[RunsAfter(typeof(DerivedPropertyChangeHandler))]
+[RunsBefore(typeof(PropertyChangeInterceptor))]
 internal sealed class VetoingWriteInterceptor : IWriteInterceptor
 {
     public void WriteProperty<TProperty>(

@@ -2,9 +2,11 @@ using System.Collections;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "The central orchestrator of attach, detach and derived property tracking for the graph; staying under the limit would take forwarder methods or rewriting framework collection code for the coupling count alone.")]
 public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
     private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = new(ReferenceEqualityComparer.Instance);
@@ -15,6 +17,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
     [ThreadStatic]
     private static Stack<HashSet<IInterceptorSubject>>? _subjectHashSetPool;
+
+    public LifecycleInterceptor()
+    {
+        SingleAttachment = [this];
+        TrackingWriteObserver.EnsureRegistered();
+    }
+
+    /// <summary>The attachments of a subject that is attached to this interceptor only.</summary>
+    internal LifecycleInterceptor[] SingleAttachment { get; }
 
     /// <summary>
     /// Raised when a subject is attached to the object graph.
@@ -79,6 +90,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
+                using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
                 FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
 
                 foreach (var child in collectedSubjects)
@@ -105,6 +117,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
+                using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
                 FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
 
                 foreach (var child in collectedSubjects)
@@ -132,6 +145,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             return;
         }
+
+        SubjectLifecycleAttachments.Add(subject, this);
 
         var count = subject.GetReferenceCount();
         var change = new SubjectLifecycleChange
@@ -163,6 +178,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         if (!set.Add(property))
         {
             return;
+        }
+
+        if (isFirstAttach)
+        {
+            SubjectLifecycleAttachments.Add(subject, this);
         }
 
         var count = subject.IncrementReferenceCount();
@@ -215,14 +235,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             return;
         }
-        
-        foreach (var entry in subject.Properties)
-        {
-            var property = new PropertyReference(subject, entry.Key);
-            if (entry.Value is { IsIntercepted: true } && entry.Value.Type.CanContainSubjects())
-                _lastProcessedValues.Remove(property);
 
-            subject.DetachSubjectProperty(property);
+        using (SubjectLifecycleAttachments.BeginDetach(subject, this))
+        {
+            foreach (var entry in subject.Properties)
+            {
+                var property = new PropertyReference(subject, entry.Key);
+                if (entry.Value is { IsIntercepted: true } && entry.Value.Type.CanContainSubjects())
+                    _lastProcessedValues.Remove(property);
+
+                subject.DetachSubjectProperty(property);
+            }
         }
 
         var count = subject.GetReferenceCount();
@@ -294,6 +317,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private List<(IInterceptorSubject subject, PropertyReference property, object? index)>? DetachSubjectProperties(
         IInterceptorSubject subject)
     {
+        using var detach = SubjectLifecycleAttachments.BeginDetach(subject, this);
         List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
         foreach (var entry in subject.Properties)
         {
@@ -355,6 +379,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         lock (_attachedSubjects)
         {
+            using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
             var lastProcessed = _lastProcessedValues.GetValueOrDefault(context.Property);
 
             // Read the actual backing store value to handle concurrent writes correctly.
