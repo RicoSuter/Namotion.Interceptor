@@ -450,8 +450,7 @@ internal static class DerivedPropertyOwnership
         property.SetWriteTimestamp(timestamp);
     }
 
-    // Called under lock(data). Writes the value before it moves the sequence, the reverse of the order in which the
-    // stale-publication guard reads them.
+    // Called under lock(data). Every stored value moves the sequence, which the stale-publication guard compares.
     private static long StoreValue(DerivedPropertyData data, object? value)
     {
         data.LastKnownValue = value;

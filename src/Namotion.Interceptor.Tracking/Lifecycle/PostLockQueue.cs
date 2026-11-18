@@ -111,6 +111,9 @@ internal static class PostLockQueue
         _deferrals++;
         if (_heldLocks++ == 0)
         {
+            Debug.Assert(
+                !isWriteReconciliation || ReferenceEquals(PropertyAccessObservation.WriteObserver, TrackingWriteObserver.Instance),
+                "The anchor write is completed by the write observer of Tracking, which the lifecycle interceptor installs.");
             _lockAnchorDepth = isWriteReconciliation ? PropertyAccessObservation.WriteDepth : 0;
         }
 
@@ -127,6 +130,7 @@ internal static class PostLockQueue
     {
         public void Dispose()
         {
+            Debug.Assert(_heldLocks > 0, "A lock scope is disposed only after its EnterLock.");
             _deferrals--;
             if (--_heldLocks == 0 && _innermost is { AnchorDepth: 0 })
             {

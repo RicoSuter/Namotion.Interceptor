@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Namotion.Interceptor.Tracking.Derived;
 
 
@@ -25,21 +26,20 @@ internal static class SubjectLifecycleAttachments
     /// properties until disposed. Disposing detaches the subject's derived properties when it left its last graph,
     /// also when a lifecycle handler threw.
     /// </summary>
-    internal static IDisposable BeginDetach(IInterceptorSubject subject, LifecycleInterceptor interceptor)
+    internal static DetachScope BeginDetach(IInterceptorSubject subject, LifecycleInterceptor interceptor)
     {
         Remove(subject, interceptor);
         (_detachingSubjects ??= []).Add(subject);
-        return DetachEnd.Instance;
+        return default;
     }
 
-    // A stateless singleton, so it allocates nothing.
-    private sealed class DetachEnd : IDisposable
+    /// <summary>The detach of a subject's properties begun by <see cref="BeginDetach"/>.</summary>
+    internal readonly struct DetachScope : IDisposable
     {
-        public static readonly DetachEnd Instance = new();
-
         public void Dispose()
         {
-            var subjects = _detachingSubjects!;
+            Debug.Assert(_detachingSubjects is { Count: > 0 }, "A detach scope is disposed only after its BeginDetach.");
+            var subjects = _detachingSubjects;
             var subject = subjects[^1];
             subjects.RemoveAt(subjects.Count - 1);
             try

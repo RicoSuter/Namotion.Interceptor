@@ -73,8 +73,13 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
     {
         public void Dispose()
         {
-            recorder?.FinishRecording();
-            recorder?.ClearLastRecording();
+            if (recorder is null)
+            {
+                return;
+            }
+
+            recorder.FinishRecording();
+            recorder.ClearLastRecording();
         }
     }
 

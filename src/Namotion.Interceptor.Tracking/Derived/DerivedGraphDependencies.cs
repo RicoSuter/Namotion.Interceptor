@@ -58,11 +58,17 @@ public static class DerivedGraphDependencies
     public static void Changed(IInterceptorSubject subject, bool hasFailed = false) => Changed(subject, holder: null, hasFailed);
 
     /// <summary>
-    /// Recalculates the derived properties that read the graph state of <paramref name="subject"/> or, when given, the
-    /// children of <paramref name="holder"/>. Called after a subject was attached or detached through a property of
+    /// Recalculates the derived properties that read the graph state of <paramref name="subject"/> and the children of
+    /// <paramref name="holder"/>. Called after a subject was attached or detached through a property of
     /// <paramref name="holder"/>, once both changed.
     /// </summary>
-    internal static void Changed(IInterceptorSubject subject, IInterceptorSubject? holder, bool hasFailed = false)
+    internal static void Changed(IInterceptorSubject subject, IInterceptorSubject holder) => Changed(subject, holder, hasFailed: false);
+
+    /// <summary>
+    /// Recalculates the derived properties that read the graph state of <paramref name="subject"/> and, when given, the
+    /// children of <paramref name="holder"/>.
+    /// </summary>
+    private static void Changed(IInterceptorSubject subject, IInterceptorSubject? holder, bool hasFailed)
     {
         // No graph dependency has data while the graph gate is not raised, see "Graph gate" in
         // docs/design/tracking-derived-properties.md.
@@ -74,10 +80,10 @@ public static class DerivedGraphDependencies
         // W2 ("The Version Protocol" in docs/design/tracking-derived-properties.md), once for every graph dependency:
         // all of them changed before the first data lookup.
         Interlocked.MemoryBarrier();
-        TrackingWriteObserver.RequestGraphRecalculations(Of(subject), hasFailed);
+        RequestRecalculations(Of(subject), hasFailed);
         if (holder is not null)
         {
-            TrackingWriteObserver.RequestGraphRecalculations(ChildrenOf(holder), hasFailed);
+            RequestRecalculations(ChildrenOf(holder), hasFailed);
         }
     }
 
@@ -97,10 +103,24 @@ public static class DerivedGraphDependencies
         Interlocked.MemoryBarrier();
         foreach (var child in children)
         {
-            TrackingWriteObserver.RequestGraphRecalculations(Of(child.Subject), hasFailed: false);
+            RequestRecalculations(Of(child.Subject), hasFailed: false);
         }
 
-        TrackingWriteObserver.RequestGraphRecalculations(ChildrenOf(holder), hasFailed: false);
+        RequestRecalculations(ChildrenOf(holder), hasFailed: false);
+    }
+
+    /// <summary>
+    /// W3 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the graph
+    /// dependency <paramref name="dependency"/>, after the W2 of its dispatch. W3 is only the data lookup: the dispatch
+    /// read the graph gate before W2, and a graph dependency has no type gate.
+    /// </summary>
+    private static void RequestRecalculations(PropertyReference dependency, bool hasFailed)
+    {
+        var data = dependency.TryGetDerivedPropertyData();
+        if (data is not null)
+        {
+            TrackingWriteObserver.RequestRecalculations(dependency, data, hasFailed);
+        }
     }
 
     /// <summary>

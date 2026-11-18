@@ -75,18 +75,15 @@ internal sealed class TrackingWriteObserver : IPropertyWriteObserver
     }
 
     /// <summary>
-    /// W3 to W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of the graph
-    /// dependency <paramref name="graph"/> (<see cref="DerivedGraphDependencies"/>), after its W2.
+    /// W4 and W5 ("The Version Protocol" in docs/design/tracking-derived-properties.md) for a change of
+    /// <paramref name="property"/> that is not a write through the interceptor chain: its caller ran W1 to W3 and passes
+    /// the data that W3 found.
     /// </summary>
-    internal static void RequestGraphRecalculations(PropertyReference graph, bool hasFailed)
+    internal static void RequestRecalculations(PropertyReference property, DerivedPropertyData data, bool hasFailed)
     {
-        var data = graph.TryGetDerivedPropertyData();
-        if (data is not null)
-        {
-            RequestRecalculations(
-                new PropertyWriteObservation(graph, isWritten: true, rawTimestamp: 0, isDerivedRecalculation: false, depth: 0, hasFailed: hasFailed),
-                data, segment: null);
-        }
+        RequestRecalculations(
+            new PropertyWriteObservation(property, isWritten: true, rawTimestamp: 0, isDerivedRecalculation: false, depth: 0, hasFailed: hasFailed),
+            data, segment: null);
     }
 
     private static DerivedPropertyData? TryGetWrittenData(in PropertyWriteObservation write)
