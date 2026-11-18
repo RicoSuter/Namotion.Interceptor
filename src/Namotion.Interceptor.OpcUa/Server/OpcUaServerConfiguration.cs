@@ -213,11 +213,6 @@ public class OpcUaServerConfiguration
                 ServerCapabilities = ["DA"]
             },
             DisableHiResClock = true,
-            TraceConfiguration = new TraceConfiguration
-            {
-                OutputFilePath = "Logs/OpcUaServer.log",
-                DeleteOnLoad = true
-            },
             CertificateValidator = new CertificateValidator(ResolvedTelemetryContext)
         };
 

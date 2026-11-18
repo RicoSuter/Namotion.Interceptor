@@ -381,6 +381,8 @@ public sealed class DatabaseSource : SubjectSourceBase
 
 **Build the payload from `changes` only**: never read subject properties in `WriteChangesAsync`. Under transactions the built-in writer calls the source on the committing flow, where property reads and writes throw `InvalidOperationException`, because sibling and landed-model state is outside the frozen snapshot and can make the payload inconsistent with it. Capture any other subject state the write needs before `CommitAsync`, and see [Transactions](tracking-transactions.md) for the full committing access boundary.
 
+**Complete a write promptly once the transport is gone**: the write retry queue holds its flush gate while `WriteChangesAsync` runs, so a write that hangs blocks every later write, the change processor and the reconcile until it returns. Once the connection drops or the source tears down its transport, a write in flight must end soon and report the changes it could not confirm as failed, which parks them for retry. If the transport library can drop a pending request without completing it, tie the write's cancellation to the connection's lifetime, as the OPC UA client does.
+
 **WriteResult**: Return `WriteResult.Success` when all changes were written. Return `WriteResult.Failure(changes, exception)` when all changes failed, or `WriteResult.PartialFailure(changes, exception)` when some succeeded. The failed changes list everything not confirmed written; unlisted changes count as written, and an error with an empty list is treated as the whole batch having failed. The base class enqueues the failed changes into the write retry queue automatically.
 
 #### Registering a Source

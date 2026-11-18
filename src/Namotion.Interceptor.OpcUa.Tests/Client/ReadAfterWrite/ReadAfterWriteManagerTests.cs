@@ -92,7 +92,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
 
         // Create manager with null session provider (for unit tests)
         _manager = new ReadAfterWriteManager(
-            sessionProvider: () => null,
+            sessionProvider: () => default,
             source: null!, // Not used in these unit tests
             configuration,
             _metrics,
@@ -277,7 +277,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
             CreateDataValue("last", StatusCodes.Good, timestamp));
         var metrics = new ReadAfterWriteMetrics();
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             new Mock<Connectors.ISubjectSource>().Object,
             CreateConfiguration(TimeSpan.FromMilliseconds(250)),
             metrics,
@@ -330,7 +330,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var metrics = new ReadAfterWriteMetrics();
         var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             new Mock<Connectors.ISubjectSource>().Object,
             CreateConfiguration(TimeSpan.FromMilliseconds(250)),
             metrics,
@@ -386,7 +386,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var metrics = new ReadAfterWriteMetrics();
         var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             new Mock<Connectors.ISubjectSource>().Object,
             CreateConfiguration(TimeSpan.FromMilliseconds(250)),
             metrics,
@@ -440,7 +440,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var metrics = new ReadAfterWriteMetrics();
         var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             new Mock<Connectors.ISubjectSource>().Object,
             CreateConfiguration(TimeSpan.FromMilliseconds(250)),
             metrics,
@@ -473,7 +473,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
             CreateDataValue("first", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)));
         var metrics = new ReadAfterWriteMetrics();
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             new Mock<Connectors.ISubjectSource>().Object,
             CreateConfiguration(TimeSpan.FromMilliseconds(250)),
             metrics,
@@ -512,7 +512,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var conversionError = new InvalidOperationException("conversion failed");
         var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             new Mock<Connectors.ISubjectSource>().Object,
             CreateConfiguration(TimeSpan.FromMilliseconds(250), new CallbackValueConverter("throw", () => throw conversionError)),
             metrics,
@@ -554,7 +554,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
             CreateDataValue("applied", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)));
         var metrics = new ReadAfterWriteMetrics();
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             new Mock<Connectors.ISubjectSource>().Object,
             CreateConfiguration(TimeSpan.FromMilliseconds(250)),
             metrics,
@@ -591,7 +591,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var session = CreateSessionReturning(CreateDataValue("stale", StatusCodes.Good, DateTime.UtcNow.AddMinutes(-1)));
         var metrics = new ReadAfterWriteMetrics();
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             new Mock<Connectors.ISubjectSource>().Object,
             CreateConfiguration(TimeSpan.FromMilliseconds(250), new CallbackValueConverter("stale", () => throw conversionError)),
             metrics,
@@ -620,7 +620,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var session = CreateSessionReturning(CreateDataValue("read", StatusCodes.Good, readTimestamp.UtcDateTime));
         var metrics = new ReadAfterWriteMetrics();
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             new Mock<Connectors.ISubjectSource>().Object,
             CreateConfiguration(TimeSpan.FromMilliseconds(250), converter),
             metrics,
@@ -650,7 +650,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
             .Subscribe(_ => lockHeldDuringApply = applyLock.IsHeldByCurrentThread);
         var session = CreateSessionReturning(CreateDataValue("read", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)));
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             new Mock<Connectors.ISubjectSource>().Object,
             CreateConfiguration(TimeSpan.FromMilliseconds(250)),
             new ReadAfterWriteMetrics(),
@@ -680,7 +680,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
             .Subscribe(_ => newLockHeldDuringApply = newLock.IsHeldByCurrentThread);
         var session = CreateSessionReturning(CreateDataValue("read", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)));
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             new Mock<Connectors.ISubjectSource>().Object,
             CreateConfiguration(TimeSpan.FromMilliseconds(250)),
             new ReadAfterWriteMetrics(),
@@ -711,7 +711,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
             .Subscribe(_ => newLockHeldDuringApply = newLock.IsHeldByCurrentThread);
         var session = CreateSessionReturning(CreateDataValue("read", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)));
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             new Mock<Connectors.ISubjectSource>().Object,
             CreateConfiguration(TimeSpan.FromMilliseconds(250)),
             new ReadAfterWriteMetrics(),
@@ -747,7 +747,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var configuration = CreateConfiguration(TimeSpan.FromMinutes(1));
         configuration.PollingCircuitBreakerThreshold = 1;
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             new Mock<Connectors.ISubjectSource>().Object,
             configuration,
             metrics,
@@ -799,7 +799,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
 
         var configuration = CreateConfiguration(TimeSpan.Zero);
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             new Mock<Connectors.ISubjectSource>().Object,
             configuration,
             metrics,
@@ -866,7 +866,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         // Arrange
         var logger = new BlockingLogger();
         await using var manager = new ReadAfterWriteManager(
-            sessionProvider: () => null,
+            sessionProvider: () => default,
             source: null!,
             CreateConfiguration(TimeSpan.FromMinutes(1)),
             new ReadAfterWriteMetrics(),
@@ -975,7 +975,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         configuration.PollingCircuitBreakerThreshold = 1;
         var metrics = new ReadAfterWriteMetrics();
         await using var manager = new ReadAfterWriteManager(
-            () => session.Object,
+            () => (session.Object, CancellationToken.None),
             source,
             configuration,
             metrics,
@@ -995,6 +995,68 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         Assert.False(GetCircuitBreaker(manager).IsOpen);
         Assert.Empty(reportedErrors);
         Assert.Null(source.Diagnostics.LastError);
+    }
+
+    [Fact]
+    public async Task WhenTheSessionLifetimeEndsDuringARead_ThenItDoesNotRecordFailure()
+    {
+        // Arrange
+        await using var source = ClientSourceTestFactory.CreateClientSource();
+        using var sessionLifetime = new CancellationTokenSource();
+        var readStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+
+        async Task<ReadResponse> FailAfterCancellationAsync(CancellationToken cancellationToken)
+        {
+            readStarted.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                throw new InvalidOperationException("The cancellation wait completed without cancellation.");
+            }
+            catch (OperationCanceledException)
+            {
+                // As the SDK reports a request whose token was canceled.
+                throw new ServiceResultException(StatusCodes.BadRequestInterrupted);
+            }
+        }
+
+        var session = new Mock<ISession>();
+        session.SetupGet(value => value.Connected).Returns(true);
+        session
+            .Setup(value => value.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection _, CancellationToken cancellationToken) =>
+                FailAfterCancellationAsync(cancellationToken));
+
+        var configuration = ClientSourceTestFactory.CreateConfiguration();
+        configuration.ReadAfterWriteBuffer = TimeSpan.FromMinutes(1);
+        configuration.PollingCircuitBreakerThreshold = 1;
+        var metrics = new ReadAfterWriteMetrics();
+        await using var manager = new ReadAfterWriteManager(
+            () => (session.Object, sessionLifetime.Token),
+            source,
+            configuration,
+            metrics,
+            reportedErrors.Enqueue,
+            NullLogger.Instance);
+        RegisterAndSchedule(manager, new NodeId("FirstName", 2), CreateTestProperty(_testSubject));
+
+        var processing = manager.ProcessDueReadsAsync(DateTime.MaxValue);
+        await readStarted.Task.WaitAsync(TestTimeouts.Default);
+
+        // Act
+        await sessionLifetime.CancelAsync();
+        await processing.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal((Executed: 0L, Failed: 0L), (metrics.Executed, metrics.Failed));
+        Assert.False(GetCircuitBreaker(manager).IsOpen);
+        Assert.Empty(reportedErrors);
     }
 
     [Fact]
@@ -1026,7 +1088,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         configuration.ReadAfterWriteBuffer = TimeSpan.FromMinutes(1);
         var metrics = new ReadAfterWriteMetrics();
         await using var manager = new ReadAfterWriteManager(
-            sessionProvider: () => session.Object,
+            sessionProvider: () => (session.Object, CancellationToken.None),
             source,
             configuration,
             metrics,

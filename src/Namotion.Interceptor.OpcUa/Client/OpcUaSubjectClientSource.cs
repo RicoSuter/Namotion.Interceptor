@@ -176,7 +176,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             this, propertyWriter, _configuration, PollingMetrics, ReadAfterWriteMetrics, _logger);
         _sessionManager = sessionManager;
         _writer = new OutboundWriter(
-            () => sessionManager.CurrentSession,
+            () => sessionManager.CurrentSessionWithLifetime,
             sessionManager.ReadAfterWriteManager,
             sessionManager.ScheduleFullStateSyncAfterResponseMismatch,
             _configuration,
@@ -267,7 +267,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return null;
         }
 
-        var session = _sessionManager?.CurrentSession;
+        var (session, sessionLifetime) = _sessionManager?.CurrentSessionWithLifetime ?? default;
         if (session is null)
         {
             throw new InvalidOperationException("No active OPC UA session available.");
@@ -293,7 +293,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
             // A mismatch fails the whole load, whose callers reload on failure, so the session is resynced anyway.
             var results = await OpcUaValueReader.ReadAsync(
-                session, readValues, TimestampsToReturn.Source, cancellationToken).ConfigureAwait(false);
+                session, sessionLifetime, readValues, TimestampsToReturn.Source, cancellationToken).ConfigureAwait(false);
 
             for (var i = 0; i < results.Count; i++)
             {

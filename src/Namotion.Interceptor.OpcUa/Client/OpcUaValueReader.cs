@@ -23,6 +23,7 @@ internal static class OpcUaValueReader
     /// Sends one read request and checks that the response answers it.
     /// </summary>
     /// <param name="session">The session to read with.</param>
+    /// <param name="sessionLifetime">The token that is canceled once <paramref name="session"/> stops being current.</param>
     /// <param name="nodesToRead">The nodes to read, at most <see cref="GetNodesPerRead"/> of them: past the server's
     /// limit the SDK splits the request itself and only its last split would be checked.</param>
     /// <param name="timestampsToReturn">The timestamps the server returns.</param>
@@ -32,12 +33,16 @@ internal static class OpcUaValueReader
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     public static async ValueTask<DataValueCollection> ReadAsync(
         ISession session,
+        CancellationToken sessionLifetime,
         ReadValueIdCollection nodesToRead,
         TimestampsToReturn timestampsToReturn,
         CancellationToken cancellationToken)
     {
         var requestHeader = new RequestHeader();
         ReadResponse response;
+
+        // Ends the read once its session is no longer current, see SessionManager.KillTransportChannel.
+        using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, sessionLifetime);
         try
         {
             response = await session.ReadAsync(
@@ -45,7 +50,7 @@ internal static class OpcUaValueReader
                 maxAge: 0,
                 timestampsToReturn,
                 nodesToRead,
-                cancellationToken).ConfigureAwait(false);
+                requestCancellation.Token).ConfigureAwait(false);
         }
         catch (InvalidCastException exception)
         {

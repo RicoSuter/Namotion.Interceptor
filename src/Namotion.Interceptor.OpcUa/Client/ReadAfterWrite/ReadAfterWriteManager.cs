@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 /// </summary>
 internal sealed class ReadAfterWriteManager : IAsyncDisposable
 {
-    private readonly Func<ISession?> _sessionProvider;
+    private readonly Func<(ISession? Session, CancellationToken Lifetime)> _sessionProvider;
     private readonly ISubjectSource _source;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
@@ -47,14 +47,14 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     /// <summary>
     /// Creates a new read-after-write manager.
     /// </summary>
-    /// <param name="sessionProvider">Function to get current session.</param>
+    /// <param name="sessionProvider">Returns the current session with a token that is canceled once it stops being current.</param>
     /// <param name="source">The subject source for applying read values.</param>
     /// <param name="configuration">OPC UA client configuration.</param>
     /// <param name="metrics">The counters to report into.</param>
     /// <param name="reportError">Reports genuine background failures to the owning source.</param>
     /// <param name="logger">Logger instance.</param>
     public ReadAfterWriteManager(
-        Func<ISession?> sessionProvider,
+        Func<(ISession? Session, CancellationToken Lifetime)> sessionProvider,
         ISubjectSource source,
         OpcUaClientConfiguration configuration,
         ReadAfterWriteMetrics metrics,
@@ -165,7 +165,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         }
 
         // Get session outside lock to avoid calling external code while holding lock
-        var currentSession = _sessionProvider();
+        var currentSession = _sessionProvider().Session;
         lock (_lock)
         {
             if (Volatile.Read(ref _disposed) == 1)
@@ -323,7 +323,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             return;
         }
 
-        var session = _sessionProvider();
+        var (session, sessionLifetime) = _sessionProvider();
         if (session is null || !session.Connected)
         {
             _logger.LogDebug("Skipping read-after-writes - session not connected.");
@@ -359,10 +359,16 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     try
                     {
                         results = await OpcUaValueReader.ReadAsync(
-                            session, readValues, TimestampsToReturn.Source, _cts.Token).ConfigureAwait(false);
+                            session, sessionLifetime, readValues, TimestampsToReturn.Source, _cts.Token).ConfigureAwait(false);
                     }
                     catch (Exception exception) when (_cts.IsCancellationRequested && exception is not OpcUaResponseMismatchException)
                     {
+                        return;
+                    }
+                    catch (Exception exception) when (sessionLifetime.IsCancellationRequested && exception is not OpcUaResponseMismatchException)
+                    {
+                        // Not a read failure: every session change is followed by a full state read.
+                        _logger.LogDebug(exception, "Skipped {Count} read-after-writes because their session is no longer current.", dueCount - offset);
                         return;
                     }
 

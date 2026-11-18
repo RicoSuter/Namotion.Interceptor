@@ -13,12 +13,12 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 public class OpcUaServerRequestCompletionCollection;
 
 /// <summary>
-/// A request completed a second time can hand its response to a later request. These pin that the server
+/// A request completed a second time can hand its response to a later request. These pin that the SDK
 /// ignores the second completion, so later calls still receive the responses to their own requests.
 /// </summary>
 /// <remarks>
-/// Runs alone because, without the guard, the shifted response poisons the SDK's process-wide response
-/// pool, which every other server in the test process draws from.
+/// Runs alone because, if the SDK accepted the second completion, the shifted response would poison its
+/// process-wide response pool, which every other server in the test process draws from.
 /// </remarks>
 [Trait("Category", "Integration")]
 [Collection(nameof(OpcUaServerRequestCompletionTests))]
@@ -129,7 +129,7 @@ public class OpcUaServerRequestCompletionTests
 
     /// <summary>
     /// Captures the write that carries <see cref="CompleteTwiceValue"/> so the test can complete it again
-    /// after its response was delivered, the shape of the SDK's own double completion.
+    /// after its response was delivered, the shape of the double completion that older SDKs made on stop.
     /// </summary>
     private sealed class CompletingTwiceServer : OpcUaStandardServer
     {
