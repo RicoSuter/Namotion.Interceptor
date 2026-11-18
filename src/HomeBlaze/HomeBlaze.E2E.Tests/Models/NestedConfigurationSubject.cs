@@ -5,7 +5,8 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.E2E.Tests.Models;
 
 /// <summary>
-/// A subject with a subject in its configuration, which a configuration that is loaded again replaces with a new one.
+/// A subject whose configuration holds a child subject. Loading the configuration again replaces the child with a new
+/// instance.
 /// </summary>
 [InterceptorSubject]
 public partial class NestedConfigurationSubject : IConfigurable

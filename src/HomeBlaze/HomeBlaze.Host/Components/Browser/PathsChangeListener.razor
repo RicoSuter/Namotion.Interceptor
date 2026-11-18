@@ -8,8 +8,8 @@
     private long _notifiedVersion = -1;
 
     /// <summary>
-    /// Called on the renderer after the first render and after each render on a new version of the paths, so once the
-    /// paths of subjects may have changed.
+    /// Called on the renderer after the first render and after each render at a <see cref="SubjectPathResolver.PathsVersion"/>
+    /// other than the one of the last call.
     /// </summary>
     [Parameter, EditorRequired]
     public Action? OnPathsChanged { get; set; }

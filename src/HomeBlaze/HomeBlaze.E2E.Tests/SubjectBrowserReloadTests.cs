@@ -1,17 +1,16 @@
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.E2E.Tests.Models;
 using Microsoft.Playwright;
 
 namespace HomeBlaze.E2E.Tests;
 
 /// <summary>
-/// E2E tests for the panes of the subject browser while the file of a subject they show is loaded again.
+/// E2E tests for the panes of the subject browser while a subject they show is replaced or moved in the graph.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
 [Trait("Category", "Integration")]
 public class SubjectBrowserReloadTests
 {
-    private const int Timeout = 30000;
-
     private const string ParentJson =
         """
         {
@@ -35,16 +34,16 @@ public class SubjectBrowserReloadTests
             // Arrange
             var page = await SubjectBrowserPage.OpenAsync(_fixture, $"{name}/Child");
             var panes = page.Locator("#scrollContainer [data-testid='subject-pane']");
-            await Assertions.Expect(panes).ToHaveCountAsync(3, new() { Timeout = Timeout });
+            await Assertions.Expect(panes).ToHaveCountAsync(3);
             var label = GetValueText(page, panes.Last, "ShownLabel");
-            await Assertions.Expect(label).ToHaveTextAsync("Loaded label", new() { Timeout = Timeout });
+            await Assertions.Expect(label).ToHaveTextAsync("Loaded label");
 
             // Act: the configuration of the file replaces the child with a new subject.
             await File.WriteAllTextAsync(filePath, ParentJson.Replace("Loaded label", "Reloaded label"));
             await _fixture.ReconcileStorageAsync();
 
             // Assert
-            await Assertions.Expect(label).ToHaveTextAsync("Reloaded label", new() { Timeout = Timeout });
+            await Assertions.Expect(label).ToHaveTextAsync("Reloaded label");
             await Assertions.Expect(panes).ToHaveCountAsync(3);
         });
     }
@@ -57,17 +56,50 @@ public class SubjectBrowserReloadTests
             // Arrange
             var page = await SubjectBrowserPage.OpenAsync(_fixture, $"{name}/Child");
             var panes = page.Locator("#scrollContainer [data-testid='subject-pane']");
-            await Assertions.Expect(panes).ToHaveCountAsync(3, new() { Timeout = Timeout });
+            await Assertions.Expect(panes).ToHaveCountAsync(3);
 
             // Act: a subject of another type replaces the subject of the file in the children of the root.
             await File.WriteAllTextAsync(filePath, """{ "$type": "HomeBlaze.Components.GridLayout" }""");
             await _fixture.ReconcileStorageAsync();
 
             // Assert
-            await Assertions.Expect(panes).ToHaveCountAsync(2, new() { Timeout = Timeout });
-            await Assertions.Expect(panes.Last.GetByRole(AriaRole.Heading)).ToHaveTextAsync("Grid", new() { Timeout = Timeout });
-            await Assertions.Expect(page).ToHaveURLAsync($"{_fixture.ServerAddress}browser/{name}", new() { Timeout = Timeout });
+            await Assertions.Expect(panes).ToHaveCountAsync(2);
+            await Assertions.Expect(panes.Last.GetByRole(AriaRole.Heading)).ToHaveTextAsync("Grid");
+            await Assertions.Expect(page).ToHaveURLAsync($"{_fixture.ServerAddress}browser/{name}");
         });
+    }
+
+    [Fact]
+    public async Task WhenAnItemBeforeTheShownOneIsRemoved_ThenThePaneKeepsShowingItInsteadOfTheItemThatTakesItsIndex()
+    {
+        // Arrange
+        var (name, list) = await _fixture.AddSubjectToRootAsync<ChildListSubject>();
+        try
+        {
+            var items = new[] { "First", "Second", "Third" }
+                .Select(label => new NestedConfigurationSubject { Child = new NestedConfigurationChild { Label = $"{label} child" } })
+                .ToArray();
+            list.Items = items;
+
+            var page = await SubjectBrowserPage.OpenAsync(_fixture, $"{name}/Items/1/Child");
+            var panes = page.Locator("#scrollContainer [data-testid='subject-pane']");
+            await Assertions.Expect(panes).ToHaveCountAsync(4);
+            var label = GetValueText(page, panes.Last, "ShownLabel");
+            await Assertions.Expect(label).ToHaveTextAsync("Second child");
+
+            // Act: the shown item moves to index 0 and the third takes index 1. The child of the shown item is replaced
+            // afterwards, which only a pane that still shows the item follows.
+            list.Items = [items[1], items[2]];
+            items[1].Child = new NestedConfigurationChild { Label = "Replaced child" };
+
+            // Assert
+            await Assertions.Expect(label).ToHaveTextAsync("Replaced child");
+            await Assertions.Expect(panes).ToHaveCountAsync(4);
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, list);
+        }
     }
 
     private static ILocator GetValueText(IPage page, ILocator pane, string displayName)
