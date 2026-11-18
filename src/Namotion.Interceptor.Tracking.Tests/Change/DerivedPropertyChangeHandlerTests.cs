@@ -542,54 +542,6 @@ public class DerivedPropertyChangeHandlerTests
     }
 
     [Fact]
-    public void WhenATransactionBecomesAmbientDuringAnUncapturedWrite_ThenTheDependentsStillRecalculate()
-    {
-        // Arrange: no transaction is ambient when the write starts, so the transaction interceptor takes its
-        // fast path and the write reaches the model. A synchronous observer then opens one, which publishes
-        // it into the ambient slot of the flow the write is running on, so by the time the cascade is
-        // decided a live transaction is bound to this context for a write nothing captured.
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithTransactions();
-
-        var person = new Person(context) { LastName = "Doe" };
-        _ = person.FullName;
-
-        SubjectTransaction? ambientTransaction = null;
-        var changedProperties = new List<string>();
-        using var subscription = context
-            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-            .Subscribe(change =>
-            {
-                changedProperties.Add(change.Property.Name);
-                if (change.Property.Name == nameof(Person.FirstName) && ambientTransaction is null)
-                {
-                    ambientTransaction = context
-                        .BeginTransactionAsync(TransactionFailureHandling.BestEffort)
-                        .GetAwaiter()
-                        .GetResult();
-                }
-            });
-
-        // Act
-        try
-        {
-            person.FirstName = "Jane";
-        }
-        finally
-        {
-            // Disposal releases a process-wide active count, so leaking it here would leave every later
-            // test in the assembly believing a transaction is open.
-            ambientTransaction?.Dispose();
-        }
-
-        // Assert: the model holds the recalculated value either way, so only the announcements discriminate.
-        Assert.Contains(nameof(Person.FullName), changedProperties);
-        Assert.Contains(nameof(Person.FullNameWithPrefix), changedProperties);
-    }
-
-    [Fact]
     public async Task WhenATransactionIsRolledBack_ThenNoDependentValueWasAnnouncedFromItsPendingState()
     {
         // Arrange

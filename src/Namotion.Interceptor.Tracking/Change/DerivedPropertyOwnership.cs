@@ -1001,7 +1001,15 @@ internal static class DerivedPropertyOwnership
 
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)
         {
-            raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
+            PropertyChangeInterceptor.EnterSynchronousCallback();
+            try
+            {
+                raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
+            }
+            finally
+            {
+                PropertyChangeInterceptor.ExitSynchronousCallback();
+            }
         }
     }
 

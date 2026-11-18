@@ -23,6 +23,11 @@ namespace Namotion.Interceptor.Tracking.Change;
 [RunsBefore(typeof(LifecycleInterceptor))]
 public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChange>, IWriteInterceptor
 {
+    // The synchronous change callbacks running on the thread: Rx observers and per-property subscriptions that run
+    // inline, and the PropertyChanged handlers of a derived property.
+    [ThreadStatic]
+    private static int _synchronousCallbacks;
+
     private readonly Lock _modificationLock = new();
 
     // The single hot-path field. Null means neither channel has consumers (idle).
@@ -264,11 +269,43 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             subscriptions[i].Enqueue(in change);
         }
 
-        syncSubject?.OnNext(change);
-
-        if (listeners is not null)
+        if (syncSubject is null && listeners is null)
         {
-            PropertyChangeSubscription.Dispatch(listeners, in change);
+            return;
+        }
+
+        _synchronousCallbacks++;
+        try
+        {
+            syncSubject?.OnNext(change);
+
+            if (listeners is not null)
+            {
+                PropertyChangeSubscription.Dispatch(listeners, in change);
+            }
+        }
+        finally
+        {
+            _synchronousCallbacks--;
+        }
+    }
+
+    internal static void EnterSynchronousCallback() => _synchronousCallbacks++;
+
+    internal static void ExitSynchronousCallback() => _synchronousCallbacks--;
+
+    /// <summary>
+    /// Throws when the thread runs a synchronous change callback, holds a lifecycle lock or has a queued delivery
+    /// pending, where a transaction must not be begun or committed. See "Transactions" under "Post-Lock Queue" in
+    /// docs/design/tracking-lifecycle.md.
+    /// </summary>
+    internal static void ThrowIfInSynchronousCallback()
+    {
+        if (_synchronousCallbacks != 0 || PostLockQueue.IsDeliveryDeferred)
+        {
+            throw new InvalidOperationException(
+                "A transaction cannot be begun or committed in a synchronous change observer or lifecycle callback. " +
+                "Run it on a scheduler, or start it with Task.Run without waiting for it.");
         }
     }
 

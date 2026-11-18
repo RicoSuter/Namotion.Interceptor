@@ -65,11 +65,11 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject)
     {
-        DerivedStructureDependencies.RecordRead(subject);
+        DerivedGraphDependencies.RecordRead(subject);
         return TryGetKnownSubject(subject);
     }
 
-    /// <summary>Gets the registered subject, without recording the structure read.</summary>
+    /// <summary>Gets the registered subject, without recording the graph state read.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal RegisteredSubject? TryGetKnownSubject(IInterceptorSubject subject)
     {

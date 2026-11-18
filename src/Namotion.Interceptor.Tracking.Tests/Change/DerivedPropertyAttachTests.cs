@@ -134,7 +134,7 @@ public class DerivedPropertyAttachTests
     [Fact]
     public void WhenAGetterReadsItsParent_ThenTheAttachAndAMovePublishTheChange()
     {
-        // Arrange: the structure of the worker's ancestors is a tracked dependency, which the attach moves.
+        // Arrange: the graph state of the worker's ancestors is a tracked dependency, which the attach moves.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var first = new EvaluatorRoot(context) { Anchor = 1 };
         var second = new EvaluatorRoot(context) { Anchor = 2 };

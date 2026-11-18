@@ -51,12 +51,12 @@ public partial class HostingGraphRoot
 }
 
 /// <summary>
-/// A subject whose derived getter reads the parents of a subject, which is a recorded structure read.
+/// A subject whose derived getter reads the parents of a subject, which is a recorded graph state read.
 /// </summary>
 [InterceptorSubject]
-public partial class HostingStructureReader
+public partial class HostingGraphReader
 {
-    public HostingStructureReader()
+    public HostingGraphReader()
     {
         Target = new HostingLeaf();
     }
@@ -121,34 +121,34 @@ public class HostingLifecycleBenchmark
     public int SubjectCount;
 
     /// <summary>
-    /// Whether the process wide structure gate is raised before measuring. It is never lowered, and
+    /// Whether the process wide graph gate is raised before measuring. It is never lowered, and
     /// BenchmarkDotNet runs every parameter combination in its own process, so the rows with
-    /// <c>false</c> measure a process in which no structure dependency was ever created.
+    /// <c>false</c> measure a process in which no graph dependency was ever created.
     /// </summary>
     [Params(false, true)]
-    public bool StructureGateRaised;
+    public bool GraphGateRaised;
 
     [GlobalSetup(Targets = [nameof(AttachCold), nameof(Detach)])]
     public void Setup()
     {
-        RaiseStructureGateIfRequested();
+        RaiseGraphGateIfRequested();
     }
 
-    private void RaiseStructureGateIfRequested()
+    private void RaiseGraphGateIfRequested()
     {
-        if (!StructureGateRaised)
+        if (!GraphGateRaised)
         {
             return;
         }
 
-        // Attaching a subject whose derived getter reads a structure API evaluates the getter, which
-        // creates a structure dependency and raises the gate.
+        // Attaching a subject whose derived getter reads a graph state API evaluates the getter, which
+        // creates a graph dependency and raises the gate.
         var context = InterceptorSubjectContext
             .Create()
             .WithDerivedPropertyChangeDetection()
             .WithContextInheritance();
 
-        _ = new HostingStructureReader(context);
+        _ = new HostingGraphReader(context);
     }
 
     private IInterceptorSubjectContext CreateContext()
@@ -199,7 +199,7 @@ public class HostingLifecycleBenchmark
     [GlobalSetup(Targets = [nameof(AttachWarm)])]
     public void SetupWarm()
     {
-        RaiseStructureGateIfRequested();
+        RaiseGraphGateIfRequested();
 
         _warmContext = CreateContext();
         _warmRoot = new HostingGraphRoot(_warmContext);

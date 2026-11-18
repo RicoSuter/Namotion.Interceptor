@@ -61,9 +61,9 @@ public class DerivedPropertyProtocolTests
     }
 
     [Fact]
-    public async Task WhenStructureChangesBetweenReadAndCommit_ThenEvaluationRunsAgain()
+    public async Task WhenGraphStateChangesBetweenReadAndCommit_ThenEvaluationRunsAgain()
     {
-        // Arrange: the getter reads the parents of the spare only once Data is set, so its structure is not a dependency
+        // Arrange: the getter reads the parents of the spare only once Data is set, so its graph state is not a dependency
         // when the spare is attached.
         var context = CreateContext();
         var root = new EvaluatorRoot(context);

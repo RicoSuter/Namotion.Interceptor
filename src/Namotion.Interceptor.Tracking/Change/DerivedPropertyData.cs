@@ -3,8 +3,8 @@ using System.Runtime.CompilerServices;
 namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
-/// Consolidated per-property data for derived property tracking, also of a subject's structure
-/// (<see cref="DerivedStructureDependencies"/>), which is a dependency source like a property.
+/// Consolidated per-property data for derived property tracking, also of a subject's graph state and children
+/// (<see cref="DerivedGraphDependencies"/>), which is a dependency source like a property.
 /// Created once per (subject, property) and never removed or replaced. Stored in Subject.Data under a short key
 /// to minimize dictionary lookups (one lookup instead of separate lookups
 /// for UsedByProperties, RequiredProperties, and LastKnownValue).
@@ -132,14 +132,14 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Creates the data of <paramref name="property"/> and raises the gate of its subject's type first, so the
-    /// gate is raised before the data can be found. The data of a subject's structure raises the structure gate
-    /// instead: the structure is never written through the write observer.
+    /// gate is raised before the data can be found. The data of a graph dependency raises the graph gate instead: a
+    /// subject's graph state and children are never written through the write observer.
     /// </summary>
     internal static DerivedPropertyData Create(PropertyReference property)
     {
-        if (DerivedStructureDependencies.IsStructureDependency(property))
+        if (DerivedGraphDependencies.IsGraphDependency(property))
         {
-            DerivedStructureDependencies.RaiseGate();
+            DerivedGraphDependencies.RaiseGate();
         }
         else
         {

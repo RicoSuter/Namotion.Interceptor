@@ -14,6 +14,14 @@ When tradeoffs conflict, prefer in this order:
 2. **Performance** — minimize allocations and CPU time. Both matter; when they trade, allocations usually win (GC pressure compounds across the host).
 3. **Code style / idiom** — non-idiomatic API is fine when 1 or 2 demand it (e.g., `ImmutableArray<T>` in public API instead of `IEnumerable<T>`).
 
+## Scope
+
+Support what real consumers need, not every combination of features. Before adding code for an edge case, check whether an application in this repository (HomeBlaze, the connectors) or a known consumer needs it; ask the maintainer when unsure.
+
+- When it is not needed, disallow it: throw a clear exception at the earliest point and document the rule.
+- Fail deterministically: the same code always throws, independent of timing, thread interleaving or queued work. A rule that only sometimes throws is not fail fast.
+- Open a disallowed pattern up later, in its own change, when a real consumer needs it.
+
 ## Development Commands
 
 ### Build and Test
