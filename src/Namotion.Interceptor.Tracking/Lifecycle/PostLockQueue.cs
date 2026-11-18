@@ -113,12 +113,7 @@ internal static class PostLockQueue
             return;
         }
 
-        // The anchor write is completed by the write observer of Tracking, so another observer installed in its
-        // place leaves the release of the lock as the anchor.
-        _lockAnchorDepth = isWriteReconciliation &&
-                           ReferenceEquals(PropertyAccessObservation.WriteObserver, TrackingWriteObserver.Instance)
-            ? PropertyAccessObservation.WriteDepth
-            : 0;
+        _lockAnchorDepth = isWriteReconciliation ? PropertyAccessObservation.WriteDepth : 0;
     }
 
     /// <summary>
