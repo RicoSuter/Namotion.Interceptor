@@ -24,6 +24,18 @@ internal static class DerivedPropertyOwnership
     private const int MaxStabilizationIterations = 100;
 
     /// <summary>
+    /// The attach count of a request raised by a write or by <c>RecalculateDerivedProperty</c>: it is not checked when
+    /// the request runs at once, and a queued request takes the property's attach count when it is queued.
+    /// </summary>
+    internal const long AnyAttachCount = -1;
+
+    /// <summary>
+    /// Runs, when a test sets it, before every evaluation of an owner loop, and after an attach decided its request,
+    /// before the request is queued or run.
+    /// </summary>
+    internal static Action<PropertyReference>? AfterTakeForTests { get; set; }
+
+    /// <summary>
     /// Attaches a derived property and evaluates its first value, unless it is attached through another graph
     /// already.
     /// </summary>
@@ -45,20 +57,16 @@ internal static class DerivedPropertyOwnership
             data.HasValue = false;
             data.IsFaulted = false;
             attachToken = data.AttachToken = DerivedPropertyData.NewToken();
+            Volatile.Write(ref data.AttachCount, data.AttachCount + 1);
+
+            // Requests on a detached property are dropped, so a flag left from before the detach is stale. A
+            // recalculation from before the detach that is still in flight is not signaled: it releases the
+            // property at its commit (EvaluateAndCommit), and the attach requests a recalculation after its own.
+            TakePendingRequest(data, out _);
             ownsData = data.OwnerToken == 0;
             if (ownsData)
             {
-                // Requests on a detached property are dropped, so a flag left from before the detach is stale.
                 TakeOwnership(data, attachToken);
-                TakePendingRequest(data, out _);
-            }
-            else
-            {
-                // A recalculation from before a detach is in flight: it hands off at its next lock, or answers the
-                // request with the attach's timestamp when the attach commits first. A pending timestamp is from
-                // before the detach.
-                MarkRecalculationNeeded(data);
-                data.PendingRawTimestamp = 0;
             }
         }
 
@@ -103,15 +111,31 @@ internal static class DerivedPropertyOwnership
     /// Requests the recalculation of a derived property after a write to one of its dependencies (or to the
     /// property itself, for a derived property with a setter). A <paramref name="rawTimestamp"/> of 0 resolves
     /// the current changed timestamp. The request is dropped for a detached property, and left to the current
-    /// owner or attach when there is one; otherwise this call owns the property until no request is pending.
+    /// owner or attach when there is one; otherwise this call owns the property until no request is pending. While
+    /// the thread holds a lifecycle lock, the request is queued with its timestamp and runs after the lifecycle
+    /// operation (<see cref="PostLockQueue"/>).
     /// </summary>
     /// <param name="property">The derived property.</param>
     /// <param name="rawTimestamp">The raw changed timestamp of the trigger.</param>
     internal static void RequestRecalculation(PropertyReference property, long rawTimestamp)
     {
+        if (!PostLockQueue.TryEnqueueRequest(property, rawTimestamp, AnyAttachCount))
+        {
+            Request(property, rawTimestamp, AnyAttachCount);
+        }
+    }
+
+    /// <summary>
+    /// Runs a request outside every lifecycle lock. A request that carries an attach count (queued under a lifecycle
+    /// lock, or handed over by an attach) is dropped when the property was attached again since that count was read
+    /// (<paramref name="attachCount"/> moved): that attach evaluated after the request's cause.
+    /// <see cref="AnyAttachCount"/> skips this check.
+    /// </summary>
+    internal static void Request(PropertyReference property, long rawTimestamp, long attachCount)
+    {
         if (rawTimestamp == 0)
         {
-            // A request without a trigger timestamp (one an attach marked itself) takes the time of the request.
+            // A request without a trigger timestamp (one an attach requests itself) takes the time of the request.
             rawTimestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
         }
 
@@ -124,9 +148,10 @@ internal static class DerivedPropertyOwnership
         }
 
         long token;
+        long ownerAttachCount;
         lock (data)
         {
-            if (!data.IsAttached)
+            if (!data.IsAttached || (attachCount != AnyAttachCount && data.AttachCount != attachCount))
             {
                 return;
             }
@@ -134,20 +159,42 @@ internal static class DerivedPropertyOwnership
             if (data.OwnerToken != 0 || data.AttachToken != 0)
             {
                 MarkRecalculationNeeded(data);
-                data.PendingRawTimestamp = rawTimestamp;
+
+                // The newest timestamp wins, whichever request arrives last.
+                data.PendingRawTimestamp = PostLockQueue.Newest(data.PendingRawTimestamp, rawTimestamp);
                 return;
             }
 
             token = TakeOwnership(data, DerivedPropertyData.NewToken());
+            ownerAttachCount = data.AttachCount;
         }
 
-        RunOwnerLoops(data, property, token, rawTimestamp);
+        RunOwnerLoops(data, property, token, rawTimestamp, ownerAttachCount);
     }
 
     /// <summary>Traces an exception that is dropped because another one wins or nobody can receive it.</summary>
     internal static void TraceDropped(string reason, Exception exception)
     {
         TraceWarning($"DerivedPropertyChangeHandler: {reason}", exception);
+    }
+
+    /// <summary>
+    /// Rethrows the first exception of work that ran on after it, or traces it when <paramref name="rethrow"/> is
+    /// false because another exception is in flight or the caller must not throw.
+    /// </summary>
+    internal static void ThrowOrTrace(ExceptionDispatchInfo? exception, bool rethrow, string reason)
+    {
+        if (exception is null)
+        {
+            return;
+        }
+
+        if (rethrow)
+        {
+            exception.Throw();
+        }
+
+        TraceDropped(reason, exception.SourceException);
     }
 
     private static void TraceWarning(string message, Exception? exception = null)
@@ -183,9 +230,7 @@ internal static class DerivedPropertyOwnership
     }
 
     // Called under lock(data). Clears the pending request flags and returns whether a foreign request was among them.
-    // The pending timestamp is zeroed when taken, so a flag set without a request (by an attach) does not carry an
-    // older write's timestamp; 0 is resolved to the current time outside the lock (by RequestRecalculation, or by the
-    // publication of the owner loop that takes it).
+    // The pending timestamp is zeroed when it is taken.
     private static bool TakePendingRequest(DerivedPropertyData data, out long pendingTimestamp)
     {
         var isForeign = data.HasForeignRequest;
@@ -205,18 +250,20 @@ internal static class DerivedPropertyOwnership
     {
         bool requestAfterAttach;
         long pendingTimestamp;
+        long attachCount;
         bool isExhausted;
         try
         {
-            requestAfterAttach = RunAttachEvaluations(data, property, attachToken, ownsData, out pendingTimestamp, out isExhausted);
+            requestAfterAttach = RunAttachEvaluations(
+                data, property, attachToken, ownsData, out pendingTimestamp, out attachCount, out isExhausted);
         }
         catch (Exception exception)
         {
             // Something besides the getter threw (a time source): the attach must not keep the property owned, or
             // every later request would be left to it.
-            if (ReleaseAttachAfterFailure(data, attachToken, out pendingTimestamp))
+            if (ReleaseAttachAfterFailure(data, attachToken, out pendingTimestamp, out attachCount))
             {
-                RequestRecalculationAfterAttach(property, pendingTimestamp);
+                RequestRecalculationAfterAttach(property, pendingTimestamp, attachCount);
             }
 
             TraceDropped($"the attach of '{property.Metadata.Name}' on {property.Subject.GetType().Name} failed", exception);
@@ -225,7 +272,7 @@ internal static class DerivedPropertyOwnership
 
         if (requestAfterAttach)
         {
-            RequestRecalculationAfterAttach(property, pendingTimestamp);
+            RequestRecalculationAfterAttach(property, pendingTimestamp, attachCount);
         }
 
         // Traced outside lock(data), and after the request, so a failing trace listener cannot lose it.
@@ -237,13 +284,19 @@ internal static class DerivedPropertyOwnership
         }
     }
 
-    // The recalculation publishes on the attaching thread: an observer's exception is traced, and the recalculation
-    // has handled the requests it left (see RunOwnerLoops).
-    private static void RequestRecalculationAfterAttach(PropertyReference property, long pendingTimestamp)
+    // Outside the lifecycle lock the recalculation publishes here: an observer's exception is traced, and the
+    // recalculation has handled the requests it left (see RunOwnerLoops). Under the lock the request is queued, and an
+    // observer's exception is rethrown from the structural write that drains it, after the attach completed, or traced
+    // at a release anchor or when that write failed.
+    private static void RequestRecalculationAfterAttach(PropertyReference property, long pendingTimestamp, long attachCount)
     {
         try
         {
-            RequestRecalculation(property, pendingTimestamp);
+            AfterTakeForTests?.Invoke(property);
+            if (!PostLockQueue.TryEnqueueRequest(property, pendingTimestamp, attachCount))
+            {
+                Request(property, pendingTimestamp, attachCount);
+            }
         }
         catch (Exception exception)
         {
@@ -251,15 +304,19 @@ internal static class DerivedPropertyOwnership
         }
     }
 
-    // Returns true when a request is pending and nobody owns the property after the attach. isExhausted: the
-    // iteration limit was reached and the last, unstable evaluation was committed.
+    // Returns true when a recalculation is to be requested after the attach: a request is pending and nobody owns the
+    // property, the evaluation was not stable, or a recalculation from before the detach owned the property.
+    // attachCount: the attach count under lock(data) when the attach decided the request, which the request carries:
+    // an attach that increments it later evaluates after every cause of the request. isExhausted: the iteration limit
+    // was reached and the last, unstable evaluation was committed.
     private static bool RunAttachEvaluations(
         DerivedPropertyData data, PropertyReference property, long attachToken, bool ownsData, out long pendingTimestamp,
-        out bool isExhausted)
+        out long attachCount, out bool isExhausted)
     {
         var requestAfterAttach = false;
         var hasEvaluatedAfterOwnWrite = false;
         pendingTimestamp = 0;
+        attachCount = 0;
         isExhausted = false;
 
         // The last iteration always commits, so the loop ends by a break.
@@ -283,6 +340,7 @@ internal static class DerivedPropertyOwnership
                     }
 
                     requestAfterAttach = TakePendingRequestIfUnowned(data, out pendingTimestamp);
+                    attachCount = data.AttachCount;
                     break;
                 }
 
@@ -292,9 +350,20 @@ internal static class DerivedPropertyOwnership
                     continue;
                 }
 
-                CommitAttachEvaluation(data, property, evaluation, isStable, attachToken, ownsData, timestamp);
+                CommitAttachEvaluation(data, property, evaluation, attachToken, timestamp);
                 isExhausted = !isStable;
-                requestAfterAttach = TakePendingRequestIfUnowned(data, out pendingTimestamp);
+
+                // An unstable evaluation is evaluated again after the attach. So is one that found a recalculation
+                // from before the detach in flight, which this request hands over to, with the attach's timestamp
+                // unless a request that arrived since carries its own. Under the lifecycle lock the request is
+                // queued, so it does not run before the structural change is announced.
+                requestAfterAttach = TakePendingRequestIfUnowned(data, out pendingTimestamp) || !isStable || !ownsData;
+                if (!ownsData && pendingTimestamp == 0)
+                {
+                    pendingTimestamp = timestamp;
+                }
+
+                attachCount = data.AttachCount;
                 break;
             }
         }
@@ -318,26 +387,13 @@ internal static class DerivedPropertyOwnership
         return isStable;
     }
 
-    // Called under lock(data) with a current attach token, after the last evaluation of the attach.
+    // Called under lock(data) with a current attach token, after the last evaluation of the attach. An unstable
+    // evaluation (the getter keeps changing what it reads, for example it writes a property it reads) is committed
+    // as well, and the attach requests a recalculation after it.
     private static void CommitAttachEvaluation(
-        DerivedPropertyData data, in PropertyReference property, Evaluation evaluation, bool isStable, long attachToken,
-        bool ownsData, long timestamp)
+        DerivedPropertyData data, in PropertyReference property, Evaluation evaluation, long attachToken, long timestamp)
     {
-        if (!isStable)
-        {
-            // The getter keeps changing what it reads (for example it writes a property it reads): the last
-            // value is committed, and a recalculation is requested after the attach.
-            MarkRecalculationNeeded(data);
-        }
-
         CommitFirstValue(data, property, evaluation, timestamp);
-        if (!ownsData && data.PendingRawTimestamp == 0)
-        {
-            // The owner in flight answers the request of this attach: it publishes the change with the attach's
-            // timestamp, not with one resolved on its own thread. A request that arrived since carries its own.
-            data.PendingRawTimestamp = timestamp;
-        }
-
         data.AttachToken = 0;
         if (data.OwnerToken == attachToken)
         {
@@ -346,31 +402,34 @@ internal static class DerivedPropertyOwnership
     }
 
     // Ends a failed attach if it is still this one and releases the ownership it holds. Returns true when a
-    // request is pending and nobody owns the property.
-    private static bool ReleaseAttachAfterFailure(DerivedPropertyData data, long attachToken, out long pendingTimestamp)
+    // recalculation is to be requested after the attach: always for the current attach, otherwise when a request
+    // is pending and nobody owns the property.
+    private static bool ReleaseAttachAfterFailure(DerivedPropertyData data, long attachToken, out long pendingTimestamp, out long attachCount)
     {
         DiscardRecording();
         lock (data)
         {
-            if (data.AttachToken == attachToken)
-            {
-                // Failed before its first value and maybe its dependencies were committed: a recalculation after the
-                // failure evaluates again, and its success is published, as after a getter that threw.
-                data.AttachToken = 0;
-                if (!data.HasValue)
-                {
-                    data.IsFaulted = true;
-                }
-
-                MarkRecalculationNeeded(data);
-            }
-
             if (data.OwnerToken == attachToken)
             {
                 data.OwnerToken = 0;
             }
 
-            return TakePendingRequestIfUnowned(data, out pendingTimestamp);
+            attachCount = data.AttachCount;
+            if (data.AttachToken != attachToken)
+            {
+                return TakePendingRequestIfUnowned(data, out pendingTimestamp);
+            }
+
+            // Failed before its first value and maybe its dependencies were committed: a recalculation after the failure
+            // evaluates again, and its success is published, as after a getter that threw.
+            data.AttachToken = 0;
+            if (!data.HasValue)
+            {
+                data.IsFaulted = true;
+            }
+
+            TakePendingRequest(data, out pendingTimestamp);
+            return true;
         }
     }
 
@@ -408,10 +467,10 @@ internal static class DerivedPropertyOwnership
     /// Runs owner loops in this frame until no request is pending, taking a request over after a failed loop
     /// ("Failures and takeover" in docs/design/tracking-derived-properties.md). The first exception propagates.
     /// </summary>
-    private static void RunOwnerLoops(DerivedPropertyData data, PropertyReference property, long token, long rawTimestamp)
+    private static void RunOwnerLoops(DerivedPropertyData data, PropertyReference property, long token, long rawTimestamp, long attachCount)
     {
         ExceptionDispatchInfo? firstException = null;
-        var state = new OwnerLoopState { RawTimestamp = rawTimestamp };
+        var state = new OwnerLoopState { RawTimestamp = rawTimestamp, AttachCount = attachCount };
         while (true)
         {
             var isFirstException = false;
@@ -456,11 +515,17 @@ internal static class DerivedPropertyOwnership
     {
         /// <summary>
         /// The raw changed timestamp of the request being evaluated; 0 for a request without one, which its
-        /// publication resolves.
+        /// publication resolves, and 0 after a commit answered it, until the loop takes the next request.
         /// </summary>
         public long RawTimestamp;
 
         public UnansweredRequest Unanswered;
+
+        /// <summary>
+        /// The attach count when the loop took its last request, read under lock(data) at the take: an attach that
+        /// committed since evaluated after every request the loop took.
+        /// </summary>
+        public long AttachCount;
 
         /// <summary>The loop evaluated again since its last commit because the getter wrote a source it had read.</summary>
         public bool HasEvaluatedAfterOwnWrite;
@@ -518,12 +583,16 @@ internal static class DerivedPropertyOwnership
             return commit.Outcome != CommitOutcome.EvaluateAgain;
         }
 
+        // The commit answered the request, so a request taken after it, also by a takeover after the publication
+        // failed, carries its own timestamp.
+        var rawTimestamp = state.RawTimestamp;
+        state.RawTimestamp = 0;
         state.Unanswered = UnansweredRequest.None;
         state.HasEvaluatedAfterOwnWrite = false;
 
         if (commit.ShouldPublish)
         {
-            NotifyDerivedPropertyChanged(property, data, commit.Sequence, commit.NewValue, commit.OldValue, state.RawTimestamp);
+            NotifyDerivedPropertyChanged(property, data, commit.Sequence, commit.NewValue, commit.OldValue, rawTimestamp);
         }
 
         lock (data)
@@ -537,6 +606,7 @@ internal static class DerivedPropertyOwnership
             {
                 state.IsAnsweringForeignWrite = TakePendingRequest(data, out state.RawTimestamp);
                 state.Unanswered = Add(UnansweredRequest.None, state.IsAnsweringForeignWrite);
+                state.AttachCount = data.AttachCount;
                 return false;
             }
 
@@ -544,6 +614,30 @@ internal static class DerivedPropertyOwnership
             data.OwnerToken = 0;
             return true;
         }
+    }
+
+    /// <summary>
+    /// The timestamp of the evaluation that answers the taken pending request (0 for none) together with the request
+    /// the loop carries unanswered from the current attachment: the newest of both. An attach that committed since the
+    /// loop took its last request answered that request, so the pending timestamp alone is carried then. Called under
+    /// lock(data) before <see cref="OwnerLoopState.AttachCount"/> is updated.
+    /// </summary>
+    private static long GetAnsweredTimestamp(DerivedPropertyData data, in OwnerLoopState state, long pendingTimestamp)
+    {
+        return data.AttachCount == state.AttachCount
+            ? PostLockQueue.Newest(state.RawTimestamp, pendingTimestamp)
+            : pendingTimestamp;
+    }
+
+    /// <summary>
+    /// Whether a request is pending, or the failed loop carries one unanswered from the current attachment. An attach
+    /// that committed since the loop took its last request answered that request and requests a recalculation after
+    /// it, so without a pending request the owner releases, as at its commit. Called under lock(data).
+    /// </summary>
+    private static bool HasRequestToTakeOver(DerivedPropertyData data, in OwnerLoopState state)
+    {
+        return data.RecalculationNeeded ||
+            (state.Unanswered != UnansweredRequest.None && data.AttachCount == state.AttachCount);
     }
 
     // Called after a failed owner loop: releases ownership and takes a pending request over with a new token. A
@@ -560,10 +654,9 @@ internal static class DerivedPropertyOwnership
 
             data.OwnerToken = 0;
 
-            // Nothing is pending, the property is detached, or an attach is in progress, which evaluates again and
-            // takes over a set flag.
-            var hasNewRequest = data.RecalculationNeeded;
-            if ((!hasNewRequest && state.Unanswered == UnansweredRequest.None) || !data.IsAttached || data.AttachToken != 0)
+            // No request to take over, the property is detached, or an attach is in progress, which evaluates again
+            // and takes over a set flag.
+            if (!HasRequestToTakeOver(data, in state) || !data.IsAttached || data.AttachToken != 0)
             {
                 return false;
             }
@@ -574,13 +667,9 @@ internal static class DerivedPropertyOwnership
                 return false;
             }
 
-            // A request carried over from the failed loop keeps the timestamp it adopted; a newer one wins.
-            if (hasNewRequest)
-            {
-                state.RawTimestamp = pendingTimestamp;
-            }
-
+            state.RawTimestamp = GetAnsweredTimestamp(data, in state, pendingTimestamp);
             token = TakeOwnership(data, DerivedPropertyData.NewToken());
+            state.AttachCount = data.AttachCount;
             return true;
         }
     }
@@ -598,6 +687,7 @@ internal static class DerivedPropertyOwnership
     /// <summary>Evaluates outside lock(data) and commits under it.</summary>
     private static Commit EvaluateAndCommit(DerivedPropertyData data, PropertyReference property, long token, ref OwnerLoopState state)
     {
+        AfterTakeForTests?.Invoke(property);
         var evaluation = Evaluate(data, property);
         lock (data)
         {
@@ -618,9 +708,20 @@ internal static class DerivedPropertyOwnership
             if (data.RecalculationNeeded)
             {
                 DiscardRecording();
-                state.IsAnsweringForeignWrite = TakePendingRequest(data, out state.RawTimestamp);
+                state.IsAnsweringForeignWrite = TakePendingRequest(data, out var pendingTimestamp);
                 state.Unanswered = Add(state.Unanswered, state.IsAnsweringForeignWrite);
+                state.RawTimestamp = GetAnsweredTimestamp(data, in state, pendingTimestamp);
+                state.AttachCount = data.AttachCount;
                 return new Commit(CommitOutcome.EvaluateAgain);
+            }
+
+            if (data.AttachCount != state.AttachCount)
+            {
+                // An attach has committed since the loop took its last request: the attach's value is newer, and the
+                // attach requested a recalculation after it, which answers the requests this loop took.
+                DiscardRecording();
+                data.OwnerToken = 0;
+                return new Commit(CommitOutcome.Released);
             }
 
             var check = CommitDependencies(data, property);
@@ -720,7 +821,15 @@ internal static class DerivedPropertyOwnership
 
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)
         {
-            raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
+            PropertyChangeInterceptor.EnterSynchronousCallback();
+            try
+            {
+                raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
+            }
+            finally
+            {
+                PropertyChangeInterceptor.ExitSynchronousCallback();
+            }
         }
     }
 

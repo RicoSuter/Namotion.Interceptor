@@ -202,11 +202,12 @@ public class DerivedPropertyOwnershipTests
     }
 
     [Fact]
-    public void WhenGetterWritesWhatItReads_ThenAttachAndRecalculationEndAtTheLimitAndLaterWritesStillPublish()
+    public void WhenGetterWritesWhatItReads_ThenAttachCommitsAndRecalculationEndsAtTheLimitAndLaterWritesStillPublish()
     {
         // Arrange: the getter writes what it reads. Another thread writes Anchor during the first attach
-        // evaluation, so the attach evaluates again once it committed Anchor as a dependency; from then on every own write of the
-        // dependency Anchor requests a recalculation on the evaluating thread.
+        // evaluation, so the attach evaluates again once it committed Anchor as a dependency; from then on every
+        // own write of the dependency Anchor requests a recalculation on the evaluating thread. Under the lifecycle
+        // lock of the attach, those requests are queued until the structural write completes.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
         var root = new EvaluatorRoot(context);
         var machine = new EvaluatorMachine();
@@ -232,13 +233,13 @@ public class DerivedPropertyOwnershipTests
         machine.Worker.Evaluator = _ => root.Anchor;
         root.Anchor = 1000;
 
-        // Assert: the attach evaluation never stabilizes and commits its last value; the recalculation
-        // requested after the attach never stabilizes either and ends at the limit, and a later write still
-        // recalculates.
+        // Assert: the attach commits after its evaluation following the own write, since the requests of its
+        // own writes wait for the end of the lifecycle operation; the queued recalculation never stabilizes and
+        // ends at the limit, and a later write still recalculates.
         Assert.True(isWrittenByOtherThread);
         Assert.Contains(changes, c => c.Property.Subject == machine.Worker && c.GetNewValue<int>() == 1000);
         var trace = traceCapture.Text;
-        Assert.Contains("exhausted while attaching", trace);
+        Assert.DoesNotContain("exhausted while attaching", trace);
         Assert.Contains("exhausted for", trace);
     }
 
@@ -277,6 +278,52 @@ public class DerivedPropertyOwnershipTests
         // Assert
         Assert.Null(exception);
         Assert.Contains("exhausted for", traceCapture.Text);
+    }
+
+    [Fact]
+    public void WhenAnotherThreadWritesADependencyDuringEveryAttachEvaluation_ThenAttachCommitsItsLastEvaluationAndTheRecalculationAfterItPublishes()
+    {
+        // Arrange: while each of the first 100 evaluations (the attach's iteration limit) runs, another thread
+        // writes Anchor, which the getter reads, so no attach evaluation is stable. The writes come from another
+        // thread, so they are not queued under the attach's lifecycle lock but set the request flag of the attach.
+        const int attachIterationLimit = 100;
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithParents();
+        var root = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var evaluations = 0;
+        var areWritesCompleted = true;
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor;
+            if (++evaluations <= attachIterationLimit)
+            {
+                areWritesCompleted &= DedicatedThreadTestHelpers
+                    .RunOnDedicatedThreadAsync(() => root.Anchor = value + 1)
+                    .Wait(Timeout);
+            }
+
+            return value;
+        };
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(change =>
+        {
+            if (change.Property.Subject == machine.Worker)
+            {
+                changes.Add(change);
+            }
+        });
+        using var traceCapture = new TraceCapture();
+
+        // Act
+        root.Machine = machine;
+
+        // Assert: the attach commits its last evaluation (99), which is not published, and the recalculation
+        // requested after the attach publishes the value of the last write (100).
+        Assert.True(areWritesCompleted);
+        var change = Assert.Single(changes);
+        Assert.Equal((attachIterationLimit - 1, attachIterationLimit), (change.GetOldValue<int>(), change.GetNewValue<int>()));
+        Assert.Equal(attachIterationLimit, machine.Worker.Result);
+        Assert.Contains("exhausted while attaching", traceCapture.Text);
     }
 
     [Fact]
