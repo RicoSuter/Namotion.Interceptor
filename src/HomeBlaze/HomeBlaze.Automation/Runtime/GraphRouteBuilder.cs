@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 using HomeBlaze.Services;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Automation.Runtime;
@@ -66,16 +67,18 @@ internal sealed class GraphRouteBuilder(IInterceptorSubject automation) : ISubje
     }
 
     // The property that gives a subject its next parent is on no route, and only these subjects report a parent gain, see
-    // PropertyAttachNotifier. A subject with several parents loses one without a write of a holder when an ancestor of
-    // that parent is detached.
+    // PropertyAttachNotifier. A subject held by several properties loses one without a write of a holder when an ancestor
+    // of that property's subject is detached. Another key or position in a property that holds the subject already is
+    // gained by a write of that property, which is on the route.
     private bool TellsParentGains(IInterceptorSubject subject, ImmutableArray<SubjectPropertyParent> parents)
     {
-        if (parents.Length > 1)
+        var propertyCount = parents.CountProperties();
+        if (propertyCount > 1)
         {
             return false;
         }
 
         return ReferenceEquals(subject, automation) ||
-            (subject is AutomationRule && parents.Length == 1 && ReferenceEquals(parents[0].Property.Subject, automation));
+            (subject is AutomationRule && propertyCount == 1 && ReferenceEquals(parents[0].Property.Subject, automation));
     }
 }

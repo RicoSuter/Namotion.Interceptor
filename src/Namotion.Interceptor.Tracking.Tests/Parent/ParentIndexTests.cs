@@ -1,5 +1,6 @@
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -150,7 +151,7 @@ public class ParentIndexTests
     }
 
     [Fact]
-    public void WhenSubjectMovesToSeveralKeys_ThenParentIndexIsTheFirstKey()
+    public void WhenSubjectMovesToSeveralKeys_ThenItHasAParentEntryPerKey()
     {
         // Arrange
         var car = new Car();
@@ -164,11 +165,51 @@ public class ParentIndexTests
         garage.CarsByName = new Dictionary<string, Car> { ["First"] = car, ["Second"] = car, ["Other"] = other };
 
         // Assert
-        Assert.Equal(Parent(garage, nameof(Garage.CarsByName), "First"), Assert.Single(car.GetParents()));
+        Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.CarsByName), "First"), Parent(garage, nameof(Garage.CarsByName), "Second")], car.GetParents());
     }
 
     [Fact]
-    public void WhenSubjectMovesToSeveralPositions_ThenParentIndexIsTheFirstPosition()
+    public void WhenDictionaryIsAssignedAgainWithAnEqualKey_ThenParentIndexKeepsTheStoredKeyInstance()
+    {
+        // Arrange
+        var car = new Car();
+        var storedKey = new string('A', 1);
+        var garage = new Garage(CreateContext())
+        {
+            CarsByName = new Dictionary<string, Car> { [storedKey] = car }
+        };
+
+        // Act
+        garage.CarsByName = new Dictionary<string, Car> { [new string('A', 1)] = car };
+
+        // Assert
+        Assert.Same(storedKey, Assert.Single(car.GetParents()).Index);
+    }
+
+    [Fact]
+    public void WhenSubjectUnderAnEqualKeyGainsAnotherKey_ThenItsParentEntriesStoreTheNewKeyInstances()
+    {
+        // Arrange: the second write keeps the first key instance, since its key is equal.
+        var car = new Car();
+        var garage = new Garage(CreateContext())
+        {
+            CarsByName = new Dictionary<string, Car> { [new string('A', 1)] = car }
+        };
+        garage.CarsByName = new Dictionary<string, Car> { [new string('A', 1)] = car };
+        var newKey = new string('A', 1);
+
+        // Act
+        garage.CarsByName = new Dictionary<string, Car> { [newKey] = car, ["Other"] = car };
+
+        // Assert
+        var parents = car.GetParents();
+        Assert.Equal(2, parents.Length);
+        Assert.Same(newKey, parents[0].Index);
+        Assert.Equal("Other", parents[1].Index);
+    }
+
+    [Fact]
+    public void WhenSubjectMovesToSeveralPositions_ThenItHasAParentEntryPerPosition()
     {
         // Arrange
         var car = new Car();
@@ -179,11 +220,26 @@ public class ParentIndexTests
         garage.Cars = [car, other, car];
 
         // Assert
-        Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(car.GetParents()));
+        Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.Cars), 0), Parent(garage, nameof(Garage.Cars), 2)], car.GetParents());
     }
 
     [Fact]
-    public void WhenRetainedSubjectIsAlsoAppended_ThenParentIndexStaysTheFirstPosition()
+    public void WhenSubjectHoldingAChildTwiceIsAttached_ThenTheChildHasAParentEntryPerPosition()
+    {
+        // Arrange
+        var car = new Car();
+        var garage = new Garage { Cars = [car, car] };
+        var holder = new BroadlyDeclaredHolder(CreateContext());
+
+        // Act
+        holder.BroadCars = garage;
+
+        // Assert
+        Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.Cars), 0), Parent(garage, nameof(Garage.Cars), 1)], car.GetParents());
+    }
+
+    [Fact]
+    public void WhenRetainedSubjectIsAlsoAppended_ThenItGainsAParentEntryForThePosition()
     {
         // Arrange
         var car = new Car();
@@ -194,7 +250,7 @@ public class ParentIndexTests
         garage.Cars = [car, other, car];
 
         // Assert
-        Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(car.GetParents()));
+        Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.Cars), 0), Parent(garage, nameof(Garage.Cars), 2)], car.GetParents());
     }
 
     [Fact]
@@ -479,5 +535,148 @@ public class ParentIndexTests
         // Assert
         Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(first.GetParents()));
         Assert.Equal(0, garage.TryGetRegisteredProperty(g => g.Cars)!.Children.Single(c => c.Subject == first).Index);
+    }
+
+    [Fact]
+    public void WhenCollectionIsClearedInPlaceAndAssignedWithTheSubjectTwice_ThenItKeepsOnlyItsOldIndex()
+    {
+        // Arrange
+        var context = CreateContext().WithRegistry();
+        var car = new Car();
+        var assigned = new List<Car> { car };
+        var garage = new Garage(context) { Cars = assigned };
+
+        // Act: the car is neither kept, since the cleared old value lacks it, nor attached, since its link exists.
+        assigned.Clear();
+        garage.Cars = new List<Car> { car, car };
+
+        // Assert
+        Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(car.GetParents()));
+        Assert.Equal(0, Assert.Single(garage.TryGetRegisteredProperty(g => g.Cars)!.Children).Index);
+    }
+
+    [Fact]
+    public void WhenSubjectIsAddedAgainInPlaceAndAssignedTwice_ThenItKeepsOnlyItsFirstIndex()
+    {
+        // Arrange
+        var context = CreateContext().WithRegistry();
+        var car = new Car();
+        var assigned = new List<Car> { car };
+        var garage = new Garage(context) { Cars = assigned };
+
+        // Act: the old value is read as it is now, so it already holds the car twice and nothing changed.
+        assigned.Add(car);
+        garage.Cars = new List<Car> { car, car };
+
+        // Assert
+        Assert.Equal(Parent(garage, nameof(Garage.Cars), 0), Assert.Single(car.GetParents()));
+        Assert.Equal(0, Assert.Single(garage.TryGetRegisteredProperty(g => g.Cars)!.Children).Index);
+    }
+
+    [Fact]
+    public void WhenHandlerGetsSeveralPlacesOfASubject_ThenItHasAParentEntryPerPlace()
+    {
+        // Arrange
+        var car = new Car();
+        var other = new Car();
+        var garage = new Garage(CreateContext()) { Cars = [car, other] };
+        IChildIndexHandler handler = new ParentTrackingHandler();
+
+        // Act
+        handler.ReplaceChildIndices(
+            new PropertyReference(garage, nameof(Garage.Cars)),
+            [new SubjectChild(car, 0), new SubjectChild(car, 2), new SubjectChild(other, 1)]);
+
+        // Assert
+        Assert.Equal<SubjectParent>(
+            [Parent(garage, nameof(Garage.Cars), 0), Parent(garage, nameof(Garage.Cars), 2)],
+            car.GetParents());
+        Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.Cars), 1)], other.GetParents());
+    }
+
+    [Fact]
+    public void WhenHandlerGetsOnePlaceOfASubjectWithSeveral_ThenItKeepsOneParentEntry()
+    {
+        // Arrange
+        var car = new Car();
+        var garage = new Garage(CreateContext()) { Cars = [car] };
+        IChildIndexHandler handler = new ParentTrackingHandler();
+        var property = new PropertyReference(garage, nameof(Garage.Cars));
+        handler.ReplaceChildIndices(property, [new SubjectChild(car, 0), new SubjectChild(car, 1)]);
+
+        // Act
+        handler.ReplaceChildIndices(property, [new SubjectChild(car, 1)]);
+
+        // Assert
+        Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.Cars), 1)], car.GetParents());
+    }
+
+    [Fact]
+    public void WhenSubjectWithSeveralParentEntriesLeavesTheProperty_ThenAllItsEntriesForThePropertyAreRemoved()
+    {
+        // Arrange
+        var car = new Car();
+        var garage = new Garage(CreateContext())
+        {
+            Cars = [car],
+            CarsByName = new Dictionary<string, Car> { ["Motor"] = car }
+        };
+        IChildIndexHandler handler = new ParentTrackingHandler();
+        handler.ReplaceChildIndices(
+            new PropertyReference(garage, nameof(Garage.Cars)),
+            [new SubjectChild(car, 0), new SubjectChild(car, 1)]);
+
+        // Act
+        garage.Cars = [];
+
+        // Assert
+        Assert.Equal<SubjectParent>([Parent(garage, nameof(Garage.CarsByName), "Motor")], car.GetParents());
+    }
+
+    [Fact]
+    public void WhenSubjectHasNoParent_ThenItCountsNoProperty()
+    {
+        // Arrange
+        var car = new Car(CreateContext());
+
+        // Act
+        var count = car.GetParents().CountProperties();
+
+        // Assert
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public void WhenOnePropertyHoldsSubjectAtSeveralPlaces_ThenItCountsOneProperty()
+    {
+        // Arrange
+        var car = new Car();
+        _ = new Garage(CreateContext()) { Cars = [car, car] };
+
+        // Act
+        var parents = car.GetParents();
+
+        // Assert
+        Assert.Equal(2, parents.Length);
+        Assert.Equal(1, parents.CountProperties());
+    }
+
+    [Fact]
+    public void WhenSeveralPropertiesHoldSubject_ThenItCountsEachPropertyOnce()
+    {
+        // Arrange
+        var car = new Car();
+        _ = new Garage(CreateContext())
+        {
+            Cars = [car, car],
+            CarsByName = new Dictionary<string, Car> { ["Motor"] = car }
+        };
+
+        // Act
+        var parents = car.GetParents();
+
+        // Assert
+        Assert.Equal(3, parents.Length);
+        Assert.Equal(2, parents.CountProperties());
     }
 }

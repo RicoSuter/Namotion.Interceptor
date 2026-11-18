@@ -592,7 +592,6 @@ Each automation keeps its current state, when it entered it, and the last trigge
 - A system clock that is set forward or back is noticed within a minute.
 - A list or dictionary that a device changes in place is not observed: a path through it, such as `/Room/Devices[lamp]/On`, may keep leading to what it found before until a new list or dictionary is assigned.
 - Neither is an attribute whose value a device changes without a write, such as configuration metadata that becomes secret: a path to its property keeps whether it may be read until the automation resolves the path again, such as after a subject on the path is replaced.
-- In a list or dictionary that holds or held the same device more than once, a path through another of its keys or positions, such as `/Room/Devices[spare]/On`, may keep leading to what it found before until the structure on its path changes again.
 
 ---
 

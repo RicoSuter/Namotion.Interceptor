@@ -575,6 +575,225 @@ public class OpcUaSubjectLoaderTests
     }
 
     [Fact]
+    public async Task WhenCollectionHoldsASubjectTwice_ThenEachNodeGetsItsOwnSubject()
+    {
+        // Arrange
+        var (loader, _) = CreateLoader();
+        var subject = CreateTestSubject();
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+
+        var first = new DynamicSubject(subject.Context);
+        var second = new DynamicSubject(subject.Context);
+        DynamicSubject[] items = [];
+        var property = registeredSubject.AddProperty(
+            "Items",
+            typeof(DynamicSubject[]),
+            _ => items,
+            (_, value) => items = (DynamicSubject[])value!,
+            new OpcUaNodeAttribute("Items", "urn:test", "opc")
+            {
+                NodeIdentifier = "2000",
+                NodeNamespaceUri = "urn:test"
+            });
+        property.SetValue(new[] { first, second, first });
+
+        var mockSession = CreateMockSessionWithItemsNode("Items[0]", "Items[1]", "Items[2]");
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(3, items.Length);
+        Assert.Same(first, items[0]);
+        Assert.Same(second, items[1]);
+        Assert.NotSame(first, items[2]);
+        Assert.NotSame(second, items[2]);
+    }
+
+    [Fact]
+    public async Task WhenDictionaryHoldsASubjectUnderTwoKeys_ThenEachNodeGetsItsOwnSubject()
+    {
+        // Arrange
+        var (loader, _) = CreateLoader();
+        var subject = CreateTestSubject();
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+
+        var first = new DynamicSubject(subject.Context);
+        var items = new Dictionary<string, DynamicSubject>();
+        var property = registeredSubject.AddProperty(
+            "Items",
+            typeof(Dictionary<string, DynamicSubject>),
+            _ => items,
+            (_, value) => items = (Dictionary<string, DynamicSubject>)value!,
+            new OpcUaNodeAttribute("Items", "urn:test", "opc")
+            {
+                NodeIdentifier = "2000",
+                NodeNamespaceUri = "urn:test"
+            });
+        property.SetValue(new Dictionary<string, DynamicSubject> { ["A"] = first, ["B"] = first });
+
+        var mockSession = CreateMockSessionWithItemsNode("A", "B");
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, items.Count);
+        Assert.Same(first, items["A"]);
+        Assert.NotSame(first, items["B"]);
+    }
+
+    [Fact]
+    public async Task WhenServerPublishesARepeatedSubjectOnce_ThenTheLaterSubjectsKeepTheirNodes()
+    {
+        // Arrange
+        var (loader, _) = CreateLoader();
+        var subject = CreateTestSubject();
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+
+        var first = new DynamicSubject(subject.Context);
+        var second = new DynamicSubject(subject.Context);
+        DynamicSubject[] items = [];
+        var property = registeredSubject.AddProperty(
+            "Items",
+            typeof(DynamicSubject[]),
+            _ => items,
+            (_, value) => items = (DynamicSubject[])value!,
+            new OpcUaNodeAttribute("Items", "urn:test", "opc")
+            {
+                NodeIdentifier = "2000",
+                NodeNamespaceUri = "urn:test"
+            });
+        property.SetValue(new[] { first, first, second });
+
+        // The server publishes the repeated subject at its first position only.
+        var mockSession = CreateMockSessionWithItemsNode("Items[0]", "Items[2]");
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, items.Length);
+        Assert.Same(first, items[0]);
+        Assert.Same(second, items[1]);
+    }
+
+    [Fact]
+    public async Task WhenDictionaryHoldsASubjectUnderTwoKeysBrowsedInReverse_ThenTheSubjectKeepsItsFirstKey()
+    {
+        // Arrange
+        var (loader, _) = CreateLoader();
+        var subject = CreateTestSubject();
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+
+        var first = new DynamicSubject(subject.Context);
+        var items = new Dictionary<string, DynamicSubject>();
+        var property = registeredSubject.AddProperty(
+            "Items",
+            typeof(Dictionary<string, DynamicSubject>),
+            _ => items,
+            (_, value) => items = (Dictionary<string, DynamicSubject>)value!,
+            new OpcUaNodeAttribute("Items", "urn:test", "opc")
+            {
+                NodeIdentifier = "2000",
+                NodeNamespaceUri = "urn:test"
+            });
+        property.SetValue(new Dictionary<string, DynamicSubject> { ["A"] = first, ["B"] = first });
+
+        var mockSession = CreateMockSessionWithItemsNode("B", "A");
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, items.Count);
+        Assert.Same(first, items["A"]);
+        Assert.NotSame(first, items["B"]);
+    }
+
+    [Fact]
+    public async Task WhenDictionaryHoldsASubjectUnderTwoEqualKeys_ThenTheSubjectKeepsTheKey()
+    {
+        // Arrange
+        var (loader, _) = CreateLoader();
+        var subject = CreateTestSubject();
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+
+        var first = new DynamicSubject(subject.Context);
+        var items = new Dictionary<string, DynamicSubject>();
+        var property = registeredSubject.AddProperty(
+            "Items",
+            typeof(Dictionary<string, DynamicSubject>),
+            _ => items,
+            (_, value) => items = (Dictionary<string, DynamicSubject>)value!,
+            new OpcUaNodeAttribute("Items", "urn:test", "opc")
+            {
+                NodeIdentifier = "2000",
+                NodeNamespaceUri = "urn:test"
+            });
+
+        // Two distinct but equal keys, which a dictionary comparing keys by reference holds apart.
+        property.SetValue(new Dictionary<string, DynamicSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance)
+        {
+            [new string('A', 1)] = first,
+            [new string('A', 1)] = first
+        });
+
+        var mockSession = CreateMockSessionWithItemsNode("A");
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        Assert.Single(items);
+        Assert.Same(first, items["A"]);
+    }
+
+    // The root holds an "Items" node (2000 in urn:test), which holds an object node per given name.
+    private Mock<ISession> CreateMockSessionWithItemsNode(params string[] childNames)
+    {
+        var itemsNodeId = new ExpandedNodeId("2000", "urn:test");
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            {
+                var nodeId = browseDescriptions[0].NodeId;
+                var collection = new ReferenceDescriptionCollection();
+                if (nodeId == new NodeId(1, 0))
+                {
+                    collection.Add(CreateObjectReferenceDescription("Items", itemsNodeId));
+                }
+                else if (nodeId == ExpandedNodeId.ToNodeId(itemsNodeId, mockSession.Object.NamespaceUris))
+                {
+                    for (var index = 0; index < childNames.Length; index++)
+                    {
+                        collection.Add(CreateObjectReferenceDescription(
+                            childNames[index], new ExpandedNodeId((2001 + index).ToString(), "urn:test")));
+                    }
+                }
+
+                return new BrowseResponse
+                {
+                    Results = [new BrowseResult { References = collection }],
+                    DiagnosticInfos = []
+                };
+            });
+
+        return mockSession;
+    }
+
+    [Fact]
     public async Task WhenSamePropertyAppearsViaDifferentReferenceTypes_ThenPropertyIsProcessedOnce()
     {
         // Arrange: a variable node appears twice in browse results (e.g., via HasComponent and HasProperty)

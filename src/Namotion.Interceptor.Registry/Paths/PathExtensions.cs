@@ -526,7 +526,7 @@ public static class PathExtensions
                 return rootSubject is null;
             }
 
-            if (rootSubject is not null && parents.Length > 1)
+            if (rootSubject is not null && parents.Length > 1 && parents.CountProperties() > 1)
             {
                 // First parent may not reach the root, so search all parents from the leaf.
                 frames.Reset();

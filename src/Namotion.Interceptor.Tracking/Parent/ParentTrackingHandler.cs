@@ -18,7 +18,7 @@ public class ParentTrackingHandler : ILifecycleHandler, IChildIndexHandler
         // Add parent on attach or reference added
         if (change.IsContextAttach || change.IsPropertyReferenceAdded)
         {
-            change.Subject.AddParent(change.Property.Value, change.Index);
+            change.Subject.AddParent(change.Property.Value, change.Index, change.AdditionalIndices);
             return;
         }
 
@@ -29,11 +29,11 @@ public class ParentTrackingHandler : ILifecycleHandler, IChildIndexHandler
         }
     }
 
-    void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
+    void IChildIndexHandler.ReplaceChildIndices(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
-        foreach (var child in children)
+        foreach (var group in children.GroupBySubject())
         {
-            child.Subject.UpdateParentIndex(property, child.Index);
+            group.Subject.ReplaceParentIndices(property, group.Children);
         }
     }
 }

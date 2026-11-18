@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// </summary>
 /// <param name="Subject">The subject.</param>
 /// <param name="Index">
-/// The key or position of the subject in the value: the first one where the value holds the subject
-/// more than once, and <c>null</c> where the value is the subject itself.
+/// The key or position of the subject in the value, <c>null</c> where the value is the subject itself.
+/// A subject the value holds more than once is a child at each of its keys or positions.
 /// </param>
 public readonly record struct SubjectChild(IInterceptorSubject Subject, object? Index);

@@ -287,11 +287,19 @@ internal class BrowseTool
                 var count = 0;
                 Type? firstType = null;
                 var isOneType = true;
-                foreach (var child in property.Children)
+                var children = property.Children;
+
+                // A subject held at several keys or positions is listed once when expanded, so it counts once.
+                var counted = children.Length > 1
+                    ? new HashSet<IInterceptorSubject>(children.Length, ReferenceEqualityComparer.Instance)
+                    : null;
+
+                foreach (var child in children)
                 {
                     if ((property.IsSubjectDictionary && child.Index is null) ||
                         child.Subject.TryGetRegisteredSubject() is not { } childRegistered ||
-                        !IsListed(childRegistered, in options))
+                        !IsListed(childRegistered, in options) ||
+                        counted?.Add(child.Subject) == false)
                     {
                         continue;
                     }

@@ -29,14 +29,19 @@ public class RegisteredSubject
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
     /// <summary>
-    /// Gets the current reference count (number of parent references).
+    /// Gets the current reference count: the number of properties that hold the subject.
     /// Returns 0 if subject is not attached or lifecycle tracking is not enabled.
     /// </summary>
+    /// <remarks>
+    /// <see cref="Parents"/> has an entry per key or position, so its length exceeds this count when a property holds
+    /// the subject at several places. Use <see cref="SubjectRegistryExtensions.CountProperties"/> to count the
+    /// properties of <see cref="Parents"/>.
+    /// </remarks>
     public int ReferenceCount => Subject.GetReferenceCount();
 
     /// <summary>
     /// Gets the properties which reference this subject.
-    /// One entry per property that holds the subject, with its first key or position (<c>null</c> for a subject reference).
+    /// One entry per key or position that holds the subject, grouped by property in the order of its value (<c>null</c> for a subject reference).
     /// Thread-safe; reads are lock-free once the snapshot is cached.
     /// </summary>
     public ImmutableArray<SubjectPropertyParent> Parents
@@ -145,7 +150,8 @@ public class RegisteredSubject
                     this, p.Key, p.Value.Type, p.Value.Attributes));
     }
 
-    internal void AddParent(RegisteredSubjectProperty parent, object? index)
+    // Adds an entry per place, the index first, after the entries of the other properties.
+    internal void AddParent(RegisteredSubjectProperty parent, object? index, ImmutableArray<object?> additionalIndices)
     {
         lock (_lock)
         {
@@ -159,27 +165,38 @@ public class RegisteredSubject
                 _additionalParents ??= [];
                 _additionalParents.Add(entry);
             }
+
+            if (additionalIndices.Length > 0)
+            {
+                _additionalParents ??= [];
+                foreach (var additionalIndex in additionalIndices)
+                {
+                    _additionalParents.Add(new SubjectPropertyParent { Property = parent, Index = additionalIndex });
+                }
+            }
+
             InvalidateParentsSnapshot();
         }
     }
 
-    // Matched by property alone: a subject has one parent entry per property that holds it.
-    internal void RemoveParent(RegisteredSubjectProperty property)
+    // Removes every entry of the property, one per key or position that held the subject, and returns how many.
+    internal int RemoveParent(RegisteredSubjectProperty property)
     {
         lock (_lock)
         {
+            var removed = RemoveAdditionalParents(property, 0);
             if (_firstParent.Property == property)
             {
                 PromoteFirstParentFromAdditional();
-                return;
+                return removed + 1;
             }
 
-            var position = IndexOfAdditionalParent(property);
-            if (position >= 0)
+            if (removed > 0)
             {
-                _additionalParents!.RemoveAt(position);
                 InvalidateParentsSnapshot();
             }
+
+            return removed;
         }
     }
 
@@ -201,6 +218,73 @@ public class RegisteredSubject
                 _additionalParents![position] = entry;
                 InvalidateParentsSnapshot();
             }
+        }
+    }
+
+    // Replaces the entries of the property with one per place (at least one), at the position of its first entry.
+    internal void ReplaceParentIndices(RegisteredSubjectProperty property, ReadOnlySpan<SubjectChild> places)
+    {
+        lock (_lock)
+        {
+            // The first place overwrites the first entry, so one entry and one place need no list.
+            var entry = new SubjectPropertyParent { Property = property, Index = places[0].Index };
+            int next;
+            if (_firstParent.Property == property)
+            {
+                _firstParent = entry;
+                next = 0;
+            }
+            else
+            {
+                var position = IndexOfAdditionalParent(property);
+                if (position < 0)
+                    return;
+
+                _additionalParents![position] = entry;
+                next = position + 1;
+            }
+
+            RemoveAdditionalParents(property, next);
+            InsertAdditionalParents(next, property, places[1..]);
+            InvalidateParentsSnapshot();
+        }
+    }
+
+    // Removes the entries of the property from the overflow list, starting at the given position, keeping the order
+    // of the others, and returns how many. Caller must hold _lock.
+    private int RemoveAdditionalParents(RegisteredSubjectProperty property, int start)
+    {
+        var parents = _additionalParents;
+        if (parents is null)
+            return 0;
+
+        var span = CollectionsMarshal.AsSpan(parents);
+        var kept = start;
+        for (var i = start; i < span.Length; i++)
+        {
+            if (span[i].Property != property)
+                span[kept++] = span[i];
+        }
+
+        var removed = span.Length - kept;
+        parents.RemoveRange(kept, removed);
+        return removed;
+    }
+
+    // Caller must hold _lock.
+    private void InsertAdditionalParents(int position, RegisteredSubjectProperty property, ReadOnlySpan<SubjectChild> places)
+    {
+        if (places.IsEmpty)
+            return;
+
+        var parents = _additionalParents ??= [];
+        var count = parents.Count;
+        CollectionsMarshal.SetCount(parents, count + places.Length);
+        var span = CollectionsMarshal.AsSpan(parents);
+        span[position..count].CopyTo(span[(position + places.Length)..]);
+        for (var i = 0; i < places.Length; i++)
+        {
+            span[position + i] = new SubjectPropertyParent { Property = property, Index = places[i].Index };
         }
     }
 

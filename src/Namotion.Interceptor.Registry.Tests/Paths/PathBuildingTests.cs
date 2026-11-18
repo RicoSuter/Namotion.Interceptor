@@ -336,6 +336,24 @@ public class PathBuildingTests
         // Assert
         Assert.Equal("Items[1].Name", path);
     }
+
+    [Fact]
+    public void WhenSubjectIsHeldAtTwoPositionsOfOneProperty_ThenPathFromRootGoesThroughTheFirstPosition()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new TryGetPathIndexRoot(context);
+        var repeated = new TryGetPathIndexChild();
+        var other = new TryGetPathIndexChild();
+        root.Items = [other, repeated, other, repeated];
+        var nameProperty = repeated.TryGetRegisteredSubject()!.TryGetProperty("Name")!;
+
+        // Act
+        var path = nameProperty.TryGetPath(DefaultPathProvider.Instance, root);
+
+        // Assert
+        Assert.Equal("Items[1].Name", path);
+    }
 }
 
 [Namotion.Interceptor.Attributes.InterceptorSubject]

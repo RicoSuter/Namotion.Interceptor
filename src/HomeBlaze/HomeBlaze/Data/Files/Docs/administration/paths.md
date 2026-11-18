@@ -122,7 +122,7 @@ Every subject opens in the browser of the application, and a subject with a page
 
 ## Limitations
 
-- **Parent navigation with multiple parents**: If a subject has multiple parents (rare), `../` returns null (ambiguous path).
+- **Parent navigation with several holding properties**: If several properties hold a subject (rare), `../` returns null (ambiguous path). A subject that one list or dictionary holds at several places still resolves `../` to the owner of that list or dictionary.
 - **Detached subjects**: Subjects not attached to the graph have no path.
 - **A property of the page**: On a markdown page, a property of the page itself is written without a prefix, like `Title`. With `./` before it, as in `./Title`, an expression shows nothing.
 - **Names are local to their page**: A name declared with `#name` is known on its own page only. Another page reaches a block that is directly on a page through that page, for example `/Demo/Inline.md/mymotor`.

@@ -88,6 +88,39 @@ public class BrowseToolEdgeCaseTests
     }
 
     [Fact]
+    public async Task WhenCollapsedDictionaryHoldsASubjectUnderTwoKeys_ThenCountMatchesTheExpandedList()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var repeated = new TestEqualItem { Name = "Repeated" };
+        var group = new TestMixedGroup(context);
+        group.Items = new Dictionary<string, IInterceptorSubject>
+        {
+            ["First"] = repeated,
+            ["Second"] = new TestEqualItem { Name = "Other" },
+            ["Third"] = repeated
+        };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var tool = new McpToolFactory(group, config).CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var collapsedInput = JsonSerializer.SerializeToElement(new { format = "json", depth = 0 });
+        var collapsed = JsonSerializer.SerializeToElement(await tool.Handler(collapsedInput, CancellationToken.None));
+        var expandedInput = JsonSerializer.SerializeToElement(new { format = "json", depth = 1 });
+        var expanded = JsonSerializer.SerializeToElement(await tool.Handler(expandedInput, CancellationToken.None));
+
+        // Assert
+        var expandedChildren = expanded.GetProperty("result").GetProperty("properties").GetProperty("Items").GetProperty("children");
+        var collapsedItems = collapsed.GetProperty("result").GetProperty("properties").GetProperty("Items");
+        Assert.Equal(2, expandedChildren.EnumerateObject().Count());
+        Assert.Equal(2, collapsedItems.GetProperty("count").GetInt32());
+    }
+
+    [Fact]
     public async Task WhenEnricherThrows_ThenExceptionPropagates()
     {
         // Arrange

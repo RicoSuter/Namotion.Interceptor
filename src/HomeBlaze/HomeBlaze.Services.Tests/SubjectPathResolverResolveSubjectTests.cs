@@ -268,6 +268,38 @@ public class SubjectPathResolverResolveSubjectTests : SubjectPathResolverTestBas
     }
 
     [Fact]
+    public void WhenSubjectIsHeldAtSeveralKeysOfOneProperty_ThenDotDotSlashReturnsThatParent()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context) { Name = "Root" };
+        root.Children = new Dictionary<string, TestContainer> { ["First"] = child, ["Second"] = child };
+        RootManager.Root = root;
+
+        // Act
+        var result = Resolver.ResolveSubject("../", PathStyle.Canonical, child);
+
+        // Assert
+        Assert.Same(root, result);
+    }
+
+    [Fact]
+    public void WhenSubjectIsHeldByTwoProperties_ThenDotDotSlashReturnsNull()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        root.Children = new Dictionary<string, TestContainer> { ["Other"] = child };
+        RootManager.Root = root;
+
+        // Act
+        var result = Resolver.ResolveSubject("../", PathStyle.Canonical, child);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
     public void ResolveSubject_DotDotSlash_NoRelativeTo_ReturnsNull()
     {
         // Act

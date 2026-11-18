@@ -307,12 +307,22 @@ internal class OpcUaSubjectLoader
         var childCount = childNodes.Count;
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childCount);
 
+        // Each subject once, at its first position: a server publishes a repeated subject there only.
         var existingChildren = property.Children;
+        var existingSubjects = new List<IInterceptorSubject>(existingChildren.Length);
+        var seenSubjects = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
+        foreach (var child in existingChildren)
+        {
+            if (seenSubjects.Add(child.Subject))
+            {
+                existingSubjects.Add(child.Subject);
+            }
+        }
 
         for (var i = 0; i < childCount; i++)
         {
             var (childNode, nodeId) = childNodes[i];
-            var childSubject = i < existingChildren.Length ? existingChildren[i].Subject : null;
+            var childSubject = i < existingSubjects.Count ? existingSubjects[i] : null;
 
             if (childSubject is null)
             {
@@ -351,9 +361,19 @@ internal class OpcUaSubjectLoader
     {
         var rawChildNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
         var childNodes = DistinctByResolvedNodeId(rawChildNodes, session);
-        var existingChildren = property.Children.ToDictionary(c => c.Index!, c => c.Subject);
         var entries = new Dictionary<object, IInterceptorSubject>();
         var nodesByKey = new Dictionary<object, ReferenceDescription>();
+
+        // Each subject under its first key only: a server publishes a repeated subject there only.
+        var existingChildren = new Dictionary<object, IInterceptorSubject>();
+        var seenSubjects = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
+        foreach (var child in property.Children)
+        {
+            if (seenSubjects.Add(child.Subject))
+            {
+                existingChildren.TryAdd(child.Index!, child.Subject);
+            }
+        }
 
         foreach (var (childNode, nodeId) in childNodes)
         {

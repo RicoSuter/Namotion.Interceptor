@@ -137,9 +137,13 @@ internal sealed class PropertyAttachNotifier(ISubjectRegistry? registry) : ILife
                 source.OnPropertyAdded(new PropertyReference(attribute.Subject, name));
             }
 
-            foreach (var parent in parents)
+            for (var index = 0; index < parents.Length; index++)
             {
-                source.OnPropertyAdded(new PropertyReference(parent.Property.Subject, name));
+                // The entries of a property are adjacent, one per key or position, and name the same subject.
+                if (index == 0 || parents[index].Property != parents[index - 1].Property)
+                {
+                    source.OnPropertyAdded(new PropertyReference(parents[index].Property.Subject, name));
+                }
             }
         }
     }
@@ -159,9 +163,12 @@ internal sealed class PropertyAttachNotifier(ISubjectRegistry? registry) : ILife
         }
         else if (subject is AutomationRule && subject.TryGetRegisteredSubject() is { } registered)
         {
-            foreach (var parent in registered.Parents)
+            var parents = registered.Parents;
+            for (var index = 0; index < parents.Length; index++)
             {
-                if (parent.Property.Subject is Automation owner)
+                // The entries of a property are adjacent, one per key or position, and name the same subject.
+                if (parents[index].Property.Subject is Automation owner &&
+                    (index == 0 || parents[index].Property != parents[index - 1].Property))
                 {
                     AddParentGain(owner);
                 }

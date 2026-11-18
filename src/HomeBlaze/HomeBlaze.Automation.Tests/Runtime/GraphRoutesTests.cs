@@ -337,6 +337,25 @@ public class GraphRoutesTests
         Assert.True(route.IsUnbounded);
     }
 
+    // Another key of the automation's Rules is gained only by a write of Rules, which is on the route.
+    [Fact]
+    public async Task WhenAPathLeadsUpFromARuleThatItsAutomationHoldsUnderTwoKeys_ThenThePathResolvesAndTheRouteIsBounded()
+    {
+        // Arrange
+        await using var fixture = await RouteFixture.CreateAsync();
+        var rule = fixture.Rule;
+        fixture.Automation.Rules = new Dictionary<string, AutomationRule> { ["r1"] = rule, ["r2"] = rule };
+
+        // Act
+        var (property, route) = fixture.ResolveProperty("../Rules");
+
+        // Assert
+        Assert.NotNull(property);
+        Assert.Same(fixture.Automation, property.Subject);
+        Assert.Contains(new PropertyReference(fixture.Automation, nameof(Automation.Rules)), route.Properties.ToArray());
+        Assert.False(route.IsUnbounded);
+    }
+
     // Detaching an ancestor of one of the folders gives the automation a single parent without a change of a holder.
     [Fact]
     public async Task WhenAPathLeadsUpFromAnAutomationWithSeveralParents_ThenTheRouteIsUnbounded()

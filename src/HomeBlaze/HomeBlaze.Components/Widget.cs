@@ -100,7 +100,7 @@ public partial class Widget : ITitleProvider, IConfigurable
                 return false;
             }
 
-            if (parents.Length > 1)
+            if (parents.Length > 1 && parents.CountProperties() > 1)
             {
                 break;
             }
