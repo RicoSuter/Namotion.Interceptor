@@ -299,20 +299,25 @@ namespace HomeBlaze.Services.Components
 }
 namespace HomeBlaze.Services.Diagnostics
 {
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("Article")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     [System.ComponentModel.Description("Reports recent warnings and errors of the current process")]
     [System.ComponentModel.DisplayName("Logs")]
-    public class HostLogs : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public class HostLogs : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
+        public HostLogs(HomeBlaze.Services.Diagnostics.RecentLogStore? recentLogStore = null, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Services.Diagnostics.HostLogs>? logger = null) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.State(Position=401)]
-        public int Capacity { get; }
+        [System.ComponentModel.DataAnnotations.Range(0, 10000)]
+        public int Capacity { get; set; }
         [HomeBlaze.Abstractions.Attributes.State(Position=402)]
         public int EntryCount { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=400)]
-        public Microsoft.Extensions.Logging.LogLevel MinimumLevel { get; }
+        public Microsoft.Extensions.Logging.LogLevel? MinimumLevel { get; set; }
         [Namotion.Interceptor.Attributes.Derived]
         public string Title { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=404)]
@@ -321,6 +326,7 @@ namespace HomeBlaze.Services.Diagnostics
         public long TotalWarnings { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Changes the lowest level kept in recent logs and saves it; null restores the defa" +
             "ult, Warning. Levels below the Logging:LogLevel configuration of the host, Infor" +
             "mation by default, never arrive. Does not affect other log outputs", Icon="Tune", Position=2, Title="Change Log Level")]
@@ -430,6 +436,7 @@ namespace HomeBlaze.Services.Diagnostics
         public bool IsContainer { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=950)]
         public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.State(Position=431)]
         public HomeBlaze.Services.Diagnostics.HostLogs Logs { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=400)]
@@ -450,10 +457,6 @@ namespace HomeBlaze.Services.Diagnostics
         [HomeBlaze.Abstractions.Attributes.State(Position=403)]
         [System.ComponentModel.Category("System")]
         public int ProcessorCount { get; }
-        [HomeBlaze.Abstractions.Attributes.Configuration]
-        public int RecentLogCapacity { get; set; }
-        [HomeBlaze.Abstractions.Attributes.Configuration]
-        public Microsoft.Extensions.Logging.LogLevel? RecentLogMinimumLevel { get; set; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
         public HomeBlaze.Abstractions.ServiceStatus Status { get; }
         [HomeBlaze.Abstractions.Attributes.State]

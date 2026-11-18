@@ -4,11 +4,9 @@ using System.Runtime.InteropServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
-using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Tracking.Parent;
 using DiagnosticsProcess = System.Diagnostics.Process;
 
 namespace HomeBlaze.Services.Diagnostics;
@@ -37,10 +35,6 @@ public partial class HostSystem : BackgroundService,
     private static readonly TimeSpan MaximumPollingDelay = TimeSpan.FromMilliseconds(int.MaxValue);
 
     private readonly ISystemMetricsReader? _reader;
-    private readonly RecentLogStore _recentLogStore;
-    // Serializes reading the recent log settings and applying them, so the store never ends up with values read
-    // before a concurrent change.
-    private readonly Lock _recentLogConfigurationLock = new();
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _pollSignal = new(0, 1);
 
@@ -54,18 +48,6 @@ public partial class HostSystem : BackgroundService,
 
     [Configuration]
     public partial TimeSpan PollingInterval { get; set; }
-
-    /// <summary>
-    /// The lowest level <see cref="Logs"/> keeps, Warning when null.
-    /// </summary>
-    [Configuration]
-    public partial LogLevel? RecentLogMinimumLevel { get; set; }
-
-    /// <summary>
-    /// The most entries <see cref="Logs"/> keeps, at most 10,000; 0 keeps none.
-    /// </summary>
-    [Configuration]
-    public partial int RecentLogCapacity { get; set; }
 
     [State(Position = 400)]
     [Category("System")]
@@ -130,6 +112,10 @@ public partial class HostSystem : BackgroundService,
     [State(Position = 430)]
     public partial HostProcess Process { get; internal set; }
 
+    /// <summary>
+    /// The recent log entries of the process; its configuration is saved with this subject.
+    /// </summary>
+    [Configuration]
     [State(Position = 431)]
     public partial HostLogs Logs { get; internal set; }
 
@@ -163,12 +149,9 @@ public partial class HostSystem : BackgroundService,
     {
         _reader = reader;
         _logger = logger;
-        _recentLogStore = recentLogStore ?? new RecentLogStore();
 
         Name = string.Empty;
         PollingInterval = TimeSpan.FromSeconds(15);
-        RecentLogMinimumLevel = null;
-        RecentLogCapacity = RecentLogStore.DefaultCapacity;
 
         MachineName = Environment.MachineName;
         OperatingSystemName = SystemInformation.ReadOperatingSystemName();
@@ -184,47 +167,34 @@ public partial class HostSystem : BackgroundService,
         Uptime = null;
 
         Process = new HostProcess(collectGarbage, RequestPoll);
-        Logs = new HostLogs(_recentLogStore, ChangeLogLevelAsync);
+        Logs = new HostLogs(recentLogStore ?? new RecentLogStore(), logger);
 
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
         LastUpdated = null;
     }
 
+    // A configuration with "logs": null keeps the current Logs, and a replaced one stops configuring the store.
+    partial void OnLogsChanging(ref HostLogs newValue, ref bool cancel)
+    {
+        if (newValue is null)
+        {
+            cancel = true;
+            return;
+        }
+
+        if (_Logs is { } current && !ReferenceEquals(current, newValue))
+        {
+            current.MarkReplaced();
+        }
+    }
+
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        ApplyRecentLogConfiguration();
+        // A reload replaces the nested Logs and applies only this subject.
+        Logs.ApplyConfiguration();
         RequestPoll();
         return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// Sets <see cref="RecentLogMinimumLevel"/>, applies it and saves the configuration when a storage holds it.
-    /// </summary>
-    internal async Task ChangeLogLevelAsync(LogLevel? minimumLevel, CancellationToken cancellationToken)
-    {
-        lock (_recentLogConfigurationLock)
-        {
-            RecentLogMinimumLevel = minimumLevel;
-            ApplyRecentLogConfiguration();
-        }
-
-        RequestPoll();
-
-        var configurationWriter = this.TryGetFirstParent<IConfigurationWriter>();
-        if (configurationWriter is null ||
-            !await configurationWriter.WriteConfigurationAsync(this, cancellationToken))
-        {
-            _logger.LogWarning("The recent log level was changed but not saved, so it is lost on restart");
-        }
-    }
-
-    private void ApplyRecentLogConfiguration()
-    {
-        lock (_recentLogConfigurationLock)
-        {
-            _recentLogStore.Configure(RecentLogMinimumLevel, RecentLogCapacity);
-        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -233,7 +203,7 @@ public partial class HostSystem : BackgroundService,
         using var currentProcess = DiagnosticsProcess.GetCurrentProcess();
 
         // Loading the configuration from its file does not apply it.
-        ApplyRecentLogConfiguration();
+        Logs.ApplyConfiguration();
 
         _cpuWindow.Reset();
         Process.ResetBaseline();

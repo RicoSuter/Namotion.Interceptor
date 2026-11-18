@@ -22,6 +22,12 @@ public sealed class RecentLogStore
     private readonly Lock _lock = new();
     private readonly TimeProvider _timeProvider;
 
+    /// <summary>
+    /// Serializes reading a configuration and applying it with <see cref="Configure"/> across all subjects that
+    /// configure this store, so the store never ends up with values read before a concurrent change.
+    /// </summary>
+    internal Lock ConfigurationLock { get; } = new();
+
     // Guarded by _lock: a ring of _count entries starting at the oldest, _start.
     private RecentLogEntry[] _entries;
     private int _start;
