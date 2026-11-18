@@ -1,5 +1,3 @@
-@using System.Reactive.Concurrency
-@using System.Reactive.Linq
 @using Microsoft.AspNetCore.WebUtilities
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Services.Metadata
@@ -14,6 +12,7 @@
 @inject IDialogService DialogService
 @inject PropertyRowLayoutService RowLayout
 @inject BrowserPreferences Preferences
+@inject SubjectPathResolver PathResolver
 
 @implements IDisposable
 @implements IAsyncDisposable
@@ -21,6 +20,9 @@
 @* The panes take the height the breadcrumbs leave, which wrap on a narrow view. 66px is the top padding of the main
    content below the app bar plus 2px of slack. *@
 <div style="display: flex; flex-direction: column; height: calc(100vh - 66px);">
+    @* Read in the render, so that a change of the graph, such as a replaced subject of the panes, renders the browser
+       again, see FollowReplacedSubjectsAfterRender. *@
+    @{ _renderedPathsVersion = PathResolver.PathsVersion; }
     <MudStack Row="true" AlignItems="AlignItems.Center" Class="browser-toolbar mb-2" Style="flex-shrink: 0;">
         <MudBreadcrumbs Items="_breadcrumbs" />
         <MudSpacer />
@@ -128,11 +130,8 @@
     private IJSObjectReference? _paneFitting;
     private ISubjectRegistry? _subjectRegistry;
 
-    // Read by the filter of the subscription inside every property write of the graph, so it is replaced and never
-    // changed, see PublishPaneLinks.
-    private SubjectChainLinks _paneLinks = SubjectChainLinks.Empty;
-    private IDisposable? _changeSubscription;
-    private int _isFollowQueued;
+    private long _renderedPathsVersion;
+    private long _followedPathsVersion = -1;
 
     protected override void OnInitialized()
     {
@@ -166,6 +165,7 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        var hasFollowed = FollowReplacedSubjectsAfterRender();
         try
         {
             if (firstRender)
@@ -186,7 +186,7 @@
             }
 
             // The panes are fitted before the first scroll, which a render during the import above leaves to this one.
-            if (_scrollToLastPane && _jsModule != null && !_disposed)
+            if (!hasFollowed && _scrollToLastPane && _jsModule != null && !_disposed)
             {
                 _scrollToLastPane = false;
                 var scrollVersion = _scrollVersion;
@@ -256,7 +256,6 @@
     {
         var previousPaneCount = _panes.Count + _placeholderCount;
         BuildPanesFromPath();
-        OnPanesChanged();
 
         // A shorter path leaves placeholders behind like closed panes do, see RemovePanesFrom.
         _placeholderCount = Math.Max(0, previousPaneCount - _panes.Count);
@@ -412,7 +411,6 @@
         // The new pane takes the place of the first pane it replaced.
         _placeholderCount = Math.Max(0, _placeholderCount - 1);
         ScrollToLastPaneAfterRender();
-        OnPanesChanged();
         UpdateUrl();
         StateHasChanged();
     }
@@ -423,7 +421,6 @@
         if (paneIndex <= 0) return; // Can't close the root pane
 
         RemovePanesFrom(paneIndex);
-        OnPanesChanged();
         UpdateUrl();
         StateHasChanged();
     }
@@ -468,7 +465,6 @@
             if (paneIndex > 0)
             {
                 RemovePanesFrom(paneIndex);
-                OnPanesChanged();
                 UpdateUrl();
                 StateHasChanged();
             }
@@ -484,58 +480,29 @@
 
     private void UpdateUrl()
     {
-        var pathParts = new List<string>();
+        RebuildBreadcrumbs();
 
-        // Skip the first pane (root) when building path
-        foreach (var pane in _panes.Skip(1))
-        {
-            // For [InlinePaths] properties, only add the index (key), not the property name
-            var parentPane = _panes[_panes.IndexOf(pane) - 1];
-            var isInlinePathsProperty = pane.PropertyName != null &&
-                InlinePathsAttribute.IsInlinePathsProperty(parentPane.Subject.GetType(), pane.PropertyName);
-
-            if (isInlinePathsProperty && pane.Index != null)
-            {
-                // Only add the key for [InlinePaths] properties
-                pathParts.Add(PathExtensions.FormatPathIndex(pane.Index));
-            }
-            else
-            {
-                // Add property name
-                if (pane.PropertyName != null)
-                {
-                    pathParts.Add(pane.PropertyName);
-                }
-
-                // Add index/key if present (for collections/dictionaries)
-                if (pane.Index != null)
-                {
-                    pathParts.Add(PathExtensions.FormatPathIndex(pane.Index));
-                }
-            }
-        }
-
-        var url = BrowserUrls.Create(pathParts);
+        // The last breadcrumb links to the last pane.
+        var url = _breadcrumbs[^1].Href!;
 
         // Store the URL so OnLocationChanged knows to ignore this navigation
         _lastNavigatedUrl = url;
         NavigationManager.NavigateTo(url, replace: true);
-
-        RebuildBreadcrumbs();
     }
 
     private void RebuildBreadcrumbs()
     {
         _breadcrumbs.Clear();
-        _breadcrumbs.Add(new BreadcrumbItem("Root", "/browser"));
+        _breadcrumbs.Add(new BreadcrumbItem("Root", BrowserUrls.Root));
 
         var breadcrumbParts = new List<string>();
-        foreach (var pane in _panes.Skip(1))
+        for (var i = 1; i < _panes.Count; i++)
         {
+            var pane = _panes[i];
+
             // For [InlinePaths] properties, only add the index (key), not the property name
-            var parentPane = _panes[_panes.IndexOf(pane) - 1];
             var isInlinePathsProp = pane.PropertyName != null &&
-                InlinePathsAttribute.IsInlinePathsProperty(parentPane.Subject.GetType(), pane.PropertyName);
+                InlinePathsAttribute.IsInlinePathsProperty(_panes[i - 1].Subject.GetType(), pane.PropertyName);
 
             if (isInlinePathsProp && pane.Index != null)
             {
@@ -558,70 +525,31 @@
         }
     }
 
-    // Called after every change of the panes. A write that replaced a subject of the panes before their links were
-    // published passed the filter unnoticed, so the panes are checked against the graph after each publish.
-    private void OnPanesChanged()
+    // Follows the panes to the graph once per version of its paths: a render on a newer version follows a change that
+    // was made after the panes were resolved, also one that a click on a not yet rendered child list missed. Returns
+    // whether the panes changed, which renders them again.
+    private bool FollowReplacedSubjectsAfterRender()
     {
-        do
+        if (_renderedPathsVersion == _followedPathsVersion || _disposed)
         {
-            PublishPaneLinks();
-        }
-        while (FollowReplacedSubjects());
-    }
-
-    private void PublishPaneLinks()
-    {
-        if (_changeSubscription is null && !_disposed && RootContext is { } context)
-        {
-            // The filter runs inside every property write of the graph and only compares references. What passes is
-            // handled off the write, which every other writer of the subject waits for.
-            _changeSubscription = context
-                .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-                .Where(change => Volatile.Read(ref _paneLinks).Contains(change.Property))
-                .Subscribe(_ => QueueFollowReplacedSubjects());
+            return false;
         }
 
-        // Exchanged rather than assigned: the full fence keeps the reads of the graph that follow, in
-        // FollowReplacedSubjects, after the links are visible to the filter of a write on another thread.
-        Interlocked.Exchange(ref _paneLinks, SubjectChainLinks.Create(_panes, static pane => pane.Subject, static pane => pane.PropertyName!));
-    }
-
-    private void QueueFollowReplacedSubjects()
-    {
-        // One check covers all writes until it starts, such as the replacement of every nested subject of a reload.
-        if (Interlocked.Exchange(ref _isFollowQueued, 1) == 0)
+        _followedPathsVersion = _renderedPathsVersion;
+        var paneCount = _panes.Count;
+        if (!FollowReplacedSubjects())
         {
-            ThreadPool.UnsafeQueueUserWorkItem(static browser => _ = browser.FollowReplacedSubjectsOnRendererAsync(), this, preferLocal: false);
+            return false;
         }
-    }
 
-    private async Task FollowReplacedSubjectsOnRendererAsync()
-    {
-        try
+        // Closed like a deleted subject's pane, so that the URL and a reload show what is left.
+        if (_panes.Count < paneCount)
         {
-            await InvokeAsync(() =>
-            {
-                // Reset with a full fence before the graph is read, so that a later write queues another check.
-                Interlocked.Exchange(ref _isFollowQueued, 0);
-                var paneCount = _panes.Count;
-                if (!_disposed && FollowReplacedSubjects())
-                {
-                    OnPanesChanged();
-
-                    // Closed like a deleted subject's pane, so that the URL and a reload show what is left.
-                    if (_panes.Count < paneCount)
-                    {
-                        UpdateUrl();
-                    }
-
-                    StateHasChanged();
-                }
-            });
+            UpdateUrl();
         }
-        catch (ObjectDisposedException)
-        {
-            // The circuit is gone, and the panes with it.
-        }
+
+        StateHasChanged();
+        return true;
     }
 
     // Puts the subject that each pane is reached through now in the place of the one it shows, and closes the panes
@@ -633,21 +561,22 @@
         {
             var pane = _panes[i];
             var property = _panes[i - 1].Subject.TryGetRegisteredSubject()?.TryGetProperty(pane.PropertyName!);
-            var subject = property is { CanContainSubjects: true } ? FindChild(property, pane.Index) : null;
+            if (property is not { CanContainSubjects: true } || FindChild(property, pane.Index) is not { } subject)
+            {
+                RemovePanesFrom(i);
+
+                // The highlighted property is one of the last pane, which is closed now.
+                _highlightedProperty = null;
+                hasChanged = true;
+                break;
+            }
+
             if (ReferenceEquals(subject, pane.Subject))
             {
                 continue;
             }
 
             hasChanged = true;
-            if (subject is null || property is null)
-            {
-                RemovePanesFrom(i);
-
-                // The highlighted property is one of the last pane, which is closed now.
-                _highlightedProperty = null;
-                break;
-            }
 
             // Same path and so the same element: the row keeps its scroll position.
             _panes[i] = new SubjectPane
@@ -680,7 +609,6 @@
     public void Dispose()
     {
         _disposed = true;
-        _changeSubscription?.Dispose();
         NavigationManager.LocationChanged -= OnLocationChanged;
         RowLayout.OnChange -= OnRowLayoutChanged;
     }

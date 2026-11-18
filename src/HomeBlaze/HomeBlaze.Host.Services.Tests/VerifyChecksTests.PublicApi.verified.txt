@@ -58,12 +58,6 @@ namespace HomeBlaze.Host.Services.Navigation
         public System.Collections.Generic.IEnumerable<HomeBlaze.Host.Services.Navigation.NavigationItem> GetChildItems(Namotion.Interceptor.IInterceptorSubject parent) { }
         public System.Collections.Immutable.ImmutableArray<HomeBlaze.Host.Services.Navigation.NavigationItem> GetRecentAppBarItems(Namotion.Interceptor.IInterceptorSubject root, System.TimeSpan maximumAge) { }
     }
-    public sealed class SubjectChainLinks
-    {
-        public static HomeBlaze.Host.Services.Navigation.SubjectChainLinks Empty { get; }
-        public bool Contains(in Namotion.Interceptor.PropertyReference property) { }
-        public static HomeBlaze.Host.Services.Navigation.SubjectChainLinks Create<TItem>(System.Collections.Generic.IReadOnlyList<TItem> chain, System.Func<TItem, Namotion.Interceptor.IInterceptorSubject> getSubject, System.Func<TItem, string> getPropertyName) { }
-    }
 }
 namespace HomeBlaze.Host.Services
 {
