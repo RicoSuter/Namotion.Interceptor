@@ -467,7 +467,7 @@ public class OpcUaClientSecurityConfigurationTests : IDisposable
         // Assert
         Assert.Same(innerException, error.InnerException);
         Assert.Contains($"does not trust this client's certificate {clientCertificate.Thumbprint}", error.Message);
-        Assert.Contains(Path.Combine(_storePath, "own", "certs"), error.Message);
+        Assert.Contains(Path.Combine($"{_storePath}/own", "certs"), error.Message);
         Assert.DoesNotContain(nameof(OpcUaClientConfiguration.AutoAcceptUntrustedCertificates), error.Message);
     }
 
@@ -507,7 +507,7 @@ public class OpcUaClientSecurityConfigurationTests : IDisposable
 
         // Assert
         Assert.Contains($"this client's certificate {clientCertificate.Thumbprint}", error.Message);
-        Assert.Contains(Path.Combine(_storePath, "own", "certs"), error.Message);
+        Assert.Contains(Path.Combine($"{_storePath}/own", "certs"), error.Message);
         Assert.DoesNotContain(serverCertificate.Thumbprint, error.Message);
     }
 
