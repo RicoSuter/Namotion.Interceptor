@@ -12,7 +12,6 @@
 @inject IDialogService DialogService
 @inject PropertyRowLayoutService RowLayout
 @inject BrowserPreferences Preferences
-@inject SubjectPathResolver PathResolver
 
 @implements IDisposable
 @implements IAsyncDisposable
@@ -20,9 +19,7 @@
 @* The panes take the height the breadcrumbs leave, which wrap on a narrow view. 66px is the top padding of the main
    content below the app bar plus 2px of slack. *@
 <div style="display: flex; flex-direction: column; height: calc(100vh - 66px);">
-    @* Read in the render, so that a change of the graph, such as a replaced subject of the panes, renders the browser
-       again, see FollowReplacedSubjectsAfterRender. *@
-    @{ _renderedPathsVersion = PathResolver.PathsVersion; }
+    <PathsChangeListener OnPathsChanged="OnPathsChanged" />
     <MudStack Row="true" AlignItems="AlignItems.Center" Class="browser-toolbar mb-2" Style="flex-shrink: 0;">
         <MudBreadcrumbs Items="_breadcrumbs" />
         <MudSpacer />
@@ -130,9 +127,6 @@
     private IJSObjectReference? _paneFitting;
     private ISubjectRegistry? _subjectRegistry;
 
-    private long _renderedPathsVersion;
-    private long _followedPathsVersion = -1;
-
     protected override void OnInitialized()
     {
         base.OnInitialized();
@@ -165,7 +159,6 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        var hasFollowed = FollowReplacedSubjectsAfterRender();
         try
         {
             if (firstRender)
@@ -186,7 +179,7 @@
             }
 
             // The panes are fitted before the first scroll, which a render during the import above leaves to this one.
-            if (!hasFollowed && _scrollToLastPane && _jsModule != null && !_disposed)
+            if (_scrollToLastPane && _jsModule != null && !_disposed)
             {
                 _scrollToLastPane = false;
                 var scrollVersion = _scrollVersion;
@@ -411,6 +404,9 @@
         // The new pane takes the place of the first pane it replaced.
         _placeholderCount = Math.Max(0, _placeholderCount - 1);
         ScrollToLastPaneAfterRender();
+
+        // The child list can have been rendered before its subject was replaced, after the paths change was handled.
+        FollowReplacedSubjects();
         UpdateUrl();
         StateHasChanged();
     }
@@ -525,21 +521,13 @@
         }
     }
 
-    // Follows the panes to the graph once per version of its paths: a render on a newer version follows a change that
-    // was made after the panes were resolved, also one that a click on a not yet rendered child list missed. Returns
-    // whether the panes changed, which renders them again.
-    private bool FollowReplacedSubjectsAfterRender()
+    // Renders the browser only when one of its panes changed, not on every change of the paths in the graph.
+    private void OnPathsChanged()
     {
-        if (_renderedPathsVersion == _followedPathsVersion || _disposed)
-        {
-            return false;
-        }
-
-        _followedPathsVersion = _renderedPathsVersion;
         var paneCount = _panes.Count;
-        if (!FollowReplacedSubjects())
+        if (_disposed || !FollowReplacedSubjects())
         {
-            return false;
+            return;
         }
 
         // Closed like a deleted subject's pane, so that the URL and a reload show what is left.
@@ -549,7 +537,6 @@
         }
 
         StateHasChanged();
-        return true;
     }
 
     // Puts the subject that each pane is reached through now in the place of the one it shows, and closes the panes
