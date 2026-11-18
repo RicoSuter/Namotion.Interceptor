@@ -7,7 +7,7 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
-using static Namotion.Interceptor.Tracking.Tests.Change.DerivedPropertyTestHelpers;
+using static Namotion.Interceptor.Tracking.Tests.Derived.DerivedPropertyTestHelpers;
 
 namespace Namotion.Interceptor.Tracking.Tests.Derived;
 

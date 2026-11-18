@@ -2,12 +2,14 @@ using System.Reactive.Concurrency;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Derived;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
+using Namotion.Interceptor.Tracking.Tests.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
-using static Namotion.Interceptor.Tracking.Tests.Change.DerivedPropertyTestHelpers;
+using static Namotion.Interceptor.Tracking.Tests.Derived.DerivedPropertyTestHelpers;
 
-namespace Namotion.Interceptor.Tracking.Tests.Change;
+namespace Namotion.Interceptor.Tracking.Tests.Derived;
 
 [Collection(PerPropertySubscriptionCollection.Name)]
 public class DerivedPropertyAttachTests

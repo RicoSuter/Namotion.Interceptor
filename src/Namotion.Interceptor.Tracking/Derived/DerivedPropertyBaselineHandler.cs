@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
-namespace Namotion.Interceptor.Tracking.Change;
+namespace Namotion.Interceptor.Tracking.Derived;
 
 /// <summary>
 /// Records the value of each derived property of a subject that attaches, as one of the first lifecycle handlers,
