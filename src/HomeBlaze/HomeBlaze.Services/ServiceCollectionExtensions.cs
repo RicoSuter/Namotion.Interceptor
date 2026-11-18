@@ -1,6 +1,7 @@
 using HomeBlaze.Services.Clients;
 using HomeBlaze.Services.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using HomeBlaze.Components.Abstractions.TimeZones;
@@ -38,6 +39,11 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System,
             serviceProvider.GetService<ILogger<ClientConnectionService>>() ?? NullLogger<ClientConnectionService>.Instance));
         services.AddScoped<ITimeZoneDisplay, TimeZoneDisplayService>();
+        // The logging factory creates the provider when the host builds it, so the store fills from startup on,
+        // before a host system subject configures it.
+        services.TryAddSingleton(serviceProvider => new RecentLogStore(serviceProvider.GetService<TimeProvider>()));
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ILoggerProvider, RecentLogLoggerProvider>(
+            serviceProvider => new RecentLogLoggerProvider(serviceProvider.GetRequiredService<RecentLogStore>())));
         // It subscribes before any hosted service starts and unsubscribes after all have stopped. Registered
         // ahead of the HomeBlaze services so it also covers their lifecycle callbacks, but not those of
         // services registered earlier, such as by AddServiceDefaults.
