@@ -65,8 +65,7 @@ internal sealed class OutboundWriter
             var requestHeader = new RequestHeader();
             WriteResponse writeResponse;
 
-            // Without the session's lifetime, a write on a session whose channel the client disposed would hold
-            // the write retry queue until the operation timeout, see SessionManager.CurrentSessionWithLifetime.
+            // Keeps a write on a session that is no longer current from holding the write retry queue, see SessionManager.KillTransportChannel.
             using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, sessionLifetime);
             try
             {

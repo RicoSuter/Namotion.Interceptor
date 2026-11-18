@@ -552,7 +552,7 @@ If the session dies without the SDK handler being active (e.g., after `KillAsync
 2. Triggers manual reconnection: fresh session, new subscriptions, full state read
 3. Full consistency is restored
 
-In every flow, the reads and writes still in flight on a session that is abandoned, replaced or cleared are canceled. The SDK does not complete a request on a transport channel the client disposes, so such a write would otherwise wait for `OperationTimeout` and hold up every later write. A canceled write fails and is parked in the write retry queue.
+In every flow, the connector's own value reads and writes still in flight on a session that is abandoned, replaced or cleared are canceled instead of waiting for `OperationTimeout`. A canceled write fails and is parked in the write retry queue. Other calls on the session, including calls made through `CurrentSession`, are not canceled this way and can wait until `OperationTimeout`.
 
 #### Stall Detection
 

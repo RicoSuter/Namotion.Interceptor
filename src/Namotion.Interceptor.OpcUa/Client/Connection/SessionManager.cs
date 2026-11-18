@@ -57,8 +57,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Gets the current session with a token that is canceled once that session stops being current, or
-    /// <c>default</c> without a session. A request sent on the session observes the token, because the SDK
-    /// does not complete a request in flight on a channel the client disposes.
+    /// <c>default</c> without a session, see <see cref="KillTransportChannel"/>.
     /// </summary>
     internal (ISession? Session, CancellationToken Lifetime) CurrentSessionWithLifetime =>
         Volatile.Read(ref _sessionLease) is { } lease ? (lease.Session, lease.Lifetime) : default;
@@ -418,8 +417,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
         if (oldSession is not null)
         {
-            // Requests still in flight on the old session were canceled when SetSession ended its lifetime;
-            // disposing its channel stops its traffic but does not complete them.
             oldSession.KeepAlive -= OnKeepAlive;
             KillTransportChannel(oldSession);
             _sessionsToDispose.Enqueue(oldSession);
@@ -757,8 +754,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             // to a dead transport, which can disrupt the server's publish pipeline for other clients.
             await DisposeSessionAsync(sessionToDispose, cancellationToken).ConfigureAwait(false);
 
-            // Kill the transport in case the close left it open. Requests in flight on it were canceled when
-            // SetSession ended the session's lifetime.
+            // Kill the transport in case the close left it open.
             KillTransportChannel(sessionToDispose);
         }
     }
@@ -1029,9 +1025,12 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Kills a session's transport channel immediately (synchronous), which stops its traffic.
-    /// The SDK drops the requests in flight on the channel without completing them, so they end only at
-    /// their operation timeout or through their cancellation token; the client's value reads and writes
-    /// observe the session lifetime that <see cref="SetSession"/> cancels.
+    /// The SDK drops the requests in flight on the channel without completing them, so each ends only at its
+    /// operation timeout or through its cancellation token. The connector's own value reads and writes link
+    /// their token to the session lifetime that <see cref="SetSession"/> cancels, so they end promptly; other
+    /// calls on the session, including those made through <see cref="CurrentSession"/>, are not canceled this
+    /// way and can wait until the operation timeout. Closing the session first, as a clear does, fails them
+    /// instead.
     /// </summary>
     private void KillTransportChannel(Session session)
     {
@@ -1117,8 +1116,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             try { pendingSession.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing pending old session."); }
         }
 
-        // Cleared before the close, as in ClearSessionAsync, so no reader takes a closing session and its
-        // requests in flight are canceled even when the close times out.
+        // Cleared before the close, as in ClearSessionAsync, so no reader takes a closing session and the
+        // connector's value reads and writes on it are canceled even when the close times out.
         Session? sessionToDispose;
         lock (_reconnectingLock)
         {
@@ -1156,7 +1155,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// after releasing any locks (notably <see cref="_reconnectingLock"/>) so that user-supplied event
     /// handlers run without those locks held.
     /// </summary>
-    private void SetSession(Session? newSession)
+    internal void SetSession(Session? newSession)
     {
         SessionLease? oldLease;
         SessionLease? newLease = null;

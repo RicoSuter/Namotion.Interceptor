@@ -41,8 +41,7 @@ internal static class OpcUaValueReader
         var requestHeader = new RequestHeader();
         ReadResponse response;
 
-        // The SDK does not complete a request in flight on a channel the client disposes, see
-        // SessionManager.CurrentSessionWithLifetime.
+        // Ends the read once its session is no longer current, see SessionManager.KillTransportChannel.
         using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, sessionLifetime);
         try
         {

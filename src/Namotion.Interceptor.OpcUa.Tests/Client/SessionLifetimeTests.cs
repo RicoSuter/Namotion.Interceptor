@@ -15,10 +15,8 @@ using static Namotion.Interceptor.OpcUa.Tests.Client.ClientSourceTestFactory;
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
 /// <summary>
-/// A request in flight on a session the client stops using must end promptly. The SDK does not guarantee
-/// that: disposing a transport channel drops its pending requests without completing them, so such a request
-/// ends only at its operation timeout or when its token is canceled. Each session therefore carries a lifetime
-/// token that is canceled once the session stops being current.
+/// The session's lifetime token: when it ends as the session stops being current, and that the connector's value reads and
+/// writes on such a session end promptly through it.
 /// </summary>
 public class SessionLifetimeTests
 {
@@ -32,7 +30,7 @@ public class SessionLifetimeTests
 
         var channel = new OrphaningTransportChannel(configuration.ResolvedTelemetryContext);
         var session = CreateConnectedSession(channel, configuration.ResolvedTelemetryContext);
-        SetSession(sessionManager, session);
+        sessionManager.SetSession(session);
 
         var writer = new OutboundWriter(
             () => sessionManager.CurrentSessionWithLifetime,
@@ -102,11 +100,11 @@ public class SessionLifetimeTests
 
         try
         {
-            SetSession(sessionManager, firstSession);
+            sessionManager.SetSession(firstSession);
             var (_, firstLifetime) = sessionManager.CurrentSessionWithLifetime;
 
             // Act
-            SetSession(sessionManager, secondSession);
+            sessionManager.SetSession(secondSession);
             var (currentSession, secondLifetime) = sessionManager.CurrentSessionWithLifetime;
 
             // Assert
@@ -117,7 +115,7 @@ public class SessionLifetimeTests
         }
         finally
         {
-            SetSession(sessionManager, null);
+            sessionManager.SetSession(null);
         }
     }
 
@@ -133,11 +131,11 @@ public class SessionLifetimeTests
 
         try
         {
-            SetSession(sessionManager, session);
+            sessionManager.SetSession(session);
             var (_, lifetime) = sessionManager.CurrentSessionWithLifetime;
 
             // Act
-            SetSession(sessionManager, session);
+            sessionManager.SetSession(session);
 
             // Assert
             Assert.False(lifetime.IsCancellationRequested, "Setting the current session again canceled its lifetime.");
@@ -145,7 +143,7 @@ public class SessionLifetimeTests
         }
         finally
         {
-            SetSession(sessionManager, null);
+            sessionManager.SetSession(null);
         }
     }
 
@@ -158,17 +156,50 @@ public class SessionLifetimeTests
         await using var sessionManager = CreateSessionManager(source, configuration);
         var telemetry = configuration.ResolvedTelemetryContext;
         using var session = CreateConnectedSession(new OrphaningTransportChannel(telemetry), telemetry);
-        SetSession(sessionManager, session);
+        sessionManager.SetSession(session);
         var (_, lifetime) = sessionManager.CurrentSessionWithLifetime;
 
         // Act
-        SetSession(sessionManager, null);
+        sessionManager.SetSession(null);
 
         // Assert
         Assert.True(lifetime.IsCancellationRequested, "The cleared session's lifetime was not canceled.");
         var (currentSession, currentLifetime) = sessionManager.CurrentSessionWithLifetime;
         Assert.Null(currentSession);
         Assert.False(currentLifetime.CanBeCanceled);
+    }
+
+    [Fact]
+    public async Task WhenTheSessionManagerIsDisposed_ThenTheSessionIsClearedBeforeItIsClosed()
+    {
+        // Arrange
+        var configuration = CreateConfigurationWithoutBackgroundReads();
+        await using var source = CreateClientSource(configuration: configuration);
+        var sessionManager = CreateSessionManager(source, configuration);
+        var telemetry = configuration.ResolvedTelemetryContext;
+
+        var sessionChangedToNull = false;
+        source.CurrentSessionChanged += (_, eventArgs) => sessionChangedToNull |= eventArgs.CurrentSession is null;
+
+        (bool HasCurrentSession, bool LifetimeEnded, bool SessionChangedToNull)? stateAtClose = null;
+        var lifetime = CancellationToken.None;
+        var channel = new FailingTransportChannel(telemetry, request =>
+        {
+            if (request is CloseSessionRequest)
+            {
+                stateAtClose ??= (sessionManager.CurrentSession is not null, lifetime.IsCancellationRequested, sessionChangedToNull);
+            }
+        });
+        var session = CreateConnectedSession(channel, telemetry);
+        sessionManager.SetSession(session);
+        sessionManager.DrainPendingSessionTransitions();
+        lifetime = sessionManager.CurrentSessionWithLifetime.Lifetime;
+
+        // Act
+        await sessionManager.DisposeAsync();
+
+        // Assert
+        Assert.Equal((HasCurrentSession: false, LifetimeEnded: true, SessionChangedToNull: true), stateAtClose);
     }
 
     private static OpcUaClientConfiguration CreateConfigurationWithoutBackgroundReads()
@@ -187,11 +218,6 @@ public class SessionLifetimeTests
             source.PollingMetrics,
             source.ReadAfterWriteMetrics,
             NullLogger.Instance);
-
-    private static void SetSession(SessionManager sessionManager, Session? session) =>
-        typeof(SessionManager)
-            .GetMethod("SetSession", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(sessionManager, [session]);
 
     private static Session CreateConnectedSession(ITransportChannel channel, ITelemetryContext telemetry)
     {
@@ -272,5 +298,36 @@ public class SessionLifetimeTests
         public ValueTask CloseAsync(CancellationToken ct = default) => ValueTask.CompletedTask;
 
         public void Dispose() => _isDisposed = true;
+    }
+
+    /// <summary>
+    /// Reports each request to <paramref name="onRequest"/> and fails it at once as not connected.
+    /// </summary>
+    private sealed class FailingTransportChannel(ITelemetryContext telemetry, Action<IServiceRequest> onRequest) : ITransportChannel
+    {
+        public TransportChannelFeatures SupportedFeatures => TransportChannelFeatures.None;
+
+        public EndpointDescription EndpointDescription { get; } = new("opc.tcp://localhost:4840");
+
+        public EndpointConfiguration EndpointConfiguration { get; } = EndpointConfiguration.Create();
+
+        public IServiceMessageContext MessageContext { get; } = new ServiceMessageContext(telemetry);
+
+        public int OperationTimeout { get; set; } = 30_000;
+
+        public ValueTask<IServiceResponse> SendRequestAsync(IServiceRequest request, CancellationToken ct = default)
+        {
+            onRequest(request);
+            throw new ServiceResultException(StatusCodes.BadNotConnected);
+        }
+
+        public ValueTask ReconnectAsync(ITransportWaitingConnection? connection = null, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask CloseAsync(CancellationToken ct = default) => ValueTask.CompletedTask;
+
+        public void Dispose()
+        {
+        }
     }
 }

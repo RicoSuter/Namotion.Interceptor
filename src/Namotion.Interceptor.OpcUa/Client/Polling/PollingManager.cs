@@ -242,7 +242,6 @@ internal sealed class PollingManager : IAsyncDisposable
         var startTime = DateTimeOffset.UtcNow;
         var pollSucceeded = false;
         var pollCancelled = false;
-        var sessionEnded = false;
 
         try
         {
@@ -261,8 +260,9 @@ internal sealed class PollingManager : IAsyncDisposable
                 await ReadBatchAsync(session, sessionLifetime, batch, cancellationToken).ConfigureAwait(false);
             }
 
-            sessionEnded = sessionLifetime.IsCancellationRequested;
-            pollSucceeded = !sessionEnded;
+            // An ended session is neither a failure nor a slow poll: the next poll reads every item on the new session.
+            pollCancelled = sessionLifetime.IsCancellationRequested;
+            pollSucceeded = !pollCancelled;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -282,7 +282,7 @@ internal sealed class PollingManager : IAsyncDisposable
             {
                 _circuitBreaker.RecordSuccess();
             }
-            else if (!pollCancelled && !sessionEnded && _circuitBreaker.RecordFailure())
+            else if (!pollCancelled && _circuitBreaker.RecordFailure())
             {
                 _metrics.RecordCircuitBreakerTrip();
                 _logger.LogError("Circuit breaker opened after consecutive failures. Polling suspended temporarily.");
@@ -290,7 +290,7 @@ internal sealed class PollingManager : IAsyncDisposable
 
             // Detect slow polls that exceed the polling interval
             var duration = DateTimeOffset.UtcNow - startTime;
-            if (!pollCancelled && !sessionEnded && duration > _configuration.PollingInterval)
+            if (!pollCancelled && duration > _configuration.PollingInterval)
             {
                 _metrics.RecordSlowPoll();
                 _logger.LogWarning("Slow poll detected: polling took {Duration}ms, which exceeds interval of {Interval}ms. Consider increasing polling interval or batch size.",
