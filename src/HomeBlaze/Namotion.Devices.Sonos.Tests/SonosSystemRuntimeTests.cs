@@ -299,24 +299,25 @@ public class SonosSystemRuntimeTests
         var listener = system.CurrentEventListener!;
         HttpListener? failedListener = null;
         HttpListener? restartedListener = null;
+        var acceptFailure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         listener.AcceptContextAsync = httpListener =>
         {
-            if (Interlocked.CompareExchange(ref failedListener, httpListener, null) is null)
+            // Every accept before the failure is on the listener the system started with.
+            var original = Interlocked.CompareExchange(ref failedListener, httpListener, null) ?? httpListener;
+            if (ReferenceEquals(httpListener, original))
             {
-                return Task.FromException<HttpListenerContext>(new HttpListenerException(995, "The accept failed."));
+                return AcceptUntilFailedAsync(httpListener, acceptFailure.Task);
             }
 
-            if (!ReferenceEquals(httpListener, failedListener))
-            {
-                Volatile.Write(ref restartedListener, httpListener);
-            }
-
+            Volatile.Write(ref restartedListener, httpListener);
             return httpListener.GetContextAsync();
         };
 
         // Act
-        // The NOTIFY is answered by the waiting accept; the next accept fails and ends the loop.
+        // The failed loop closes the listener, which cuts a NOTIFY still being answered, so the accept fails only
+        // once this one is answered. Sending it also moves the loop off the accept that started before the swap.
         Assert.Equal(HttpStatusCode.OK, await speaker.NotifyAsync(AvTransportEventPath, SonosEventBodies.AvTransport(("TransportState", "PLAYING"))));
+        acceptFailure.SetResult();
         await AsyncTestHelpers.WaitUntilAsync(
             () => logger.Errors.Any(message => message.Contains("stopped accepting requests")),
             ConnectedSystem.WaitTimeout,
@@ -339,6 +340,28 @@ public class SonosSystemRuntimeTests
             message: "Events should reach the player again through the subscription made before the failure.");
         Assert.Single(logger.Warnings, message => message.Contains("stopped accepting requests"));
         Assert.Equal(1, speaker.Subscribed.Count(path => path == AvTransportEventPath));
+    }
+
+    /// <summary>
+    /// Accepts the next request of the listener until <paramref name="failure"/> completes, and from then on fails as a
+    /// broken listener does, also while waiting for a request.
+    /// </summary>
+    private static async Task<HttpListenerContext> AcceptUntilFailedAsync(HttpListener listener, Task failure)
+    {
+        if (!failure.IsCompleted)
+        {
+            var accept = listener.GetContextAsync();
+            if (await Task.WhenAny(accept, failure) == accept)
+            {
+                return await accept;
+            }
+
+            // Closing the failed listener faults the abandoned accept.
+            _ = accept.ContinueWith(static task => _ = task.Exception, CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+
+        throw new HttpListenerException(995, "The accept failed.");
     }
 
     [Fact]
