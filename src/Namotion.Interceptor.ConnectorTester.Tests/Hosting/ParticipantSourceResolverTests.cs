@@ -5,24 +5,22 @@ using Namotion.Interceptor.ConnectorTester.Tests.Engine.Mutation;
 
 namespace Namotion.Interceptor.ConnectorTester.Tests.Hosting;
 
-public class DroppedWriteCountResolverTests
+public class ParticipantSourceResolverTests
 {
     [Fact]
-    public void WhenAClientHasASourceForItsRoot_ThenTheCountReadsThatSourcesDroppedRetries()
+    public void WhenAClientHasASourceForItsRoot_ThenResolveReturnsThatSource()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var root = new TestNode(context);
         var otherSource = new FailingSource { RootSubject = new TestNode(context) };
         var source = new FailingSource { RootSubject = root };
-        source.Metrics.OutboundRetries.AddDropped(3);
 
         // Act
-        var droppedWriteCount = DroppedWriteCountResolver.Resolve([otherSource, source], root, "client-a", isServer: false);
+        var resolvedSource = ParticipantSourceResolver.Resolve([otherSource, source], root, "client-a", isServer: false);
 
         // Assert
-        Assert.NotNull(droppedWriteCount);
-        Assert.Equal(3, droppedWriteCount());
+        Assert.Same(source, resolvedSource);
     }
 
     [Fact]
@@ -35,20 +33,20 @@ public class DroppedWriteCountResolverTests
 
         // Act & Assert
         var exception = Assert.Throws<InvalidOperationException>(
-            () => DroppedWriteCountResolver.Resolve([otherSource], root, "client-a", isServer: false));
+            () => ParticipantSourceResolver.Resolve([otherSource], root, "client-a", isServer: false));
         Assert.Contains("'client-a'", exception.Message);
     }
 
     [Fact]
-    public void WhenTheParticipantIsTheServer_ThenThereIsNoCount()
+    public void WhenTheParticipantIsTheServer_ThenThereIsNoSource()
     {
         // Arrange
         var root = new TestNode(InterceptorSubjectContext.Create());
 
         // Act
-        var droppedWriteCount = DroppedWriteCountResolver.Resolve([], root, "server", isServer: true);
+        var source = ParticipantSourceResolver.Resolve([], root, "server", isServer: true);
 
         // Assert
-        Assert.Null(droppedWriteCount);
+        Assert.Null(source);
     }
 }

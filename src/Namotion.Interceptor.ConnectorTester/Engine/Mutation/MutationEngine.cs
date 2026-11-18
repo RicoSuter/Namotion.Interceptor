@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
@@ -38,6 +39,12 @@ public sealed class MutationEngine : BackgroundService
 
     /// <summary>Clears the write-durability ledger, if any.</summary>
     public void ResetDurabilityLedger() => _ledger?.Reset();
+
+    /// <summary>
+    /// Gets whether the participant's source is synchronized (see <see cref="WriteDurabilityLedger.IsSourceSynchronized"/>),
+    /// and <c>true</c> when the engine has no write-durability ledger.
+    /// </summary>
+    public bool IsSourceSynchronized => _ledger?.IsSourceSynchronized ?? true;
 
     /// <summary>
     /// Checks the writes the ledger recorded against this participant's model. The result lists one line per write
@@ -95,11 +102,11 @@ public sealed class MutationEngine : BackgroundService
         TestCycleCoordinator coordinator,
         ILogger logger,
         bool verifyWriteDurability = false,
-        Func<long>? droppedWriteCount = null)
+        ISubjectSource? source = null)
     {
         var graph = new KnownNodeGraph();
         var counters = new MutationCounters();
-        var ledger = verifyWriteDurability ? new WriteDurabilityLedger(droppedWriteCount) : null;
+        var ledger = verifyWriteDurability ? new WriteDurabilityLedger(source) : null;
         var context = ((IInterceptorSubject)root).Context;
         var strategy = new RandomValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, logger, ledger);
         return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger, ledger);
@@ -113,11 +120,11 @@ public sealed class MutationEngine : BackgroundService
         int numberOfBatches,
         int participantIndex,
         bool verifyWriteDurability = false,
-        Func<long>? droppedWriteCount = null)
+        ISubjectSource? source = null)
     {
         var graph = new KnownNodeGraph();
         var counters = new MutationCounters();
-        var ledger = verifyWriteDurability ? new WriteDurabilityLedger(droppedWriteCount) : null;
+        var ledger = verifyWriteDurability ? new WriteDurabilityLedger(source) : null;
         var context = ((IInterceptorSubject)root).Context;
         var strategy = new BatchValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, numberOfBatches, participantIndex, logger, ledger);
         return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger, ledger);

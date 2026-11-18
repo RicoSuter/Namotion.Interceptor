@@ -75,9 +75,9 @@ public sealed class RandomValueMutationStrategy : IValueMutationStrategy
 
                     var failure = await CommitFailureClassifier.CommitAndRecordAsync(
                         transaction, _counters, _logger, _participantName, cancellationToken);
-                    if (_ledger is not null && uncommittedWrites is not null)
+                    if (uncommittedWrites is not null)
                     {
-                        _ledger.RecordCommit(uncommittedWrites, failure);
+                        _ledger!.RecordCommit(uncommittedWrites, failure);
                     }
                 }
                 else

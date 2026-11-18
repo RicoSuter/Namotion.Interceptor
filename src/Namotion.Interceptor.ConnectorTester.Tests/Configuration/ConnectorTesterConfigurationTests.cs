@@ -50,15 +50,17 @@ public class ConnectorTesterConfigurationTests
     }
 
     [Theory]
-    [InlineData(false, 4, 0)] // disabled, so five participants are fine
-    [InlineData(false, 4, 10)]
-    [InlineData(true, 3, 0)] // four participants for four value properties
-    [InlineData(true, 3, 10)]
+    [InlineData(false, 4, 0, 0)] // disabled, so five participants are fine
+    [InlineData(false, 4, 10, 0)]
+    [InlineData(false, 1, 0, 1)] // disabled, so structural mutations are fine
+    [InlineData(true, 3, 0, 0)] // four participants for four value properties
+    [InlineData(true, 3, 10, 0)]
     public void WhenVerifyWriteDurabilityIsDisabledOrWithinLimits_ThenValidateDoesNotThrow(
-        bool verifyWriteDurability, int clientCount, int numberOfBatches)
+        bool verifyWriteDurability, int clientCount, int numberOfBatches, int structuralMutationRate)
     {
         // Arrange
         var configuration = CreateConfiguration(verifyWriteDurability, clientCount, numberOfBatches);
+        configuration.Clients[0].StructuralMutationRate = structuralMutationRate;
 
         // Act
         var exception = Record.Exception(configuration.ValidateVerifyWriteDurability);
@@ -80,20 +82,6 @@ public class ConnectorTesterConfigurationTests
         // Act & Assert
         var exception = Assert.Throws<InvalidOperationException>(configuration.ValidateVerifyWriteDurability);
         Assert.Contains($"'{participant.Name}'", exception.Message);
-    }
-
-    [Fact]
-    public void WhenVerifyWriteDurabilityIsDisabled_ThenStructuralMutationsAreFine()
-    {
-        // Arrange
-        var configuration = CreateConfiguration(verifyWriteDurability: false, clientCount: 1, numberOfBatches: 0);
-        configuration.Clients[0].StructuralMutationRate = 1;
-
-        // Act
-        var exception = Record.Exception(configuration.ValidateVerifyWriteDurability);
-
-        // Assert
-        Assert.Null(exception);
     }
 
     [Theory]

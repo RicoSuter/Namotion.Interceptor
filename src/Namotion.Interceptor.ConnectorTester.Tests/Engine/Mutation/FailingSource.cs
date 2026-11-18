@@ -18,7 +18,14 @@ internal sealed class FailingSource : ISubjectSource
 
     public int WriteBatchSize => 0;
 
-    public SourceState State => SourceState.Synchronizing;
+    private volatile SourceState _state = SourceState.Synchronizing;
+
+    /// <summary>Gets or sets the reported state, which the test changes while another thread reads it.</summary>
+    public SourceState State
+    {
+        get => _state;
+        set => _state = value;
+    }
 
     public DateTimeOffset StateChangeTime { get; } = DateTimeOffset.UtcNow;
 

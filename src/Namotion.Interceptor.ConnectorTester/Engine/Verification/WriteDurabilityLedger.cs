@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry;
@@ -20,25 +22,35 @@ public sealed class WriteDurabilityLedger
 {
     private readonly Dictionary<TestNode, (int Property, long Counter)> _lastWrites = new();
     private readonly Lock _lock = new();
-    private readonly Func<long>? _droppedWriteCount;
+    private readonly ISubjectSource? _source;
+
+    // Written by Reset and read by DroppedWriteCount, which only the verification loop calls, one after the other.
     private long _droppedWriteBaseline;
 
     /// <summary>
-    /// Creates a ledger. <paramref name="droppedWriteCount"/> returns the running total of writes the participant's
-    /// source dropped, such as its retry queue's <c>TotalDropped</c>, and is <c>null</c> for a participant without
-    /// a source.
+    /// Creates a ledger for a participant whose writes go through <paramref name="source"/>, or for a participant
+    /// without a source when it is <c>null</c>.
     /// </summary>
-    public WriteDurabilityLedger(Func<long>? droppedWriteCount = null)
+    public WriteDurabilityLedger(ISubjectSource? source = null)
     {
-        _droppedWriteCount = droppedWriteCount;
-        _droppedWriteBaseline = droppedWriteCount?.Invoke() ?? 0;
+        _source = source;
     }
 
     /// <summary>
-    /// Gets the change in the number of writes the participant's source dropped since the last <see cref="Reset"/>,
-    /// negative when the source's count was reset in between.
+    /// Gets the number of writes the participant's source dropped, as counted by its retry queue's
+    /// <c>TotalDropped</c>, since the last <see cref="Reset"/>.
     /// </summary>
-    public long DroppedWriteCount => (_droppedWriteCount?.Invoke() ?? 0) - Interlocked.Read(ref _droppedWriteBaseline);
+    public long DroppedWriteCount => ReadTotalDropped() - _droppedWriteBaseline;
+
+    /// <summary>
+    /// Gets whether the participant's source is <see cref="SourceState.Synchronized"/>, and <c>true</c> for a
+    /// participant without a source.
+    /// </summary>
+    /// <remarks>
+    /// Reset the ledger for the first time only once this has been <c>true</c>: a write made before the source claimed its properties is
+    /// discarded without being counted as dropped.
+    /// </remarks>
+    public bool IsSourceSynchronized => _source is null || _source.State == SourceState.Synchronized;
 
     public void Record(TestNode node, int property, long counter)
     {
@@ -85,13 +97,15 @@ public sealed class WriteDurabilityLedger
         lock (_lock)
         {
             _lastWrites.Clear();
-            Interlocked.Exchange(ref _droppedWriteBaseline, _droppedWriteCount?.Invoke() ?? 0);
         }
+
+        _droppedWriteBaseline = ReadTotalDropped();
     }
 
     /// <summary>
-    /// Returns one line per recorded write that a node in <paramref name="reachableNodes"/>, the participant's current
-    /// graph, no longer holds, naming the property path, the written value and the value the model holds.
+    /// Returns one line per recorded write the model no longer holds: the property path with the written value and the
+    /// value the model holds, or with "no longer in the model" for a node missing from <paramref name="reachableNodes"/>,
+    /// the participant's current graph.
     /// </summary>
     public IReadOnlyList<string> Verify(IReadOnlyCollection<TestNode> reachableNodes)
     {
@@ -102,21 +116,28 @@ public sealed class WriteDurabilityLedger
         {
             foreach (var (node, (property, counter)) in _lastWrites)
             {
-                // A node no longer in the graph, removed locally or by another participant, carries no durability claim.
                 if (!reachable.Contains(node))
                 {
+                    violations.Add($"{GetPath(node, property)}: no longer in the model");
                     continue;
                 }
 
-                var (name, written, held) = TestNode.ReadValueProperty(node, property, counter);
+                var (written, held) = TestNode.ReadValueProperty(node, property, counter);
                 if (!Equals(written, held))
                 {
-                    var path = node.TryGetRegisteredProperty(name)?.TryGetPath() ?? name;
-                    violations.Add($"{path}: wrote '{written}', model holds '{held}'");
+                    violations.Add($"{GetPath(node, property)}: wrote '{written}', model holds '{held}'");
                 }
             }
         }
 
         return violations;
     }
+
+    private static string GetPath(TestNode node, int property)
+    {
+        var name = TestNode.GetValuePropertyName(property);
+        return node.TryGetRegisteredProperty(name)?.TryGetPath() ?? name;
+    }
+
+    private long ReadTotalDropped() => _source?.Diagnostics.OutboundRetries.TotalDropped ?? 0;
 }

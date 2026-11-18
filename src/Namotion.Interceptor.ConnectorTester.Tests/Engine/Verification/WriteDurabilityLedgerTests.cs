@@ -1,6 +1,8 @@
 using Xunit;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
+using Namotion.Interceptor.ConnectorTester.Tests.Engine.Mutation;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -79,19 +81,23 @@ public class WriteDurabilityLedgerTests
     }
 
     [Fact]
-    public void WhenNodeIsNotReachable_ThenVerifySkipsIt()
+    public void WhenNodeIsDetachedFromTheModel_ThenVerifyReportsIt()
     {
         // Arrange
-        var node = CreateCollectionChild();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var root = TestNode.CreateWithGraph(context, collectionCount: 1, dictionaryCount: 0);
+        var node = root.Collection[0];
         var ledger = new WriteDurabilityLedger();
+        TestNode.WriteValueProperty(node, property: 0, counter: 42);
         ledger.Record(node, property: 0, counter: 42);
-        node.StringValue = "server-value";
+        root.Collection = [];
 
         // Act
-        var violations = ledger.Verify([]);
+        var violations = ledger.Verify([root]);
 
         // Assert
-        Assert.Empty(violations);
+        var violation = Assert.Single(violations);
+        Assert.Equal("StringValue: no longer in the model", violation);
     }
 
     [Fact]
@@ -145,11 +151,11 @@ public class WriteDurabilityLedgerTests
     public void WhenTheSourceDropsWrites_ThenDroppedWriteCountCountsOnlyThoseSinceTheLastReset()
     {
         // Arrange
-        long totalDropped = 4;
-        var ledger = new WriteDurabilityLedger(() => totalDropped);
-        totalDropped = 10;
+        var source = new FailingSource { RootSubject = new TestNode(InterceptorSubjectContext.Create()) };
+        var ledger = new WriteDurabilityLedger(source);
+        source.Metrics.OutboundRetries.AddDropped(10);
         ledger.Reset();
-        totalDropped = 13;
+        source.Metrics.OutboundRetries.AddDropped(3);
 
         // Act
         var droppedWriteCount = ledger.DroppedWriteCount;
@@ -170,6 +176,35 @@ public class WriteDurabilityLedgerTests
 
         // Assert
         Assert.Equal(0, droppedWriteCount);
+    }
+
+    [Theory]
+    [InlineData(SourceState.Synchronizing, false)]
+    [InlineData(SourceState.Synchronized, true)]
+    public void WhenTheSourceHasAState_ThenIsSourceSynchronizedReflectsIt(SourceState state, bool expected)
+    {
+        // Arrange
+        var source = new FailingSource { RootSubject = new TestNode(InterceptorSubjectContext.Create()), State = state };
+        var ledger = new WriteDurabilityLedger(source);
+
+        // Act
+        var isSourceSynchronized = ledger.IsSourceSynchronized;
+
+        // Assert
+        Assert.Equal(expected, isSourceSynchronized);
+    }
+
+    [Fact]
+    public void WhenTheParticipantHasNoSource_ThenIsSourceSynchronized()
+    {
+        // Arrange
+        var ledger = new WriteDurabilityLedger();
+
+        // Act
+        var isSourceSynchronized = ledger.IsSourceSynchronized;
+
+        // Assert
+        Assert.True(isSourceSynchronized);
     }
 
     /// <summary>

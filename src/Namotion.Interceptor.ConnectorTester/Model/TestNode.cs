@@ -88,15 +88,15 @@ public partial class TestNode
     };
 
     /// <summary>
-    /// Returns the name of the value property at <paramref name="property"/>, the value
-    /// <see cref="WriteValueProperty"/> writes to it for <paramref name="counter"/>, and the value it holds.
+    /// Returns the value <see cref="WriteValueProperty"/> writes to the value property at <paramref name="property"/>
+    /// for <paramref name="counter"/>, and the value it holds.
     /// </summary>
-    public static (string Name, object Written, object Held) ReadValueProperty(TestNode node, int property, long counter) => property switch
+    public static (object Written, object Held) ReadValueProperty(TestNode node, int property, long counter) => property switch
     {
-        0 => (nameof(StringValue), ToStringValue(counter), node.StringValue),
-        1 => (nameof(DecimalValue), ToDecimalValue(counter), node.DecimalValue),
-        2 => (nameof(IntValue), ToIntValue(counter), node.IntValue),
-        3 => (nameof(LongValue), counter, node.LongValue),
+        0 => (ToStringValue(counter), node.StringValue),
+        1 => (ToDecimalValue(counter), node.DecimalValue),
+        2 => (ToIntValue(counter), node.IntValue),
+        3 => (counter, node.LongValue),
         _ => throw new ArgumentOutOfRangeException(nameof(property))
     };
 

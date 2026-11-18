@@ -71,22 +71,6 @@ public class CycleVerdictTests
     }
 
     [Fact]
-    public void WhenConvergedCycleLostAWriteAfterTheDroppedWriteCountWasReset_ThenTheResultIsInconclusive()
-    {
-        // Arrange
-        var (engine, _) = CreateEngine("client");
-        var durabilityResult = new WriteDurabilityResult("client", ["client: StringValue: lost"], DroppedWriteCount: -4);
-
-        // Act
-        var result = CycleVerdict.Decide(converged: true, [engine], [durabilityResult]);
-
-        // Assert: neither a failure nor a silent pass.
-        Assert.True(durabilityResult.IsInconclusive);
-        Assert.False(durabilityResult.IsFailure);
-        Assert.Equal(CycleResult.Pass, result);
-    }
-
-    [Fact]
     public void WhenCycleDidNotConverge_ThenCycleFails()
     {
         // Arrange

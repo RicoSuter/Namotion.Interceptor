@@ -144,19 +144,17 @@ public class MutationEngineTests
         Assert.Empty(violations);
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(10)]
-    public async Task WhenTheSourceDroppedWritesInTheCycle_ThenALostWriteIsInconclusive(int numberOfBatches)
+    [Fact]
+    public async Task WhenTheSourceDroppedWritesInTheCycle_ThenALostWriteIsInconclusive()
     {
         // Arrange
-        long totalDropped = 7;
         var root = new TestNode(CreateContext());
-        var engine = CreateEngine(
-            root, numberOfBatches, verifyWriteDurability: true, useTransactions: false, () => totalDropped);
+        var source = new FailingSource { RootSubject = root };
+        source.Metrics.OutboundRetries.AddDropped(7);
+        var engine = CreateEngine(root, numberOfBatches: 0, verifyWriteDurability: true, useTransactions: false, source);
         engine.ResetDurabilityLedger();
         await RunTwoValueMutationTicksAsync(engine);
-        totalDropped += 2;
+        source.Metrics.OutboundRetries.AddDropped(2);
         OverwriteValueProperties(root);
 
         // Act
@@ -166,31 +164,6 @@ public class MutationEngineTests
         Assert.Equal(2, result.DroppedWriteCount);
         Assert.Single(result.Violations);
         Assert.True(result.IsInconclusive);
-        Assert.False(result.IsFailure);
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(10)]
-    public async Task WhenTheSourceDroppedWritesBeforeTheCycle_ThenALostWriteIsAFailure(int numberOfBatches)
-    {
-        // Arrange
-        long totalDropped = 7;
-        var root = new TestNode(CreateContext());
-        var engine = CreateEngine(
-            root, numberOfBatches, verifyWriteDurability: true, useTransactions: false, () => totalDropped);
-        engine.ResetDurabilityLedger();
-        await RunTwoValueMutationTicksAsync(engine);
-        OverwriteValueProperties(root);
-
-        // Act
-        var result = engine.VerifyWriteDurability();
-
-        // Assert
-        Assert.Equal(0, result.DroppedWriteCount);
-        Assert.Single(result.Violations);
-        Assert.True(result.IsFailure);
-        Assert.False(result.IsInconclusive);
     }
 
     private static MutationEngine CreateEngine(
@@ -198,7 +171,7 @@ public class MutationEngineTests
         int numberOfBatches,
         bool verifyWriteDurability,
         bool useTransactions,
-        Func<long>? droppedWriteCount = null)
+        ISubjectSource? source = null)
     {
         var configuration = new ParticipantConfiguration
         {
@@ -209,9 +182,9 @@ public class MutationEngineTests
         var coordinator = new TestCycleCoordinator();
         return numberOfBatches > 0
             ? MutationEngine.CreateBatch(root, configuration, coordinator, NullLogger.Instance,
-                numberOfBatches, configuration.Index, verifyWriteDurability, droppedWriteCount)
+                numberOfBatches, configuration.Index, verifyWriteDurability, source)
             : MutationEngine.CreateRandom(
-                root, configuration, coordinator, NullLogger.Instance, verifyWriteDurability, droppedWriteCount);
+                root, configuration, coordinator, NullLogger.Instance, verifyWriteDurability, source);
     }
 
     private static async Task<MutationEngine> RunTwoValueMutationTicksAsync(

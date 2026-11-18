@@ -16,6 +16,8 @@ namespace Namotion.Interceptor.ConnectorTester.Engine.Verification;
 public class VerificationEngine : BackgroundService
 {
     private static readonly TimeSpan SnapshotPollInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan SourceSynchronizationTimeout = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan SourceSynchronizationPollInterval = TimeSpan.FromSeconds(1);
 
     private readonly CsvFile<CycleCsvRow> _cyclesCsv;
     private readonly CsvFile<ChaosEventCsvRow> _chaosEventsCsv;
@@ -98,6 +100,11 @@ public class VerificationEngine : BackgroundService
         await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
 
         LogStartupInformation();
+
+        if (_configuration.VerifyWriteDurability)
+        {
+            await WaitForSynchronizedSourcesAsync(stoppingToken);
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -199,12 +206,24 @@ public class VerificationEngine : BackgroundService
         }
     }
 
+    private async Task WaitForSynchronizedSourcesAsync(CancellationToken stoppingToken)
+    {
+        var unsynchronized = await SourceSynchronization.WaitAsync(
+            _mutationEngines, SourceSynchronizationTimeout, SourceSynchronizationPollInterval, stoppingToken);
+        if (unsynchronized.Count > 0)
+        {
+            _logger.LogWarning(
+                "Sources of {Participants} are not synchronized after {Timeout}, so the write-durability check of cycle 1 may report writes they discarded before claiming their properties",
+                string.Join(", ", unsynchronized), SourceSynchronizationTimeout);
+        }
+    }
+
     private void LogInconclusiveDurability(IEnumerable<WriteDurabilityResult> durabilityResults)
     {
         foreach (var result in durabilityResults.Where(result => result.IsInconclusive))
         {
             _logger.LogWarning(
-                "Cycle {Cycle}: write durability of {Participant} is inconclusive: {ViolationCount} write(s) lost, but its source's dropped-write count changed by {DroppedCount} in the cycle, either because a full retry queue dropped writes or, when negative, because the count was reset",
+                "Cycle {Cycle}: write durability of {Participant} is inconclusive: {ViolationCount} write(s) lost, but its source's full retry queue dropped {DroppedCount} write(s) in the cycle",
                 _cycleNumber, result.Participant, result.Violations.Count, result.DroppedWriteCount);
             foreach (var violation in result.Violations)
             {

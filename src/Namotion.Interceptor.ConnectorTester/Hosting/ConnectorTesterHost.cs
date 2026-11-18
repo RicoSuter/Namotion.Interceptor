@@ -93,9 +93,9 @@ public sealed class ConnectorTesterHost
         }
 
         var runModeSelection = RunModeSelector.Select(args, configuration);
-        if (runModeSelection.Mode == RunMode.Verify)
+        var verifyWriteDurability = configuration.VerifyWriteDurability && runModeSelection.Mode == RunMode.Verify;
+        if (verifyWriteDurability)
         {
-            // A --participant run has no verification engine and ignores the option.
             configuration.ValidateVerifyWriteDurability();
         }
 
@@ -107,7 +107,6 @@ public sealed class ConnectorTesterHost
         var participantBundles = new List<ParticipantHostBundle>();
 
         var participantConfigurations = EnumerateActiveParticipants(configuration, runModeSelection).ToList();
-        var verifyWriteDurability = configuration.VerifyWriteDurability && runModeSelection.Mode == RunMode.Verify;
 
         foreach (var (participantConfiguration, isServer) in participantConfigurations)
         {
@@ -156,14 +155,14 @@ public sealed class ConnectorTesterHost
             // Mutation engine stays in the main host so it shares the verification coordinator
             // graph; its logger category already encodes the participant name explicitly.
             var mutationLogger = sharedLoggerFactory.CreateLogger($"MutationEngine/{participantConfiguration.Name}");
-            var droppedWriteCount = verifyWriteDurability
-                ? DroppedWriteCountResolver.Resolve(bundle.Connectors, root, participantConfiguration.Name, isServer)
+            var source = verifyWriteDurability
+                ? ParticipantSourceResolver.Resolve(bundle.Connectors, root, participantConfiguration.Name, isServer)
                 : null;
             var mutationEngine = configuration.NumberOfBatches > 0
                 ? MutationEngine.CreateBatch(root, participantConfiguration, coordinator, mutationLogger,
-                    configuration.NumberOfBatches, participantConfiguration.Index, verifyWriteDurability, droppedWriteCount)
+                    configuration.NumberOfBatches, participantConfiguration.Index, verifyWriteDurability, source)
                 : MutationEngine.CreateRandom(root, participantConfiguration, coordinator, mutationLogger,
-                    verifyWriteDurability, droppedWriteCount);
+                    verifyWriteDurability, source);
             mutationEngines.Add(mutationEngine);
             builder.Services.AddSingleton<IHostedService>(mutationEngine);
         }
