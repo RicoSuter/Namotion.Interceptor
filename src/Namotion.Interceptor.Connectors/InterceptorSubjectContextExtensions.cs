@@ -5,7 +5,7 @@ using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Transactions;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Transactions;
+using Namotion.Interceptor.Tracking.Transactions.Writers;
 
 namespace Namotion.Interceptor.Connectors;
 

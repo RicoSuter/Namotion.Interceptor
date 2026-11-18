@@ -4,6 +4,7 @@ using System.Reactive.Linq;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Change;
+using Namotion.Interceptor.Tracking.Tests.Derived;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
 

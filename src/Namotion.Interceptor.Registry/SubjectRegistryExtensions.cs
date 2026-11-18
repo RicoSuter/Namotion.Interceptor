@@ -1,7 +1,7 @@
 ﻿using System.Linq.Expressions;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Derived;
 
 namespace Namotion.Interceptor.Registry;
 

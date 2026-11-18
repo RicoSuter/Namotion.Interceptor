@@ -5,6 +5,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Performance;
+using Namotion.Interceptor.Tracking.Transactions.Handlers;
+using Namotion.Interceptor.Tracking.Transactions.Writers;
 
 namespace Namotion.Interceptor.Tracking.Transactions;
 

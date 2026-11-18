@@ -1,4 +1,5 @@
-using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Derived;
+
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
