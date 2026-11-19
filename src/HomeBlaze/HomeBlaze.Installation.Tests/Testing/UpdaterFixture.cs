@@ -60,7 +60,11 @@ internal sealed class UpdaterFixture : IDisposable
     public void Finish(int exitCode, string log)
     {
         File.WriteAllText(PathOf(UpdaterFiles.LogFileName), log);
-        File.WriteAllText(PathOf(UpdaterFiles.ResultFileName), $"{exitCode}\n");
+
+        // Written through a rename, as the sidecar does, so the monitor never reads a partial result.
+        var temporaryPath = PathOf(UpdaterFiles.ResultFileName + ".tmp");
+        File.WriteAllText(temporaryPath, $"{exitCode}\n");
+        File.Move(temporaryPath, PathOf(UpdaterFiles.ResultFileName), overwrite: true);
     }
 
     /// <summary>
