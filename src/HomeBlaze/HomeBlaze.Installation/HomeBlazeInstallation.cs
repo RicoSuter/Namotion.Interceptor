@@ -313,6 +313,11 @@ public partial class HomeBlazeInstallation : BackgroundService,
         _updateCheckUnavailableReason = GetUpdateCheckUnavailableReason(Channel, build);
         UpdateCheckStatus = _updateCheckUnavailableReason;
 
+        IsUpdaterAvailable = false;
+        UpdateInstallState = UpdateInstallState.None;
+        UpdateInstallStatus = null;
+        LastUpdateInstall = null;
+
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
         LastUpdated = null;
