@@ -21,9 +21,9 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     private readonly TimeSpan _bufferTime;
 
     // A source we talk to over a wire: what it hands us was produced before it saw our write, so it
-    // cannot rank against our commits. Named once because the processor and the reconcile
-    // must agree; if only one ranked against the last commit, the other would still deliver an older one.
-    private const ChangeDeliveryRule DeliveryRule = ChangeDeliveryRule.SourceValuesMayBeStale;
+    // cannot rank against our commits. Named once because the processor, the retry queue's flush and the
+    // reconcile must agree; if only one ranked against the last commit, another would still deliver an older one.
+    internal const ChangeDeliveryRule DeliveryRule = ChangeDeliveryRule.SourceValuesMayBeStale;
     private readonly TimeSpan _retryTime;
     private readonly SubjectPropertyWriter _propertyWriter;
 
@@ -39,12 +39,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     // Makes the count check and the release one step. Taken inside _stateLock, never around it.
     private readonly Lock _idleFlushSignalLock = new();
 
-    // Set with a signal on each transition to Synchronized, so the idle flush tells a wake from a tick.
-    private int _idleFlushWakeRequested;
-
-    // Cached so a reconcile does not allocate a delegate.
-    private readonly Func<SubjectPropertyChange[], SubjectPropertyChange[]?> _reconcileParkedChanges;
-
     // While idle flushes keep failing, the interval doubles up to this many times, so to 8x the retry time.
     private const int MaximumIdleFlushDoublings = 3;
 
@@ -55,6 +49,13 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         SourceState State, DateTimeOffset ChangeTime, DateTimeOffset? LastSynchronizedAt);
 
     private SourceStateSnapshot _stateSnapshot = new(SourceState.Synchronizing, DateTimeOffset.UtcNow, null);
+
+    // The state the write retry queue was last reconciled in. Compared by reference, since each transition
+    // publishes a new snapshot and two of them can be equal by value. Accessed only under the queue's flush gate.
+    private SourceStateSnapshot? _reconciledSnapshot;
+
+    // Set once when RunAsync starts, before any flush can read it.
+    private CancellationToken _stoppingToken;
     private int _started;
 
     private ImmutableArray<SourceMonitor> _registeredMonitors = [];
@@ -104,8 +105,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
         ArgumentOutOfRangeException.ThrowIfNegative(writeRetryQueueSize);
 
-        WriteRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger, metrics.OutboundRetries, DeliveryRule);
-        _reconcileParkedChanges = ReconcileParkedChanges;
+        WriteRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger, metrics.OutboundRetries);
 
         // The registration lives as long as the source, and the queue count stays readable after
         // the queue itself is disposed.
@@ -241,6 +241,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         // the DI path tears the host down, but on the graph-attach path the faulted task is swallowed and
         // every WaitForSynchronizationAsync on that branch blocks until its caller's token fires. A silent
         // hang in place of the loud failure the guard exists to give.
+        _stoppingToken = stoppingToken;
         try
         {
             // A missing PropertyChangeInterceptor means the source can capture no writes: a configuration
@@ -299,9 +300,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     // Park connect-window writes captured during listen/load.
                     DrainOwnedWritesToRetryQueue(subscription);
 
-                    // Single reconcile point: send (model already holds it), restore (the load moved the
-                    // model off it), drop (a later local write supersedes it).
-                    await ReconcileRetryQueueAsync(stoppingToken).ConfigureAwait(false);
+                    // Send (model already holds it), restore (the load moved the model off it), drop (a later
+                    // local write supersedes it). Marks this synchronized period reconciled, so the flushes that
+                    // follow do not repeat it.
+                    await ReconcileRetryQueueAsync(onlyWhenDue: false, stoppingToken).ConfigureAwait(false);
 
                     // Connected phase reuses the source-lifetime subscription and does not own it.
                     using var processor = new ChangeQueueProcessor(
@@ -324,6 +326,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         },
                         completionHandler: async teardownToken =>
                         {
+                            // Not reconciled even when due: at a stop, sending a parked write beats restoring it
+                            // into a model that nothing flushes afterwards (see IsReconcileDue).
                             await WriteRetryQueue.FlushAsync(this, teardownToken).ConfigureAwait(false);
                         })
                     {
@@ -483,10 +487,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     /// <summary>
-    /// Runs the idle flush until cancelled. Each time the source becomes <see cref="SourceState.Synchronized"/>
-    /// it reconciles the write retry queue against the state just loaded, and between those wakes it flushes
-    /// the queue every retry interval while the source is synchronized, backing the interval off while
-    /// flushes keep failing. An exception from one run is logged and does not stop the next.
+    /// Runs the idle flush until cancelled. While the source is <see cref="SourceState.Synchronized"/> it
+    /// reconciles the write retry queue right after each transition to Synchronized unless that period is
+    /// reconciled already (see <see cref="IsReconcileDue"/>), and flushes it every retry interval in between,
+    /// backing the interval off while flushes keep failing. An exception from one run is logged and does not
+    /// stop the next.
     /// </summary>
     private async Task RunIdleFlushAsync(CancellationToken cancellationToken)
     {
@@ -500,13 +505,12 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             this, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
 
         var consecutiveFailures = 0;
+        SourceStateSnapshot? seenSnapshot = null;
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                timer.Change(
-                    interval == Timeout.InfiniteTimeSpan ? interval : GetIdleFlushInterval(interval, consecutiveFailures),
-                    Timeout.InfiniteTimeSpan);
+                timer.Change(GetIdleFlushInterval(interval, consecutiveFailures), Timeout.InfiniteTimeSpan);
 
                 // No token: StopIdleFlushAsync signals after cancelling, which keeps the wait to one TaskNode.
                 await _idleFlushSignal.WaitAsync().ConfigureAwait(false);
@@ -516,22 +520,23 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                 }
 
                 // Skipped during a reconnect inside the connector, which would fail every interval's flush;
-                // the wake on Synchronized covers it, so its flag is left for that wake.
-                // State is read before the flag, and TransitionStateTo sets the flag before it publishes
-                // Synchronized, so a loop that sees Synchronized here also sees the wake. In the other order a
-                // tick could flush parked writes as they are and leave the reconcile an empty queue.
-                if (State != SourceState.Synchronized)
+                // the transition back to Synchronized signals again.
+                var snapshot = Volatile.Read(ref _stateSnapshot);
+                if (snapshot.State != SourceState.Synchronized)
                 {
                     continue;
                 }
 
-                if (Interlocked.Exchange(ref _idleFlushWakeRequested, 0) != 0)
+                if (!ReferenceEquals(snapshot, seenSnapshot))
                 {
-                    // A load just moved the model, so parked writes are ranked against it as at connect.
+                    // A new synchronized period, which restarts the backoff. When connect or the write path has
+                    // reconciled it already, that reconcile has just tried the parked writes, so no flush follows
+                    // and the next one comes at the next interval.
+                    seenSnapshot = snapshot;
                     consecutiveFailures = 0;
-                    await WriteRetryQueue.ReconcileAsync(this, _reconcileParkedChanges, cancellationToken).ConfigureAwait(false);
+                    await ReconcileRetryQueueAsync(onlyWhenDue: true, cancellationToken).ConfigureAwait(false);
                 }
-                else if (await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false))
+                else if (await WriteRetryQueue.FlushOrReconcileAsync(this, cancellationToken).ConfigureAwait(false))
                 {
                     consecutiveFailures = 0;
                 }
@@ -551,9 +556,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     /// <summary>
-    /// Signals the idle flush unless a signal is already pending. A call after the idle flush ended only leaves
-    /// a pending signal, which the next connection attempt's idle flush answers with a reconcile, because that
-    /// attempt's transition to Synchronized has set the wake flag by then.
+    /// Signals the idle flush unless a signal is already pending. A signal left pending after the idle flush
+    /// ended only makes the next connection attempt's idle flush take its first pass at once.
     /// </summary>
     private void SignalIdleFlush()
     {
@@ -567,10 +571,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     /// <summary>
-    /// Doubles the retry interval per consecutive failed flush, capped at int.MaxValue milliseconds.
+    /// Doubles the retry interval per consecutive failed flush, capped at int.MaxValue milliseconds. An interval
+    /// that is off stays off.
     /// </summary>
     private static TimeSpan GetIdleFlushInterval(TimeSpan interval, int consecutiveFailures) =>
-        consecutiveFailures == 0
+        consecutiveFailures == 0 || interval == Timeout.InfiniteTimeSpan
             ? interval
             : TimeSpan.FromMilliseconds(Math.Min(interval.TotalMilliseconds * (1 << consecutiveFailures), int.MaxValue));
 
@@ -597,19 +602,43 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     /// <summary>
     /// Reconciles the write retry queue against the state just loaded: restores, sends or drops each parked
-    /// write by commit order. Runs at connect and each time the source becomes synchronized again.
+    /// write by commit order. Runs at connect, and from the idle flush when <see cref="IsReconcileDue"/>.
     /// </summary>
-    internal async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)
+    /// <param name="onlyWhenDue">Whether to do nothing unless <see cref="IsReconcileDue"/>.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    internal ValueTask ReconcileRetryQueueAsync(bool onlyWhenDue, CancellationToken cancellationToken) =>
+        WriteRetryQueue.ReconcileAsync(this, onlyWhenDue, cancellationToken);
+
+    /// <summary>
+    /// Whether the source is <see cref="SourceState.Synchronized"/> in a period the write retry queue has not
+    /// been reconciled in yet. The load that began the period may have moved the model off parked writes, so
+    /// the first flush of each period reconciles instead, whether it is the idle flush or the one ahead of an
+    /// outbound batch. Never due once the source is stopping: a value restored then would not be sent, since
+    /// nothing flushes the queue after the stop. Read under the queue's flush gate.
+    /// </summary>
+    internal bool IsReconcileDue
     {
-        await WriteRetryQueue.ReconcileAsync(this, _reconcileParkedChanges, cancellationToken).ConfigureAwait(false);
+        get
+        {
+            var snapshot = Volatile.Read(ref _stateSnapshot);
+            return snapshot.State == SourceState.Synchronized &&
+                !ReferenceEquals(snapshot, _reconciledSnapshot) &&
+                !_stoppingToken.IsCancellationRequested;
+        }
     }
+
+    /// <summary>
+    /// Records the current state as the one the write retry queue is reconciled in. Called under the queue's
+    /// flush gate before it drains.
+    /// </summary>
+    internal void MarkReconciled() => _reconciledSnapshot = Volatile.Read(ref _stateSnapshot);
 
     /// <summary>
     /// Decides each parked write and returns those to send. Runs under the retry queue's flush gate, which
     /// keeps the write handler from settling a failed batch back into the queue meanwhile, while the
-    /// processor may still be running.
+    /// processor may still be running and may itself be the caller, ahead of its batch.
     /// </summary>
-    private SubjectPropertyChange[]? ReconcileParkedChanges(SubjectPropertyChange[] retryChanges)
+    internal SubjectPropertyChange[]? ReconcileParkedChanges(SubjectPropertyChange[] retryChanges)
     {
         var restored = 0;
         var sent = 0;
@@ -767,13 +796,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
             // Never cleared, so it still answers whether a good period ever began.
             var lastSynchronizedAt = newState == SourceState.Synchronized ? now : current.LastSynchronizedAt;
-
-            // The wake flag must be set before Synchronized is published: the idle flush reads State before it
-            // takes the flag, so this order is what lets it tell this wake from a tick that coincides with it.
-            if (newState == SourceState.Synchronized)
-            {
-                Volatile.Write(ref _idleFlushWakeRequested, 1);
-            }
 
             Volatile.Write(ref _stateSnapshot, new SourceStateSnapshot(newState, now, lastSynchronizedAt));
 

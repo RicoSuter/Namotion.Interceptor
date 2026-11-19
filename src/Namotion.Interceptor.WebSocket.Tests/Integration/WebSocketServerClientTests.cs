@@ -273,7 +273,6 @@ public class WebSocketServerClientTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => client.Root!.Name == "WrittenWhileDown" && server.Root!.Name == "WrittenWhileDown",
-            timeout: TimeSpan.FromSeconds(30),
             message: "The write parked during the outage should survive the reconnect on both sides");
     }
 

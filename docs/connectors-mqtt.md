@@ -312,7 +312,7 @@ public class CustomMqttValueConverter : IMqttValueConverter
 
 ### Write Retry Queue
 
-The write retry queue is provided by `SubjectSourceBase`, see [Connectors: Write Retry Queue](connectors.md#write-retry-queue). The client has no initial load of its own, and retained messages usually arrive through the normal message handler after the source reports `Synchronized`, so parked writes are usually sent as they are after a reconnect and the broker's echo brings the model back to them; see [Connectors: Known Limitations](connectors.md#known-limitations) for `AtMostOnce`. Configure via `WriteRetryQueueSize`:
+The write retry queue is provided by `SubjectSourceBase`, see [Connectors: Write Retry Queue](connectors.md#write-retry-queue). How parked writes meet retained messages after a reconnect is described under [Connectors: Known Limitations](connectors.md#known-limitations). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 new MqttClientConfiguration
