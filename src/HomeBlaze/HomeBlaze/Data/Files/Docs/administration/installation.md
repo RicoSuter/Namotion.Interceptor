@@ -68,7 +68,7 @@ HomeBlaze sends its logs and traces to Seq through `ConnectionStrings__seq`. Wit
 The updater lets the `Install update` operation of the Installation subject pull and restart HomeBlaze, so an update needs no shell on the host. Turn it on once in the folder of the compose file:
 
 ```bash
-echo "COMPOSE_DIR=$PWD" >> .env
+echo "COMPOSE_DIR='$PWD'" >> .env
 echo "COMPOSE_PROFILES=updater" >> .env
 docker compose up -d
 ```

@@ -336,6 +336,23 @@ public class HomeBlazeInstallationInstallTests
     }
 
     [Fact]
+    public void WhenRestartedWhileRequested_ThenTheStateIsNone()
+    {
+        // Arrange
+        using var fixture = new UpdaterFixture();
+        fixture.MakeReady();
+        fixture.Installation.InstallUpdate();
+
+        // Act
+        fixture.Installation.RestoreInstall();
+
+        // Assert
+        Assert.Equal(UpdateInstallState.None, fixture.Installation.UpdateInstallState);
+        Assert.Null(fixture.Installation.UpdateInstallStatus);
+        Assert.False(File.Exists(fixture.PathOf(UpdaterFiles.RequestFileName)));
+    }
+
+    [Fact]
     public void WhenAResultWithoutARunIsFoundOnStart_ThenItIsDeleted()
     {
         // Arrange

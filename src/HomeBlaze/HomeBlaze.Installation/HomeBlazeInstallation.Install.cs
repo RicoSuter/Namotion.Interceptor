@@ -118,7 +118,7 @@ public partial class HomeBlazeInstallation
     private static bool IsHeartbeatFresh(UpdaterFiles files) =>
         files.GetHeartbeatAge() is { } age && age < HeartbeatTimeout;
 
-    private void SetInstallState(UpdateInstallState state, string message)
+    private void SetInstallState(UpdateInstallState state, string? message)
     {
         UpdateInstallState = state;
         UpdateInstallStatus = message;
@@ -184,6 +184,11 @@ public partial class HomeBlazeInstallation
                 if (files.ReadRun() is null)
                 {
                     files.DeleteRunAndResult();
+                    if (UpdateInstallState == UpdateInstallState.Requested)
+                    {
+                        SetInstallState(UpdateInstallState.None, null);
+                    }
+
                     return;
                 }
 
@@ -251,6 +256,7 @@ public partial class HomeBlazeInstallation
     private void CompleteRun(UpdaterFiles files, UpdaterRun run, int exitCode)
     {
         var log = files.ReadLog();
+        files.DeleteRunAndResult();
         var running = new BuildIdentity(Version, Commit);
         if (exitCode != 0)
         {
@@ -265,8 +271,6 @@ public partial class HomeBlazeInstallation
         {
             CompleteInstall(UpdateInstallState.UpToDate, "No newer image was found for the configured tag.");
         }
-
-        files.DeleteRunAndResult();
     }
 
     private void CompleteInstall(UpdateInstallState state, string message)

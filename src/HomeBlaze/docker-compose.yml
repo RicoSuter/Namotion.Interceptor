@@ -22,14 +22,17 @@ services:
   updater:
     # Opt-in: lets the Installation subject install updates, see the installation guide. Holds the Docker socket,
     # which gives it root access to the host. Needs COMPOSE_DIR and COMPOSE_PROFILES=updater in .env.
-    # Without COMPOSE_DIR the updater finds no data folder and stays inactive.
+    # Without COMPOSE_DIR the updater does not start (compose reports the missing path); installs without the profile are unaffected.
     image: docker:29-cli@sha256:34507eb5069d8be82c95dd3b6987d4250fd5fee49b82e2509b7d7a7030740d6d
     profiles: [updater]
     restart: unless-stopped
     working_dir: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}:${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}  # same path as on the host, so compose resolves ./data to the host folder
+      - type: bind  # same path as on the host, so compose resolves ./data to the host folder
+        source: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}
+        target: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}
+        bind: { create_host_path: false }
     command:
       - sh
       - -c
@@ -37,9 +40,11 @@ services:
         while true; do
           touch data/.updater-heartbeat
           if [ -f data/.update-request ]; then
-            mv data/.update-request data/.update-running
-            { docker compose pull homeblaze && docker compose up -d homeblaze; } > data/.update-log 2>&1
-            echo $$? > data/.update-result.tmp && mv data/.update-result.tmp data/.update-result
+            if mv data/.update-request data/.update-running 2>/dev/null; then
+              rm -f data/.update-result
+              { docker compose pull homeblaze && docker compose up -d homeblaze; } > data/.update-log 2>&1
+              echo $$? > data/.update-result.tmp && mv data/.update-result.tmp data/.update-result
+            fi
           fi
           sleep 5
         done
