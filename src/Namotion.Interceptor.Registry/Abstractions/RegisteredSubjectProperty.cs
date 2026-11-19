@@ -316,6 +316,7 @@ public class RegisteredSubjectProperty
     /// <param name="setValue">The value setter action.</param>
     /// <param name="attributes">The .NET reflection attributes of the attribute.</param>
     /// <returns>The created attribute property.</returns>
+    /// <remarks>A getter that reads itself through other properties gets <c>default</c> for that read; see docs/registry.md, Add properties.</remarks>
     public RegisteredSubjectProperty AddDerivedAttribute(
         string name, Type type, 
         Func<IInterceptorSubject, object?>? getValue, 

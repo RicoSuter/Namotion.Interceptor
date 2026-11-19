@@ -265,6 +265,7 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
+    /// <remarks>A getter that reads itself through other properties gets <c>default</c> for that read; see docs/registry.md, Add properties.</remarks>
     public RegisteredSubjectProperty AddDerivedProperty<TProperty>(string name, 
         Func<IInterceptorSubject, TProperty?>? getValue,
         Action<IInterceptorSubject, TProperty?>? setValue = null,
@@ -304,6 +305,7 @@ public class RegisteredSubject
     /// <param name="setValue">The set method.</param>
     /// <param name="attributes">The custom attributes.</param>
     /// <returns>The property.</returns>
+    /// <remarks>A getter that reads itself through other properties gets <c>default</c> for that read; see docs/registry.md, Add properties.</remarks>
     public RegisteredSubjectProperty AddDerivedProperty(string name, 
         Type type,
         Func<IInterceptorSubject, object?>? getValue,
@@ -330,6 +332,12 @@ public class RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
     {
+        // A dynamic getter can read itself through other properties, which would otherwise recurse until the stack overflows.
+        if (getValue is not null && attributes.Any(attribute => attribute is DerivedAttribute))
+        {
+            getValue = new DerivedGetterReentrancyGuard(name, type, getValue).GetValue;
+        }
+
         Subject.AddProperties(new SubjectPropertyMetadata(
             name,
             type,
