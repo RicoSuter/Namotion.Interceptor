@@ -1826,6 +1826,8 @@ namespace HomeBlaze.Components.Inputs
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Func<string, System.Collections.Immutable.ImmutableArray<string>>? Hints { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Components.Inputs.ExpressionFieldKind Kind { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string Label { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string Lead { get; set; }
@@ -1848,6 +1850,11 @@ namespace HomeBlaze.Components.Inputs
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
         protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
+    }
+    public enum ExpressionFieldKind
+    {
+        Condition = 0,
+        Value = 1,
     }
     public struct ExpressionScanner
     {

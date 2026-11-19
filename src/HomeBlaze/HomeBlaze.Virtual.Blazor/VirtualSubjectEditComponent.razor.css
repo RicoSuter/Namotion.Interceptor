@@ -1,0 +1,61 @@
+.virtual-editor {
+    height: calc(100vh - 240px);
+    min-height: 360px;
+}
+
+.virtual-editor ::deep .virtual-stack {
+    height: 100%;
+}
+
+/* A scroll area per column applies from the md breakpoint of MudBlazor (960px); below it the columns stack and the dialog scrolls as a whole. */
+@media (min-width: 960px) {
+    .virtual-editor {
+        overflow: hidden;
+    }
+
+    .virtual-editor ::deep .virtual-title {
+        flex: 0 0 auto;
+    }
+
+    .virtual-editor ::deep .virtual-grid {
+        flex: 1 1 0;
+        min-height: 0;
+        flex-wrap: nowrap;
+    }
+
+    .virtual-editor ::deep .virtual-tree-column {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .virtual-editor ::deep .virtual-tree-stack {
+        flex: 1 1 0;
+        min-height: 0;
+    }
+
+    .virtual-editor ::deep .virtual-tree-scroll {
+        flex: 1 1 0;
+        min-height: 0;
+        overflow-y: auto;
+    }
+
+    .virtual-editor ::deep .virtual-detail-column {
+        min-height: 0;
+        min-width: 0;
+        overflow-y: auto;
+    }
+}
+
+@media (max-width: 959.98px) {
+    .virtual-editor {
+        height: auto;
+        min-height: 0;
+    }
+
+    .virtual-editor ::deep .virtual-stack {
+        height: auto;
+    }
+}

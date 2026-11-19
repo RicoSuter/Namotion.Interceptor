@@ -40,8 +40,8 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
 
     // In a context of its own, so that a change of the version tells only the components that read it and not the
     // observers of the graph's changes, such as connectors and the history.
-    // Without derived property detection: a derived property that resolves a path would otherwise be computed again
-    // for every attached subject and property. Components read the version in their render instead.
+    // A derived property that resolves a path reads the version, so it depends on it and recalculates on every
+    // structural change. Components read the version in their render.
     private readonly SubjectPathsVersion _pathsVersion = new(InterceptorSubjectContext.Create()
         .WithEqualityCheck()
         .WithPropertyChangeSubscriptions()
