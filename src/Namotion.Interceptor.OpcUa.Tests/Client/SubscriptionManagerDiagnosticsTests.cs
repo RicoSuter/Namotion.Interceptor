@@ -88,9 +88,11 @@ public class SubscriptionManagerDiagnosticsTests
         Assert.Contains(acceptedSubscription, manager.Subscriptions);
         Assert.Contains(recreatedSubscription, manager.Subscriptions);
         Assert.DoesNotContain(refusedSubscription, manager.Subscriptions);
+#pragma warning disable CS0618 // SubscriptionManager still wires the classic fast callback
         Assert.Single(acceptedSubscription.FastDataChangeCallback!.GetInvocationList());
         Assert.Single(recreatedSubscription.FastDataChangeCallback!.GetInvocationList());
         Assert.Null(refusedSubscription.FastDataChangeCallback);
+#pragma warning restore CS0618
     }
 
     [Fact]
@@ -613,12 +615,12 @@ public class SubscriptionManagerDiagnosticsTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ReadResponse
             {
                 ResponseHeader = new ResponseHeader(),
-                Results = [new DataValue { Value = "read", StatusCode = StatusCodes.Good, SourceTimestamp = DateTime.UtcNow.AddMinutes(1) }],
+                Results = new[] { new DataValue("read", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)) }.ToArrayOf(),
                 DiagnosticInfos = []
             });
 
@@ -644,7 +646,7 @@ public class SubscriptionManagerDiagnosticsTests
             .SetValue(item.Status, revisedSamplingInterval);
     }
 
-    private static MonitoredItem CreateFailedNameItem(OpcUaSubjectClientSource source, uint statusCode)
+    private static MonitoredItem CreateFailedNameItem(OpcUaSubjectClientSource source, StatusCode statusCode)
     {
         var property = new RegisteredSubject((TestRoot)source.RootSubject)
             .TryGetProperty(nameof(TestRoot.Name))!;
@@ -683,12 +685,7 @@ public class SubscriptionManagerDiagnosticsTests
                 new MonitoredItemNotification
                 {
                     ClientHandle = clientHandle,
-                    Value = new DataValue
-                    {
-                        Value = value,
-                        SourceTimestamp = DateTime.UtcNow,
-                        StatusCode = StatusCodes.Good
-                    }
+                    Value = new DataValue(VariantHelper.CastFromWithReflectionFallback(value), StatusCodes.Good, DateTime.UtcNow)
                 }
             ],
             DiagnosticInfos = []

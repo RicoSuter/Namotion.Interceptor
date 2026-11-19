@@ -164,7 +164,7 @@ internal sealed class OpcUaNodeFactory
             DisplayName = new LocalizedText(mapping?.DisplayName ?? browseName.Name),
             Description = mapping?.Description is not null
                 ? new LocalizedText(mapping.Description)
-                : null,
+                : LocalizedText.Null,
             TypeDefinitionId = typeDefinition ?? ObjectTypeIds.FolderType,
             WriteMask = AttributeWriteMask.None,
             UserWriteMask = AttributeWriteMask.None,
@@ -197,7 +197,7 @@ internal sealed class OpcUaNodeFactory
             DisplayName = new LocalizedText(mapping?.DisplayName ?? browseName.Name),
             Description = mapping?.Description is not null
                 ? new LocalizedText(mapping.Description)
-                : null,
+                : LocalizedText.Null,
             TypeDefinitionId = typeDefinition ?? ObjectTypeIds.BaseObjectType,
             WriteMask = AttributeWriteMask.None,
             UserWriteMask = AttributeWriteMask.None,
@@ -228,12 +228,12 @@ internal sealed class OpcUaNodeFactory
         {
             NodeId = nodeId,
 
-            SymbolicName = browseName.Name,
+            SymbolicName = browseName.Name ?? string.Empty,
             BrowseName = browseName,
             DisplayName = new LocalizedText(mapping?.DisplayName ?? browseName.Name),
             Description = mapping?.Description is not null
                 ? new LocalizedText(mapping.Description)
-                : null,
+                : LocalizedText.Null,
 
             TypeDefinitionId = VariableTypeIds.BaseDataVariableType,
             DataType = dataTypeOverride ?? Opc.Ua.TypeInfo.GetDataTypeId(dataType),
@@ -292,7 +292,7 @@ internal sealed class OpcUaNodeFactory
                 targetNodeId = new NodeId(reference.TargetNodeId, namespaceIndex);
             }
 
-            node.AddReference(referenceTypeId, reference.IsForward, targetNodeId);
+            node.AddReference(referenceTypeId.Value, reference.IsForward, targetNodeId);
         }
     }
 
@@ -306,7 +306,7 @@ internal sealed class OpcUaNodeFactory
         var modellingRuleNodeId = GetModellingRuleNodeId(mapping.ModellingRule.Value);
         if (modellingRuleNodeId is not null)
         {
-            node.AddReference(ReferenceTypeIds.HasModellingRule, false, modellingRuleNodeId);
+            node.AddReference(ReferenceTypeIds.HasModellingRule, false, modellingRuleNodeId.Value);
         }
     }
 

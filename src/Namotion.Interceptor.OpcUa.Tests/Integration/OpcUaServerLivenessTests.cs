@@ -139,6 +139,59 @@ public class OpcUaServerLivenessTests
             await server.StopAsync();
         }
     }
+
+    [Fact]
+    public async Task WhenAPropertyValueHasNoOpcUaRepresentation_ThenTheServerStillStarts()
+    {
+        // Arrange
+        var logger = new TestLogger(_output);
+        using var port = await OpcUaTestPortPool.AcquireAsync();
+
+        await using var server = new OpcUaTestServer<UnsupportedTypeTestRoot>(logger);
+
+        // Act
+        await server.StartAsync(
+            createRoot: context => new UnsupportedTypeTestRoot(context)
+            {
+                Unsupported = new DateTimeOffset(2025, 1, 1, 12, 0, 0, TimeSpan.Zero)
+            },
+            baseAddress: port.BaseAddress,
+            certificateStoreBasePath: port.CertificateStoreBasePath);
+
+        var serverService = server.Server!;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverService.Diagnostics.IsOperational == true,
+            message: "The server should start although one property value cannot be represented.");
+        Assert.Equal(0, serverService.Diagnostics.ConsecutiveFailures);
+
+        // Act - a later change of that property must not fail the write batch either.
+        server.Root!.Unsupported = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        server.Root.Value = "changed";
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverService.TryGetVariableNode(
+                      new PropertyReference(server.Root, nameof(UnsupportedTypeTestRoot.Value)), out var node) &&
+                  node.Value.ToClrValue() as string == "changed",
+            message: "The supported property next to it should still reach its node.");
+    }
+}
+
+[InterceptorSubject]
+public partial class UnsupportedTypeTestRoot
+{
+    public UnsupportedTypeTestRoot()
+    {
+        Value = string.Empty;
+    }
+
+    [Path("opc", "Value")]
+    public partial string Value { get; set; }
+
+    [Path("opc", "Unsupported")]
+    public partial DateTimeOffset Unsupported { get; set; }
 }
 
 [InterceptorSubject]

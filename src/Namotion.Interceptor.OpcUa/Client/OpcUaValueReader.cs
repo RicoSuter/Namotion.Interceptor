@@ -31,10 +31,10 @@ internal static class OpcUaValueReader
     /// <returns>The results in node order, at most one per node; a server may return fewer.</returns>
     /// <exception cref="OpcUaResponseMismatchException">The request received the response to a different request.</exception>
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
-    public static async ValueTask<DataValueCollection> ReadAsync(
+    public static async ValueTask<ArrayOf<DataValue>> ReadAsync(
         ISession session,
         CancellationToken sessionLifetime,
-        ReadValueIdCollection nodesToRead,
+        ArrayOf<ReadValueId> nodesToRead,
         TimestampsToReturn timestampsToReturn,
         CancellationToken cancellationToken)
     {
@@ -63,11 +63,6 @@ internal static class OpcUaValueReader
         }
 
         var results = response.Results;
-        if (results.Count > nodesToRead.Count)
-        {
-            results.RemoveRange(nodesToRead.Count, results.Count - nodesToRead.Count);
-        }
-
-        return results;
+        return results.Count > nodesToRead.Count ? results.Slice(0, nodesToRead.Count) : results;
     }
 }

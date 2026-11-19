@@ -75,12 +75,13 @@ public class OpcUaServerRequestCompletionTests
 
             var source = client.Source!;
             Assert.True(source.TryGetNodeId(new PropertyReference(client.Root!, nameof(TestRoot.Name)), out var nameNodeId));
+            var nodeId = nameNodeId.Value;
             var session = source.CurrentSession!;
 
             // Act
             var completedTwice = await session.WriteAsync(
                 requestHeader: null,
-                [CreateWriteValue(nameNodeId, CompleteTwiceValue)],
+                [CreateWriteValue(nodeId, CompleteTwiceValue)],
                 CancellationToken.None);
 
             Assert.True(StatusCode.IsGood(completedTwice.Results[0]));
@@ -96,7 +97,7 @@ public class OpcUaServerRequestCompletionTests
                 var writeHeader = new RequestHeader();
                 var writeResponse = await session.WriteAsync(
                     writeHeader,
-                    [CreateWriteValue(nameNodeId, value)],
+                    [CreateWriteValue(nodeId, value)],
                     CancellationToken.None);
 
                 Assert.Equal(writeHeader.RequestHandle, writeResponse.ResponseHeader.RequestHandle);
@@ -107,11 +108,11 @@ public class OpcUaServerRequestCompletionTests
                     readHeader,
                     maxAge: 0,
                     TimestampsToReturn.Neither,
-                    [new ReadValueId { NodeId = nameNodeId, AttributeId = Opc.Ua.Attributes.Value }],
+                    [new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.Value }],
                     CancellationToken.None);
 
                 Assert.Equal(readHeader.RequestHandle, readResponse.ResponseHeader.RequestHandle);
-                Assert.Equal(value, readResponse.Results[0].Value);
+                Assert.Equal(value, readResponse.Results[0].WrappedValue.ToClrValue());
             }
         }
         finally
@@ -151,7 +152,7 @@ public class OpcUaServerRequestCompletionTests
         {
             // Captured before the call, so it is in place by the time the client has the response.
             if (request.Request is WriteRequest writeRequest &&
-                writeRequest.NodesToWrite.Exists(writeValue => Equals(writeValue.Value?.Value, CompleteTwiceValue)))
+                Array.Exists(writeRequest.NodesToWrite.ToArray() ?? [], writeValue => Equals(writeValue.Value.WrappedValue.ToClrValue(), CompleteTwiceValue)))
             {
                 Interlocked.CompareExchange(ref _capturedRequest, request, null);
             }

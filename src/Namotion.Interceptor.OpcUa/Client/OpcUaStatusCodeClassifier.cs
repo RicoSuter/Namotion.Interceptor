@@ -28,7 +28,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// </remarks>
 internal static class OpcUaStatusCodeClassifier
 {
-    private static readonly HashSet<uint> PermanentCodes =
+    private static readonly HashSet<StatusCode> PermanentCodes =
     [
         StatusCodes.BadNodeIdUnknown,
         StatusCodes.BadNodeIdInvalid,
@@ -47,6 +47,6 @@ internal static class OpcUaStatusCodeClassifier
     /// </summary>
     public static bool IsTransientError(StatusCode statusCode)
     {
-        return StatusCode.IsBad(statusCode) && !PermanentCodes.Contains(statusCode.Code);
+        return StatusCode.IsBad(statusCode) && !PermanentCodes.Contains(statusCode);
     }
 }

@@ -325,12 +325,7 @@ public class SubscriptionNotificationOrderingTests
                 MonitoredItems = [.. values.Select(value => new MonitoredItemNotification
                 {
                     ClientHandle = value.ClientHandle,
-                    Value = new DataValue
-                    {
-                        Value = value.Value,
-                        SourceTimestamp = DateTime.UtcNow,
-                        StatusCode = StatusCodes.Good
-                    }
+                    Value = new DataValue(value.Value, StatusCodes.Good, DateTime.UtcNow)
                 })],
                 DiagnosticInfos = [],
                 SequenceNumber = sequenceNumber

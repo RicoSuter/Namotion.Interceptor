@@ -91,10 +91,10 @@ public class PollingManagerTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
-            .Returns((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection _, CancellationToken cancellationToken) =>
-                WaitForCancellationAsync(cancellationToken));
+            .Returns((RequestHeader _, double _, TimestampsToReturn _, ArrayOf<ReadValueId> _, CancellationToken cancellationToken) =>
+                new ValueTask<ReadResponse>(WaitForCancellationAsync(cancellationToken)));
 
         var configuration = CreateConfiguration();
         configuration.PollingInterval = TimeSpan.FromMilliseconds(1);
@@ -150,7 +150,7 @@ public class PollingManagerTests
         var pollCount = 0;
 
         // Ends only through the request's token, as the SDK does for a request on a channel the client disposed.
-        async Task<ReadResponse> WaitForCancellationAsync(CancellationToken cancellationToken)
+        async ValueTask<ReadResponse> WaitForCancellationAsync(CancellationToken cancellationToken)
         {
             readStarted.TrySetResult();
             try
@@ -172,9 +172,9 @@ public class PollingManagerTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
-            .Returns((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection _, CancellationToken cancellationToken) =>
+            .Returns((RequestHeader _, double _, TimestampsToReturn _, ArrayOf<ReadValueId> _, CancellationToken cancellationToken) =>
                 WaitForCancellationAsync(cancellationToken));
 
         var configuration = CreateConfiguration();
@@ -252,12 +252,7 @@ public class PollingManagerTests
             ResponseHeader = new ResponseHeader(),
             Results =
             [
-                new DataValue
-                {
-                    Value = "recovered",
-                    SourceTimestamp = DateTime.UtcNow,
-                    StatusCode = StatusCodes.Good
-                }
+                new DataValue("recovered", StatusCodes.Good, DateTime.UtcNow)
             ],
             DiagnosticInfos = []
         };
@@ -266,11 +261,11 @@ public class PollingManagerTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
             .Returns(() => Interlocked.Increment(ref readAttempts) == 1
-                ? Task.FromException<ReadResponse>(error)
-                : Task.FromResult(goodResponse));
+                ? ValueTask.FromException<ReadResponse>(error)
+                : ValueTask.FromResult(goodResponse));
 
         var configuration = CreateConfiguration();
         configuration.PollingInterval = TimeSpan.FromMilliseconds(100);
@@ -329,25 +324,22 @@ public class PollingManagerTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader requestHeader, double _, TimestampsToReturn _, ReadValueIdCollection nodesToRead, CancellationToken _) =>
+            .Returns((RequestHeader requestHeader, double _, TimestampsToReturn _, ArrayOf<ReadValueId> nodesToRead, CancellationToken _) =>
             {
                 requestedNodeCounts.Enqueue(nodesToRead.Count);
                 var handle = (uint)Interlocked.Increment(ref nextHandle);
                 requestHeader.RequestHandle = handle;
-                return new ReadResponse
+                return new ValueTask<ReadResponse>(new ReadResponse
                 {
                     // Only the first request is answered for another request.
                     ResponseHeader = new ResponseHeader { RequestHandle = handle == 1 ? 99u : handle },
-                    Results = new DataValueCollection(nodesToRead.Select(_ => new DataValue
-                    {
-                        Value = "polled",
-                        SourceTimestamp = DateTime.UtcNow,
-                        StatusCode = StatusCodes.Good
-                    })),
+                    Results = Enumerable.Range(0, nodesToRead.Count)
+                        .Select(_ => new DataValue(new Variant("polled"), StatusCodes.Good, DateTime.UtcNow))
+                        .ToArray(),
                     DiagnosticInfos = []
-                };
+                });
             });
 
         var configuration = CreateConfiguration();

@@ -275,20 +275,18 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
         var itemCount = ownedProperties.Count;
         var nodesPerRead = OpcUaValueReader.GetNodesPerRead(session, itemCount);
-        var readValues = new ReadValueIdCollection(nodesPerRead);
         var result = new Dictionary<RegisteredSubjectProperty, DataValue>(itemCount);
         for (var offset = 0; offset < itemCount; offset += nodesPerRead)
         {
-            // Reused across reads: the previous read has completed, so the SDK no longer holds it.
-            readValues.Clear();
             var take = Math.Min(nodesPerRead, itemCount - offset);
+            var readValues = new ReadValueId[take];
             for (var i = 0; i < take; i++)
             {
-                readValues.Add(new ReadValueId
+                readValues[i] = new ReadValueId
                 {
                     NodeId = ownedProperties[offset + i].NodeId,
                     AttributeId = Opc.Ua.Attributes.Value
-                });
+                };
             }
 
             // A mismatch fails the whole load, whose callers reload on failure, so the session is resynced anyway.
@@ -309,8 +307,9 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         {
             foreach (var (property, dataValue) in result)
             {
-                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
-                property.SetValueFromSource(this, dataValue.SourceTimestamp, null, value);
+                var value = _configuration.ValueConverter.ConvertToPropertyValue(
+                    dataValue.WrappedValue.ToClrValue(), property);
+                property.SetValueFromSource(this, dataValue.SourceTimestamp.ToClrTimestamp(), null, value);
             }
 
             _logger.LogInformation("Updated {Count} properties with OPC UA node values.", itemCount);
@@ -539,7 +538,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             propertyWriter.StartBuffering();
 
             // Create new session (CreateSessionAsync disposes old session internally)
-            var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
+            var application = sessionManager.Application
+                ?? await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
             var session = await sessionManager.CreateSessionAsync(application, _configuration, token).ConfigureAwait(false);
 
             // Clear all read-after-write state - new session means old pending reads and registrations are invalid
@@ -631,7 +631,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             for (var i = 0; i < rootPath.Length; i++)
             {
                 var references = await BrowseNodeAsync(session, currentNodeId, cancellationToken).ConfigureAwait(false);
-                var match = references.FirstOrDefault(reference => reference.BrowseName.Name == rootPath[i]);
+                var match = references.Find(reference => reference.BrowseName.Name == rootPath[i]);
                 if (match is null)
                 {
                     return null;
@@ -760,7 +760,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
     }
 
-    private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
+    private async Task<ArrayOf<ReferenceDescription>> BrowseNodeAsync(
         Session session,
         NodeId nodeId,
         CancellationToken cancellationToken)

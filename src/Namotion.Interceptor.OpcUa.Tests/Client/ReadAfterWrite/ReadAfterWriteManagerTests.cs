@@ -49,12 +49,12 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ReadResponse
             {
                 ResponseHeader = new ResponseHeader(),
-                Results = new DataValueCollection(results),
+                Results = results.ToArrayOf(),
                 DiagnosticInfos = []
             });
 
@@ -62,12 +62,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     }
 
     private static DataValue CreateDataValue(object? value, StatusCode statusCode, DateTime sourceTimestamp) =>
-        new()
-        {
-            Value = value,
-            StatusCode = statusCode,
-            SourceTimestamp = sourceTimestamp
-        };
+        new(VariantHelper.CastFromWithReflectionFallback(value), statusCode, sourceTimestamp);
 
     private static void RegisterAndSchedule(
         ReadAfterWriteManager manager,
@@ -313,18 +308,18 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader requestHeader, double _, TimestampsToReturn _, ReadValueIdCollection _, CancellationToken _) =>
+            .Returns((RequestHeader requestHeader, double _, TimestampsToReturn _, ArrayOf<ReadValueId> _, CancellationToken _) =>
             {
                 // Assigns the request handle as the SDK does while sending, and answers for another request.
                 requestHeader.RequestHandle = 7;
-                return new ReadResponse
+                return new ValueTask<ReadResponse>(new ReadResponse
                 {
                     ResponseHeader = new ResponseHeader { RequestHandle = 8 },
-                    Results = new DataValueCollection([CreateDataValue("wrong", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1))]),
+                    Results = new[] { CreateDataValue("wrong", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)) }.ToArrayOf(),
                     DiagnosticInfos = []
-                };
+                });
             });
 
         var metrics = new ReadAfterWriteMetrics();
@@ -368,19 +363,19 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader requestHeader, double _, TimestampsToReturn _, ReadValueIdCollection nodesToRead, CancellationToken _) =>
+            .Returns((RequestHeader requestHeader, double _, TimestampsToReturn _, ArrayOf<ReadValueId> nodesToRead, CancellationToken _) =>
             {
                 requestedNodeCounts.Enqueue(nodesToRead.Count);
                 requestHeader.RequestHandle = ++nextHandle;
-                return new ReadResponse
+                return new ValueTask<ReadResponse>(new ReadResponse
                 {
                     // Only the first request is answered for another request.
                     ResponseHeader = new ResponseHeader { RequestHandle = nextHandle == 1 ? 99u : nextHandle },
-                    Results = new DataValueCollection([CreateDataValue("read", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1))]),
+                    Results = new[] { CreateDataValue("read", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)) }.ToArrayOf(),
                     DiagnosticInfos = []
-                };
+                });
             });
 
         var metrics = new ReadAfterWriteMetrics();
@@ -423,18 +418,18 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader requestHeader, double _, TimestampsToReturn _, ReadValueIdCollection _, CancellationToken _) =>
+            .Returns((RequestHeader requestHeader, double _, TimestampsToReturn _, ArrayOf<ReadValueId> _, CancellationToken _) =>
             {
                 requestHeader.RequestHandle = ++nextHandle;
-                return new ReadResponse
+                return new ValueTask<ReadResponse>(new ReadResponse
                 {
                     // Only the second request is answered for another request.
                     ResponseHeader = new ResponseHeader { RequestHandle = nextHandle == 2 ? 99u : nextHandle },
-                    Results = new DataValueCollection([CreateDataValue("read", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1))]),
+                    Results = new[] { CreateDataValue("read", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)) }.ToArrayOf(),
                     DiagnosticInfos = []
-                };
+                });
             });
 
         var metrics = new ReadAfterWriteMetrics();
@@ -730,6 +725,57 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task WhenTheApplyLockIsUpdatedWhileTheReadIsInFlight_ThenTheReadIsAppliedUnderTheNewLock()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var subject = new TestPerson(context);
+        var nodeId = new NodeId("FirstName", 2);
+        var newLock = new Lock();
+        bool? newLockHeldDuringApply = null;
+        using var subscription = context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(_ => newLockHeldDuringApply = newLock.IsHeldByCurrentThread);
+
+        ReadAfterWriteManager? manager = null;
+        var session = new Mock<ISession>();
+        session.SetupGet(value => value.Connected).Returns(true);
+        session
+            .Setup(value => value.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                manager!.UpdateApplyLock(nodeId, newLock);
+                return new ValueTask<ReadResponse>(new ReadResponse
+                {
+                    ResponseHeader = new ResponseHeader(),
+                    Results = new[] { CreateDataValue("read", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)) }.ToArrayOf(),
+                    DiagnosticInfos = []
+                });
+            });
+        await using var readAfterWriteManager = new ReadAfterWriteManager(
+            () => (session.Object, CancellationToken.None),
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(250)),
+            new ReadAfterWriteMetrics(),
+            reportError: static _ => { },
+            NullLogger.Instance);
+        manager = readAfterWriteManager;
+        RegisterAndSchedule(manager, nodeId, CreateTestProperty(subject), applyLock: new Lock());
+
+        // Act
+        await manager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert
+        Assert.Equal("read", subject.FirstName);
+        Assert.True(newLockHeldDuringApply);
+    }
+
+    [Fact]
     public async Task WhenCompletionLoggingThrows_ThenTheReadOutcomeIsCountedOnce()
     {
         // Arrange
@@ -965,10 +1011,10 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
-            .Returns((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection _, CancellationToken cancellationToken) =>
-                FailAfterCancellationAsync(cancellationToken));
+            .Returns((RequestHeader _, double _, TimestampsToReturn _, ArrayOf<ReadValueId> _, CancellationToken cancellationToken) =>
+                new ValueTask<ReadResponse>(FailAfterCancellationAsync(cancellationToken)));
 
         var configuration = ClientSourceTestFactory.CreateConfiguration();
         configuration.ReadAfterWriteBuffer = TimeSpan.FromMinutes(1);
@@ -1006,7 +1052,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var readStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
 
-        async Task<ReadResponse> FailAfterCancellationAsync(CancellationToken cancellationToken)
+        async ValueTask<ReadResponse> FailAfterCancellationAsync(CancellationToken cancellationToken)
         {
             readStarted.TrySetResult();
             try
@@ -1028,9 +1074,9 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
-            .Returns((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection _, CancellationToken cancellationToken) =>
+            .Returns((RequestHeader _, double _, TimestampsToReturn _, ArrayOf<ReadValueId> _, CancellationToken cancellationToken) =>
                 FailAfterCancellationAsync(cancellationToken));
 
         var configuration = ClientSourceTestFactory.CreateConfiguration();
@@ -1080,7 +1126,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(error);
 

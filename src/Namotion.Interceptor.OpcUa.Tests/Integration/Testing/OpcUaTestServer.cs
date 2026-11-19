@@ -26,6 +26,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
     private Action<ApplicationConfiguration>? _configureApplication;
     private string? _applicationUri;
     private bool _autoAcceptUntrustedCertificates = true;
+    private IReadOnlyList<Opc.Ua.Identity.IUserTokenAuthenticator> _userTokenAuthenticators = [];
     private string _certificateStoreBasePath = "pki";
     private TimeSpan _bufferTime = TimeSpan.FromMilliseconds(100);
     private int _disposed;
@@ -48,7 +49,8 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         string? alternateBaseAddress = null,
         Action<ApplicationConfiguration>? configureApplication = null,
         string? applicationUri = null,
-        bool autoAcceptUntrustedCertificates = true)
+        bool autoAcceptUntrustedCertificates = true,
+        IReadOnlyList<Opc.Ua.Identity.IUserTokenAuthenticator>? userTokenAuthenticators = null)
     {
         _createRoot = createRoot;
         _initializeDefaults = initializeDefaults;
@@ -59,6 +61,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         _configureApplication = configureApplication;
         _applicationUri = applicationUri;
         _autoAcceptUntrustedCertificates = autoAcceptUntrustedCertificates;
+        _userTokenAuthenticators = userTokenAuthenticators ?? [];
 
         return StartInternalAsync();
     }
@@ -113,6 +116,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                     CleanCertificateStore = false,
                     AutoAcceptUntrustedCertificates = _autoAcceptUntrustedCertificates,
                     CertificateStoreBasePath = _certificateStoreBasePath,
+                    UserTokenAuthenticators = _userTokenAuthenticators,
 
                     BufferTime = _bufferTime
                 };
@@ -201,10 +205,12 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
             var application = await base.CreateApplicationInstanceAsync();
             if (AlternateBaseAddress is not null)
             {
-                application.ApplicationConfiguration.ServerConfiguration.AlternateBaseAddresses.Add(AlternateBaseAddress);
+                var serverConfiguration = application.ApplicationConfiguration?.ServerConfiguration
+                    ?? throw new InvalidOperationException("The server application has no server configuration.");
+                serverConfiguration.AlternateBaseAddresses = serverConfiguration.AlternateBaseAddresses.AddItem(AlternateBaseAddress);
             }
 
-            ConfigureApplication?.Invoke(application.ApplicationConfiguration);
+            ConfigureApplication?.Invoke(application.ApplicationConfiguration!);
 
             return application;
         }

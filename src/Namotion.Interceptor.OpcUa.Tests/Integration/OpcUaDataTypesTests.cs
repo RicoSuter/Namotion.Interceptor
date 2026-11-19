@@ -186,4 +186,119 @@ public class OpcUaDataTypesTests : SharedServerTestBase
 
         Logger.Log("Nullable Guid bidirectional sync verified");
     }
+
+    [Fact]
+    public async Task WhenEnumChanges_ThenItSyncsBothDirections()
+    {
+        // Arrange
+        var serverArea = ServerFixture.ServerRoot.DataTypes;
+        var clientArea = Client!.Root!.DataTypes;
+
+        // Act
+        serverArea.EnumValue = DayOfWeek.Wednesday;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => clientArea.EnumValue == DayOfWeek.Wednesday,
+            timeout: TimeSpan.FromSeconds(90),
+            message: "Client should receive the server's enum update");
+
+        // Act
+        clientArea.EnumValue = DayOfWeek.Friday;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.EnumValue == DayOfWeek.Friday,
+            timeout: TimeSpan.FromSeconds(90),
+            message: "Server should receive the client's enum update");
+    }
+
+    [Fact]
+    public async Task WhenEnumArrayChanges_ThenItSyncsBothDirections()
+    {
+        // Arrange
+        var serverArea = ServerFixture.ServerRoot.DataTypes;
+        var clientArea = Client!.Root!.DataTypes;
+        DayOfWeek[] serverValues = [DayOfWeek.Monday, DayOfWeek.Sunday];
+        DayOfWeek[] clientValues = [DayOfWeek.Saturday];
+
+        // Act
+        serverArea.EnumArray = serverValues;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => clientArea.EnumArray.SequenceEqual(serverValues),
+            timeout: TimeSpan.FromSeconds(90),
+            message: "Client should receive the server's enum array update");
+
+        // Act
+        clientArea.EnumArray = clientValues;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.EnumArray.SequenceEqual(clientValues),
+            timeout: TimeSpan.FromSeconds(90),
+            message: "Server should receive the client's enum array update");
+    }
+
+    [Fact]
+    public async Task WhenSByteArrayChanges_ThenItSyncsBothDirections()
+    {
+        // Arrange
+        var serverArea = ServerFixture.ServerRoot.DataTypes;
+        var clientArea = Client!.Root!.DataTypes;
+        sbyte[] serverValues = [-1, 0, 127];
+        sbyte[] clientValues = [-128, 5];
+
+        // Act
+        serverArea.SByteArray = serverValues;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => clientArea.SByteArray.SequenceEqual(serverValues),
+            timeout: TimeSpan.FromSeconds(90),
+            message: "Client should receive the server's sbyte[] update");
+
+        // Act
+        clientArea.SByteArray = clientValues;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.SByteArray.SequenceEqual(clientValues),
+            timeout: TimeSpan.FromSeconds(90),
+            message: "Server should receive the client's sbyte[] update");
+    }
+
+    [Fact]
+    public async Task WhenDateTimeIsMinOrMaxValue_ThenClientReceivesItUnchanged()
+    {
+        // Arrange
+        var serverArea = ServerFixture.ServerRoot.DataTypes;
+        var clientArea = Client!.Root!.DataTypes;
+        var date = new DateTime(2026, 3, 4, 5, 6, 7, DateTimeKind.Utc);
+
+        serverArea.DefaultDateTimeValue = date;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => clientArea.DefaultDateTimeValue == date,
+            timeout: TimeSpan.FromSeconds(90),
+            message: "Client should receive the server's DateTime update");
+
+        // Act
+        serverArea.DefaultDateTimeValue = DateTime.MinValue;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => clientArea.DefaultDateTimeValue == DateTime.MinValue,
+            timeout: TimeSpan.FromSeconds(90),
+            message: () => $"Client should receive DateTime.MinValue, but has {clientArea.DefaultDateTimeValue:O}");
+
+        // Act
+        serverArea.DefaultDateTimeValue = DateTime.MaxValue;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => clientArea.DefaultDateTimeValue.Ticks == DateTime.MaxValue.Ticks,
+            timeout: TimeSpan.FromSeconds(90),
+            message: () => $"Client should receive DateTime.MaxValue, but has {clientArea.DefaultDateTimeValue:O}");
+    }
 }

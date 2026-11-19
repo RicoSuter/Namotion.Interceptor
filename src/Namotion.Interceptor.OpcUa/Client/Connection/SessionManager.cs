@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Security.Cryptography.X509Certificates;
+using Opc.Ua.Security.Certificates;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Polling;
@@ -49,6 +49,14 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     // Enqueued by SDK reconnection callbacks (sync), drained by health check loop via DisposePendingSessionsAsync (async).
     private readonly ConcurrentQueue<Session> _sessionsToDispose = new();
+
+    private ApplicationInstance? _application;
+
+    /// <summary>
+    /// Gets the application instance the current session was created with, so that a reconnect can
+    /// reuse it. It owns the certificate manager and is disposed with this manager.
+    /// </summary>
+    internal ApplicationInstance? Application => Volatile.Read(ref _application);
 
     /// <summary>
     /// Gets the current session. WARNING: Can change at any time due to reconnection. Never cache - read immediately before use.
@@ -308,18 +316,21 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         OpcUaClientConfiguration configuration,
         CancellationToken cancellationToken)
     {
-        var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
+        var applicationConfiguration = application.ApplicationConfiguration
+            ?? throw new InvalidOperationException("The OPC UA application instance has no application configuration.");
+        Volatile.Write(ref _application, application);
+        var endpointConfiguration = EndpointConfiguration.Create(applicationConfiguration);
         var serverUri = new Uri(configuration.ServerUrl);
 
-        EndpointDescriptionCollection endpoints;
+        ArrayOf<EndpointDescription> endpoints;
         try
         {
             using var discoveryClient = await DiscoveryClient.CreateAsync(
-                application.ApplicationConfiguration,
+                applicationConfiguration,
                 serverUri,
                 endpointConfiguration, ct: cancellationToken).ConfigureAwait(false);
 
-            endpoints = await discoveryClient.GetEndpointsAsync(null, cancellationToken).ConfigureAwait(false);
+            endpoints = await discoveryClient.GetEndpointsAsync(default, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -331,34 +342,16 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         var endpointDescription = SelectEndpoint(
-            application.ApplicationConfiguration,
+            applicationConfiguration,
             serverUri,
             endpoints,
             configuration.MinimumSecurityMode,
             configuration.ResolvedTelemetryContext);
 
         // Discovery needs no client certificate, and an unsecured endpoint never does.
-        if (endpointDescription.SecurityMode != MessageSecurityMode.None)
-        {
-            // Read before loading, because after a rejected certificate the identifier reports that certificate's subject.
-            var subjectName = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.SubjectName;
-            try
-            {
-                await ApplicationCertificateLoader.EnsureLoadedAsync(
-                    application,
-                    configuration.AutoCreateApplicationCertificate,
-                    configuration.ApplicationCertificateLifetimeInMonths,
-                    configuration.ResolvedTelemetryContext,
-                    _logger,
-                    cancellationToken).ConfigureAwait(false);
-            }
-            // The SDK can report a cancellation as another exception type, so the token is checked too.
-            catch (Exception error) when (error is not OperationCanceledException && !cancellationToken.IsCancellationRequested)
-            {
-                throw CreateCertificateLoadException(
-                    error, application.ApplicationConfiguration, subjectName, configuration.AutoCreateApplicationCertificate);
-            }
-        }
+        using var clientCertificate = endpointDescription.SecurityMode != MessageSecurityMode.None
+            ? await LoadClientCertificateAsync(application, applicationConfiguration, configuration, cancellationToken).ConfigureAwait(false)
+            : null;
 
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
         var oldSession = CurrentSession;
@@ -373,19 +366,19 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         try
         {
             sessionResult = await sessionFactory.CreateAsync(
-                application.ApplicationConfiguration,
+                applicationConfiguration,
                 endpoint,
                 updateBeforeConnect: false,
-                sessionName: application.ApplicationName,
+                sessionName: application.ApplicationName ?? configuration.ApplicationName,
                 sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
                 identity: identity,
-                preferredLocales: null,
+                preferredLocales: default,
                 cancellationToken).ConfigureAwait(false);
         }
         catch (ServiceResultException error) when (IsCertificateError(error, endpointDescription))
         {
             throw CreateCertificateErrorException(
-                error, endpointDescription, application.ApplicationConfiguration, configuration.ResolvedTelemetryContext);
+                error, endpointDescription, applicationConfiguration, clientCertificate, configuration.ResolvedTelemetryContext);
         }
 
         var newSession = sessionResult as Session
@@ -423,6 +416,32 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         return newSession;
+    }
+
+    private async Task<Certificate> LoadClientCertificateAsync(
+        ApplicationInstance application,
+        ApplicationConfiguration applicationConfiguration,
+        OpcUaClientConfiguration configuration,
+        CancellationToken cancellationToken)
+    {
+        // Read before loading, because a successful load sets the subject of the certificate it found.
+        var subjectName = applicationConfiguration.SecurityConfiguration.ApplicationCertificate?.SubjectName;
+        try
+        {
+            return await ApplicationCertificateLoader.EnsureLoadedAsync(
+                application,
+                configuration.AutoCreateApplicationCertificate,
+                configuration.ApplicationCertificateLifetimeInMonths,
+                configuration.ResolvedTelemetryContext,
+                _logger,
+                cancellationToken).ConfigureAwait(false);
+        }
+        // The SDK can report a cancellation as another exception type, so the token is checked too.
+        catch (Exception error) when (error is not OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            throw CreateCertificateLoadException(
+                error, applicationConfiguration, subjectName, configuration.AutoCreateApplicationCertificate);
+        }
     }
 
     public async Task CreateSubscriptionsAsync(
@@ -769,11 +788,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     internal static EndpointDescription SelectEndpoint(
         ApplicationConfiguration applicationConfiguration,
         Uri serverUri,
-        EndpointDescriptionCollection endpoints,
+        ArrayOf<EndpointDescription> endpoints,
         MessageSecurityMode minimumSecurityMode,
         ITelemetryContext telemetryContext)
     {
-        var schemeEndpoints = endpoints
+        var schemeEndpoints = endpoints.ToList()
             .Where(endpoint => endpoint.EndpointUrl?.StartsWith(serverUri.Scheme, StringComparison.Ordinal) == true)
             .ToArray();
 
@@ -784,10 +803,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         // The SDK falls back to the first endpoint whatever its mode and policy, so weaker ones are filtered out first.
-        var candidates = new EndpointDescriptionCollection(
-            schemeEndpoints.Where(endpoint => endpoint.SecurityMode >= minimumSecurityMode));
+        var candidates = schemeEndpoints.Where(endpoint => endpoint.SecurityMode >= minimumSecurityMode).ToArray();
 
-        if (candidates.Count == 0)
+        if (candidates.Length == 0)
         {
             throw new InvalidOperationException(
                 $"The OPC UA server at '{serverUri}' offers no endpoint with the security mode {minimumSecurityMode} or stronger, " +
@@ -801,9 +819,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             return unsecuredEndpoint;
         }
 
-        var supportedPolicies = applicationConfiguration.SecurityConfiguration.SupportedSecurityPolicies;
+        var supportedPolicies = applicationConfiguration.SecurityConfiguration.SupportedSecurityPolicies.ToArray() ?? [];
         var securedEndpoint = CoreClientUtils.SelectEndpoint(applicationConfiguration, serverUri, candidates, true, telemetryContext);
-        if (securedEndpoint is null || !supportedPolicies.Contains(securedEndpoint.SecurityPolicyUri))
+        if (securedEndpoint is null || !supportedPolicies.Contains(securedEndpoint.SecurityPolicyUri, StringComparer.Ordinal))
         {
             var requirement = minimumSecurityMode == MessageSecurityMode.None
                 ? "no unsecured endpoint and no secured endpoint with"
@@ -824,23 +842,30 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// the server certificate, or the server rejected the secure channel of a secured endpoint.
     /// </summary>
     internal static bool IsCertificateError(ServiceResultException error, EndpointDescription endpoint) =>
-        error.StatusCode is StatusCodes.BadCertificateUntrusted or StatusCodes.BadCertificateChainIncomplete or StatusCodes.BadCertificateTimeInvalid ||
+        error.StatusCode == StatusCodes.BadCertificateUntrusted ||
+        error.StatusCode == StatusCodes.BadCertificateChainIncomplete ||
+        error.StatusCode == StatusCodes.BadCertificateTimeInvalid ||
         (error.StatusCode == StatusCodes.BadSecurityChecksFailed && endpoint.SecurityMode != MessageSecurityMode.None);
 
     /// <summary>
     /// Creates the exception thrown for an error <see cref="IsCertificateError"/> accepts. The message names the
     /// certificate at fault and the folders or option that resolve it.
     /// </summary>
+    /// <param name="error">The error the session creation failed with.</param>
+    /// <param name="endpoint">The endpoint the session was created for.</param>
+    /// <param name="applicationConfiguration">The client application configuration.</param>
+    /// <param name="clientCertificate">The client certificate loaded from the own store for a secured endpoint, or <c>null</c>.</param>
+    /// <param name="telemetryContext">The telemetry context.</param>
     internal static InvalidOperationException CreateCertificateErrorException(
         ServiceResultException error,
         EndpointDescription endpoint,
         ApplicationConfiguration applicationConfiguration,
+        Certificate? clientCertificate,
         ITelemetryContext telemetryContext)
     {
         var security = applicationConfiguration.SecurityConfiguration;
         using var serverCertificate = ParseServerCertificate(endpoint, telemetryContext);
         var serverThumbprint = serverCertificate?.Thumbprint ?? "(unknown)";
-        var clientCertificate = security.ApplicationCertificate?.Certificate;
         var ownFolder = CertificateFolder.Get(security.ApplicationCertificate?.StoreType, security.ApplicationCertificate?.StorePath);
         var rejectedFolder = CertificateFolder.Get(security.RejectedCertificateStore);
         var trustedFolder = CertificateFolder.Get(security.TrustedPeerCertificates);
@@ -854,28 +879,29 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         var areBothCertificatesTimeValid = isClientCertificateSent && IsTimeValid(clientCertificate!) && isServerCertificateTimeValid;
 
         // Auto-accept only covers an untrusted server certificate, so only that message suggests it.
-        var message = error.StatusCode switch
+        var statusCode = error.StatusCode;
+        var message = true switch
         {
             // Servers report an untrusted, revoked or invalid client certificate, or one whose issuer chain is incomplete,
             // with this code. The client otherwise raises it only for a failed message signature or decryption, or a
             // mismatched endpoint list.
-            StatusCodes.BadSecurityChecksFailed =>
+            _ when statusCode == StatusCodes.BadSecurityChecksFailed =>
                 $"The OPC UA server rejected the secure channel, most likely because it does not trust this client's certificate " +
                 $"{clientCertificate?.Thumbprint ?? "(unknown)"} in '{ownFolder}'. Trust it on the server; for a certificate issued " +
                 $"by a certificate authority, the server also needs the authority's certificates.",
-            StatusCodes.BadCertificateTimeInvalid when isClientCertificateTimeInvalid =>
+            _ when statusCode == StatusCodes.BadCertificateTimeInvalid && isClientCertificateTimeInvalid =>
                 $"The OPC UA server rejected this client's certificate {clientCertificate!.Thumbprint} in '{ownFolder}' because it " +
                 $"is expired or not yet valid{FormatValidity(clientCertificate)}. Provide a valid certificate there and trust it " +
                 $"on the server, and check that the clocks of the server and this client are correct.",
-            StatusCodes.BadCertificateTimeInvalid when areBothCertificatesTimeValid =>
+            _ when statusCode == StatusCodes.BadCertificateTimeInvalid && areBothCertificatesTimeValid =>
                 $"The OPC UA server rejected a certificate as expired or not yet valid, but this client's certificate " +
                 $"{clientCertificate!.Thumbprint}{FormatValidity(clientCertificate)} and the server's certificate " +
                 $"{serverThumbprint}{FormatValidity(serverCertificate)} are both valid by this machine's clock. " +
                 $"Check that the clocks of the server and this client are correct.",
-            StatusCodes.BadCertificateTimeInvalid =>
+            _ when statusCode == StatusCodes.BadCertificateTimeInvalid =>
                 $"The OPC UA server certificate {serverThumbprint} is expired or not yet valid{FormatValidity(serverCertificate)}. " +
                 $"The server needs a valid certificate; also check that the clocks of the server and this client are correct.",
-            StatusCodes.BadCertificateChainIncomplete =>
+            _ when statusCode == StatusCodes.BadCertificateChainIncomplete =>
                 $"The OPC UA server certificate {serverThumbprint} is not trusted because its issuer chain is incomplete. " +
                 $"Add the certificates of the authorities that issued it to '{CertificateFolder.Get(security.TrustedIssuerCertificates)}' " +
                 $"and the root authority's certificate to '{trustedFolder}'; the server's certificate chain is written to '{rejectedFolder}'.",
@@ -913,20 +939,20 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         .Select(endpoint => $"{endpoint.SecurityPolicyUri} ({endpoint.SecurityMode})")
         .Distinct(StringComparer.Ordinal));
 
-    private static bool IsTimeValid(X509Certificate2 certificate)
+    private static bool IsTimeValid(Certificate certificate)
     {
         var now = DateTime.UtcNow;
         return certificate.NotBefore.ToUniversalTime() <= now && now <= certificate.NotAfter.ToUniversalTime();
     }
 
-    private static string FormatValidity(X509Certificate2? certificate) => certificate is null
+    private static string FormatValidity(Certificate? certificate) => certificate is null
         ? string.Empty
         : $" (valid from {certificate.NotBefore.ToUniversalTime():u} to {certificate.NotAfter.ToUniversalTime():u})";
 
     // Called while wrapping an error, so it must not throw and hide that error.
-    private static X509Certificate2? ParseServerCertificate(EndpointDescription endpoint, ITelemetryContext telemetryContext)
+    private static Certificate? ParseServerCertificate(EndpointDescription endpoint, ITelemetryContext telemetryContext)
     {
-        if (endpoint.ServerCertificate is not { Length: > 0 } data)
+        if (endpoint.ServerCertificate.Length == 0)
         {
             return null;
         }
@@ -934,7 +960,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         try
         {
             // The server may send its whole chain; this parses the first certificate, which is its own.
-            return Utils.ParseCertificateBlob(data, telemetryContext);
+            return Utils.ParseCertificateBlob(endpoint.ServerCertificate.Memory, telemetryContext);
         }
         catch (ServiceResultException)
         {
@@ -1145,6 +1171,13 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 // Force immediate disposal without waiting for server acknowledgment
                 try { sessionToDispose.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error force-disposing session."); }
             }
+        }
+
+        var application = Interlocked.Exchange(ref _application, null);
+        if (application is not null)
+        {
+            try { await application.DisposeAsync().AsTask().WaitAsync(_configuration.SessionDisposalTimeout).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA application instance."); }
         }
     }
 

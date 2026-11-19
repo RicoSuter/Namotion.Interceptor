@@ -21,7 +21,7 @@ public sealed class EndpointLoggingSessionFactory : DefaultSessionFactory
         string sessionName,
         uint sessionTimeout,
         IUserIdentity? identity,
-        IList<string>? preferredLocales,
+        ArrayOf<string> preferredLocales,
         CancellationToken ct = default)
     {
         var session = await base.CreateAsync(

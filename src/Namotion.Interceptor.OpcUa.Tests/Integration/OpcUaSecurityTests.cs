@@ -1,8 +1,11 @@
-using System.Security.Cryptography.X509Certificates;
+using System.Text;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Testing;
 using Opc.Ua;
+using Opc.Ua.Identity;
+using Opc.Ua.Security.Certificates;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
@@ -117,7 +120,7 @@ public class OpcUaSecurityTests
     {
         // Arrange
         await using var test = await SecurityTest.CreateAsync(_output);
-        await test.StartServerAsync();
+        await test.StartServerAsync(userTokenAuthenticators: [new UserNameAuthenticator("user", "password")]);
         using var serverCertificate = LoadOwnCertificate(test.ServerStore);
         var client = await test.StartClientAsync(config =>
             config.CreateUserIdentity = _ => Task.FromResult(new UserIdentity("user", "password"u8.ToArray())));
@@ -140,7 +143,7 @@ public class OpcUaSecurityTests
     {
         // Arrange
         await using var test = await SecurityTest.CreateAsync(_output);
-        await test.StartServerAsync(configureApplication: application => application.ServerConfiguration.SecurityPolicies =
+        await test.StartServerAsync(configureApplication: application => application.ServerConfiguration!.SecurityPolicies =
         [
             new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.None, SecurityPolicyUri = SecurityPolicies.None }
         ]);
@@ -167,7 +170,7 @@ public class OpcUaSecurityTests
     {
         // Arrange
         await using var test = await SecurityTest.CreateAsync(_output);
-        await test.StartServerAsync(configureApplication: application => application.ServerConfiguration.SecurityPolicies =
+        await test.StartServerAsync(configureApplication: application => application.ServerConfiguration!.SecurityPolicies =
         [
             new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.Sign, SecurityPolicyUri = SecurityPolicies.Basic256Sha256 }
         ]);
@@ -325,7 +328,7 @@ public class OpcUaSecurityTests
         logger.Log($"Observed status code {GetLastStatusCode(client)} in: {client.Source!.Diagnostics.LastError!.Message}");
     }
 
-    private static Task WaitForRejectedCertificateAsync(string storePath, X509Certificate2 certificate, string message) =>
+    private static Task WaitForRejectedCertificateAsync(string storePath, Certificate certificate, string message) =>
         AsyncTestHelpers.WaitUntilAsync(
             () => GetFiles(Path.Combine(storePath, "rejected", "certs"))
                 .Any(file => Path.GetFileName(file).Contains(certificate.Thumbprint, StringComparison.OrdinalIgnoreCase)),
@@ -334,15 +337,91 @@ public class OpcUaSecurityTests
     private static StatusCode? GetLastStatusCode(OpcUaTestClient<TestRoot> client) =>
         (client.Source?.Diagnostics.LastError?.InnerException as ServiceResultException)?.StatusCode;
 
-    private static X509Certificate2 ParseServerCertificate(EndpointDescription endpoint) =>
-        X509CertificateLoader.LoadCertificate(endpoint.ServerCertificate);
+    [Fact]
+    public async Task WhenNoAuthenticatorIsConfigured_ThenAUserNameLoginIsNotOffered()
+    {
+        // Arrange
+        await using var test = await SecurityTest.CreateAsync(_output);
+        await test.StartServerAsync();
+
+        // Act
+        var client = await test.StartClientAsync(config =>
+            config.CreateUserIdentity = _ => Task.FromResult(new UserIdentity("user", "password"u8.ToArray())));
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Source!.Diagnostics.LastError is not null,
+            timeout: TimeSpan.FromSeconds(30),
+            message: "A user name login should fail when the server offers anonymous logins only");
+        Assert.Null(client.Source!.CurrentSession);
+    }
+
+    [Fact]
+    public async Task WhenTheServerRestarts_ThenItsConfiguredAuthenticatorStillAcceptsLogins()
+    {
+        // Arrange
+        await using var test = await SecurityTest.CreateAsync(_output);
+        var authenticator = new UserNameAuthenticator("user", "password");
+        var server = await test.StartServerAsync(userTokenAuthenticators: [authenticator]);
+        var client = await test.StartClientAsync(config =>
+        {
+            config.MinimumSecurityMode = MessageSecurityMode.Sign;
+            config.AutoAcceptUntrustedCertificates = true;
+            config.CreateUserIdentity = _ => Task.FromResult(new UserIdentity("user", "password"u8.ToArray()));
+        });
+        await WaitUntilConnectedAsync(client);
+        var acceptedBeforeRestart = authenticator.AcceptedCount;
+
+        // Act
+        await ((IFaultInjectable)server.Server!).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => authenticator.AcceptedCount > acceptedBeforeRestart && client.Source!.CurrentSession is { Connected: true },
+            timeout: TimeSpan.FromSeconds(60),
+            message: "The restarted server should accept the user name login through the configured authenticator");
+        Assert.True(acceptedBeforeRestart >= 1);
+    }
+
+    private static Certificate ParseServerCertificate(EndpointDescription endpoint) =>
+        Certificate.FromRawData(endpoint.ServerCertificate.Memory);
 
     // A server's certificate exists once StartServerAsync returns, because the connector start runs inline up to the bind.
     /// <summary>
     /// Loads the one application certificate in the own store, which holds a single certificate in these tests.
     /// </summary>
-    private static X509Certificate2 LoadOwnCertificate(string storePath) =>
-        X509CertificateLoader.LoadCertificateFromFile(Assert.Single(GetFiles(Path.Combine(storePath, "own", "certs"))));
+    private static Certificate LoadOwnCertificate(string storePath) =>
+        Certificate.FromRawData(File.ReadAllBytes(Assert.Single(GetFiles(Path.Combine(storePath, "own", "certs")))));
+
+    /// <summary>
+    /// Accepts one user name and password.
+    /// </summary>
+    private sealed class UserNameAuthenticator(string userName, string password) : IUserTokenAuthenticator
+    {
+        private int _acceptedCount;
+
+        public UserTokenType TokenType => UserTokenType.UserName;
+
+        public string? IssuedTokenProfileUri => null;
+
+        public int AcceptedCount => Volatile.Read(ref _acceptedCount);
+
+        public ValueTask<AuthenticationResult> AuthenticateAsync(AuthenticationContext context, CancellationToken ct = default)
+        {
+            if (context.TokenHandler is not UserNameIdentityTokenHandler token)
+            {
+                return new ValueTask<AuthenticationResult>(AuthenticationResult.NotHandled);
+            }
+
+            if (token.UserName != userName || token.DecryptedPassword is not { } decrypted || Encoding.UTF8.GetString(decrypted) != password)
+            {
+                return new ValueTask<AuthenticationResult>(AuthenticationResult.Reject(new ServiceResult(StatusCodes.BadUserAccessDenied)));
+            }
+
+            Interlocked.Increment(ref _acceptedCount);
+            return new ValueTask<AuthenticationResult>(AuthenticationResult.Accept(new UserIdentity(token)));
+        }
+    }
 
     private static string[] GetFiles(string path) =>
         Directory.Exists(path) ? Directory.GetFiles(path, "*", SearchOption.AllDirectories) : [];
@@ -422,7 +501,8 @@ public class OpcUaSecurityTests
         public async Task<OpcUaTestServer<TestRoot>> StartServerAsync(
             Action<Opc.Ua.ApplicationConfiguration>? configureApplication = null,
             string? applicationUri = null,
-            bool autoAcceptUntrustedCertificates = true)
+            bool autoAcceptUntrustedCertificates = true,
+            IReadOnlyList<IUserTokenAuthenticator>? userTokenAuthenticators = null)
         {
             if (_server is not null)
             {
@@ -441,7 +521,8 @@ public class OpcUaSecurityTests
                 certificateStoreBasePath: ServerStore,
                 configureApplication: configureApplication,
                 applicationUri: applicationUri,
-                autoAcceptUntrustedCertificates: autoAcceptUntrustedCertificates);
+                autoAcceptUntrustedCertificates: autoAcceptUntrustedCertificates,
+                userTokenAuthenticators: userTokenAuthenticators);
 
             return _server;
         }

@@ -330,15 +330,14 @@ internal sealed class PollingManager : IAsyncDisposable
     {
         try
         {
-            // Build read request - pre-size to avoid resizing
-            var nodesToRead = new ReadValueIdCollection(batch.Count);
-            foreach (var item in batch)
+            var nodesToRead = new ReadValueId[batch.Count];
+            for (var i = 0; i < batch.Count; i++)
             {
-                nodesToRead.Add(new ReadValueId
+                nodesToRead[i] = new ReadValueId
                 {
-                    NodeId = item.NodeId,
+                    NodeId = batch[i].NodeId,
                     AttributeId = Opc.Ua.Attributes.Value
-                });
+                };
             }
 
             var results = await OpcUaValueReader.ReadAsync(
@@ -388,7 +387,7 @@ internal sealed class PollingManager : IAsyncDisposable
 
     private void ProcessValueChange(PollingItem pollingItem, DataValue dataValue, DateTimeOffset receivedTimestamp)
     {
-        var newValue = dataValue.Value;
+        var newValue = dataValue.WrappedValue.ToClrValue();
         var oldValue = pollingItem.LastValue;
 
         // Only notify on actual change (same as subscription behavior)
@@ -407,7 +406,7 @@ internal sealed class PollingManager : IAsyncDisposable
             }
 
             var state = (source: _source, manager: this, property: pollingItem.Property, value: newValue,
-                timestamp: (DateTimeOffset)dataValue.SourceTimestamp, receivedTimestamp, logger: _logger);
+                timestamp: dataValue.SourceTimestamp.ToClrTimestamp(), receivedTimestamp, logger: _logger);
             _propertyWriter.Write(state, static s =>
             {
                 try

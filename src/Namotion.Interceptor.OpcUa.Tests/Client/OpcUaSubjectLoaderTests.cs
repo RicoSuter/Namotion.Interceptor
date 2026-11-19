@@ -287,7 +287,7 @@ public class OpcUaSubjectLoaderTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<ViewDescription>(),
                 It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<ArrayOf<BrowseDescription>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BrowseResponse
             {
@@ -379,9 +379,9 @@ public class OpcUaSubjectLoaderTests
                 var namespaceUri = reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex);
                 return
                 [
-                    new OpcUaNodeAttribute(reference.BrowseName.Name, namespaceUri)
+                    new OpcUaNodeAttribute(reference.BrowseName.Name!, namespaceUri)
                     {
-                        NodeIdentifier = reference.NodeId.Identifier.ToString(),
+                        NodeIdentifier = reference.NodeId.IdentifierAsString,
                         NodeNamespaceUri = namespaceUri
                     }
                 ];
@@ -412,9 +412,9 @@ public class OpcUaSubjectLoaderTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<ViewDescription>(),
                 It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<ArrayOf<BrowseDescription>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, ArrayOf<BrowseDescription> browseDescriptions, CancellationToken _) =>
             {
                 var nodeId = browseDescriptions[0].NodeId;
                 ReferenceDescription[] children;
@@ -428,11 +428,9 @@ public class OpcUaSubjectLoaderTests
                 else
                     children = [];
 
-                var collection = new ReferenceDescriptionCollection();
-                collection.AddRange(children);
                 return new BrowseResponse
                 {
-                    Results = [new BrowseResult { References = collection }],
+                    Results = [new BrowseResult { References = children.ToArrayOf() }],
                     DiagnosticInfos = []
                 };
             });
@@ -490,9 +488,9 @@ public class OpcUaSubjectLoaderTests
                 var namespaceUri = reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex);
                 return
                 [
-                    new OpcUaNodeAttribute(reference.BrowseName.Name, namespaceUri)
+                    new OpcUaNodeAttribute(reference.BrowseName.Name!, namespaceUri)
                     {
-                        NodeIdentifier = reference.NodeId.Identifier.ToString(),
+                        NodeIdentifier = reference.NodeId.IdentifierAsString,
                         NodeNamespaceUri = namespaceUri
                     }
                 ];
@@ -524,9 +522,9 @@ public class OpcUaSubjectLoaderTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<ViewDescription>(),
                 It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<ArrayOf<BrowseDescription>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, ArrayOf<BrowseDescription> browseDescriptions, CancellationToken _) =>
             {
                 var nodeId = browseDescriptions[0].NodeId;
                 ReferenceDescription[] children;
@@ -540,11 +538,9 @@ public class OpcUaSubjectLoaderTests
                 else
                     children = [];
 
-                var collection = new ReferenceDescriptionCollection();
-                collection.AddRange(children);
                 return new BrowseResponse
                 {
-                    Results = [new BrowseResult { References = collection }],
+                    Results = [new BrowseResult { References = children.ToArrayOf() }],
                     DiagnosticInfos = []
                 };
             });
@@ -625,9 +621,9 @@ public class OpcUaSubjectLoaderTests
                 var namespaceUri = reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex);
                 return
                 [
-                    new OpcUaNodeAttribute(reference.BrowseName.Name, namespaceUri)
+                    new OpcUaNodeAttribute(reference.BrowseName.Name!, namespaceUri)
                     {
-                        NodeIdentifier = reference.NodeId.Identifier.ToString(),
+                        NodeIdentifier = reference.NodeId.IdentifierAsString,
                         NodeNamespaceUri = namespaceUri
                     }
                 ];
@@ -643,12 +639,12 @@ public class OpcUaSubjectLoaderTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<ViewDescription>(),
                 It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<ArrayOf<BrowseDescription>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, ArrayOf<BrowseDescription> browseDescriptions, CancellationToken _) =>
             {
                 var nodeId = browseDescriptions[0].NodeId;
-                ReferenceDescriptionCollection children;
+                ArrayOf<ReferenceDescription> children;
 
                 if (nodeId == new NodeId(1, 0))
                 {
@@ -714,9 +710,9 @@ public class OpcUaSubjectLoaderTests
                 var namespaceUri = reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex);
                 return
                 [
-                    new OpcUaNodeAttribute(reference.BrowseName.Name, namespaceUri)
+                    new OpcUaNodeAttribute(reference.BrowseName.Name!, namespaceUri)
                     {
-                        NodeIdentifier = reference.NodeId.Identifier.ToString(),
+                        NodeIdentifier = reference.NodeId.IdentifierAsString,
                         NodeNamespaceUri = namespaceUri
                     }
                 ];
@@ -732,12 +728,12 @@ public class OpcUaSubjectLoaderTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<ViewDescription>(),
                 It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<ArrayOf<BrowseDescription>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, ArrayOf<BrowseDescription> browseDescriptions, CancellationToken _) =>
             {
                 var nodeId = browseDescriptions[0].NodeId;
-                ReferenceDescriptionCollection children;
+                ArrayOf<ReferenceDescription> children;
 
                 if (nodeId == new NodeId(1, 0))
                 {
@@ -805,12 +801,12 @@ public class OpcUaSubjectLoaderTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<ViewDescription>(),
                 It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<ArrayOf<BrowseDescription>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, ArrayOf<BrowseDescription> browseDescriptions, CancellationToken _) =>
             {
                 var nodeId = browseDescriptions[0].NodeId;
-                ReferenceDescriptionCollection children = nodeId == new NodeId(1, 0)
+                ArrayOf<ReferenceDescription> children = nodeId == new NodeId(1, 0)
                     ?
                     [
                         CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId))
@@ -880,15 +876,14 @@ public class OpcUaSubjectLoaderTests
     private Mock<ISession> CreateMockSessionWithChildren(ReferenceDescription[] children)
     {
         var mockSession = CreateMockSession();
-        var childCollection = new ReferenceDescriptionCollection();
-        childCollection.AddRange(children);
+        var childCollection = children.ToArrayOf();
 
         mockSession
             .Setup(s => s.BrowseAsync(
                 It.IsAny<RequestHeader>(),
                 It.IsAny<ViewDescription>(),
                 It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<ArrayOf<BrowseDescription>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BrowseResponse
             {

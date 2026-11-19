@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Opc.Ua;
@@ -30,4 +31,10 @@ public sealed class NullTelemetryContext : ITelemetryContext
 
     /// <inheritdoc />
     public Meter CreateMeter() => NullMeter;
+
+    /// <inheritdoc />
+    public Meter CreateMeter(Assembly assembly) => NullMeter;
+
+    /// <inheritdoc />
+    public ActivitySource GetActivitySource(Assembly assembly) => NullActivitySource;
 }

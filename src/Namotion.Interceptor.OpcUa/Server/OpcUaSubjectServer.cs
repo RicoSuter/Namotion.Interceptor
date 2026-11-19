@@ -6,6 +6,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
+using Opc.Ua.Security.Certificates;
 using Opc.Ua.Configuration;
 using Opc.Ua.Server;
 
@@ -48,7 +49,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     // The SDK's own write service cannot do that, because it takes the node manager lock we hold for the
     // whole batch. This is what makes the identification exact rather than a guess about who else writes.
     [ThreadStatic]
-    internal static object? SelfWrittenNodeValue;
+    internal static Variant SelfWrittenNodeValue;
 
     /// <inheritdoc />
     public override IInterceptorSubject RootSubject => _subject;
@@ -173,9 +174,19 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                         var convertedValue = _configuration.ValueConverter
                             .ConvertToNodeValue(value, registeredProperty);
 
-                        node.Value = convertedValue;
+                        // A value without an OPC UA representation fails its own node, not the batch.
+                        var statusCode = OpcUaVariantExtensions.TryToVariant(convertedValue, out var nodeValue)
+                            ? StatusCodes.Good
+                            : StatusCodes.BadTypeMismatch;
+
+                        node.Value = nodeValue;
+                        if (node.StatusCode != statusCode)
+                        {
+                            node.StatusCode = statusCode;
+                        }
+
                         node.Timestamp = change.ChangedTimestamp.UtcDateTime;
-                        SelfWrittenNodeValue = convertedValue;
+                        SelfWrittenNodeValue = nodeValue;
                         node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
                         written++;
                     }
@@ -184,7 +195,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
             finally
             {
                 IsWritingOwnNodeValues = false;
-                SelfWrittenNodeValue = null;
+                SelfWrittenNodeValue = Variant.Null;
             }
         }
 
@@ -248,13 +259,15 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
 
                         if (_configuration.CleanCertificateStore)
                         {
-                            await ApplicationCertificateLoader.CleanStoreAsync(
-                                application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate,
-                                _logger,
-                                linkedToken).ConfigureAwait(false);
+                            if (application.ApplicationConfiguration?.SecurityConfiguration.ApplicationCertificate is { } applicationCertificate)
+                            {
+                                await ApplicationCertificateLoader.CleanStoreAsync(applicationCertificate, _logger, linkedToken).ConfigureAwait(false);
+                            }
                         }
 
-                        await LoadApplicationCertificateAsync(application, linkedToken).ConfigureAwait(false);
+                        // The server loads the certificate from its own store when it starts.
+                        (await LoadApplicationCertificateAsync(application, linkedToken).ConfigureAwait(false)).Dispose();
+
                         await application.StartAsync(server).ConfigureAwait(false);
 
                         ResetConsecutiveFailures();
@@ -313,7 +326,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                             // an abrupt connection loss (realistic crash simulation).
                             if (application.Server is OpcUaStandardServer s)
                             {
-                                s.CloseTransportListeners();
+                                await s.CloseTransportListenersAsync().ConfigureAwait(false);
                             }
                         }
 
@@ -334,21 +347,32 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                     {
                         try { server.Dispose(); }
                         catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA server."); }
+
+                        // The application instance owns the certificate manager, which keeps a timer
+                        // alive until it is disposed.
+                        try { await application.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false); }
+                        catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA application instance."); }
                     }
                 }
             }).ConfigureAwait(false);
         }
     }
 
-    internal async Task LoadApplicationCertificateAsync(ApplicationInstance application, CancellationToken cancellationToken)
+    /// <summary>
+    /// Loads or creates the server application certificate in its own store, from where the server loads it on start.
+    /// </summary>
+    /// <returns>The loaded certificate, owned by the caller.</returns>
+    internal async Task<Certificate> LoadApplicationCertificateAsync(ApplicationInstance application, CancellationToken cancellationToken)
     {
         var autoCreate = !application.DisableCertificateAutoCreation;
+        var applicationConfiguration = application.ApplicationConfiguration
+            ?? throw new InvalidOperationException("The OPC UA application instance has no application configuration.");
 
-        // Read before loading, because after a rejected certificate the identifier reports that certificate's subject.
-        var subjectName = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.SubjectName;
+        // Read before loading, because a successful load sets the subject of the certificate it found.
+        var subjectName = applicationConfiguration.SecurityConfiguration.ApplicationCertificate?.SubjectName;
         try
         {
-            await ApplicationCertificateLoader.EnsureLoadedAsync(
+            return await ApplicationCertificateLoader.EnsureLoadedAsync(
                 application,
                 autoCreate,
                 CertificateFactory.DefaultLifeTime,
@@ -359,7 +383,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         // The SDK can report a cancellation as another exception type, so the token is checked too.
         catch (Exception error) when (error is not OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            throw CreateCertificateLoadException(error, application.ApplicationConfiguration, subjectName, _configuration.BaseAddress, autoCreate);
+            throw CreateCertificateLoadException(error, applicationConfiguration, subjectName, _configuration.BaseAddress, autoCreate);
         }
     }
 
@@ -397,14 +421,14 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                 // Close transport listeners first to stop accepting new connections.
                 // Without this, clients reconnect during shutdown faster than sessions
                 // can be closed, causing StopAsync to hang indefinitely.
-                server.CloseTransportListeners();
+                await server.CloseTransportListenersAsync().ConfigureAwait(false);
 
                 if (server.CurrentInstance?.SessionManager is { } sessionManager)
                 {
                     var sessions = sessionManager.GetSessions();
                     foreach (var session in sessions)
                     {
-                        try { session.Close(); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing session during shutdown."); }
+                        try { await session.CloseAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing session during shutdown."); }
                     }
                 }
             }
@@ -426,9 +450,9 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         }
     }
 
-    internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, object? value)
+    internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, Variant value)
     {
-        if (IsWritingOwnNodeValues && Equals(value, SelfWrittenNodeValue))
+        if (IsWritingOwnNodeValues && value.Equals(SelfWrittenNodeValue))
         {
             // Our own node write, reflected back synchronously by ClearChangeMasks. Compared by value
             // rather than by the flag alone, for the reason on the field above.
@@ -441,7 +465,8 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         var registeredProperty = property.TryGetRegisteredProperty();
         if (registeredProperty is not null)
         {
-            var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, registeredProperty);
+            var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(
+                value.ToClrValue(), registeredProperty);
 
             try
             {

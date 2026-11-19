@@ -44,12 +44,19 @@ internal class CustomNodeManager : CustomNodeManager2
     // Expose protected members for OpcUaNodeFactory
     internal ISystemContext GetSystemContext() => SystemContext;
     internal NodeIdDictionary<NodeState> GetPredefinedNodes() => PredefinedNodes;
-    internal NodeState FindNode(NodeId nodeId) => FindNodeInAddressSpace(nodeId);
+    // This node manager's own nodes are not reachable through the master node manager until address
+    // space creation has finished, so they are looked up here first. Other managers' nodes (such as
+    // the Objects folder) go through the master, awaited in place because address space creation is
+    // synchronous.
+    internal NodeState? FindNode(NodeId nodeId) =>
+        PredefinedNodes.TryGetValue(nodeId, out var node)
+            ? node
+            : Server.NodeManager.FindNodeInAddressSpaceAsync(nodeId).AsTask().GetAwaiter().GetResult();
     internal void AddNode(NodeState node) => AddPredefinedNode(SystemContext, node);
 
     protected override NodeStateCollection LoadPredefinedNodes(ISystemContext context)
     {
-        var collection = base.LoadPredefinedNodes(context);
+        var collection = base.LoadPredefinedNodes(context) ?? new NodeStateCollection();
         _configuration.LoadPredefinedNodes(collection, context);
         return collection;
     }
@@ -379,20 +386,32 @@ internal class CustomNodeManager : CustomNodeManager2
         }
         else
         {
-            variableNode.AccessLevel = AccessLevels.CurrentReadOrWrite;
-            variableNode.UserAccessLevel = AccessLevels.CurrentReadOrWrite;
+            // TimestampWrite lets clients write the SourceTimestamp of their change; without it the
+            // server rejects any write that carries one with Bad_WriteNotSupported.
+            variableNode.AccessLevel = AccessLevels.CurrentReadOrWrite | AccessLevels.TimestampWrite;
+            variableNode.UserAccessLevel = AccessLevels.CurrentReadOrWrite | AccessLevels.TimestampWrite;
         }
 
         // Set array dimensions (works for 1D and multi-D)
         if (value is Array arrayValue)
         {
-            variableNode.ArrayDimensions = new ReadOnlyList<uint>(
-                Enumerable.Range(0, arrayValue.Rank)
-                    .Select(i => (uint)arrayValue.GetLength(i))
-                    .ToArray());
+            variableNode.ArrayDimensions = Enumerable.Range(0, arrayValue.Rank)
+                .Select(i => (uint)arrayValue.GetLength(i))
+                .ToArrayOf();
         }
 
-        variableNode.Value = value;
+        if (OpcUaVariantExtensions.TryToVariant(value, out var nodeValue))
+        {
+            variableNode.Value = nodeValue;
+        }
+        else
+        {
+            // Only this node is unusable; throwing here would keep the whole server from starting.
+            variableNode.StatusCode = StatusCodes.BadTypeMismatch;
+            _logger.LogWarning(
+                "The value of property {PropertyName} of type {Type} has no OPC UA representation. Its node reports BadTypeMismatch.",
+                property.Name, value?.GetType().FullName);
+        }
 
         var writeTimestamp = property.Reference.TryGetWriteTimestamp();
         if (writeTimestamp.HasValue)
@@ -411,7 +430,10 @@ internal class CustomNodeManager : CustomNodeManager2
             {
                 // Callers that reach here hold NodeManager.Lock; every value set must be flushed by
                 // the same actor under that same hold, or a later flush misattributes it as a client write.
-                _serverService.UpdateProperty(property.Reference, variableNode.Timestamp, variableNode.Value);
+                _serverService.UpdateProperty(
+                    property.Reference,
+                    variableNode.Timestamp.ToClrTimestamp(),
+                    variableNode.Value);
             }
         };
 
@@ -481,7 +503,8 @@ internal class CustomNodeManager : CustomNodeManager2
                     existingNode.BrowseName);
             }
 
-            var parentNode = FindNodeInAddressSpace(parentNodeId);
+            var parentNode = FindNode(parentNodeId)
+                ?? throw new InvalidOperationException($"Parent node '{parentNodeId}' not found in the address space.");
             parentNode.AddReference(referenceTypeId ?? ReferenceTypeIds.HasComponent, false, existingNode.NodeId);
         }
         else

@@ -1,4 +1,3 @@
-using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry;
@@ -32,15 +31,15 @@ public class OpcUaServerCertificateTests : IDisposable
         // Arrange
         using var server = CreateServer(out var configuration);
         var first = await configuration.CreateApplicationInstanceAsync();
-        await server.LoadApplicationCertificateAsync(first, CancellationToken.None);
+        using var firstCertificate = await server.LoadApplicationCertificateAsync(first, CancellationToken.None);
         var second = await configuration.CreateApplicationInstanceAsync();
 
         // Act
-        await server.LoadApplicationCertificateAsync(second, CancellationToken.None);
+        using var secondCertificate = await server.LoadApplicationCertificateAsync(second, CancellationToken.None);
 
         // Assert
-        Assert.Equal(GetCertificate(first).Thumbprint, GetCertificate(second).Thumbprint);
-        Assert.True(GetCertificate(second).HasPrivateKey);
+        Assert.Equal(firstCertificate.Thumbprint, secondCertificate.Thumbprint);
+        Assert.True(secondCertificate.HasPrivateKey);
         Assert.Empty(_logger.Warnings);
     }
 
@@ -53,10 +52,10 @@ public class OpcUaServerCertificateTests : IDisposable
         using var expiring = await AddSelfSignedCertificateAsync(application, ageInDays: 355);
 
         // Act
-        await server.LoadApplicationCertificateAsync(application, CancellationToken.None);
+        using var certificate = await server.LoadApplicationCertificateAsync(application, CancellationToken.None);
 
         // Assert
-        Assert.Equal(expiring.Thumbprint, GetCertificate(application).Thumbprint);
+        Assert.Equal(expiring.Thumbprint, certificate.Thumbprint);
         Assert.Contains(expiring.Thumbprint, Assert.Single(_logger.Warnings));
     }
 
@@ -69,10 +68,9 @@ public class OpcUaServerCertificateTests : IDisposable
         using var expired = await AddSelfSignedCertificateAsync(application, ageInDays: 400);
 
         // Act
-        await server.LoadApplicationCertificateAsync(application, CancellationToken.None);
+        using var certificate = await server.LoadApplicationCertificateAsync(application, CancellationToken.None);
 
         // Assert
-        var certificate = GetCertificate(application);
         Assert.NotEqual(expired.Thumbprint, certificate.Thumbprint);
         Assert.True(certificate.HasPrivateKey);
         Assert.True(certificate.NotAfter.ToUniversalTime() > DateTime.UtcNow.AddMonths(11));
@@ -91,10 +89,10 @@ public class OpcUaServerCertificateTests : IDisposable
         using var expired = await AddSelfSignedCertificateAsync(application, ageInDays: 400);
 
         // Act
-        await server.LoadApplicationCertificateAsync(application, CancellationToken.None);
+        using var certificate = await server.LoadApplicationCertificateAsync(application, CancellationToken.None);
 
         // Assert
-        Assert.Equal(expired.Thumbprint, GetCertificate(application).Thumbprint);
+        Assert.Equal(expired.Thumbprint, certificate.Thumbprint);
         Assert.Contains(expired.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
         Assert.Contains("not replaced", Assert.Single(_logger.Warnings));
     }
@@ -108,10 +106,9 @@ public class OpcUaServerCertificateTests : IDisposable
         using var stale = await AddSelfSignedCertificateAsync(application, ageInDays: 10, applicationUri: "urn:old-host:server");
 
         // Act
-        await server.LoadApplicationCertificateAsync(application, CancellationToken.None);
+        using var certificate = await server.LoadApplicationCertificateAsync(application, CancellationToken.None);
 
         // Assert
-        var certificate = GetCertificate(application);
         Assert.NotEqual(stale.Thumbprint, certificate.Thumbprint);
         Assert.True(certificate.HasPrivateKey);
         Assert.True(X509Utils.CompareApplicationUriWithCertificate(certificate, "urn:test:server"));
@@ -130,13 +127,12 @@ public class OpcUaServerCertificateTests : IDisposable
         using var stale = await AddSelfSignedCertificateAsync(application, ageInDays: 10, domainNames: ["old-host"]);
 
         // Act
-        await server.LoadApplicationCertificateAsync(application, CancellationToken.None);
+        using var certificate = await server.LoadApplicationCertificateAsync(application, CancellationToken.None);
 
         // Assert
-        var certificate = GetCertificate(application);
         Assert.NotEqual(stale.Thumbprint, certificate.Thumbprint);
         Assert.True(certificate.HasPrivateKey);
-        Assert.Contains(Utils.GetHostName(), X509Utils.GetDomainsFromCertificate(certificate), StringComparer.OrdinalIgnoreCase);
+        Assert.Contains(Utils.GetHostName(), X509Utils.GetDomainsFromCertificate(certificate).ToArray()!, StringComparer.OrdinalIgnoreCase);
         var warning = Assert.Single(_logger.Warnings);
         Assert.Contains(stale.Thumbprint, warning);
         Assert.Contains(_logger.Entries, entry => entry.Level == LogLevel.Information && entry.Message.Contains(certificate.Thumbprint));
@@ -150,13 +146,13 @@ public class OpcUaServerCertificateTests : IDisposable
         using var server = CreateServer(out var configuration);
         var application = await configuration.CreateApplicationInstanceAsync();
         using var issued = await AddCaIssuedCertificateAsync(application, applicationUri: "urn:old-host:server");
-        var identifier = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate;
+        var identifier = application.ApplicationConfiguration!.SecurityConfiguration.ApplicationCertificate;
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => server.LoadApplicationCertificateAsync(application, CancellationToken.None));
         Assert.IsType<ServiceResultException>(exception.InnerException);
-        Assert.Contains($"'{identifier.StorePath}'", exception.Message);
+        Assert.Contains($"'{identifier!.StorePath}'", exception.Message);
         Assert.Contains("with its private key", exception.Message);
         Assert.Contains(issued.Thumbprint, Path.GetFileName(Assert.Single(Directory.GetFiles(Path.Combine(_storePath, "own", "certs")))));
     }
@@ -168,14 +164,14 @@ public class OpcUaServerCertificateTests : IDisposable
         using var server = CreateServer(out var configuration, new NoCertificateCreationConfiguration());
         var application = await configuration.CreateApplicationInstanceAsync();
         using var stale = await AddSelfSignedCertificateAsync(application, ageInDays: 10, applicationUri: "urn:old-host:server");
-        var identifier = application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate;
+        var identifier = application.ApplicationConfiguration!.SecurityConfiguration.ApplicationCertificate;
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => server.LoadApplicationCertificateAsync(application, CancellationToken.None));
         var inner = Assert.IsType<ServiceResultException>(exception.InnerException);
         Assert.Contains(inner.Message.TrimEnd().TrimEnd('.'), exception.Message);
-        Assert.Contains($"'{Path.Combine(identifier.StorePath, "certs")}'", exception.Message);
+        Assert.Contains($"'{Path.Combine(identifier!.StorePath!, "certs")}'", exception.Message);
         Assert.Contains($"'CN={configuration.ApplicationName}, O=Namotion'", exception.Message);
         Assert.Contains("'urn:test:server'", exception.Message);
         Assert.Contains(configuration.BaseAddress, exception.Message);
@@ -210,23 +206,20 @@ public class OpcUaServerCertificateTests : IDisposable
         return new OpcUaSubjectServer(new DeliveryRuleTestRoot(context), configuration, _logger);
     }
 
-    private static X509Certificate2 GetCertificate(ApplicationInstance application) =>
-        application.ApplicationConfiguration.SecurityConfiguration.ApplicationCertificate.Certificate!;
-
     /// <summary>
     /// Adds a self-signed certificate for the server's host names, valid for 365 days and issued <paramref name="ageInDays"/> ago,
     /// for <paramref name="applicationUri"/> and <paramref name="domainNames"/> or else the server's application URI and host names.
     /// </summary>
-    private async Task<X509Certificate2> AddSelfSignedCertificateAsync(
+    private async Task<Certificate> AddSelfSignedCertificateAsync(
         ApplicationInstance application, int ageInDays, string? applicationUri = null, string[]? domainNames = null)
     {
-        var applicationConfiguration = application.ApplicationConfiguration;
-        var certificate = CertificateFactory
-            .CreateCertificate(
-                applicationUri ?? applicationConfiguration.ApplicationUri,
-                applicationConfiguration.ApplicationName,
-                applicationConfiguration.SecurityConfiguration.ApplicationCertificate.SubjectName,
-                domainNames ?? applicationConfiguration.GetServerDomainNames())
+        var applicationConfiguration = application.ApplicationConfiguration!;
+        var certificate = DefaultCertificateFactory.Instance
+            .CreateApplicationCertificate(
+                applicationUri ?? applicationConfiguration.ApplicationUri!,
+                applicationConfiguration.ApplicationName!,
+                applicationConfiguration.SecurityConfiguration.ApplicationCertificate!.SubjectName!,
+                domainNames ?? applicationConfiguration.GetServerDomainNames().ToArray())
             .SetNotBefore(DateTime.UtcNow.AddDays(-ageInDays))
             .SetLifeTime(TimeSpan.FromDays(365))
             .CreateForRSA();
@@ -239,7 +232,7 @@ public class OpcUaServerCertificateTests : IDisposable
     /// Adds a certificate for the server's host names and <paramref name="applicationUri"/>, issued by an authority whose
     /// certificate is in the issuer store, which completes the chain so the SDK accepts the certificate on load.
     /// </summary>
-    private async Task<X509Certificate2> AddCaIssuedCertificateAsync(ApplicationInstance application, string applicationUri)
+    private async Task<Certificate> AddCaIssuedCertificateAsync(ApplicationInstance application, string applicationUri)
     {
         using var authority = CertificateBuilder.Create("CN=Test Authority")
             .SetNotBefore(DateTime.UtcNow.AddDays(-10))
@@ -248,13 +241,13 @@ public class OpcUaServerCertificateTests : IDisposable
             .CreateForRSA();
         await AddToStoreAsync("issuer", authority);
 
-        var applicationConfiguration = application.ApplicationConfiguration;
-        var certificate = CertificateFactory
-            .CreateCertificate(
+        var applicationConfiguration = application.ApplicationConfiguration!;
+        var certificate = DefaultCertificateFactory.Instance
+            .CreateApplicationCertificate(
                 applicationUri,
-                applicationConfiguration.ApplicationName,
-                applicationConfiguration.SecurityConfiguration.ApplicationCertificate.SubjectName,
-                applicationConfiguration.GetServerDomainNames())
+                applicationConfiguration.ApplicationName!,
+                applicationConfiguration.SecurityConfiguration.ApplicationCertificate!.SubjectName!,
+                applicationConfiguration.GetServerDomainNames().ToArray())
             .SetNotBefore(DateTime.UtcNow.AddDays(-10))
             .SetLifeTime(TimeSpan.FromDays(365))
             .SetIssuer(authority)
@@ -263,7 +256,7 @@ public class OpcUaServerCertificateTests : IDisposable
         return certificate;
     }
 
-    private async Task AddToStoreAsync(string storeName, X509Certificate2 certificate)
+    private async Task AddToStoreAsync(string storeName, Certificate certificate)
     {
         using var store = new CertificateStoreIdentifier(Path.Combine(_storePath, storeName), CertificateStoreType.Directory, false)
             .OpenStore(NullTelemetryContext.Instance);

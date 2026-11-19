@@ -183,13 +183,8 @@ public class SessionLifetimeTests
 
         (bool HasCurrentSession, bool LifetimeEnded, bool SessionChangedToNull)? stateAtClose = null;
         var lifetime = CancellationToken.None;
-        var channel = new FailingTransportChannel(telemetry, request =>
-        {
-            if (request is CloseSessionRequest)
-            {
-                stateAtClose ??= (sessionManager.CurrentSession is not null, lifetime.IsCancellationRequested, sessionChangedToNull);
-            }
-        });
+        var channel = new FailingTransportChannel(telemetry, onClose: () =>
+            stateAtClose ??= (sessionManager.CurrentSession is not null, lifetime.IsCancellationRequested, sessionChangedToNull));
         var session = CreateConnectedSession(channel, telemetry);
         sessionManager.SetSession(session);
         sessionManager.DrainPendingSessionTransitions();
@@ -226,8 +221,7 @@ public class SessionLifetimeTests
             ApplicationName = "Test",
             ApplicationType = ApplicationType.Client,
             ClientConfiguration = new ClientConfiguration(),
-            SecurityConfiguration = new SecurityConfiguration(),
-            CertificateValidator = new CertificateValidator(telemetry)
+            SecurityConfiguration = new SecurityConfiguration()
         };
 
         var endpoint = new ConfiguredEndpoint(
@@ -248,9 +242,8 @@ public class SessionLifetimeTests
     }
 
     /// <summary>
-    /// Mirrors the SDK 1.5.378 binary channel for a request in flight: it never answers, Dispose drops the
-    /// request without completing it, and only the request's token ends it, with BadRequestInterrupted as
-    /// ChannelAsyncOperation.EndAsync reports a cancellation. The operation timeout is left out, so a request
+    /// A channel that never answers a request in flight and drops it on Dispose without completing it, so only
+    /// the request's token ends it, with BadRequestInterrupted as the SDK reports a canceled request. The operation timeout is left out, so a request
     /// that only the timeout would end hangs past the test's bound.
     /// </summary>
     private sealed class OrphaningTransportChannel(ITelemetryContext telemetry) : ITransportChannel
@@ -268,7 +261,13 @@ public class SessionLifetimeTests
 
         public EndpointConfiguration EndpointConfiguration { get; } = EndpointConfiguration.Create();
 
-        public IServiceMessageContext MessageContext { get; } = new ServiceMessageContext(telemetry);
+        public byte[] ChannelThumbprint => [];
+
+        public byte[] ClientChannelCertificate => [];
+
+        public byte[] ServerChannelCertificate => [];
+
+        public IServiceMessageContext MessageContext { get; } = ServiceMessageContext.Create(telemetry);
 
         public int OperationTimeout { get; set; } = 30_000;
 
@@ -301,9 +300,10 @@ public class SessionLifetimeTests
     }
 
     /// <summary>
-    /// Reports each request to <paramref name="onRequest"/> and fails it at once as not connected.
+    /// Fails each request at once as not connected and reports its close to <paramref name="onClose"/>, which the
+    /// session's close always makes, also when it sends no CloseSession request because it never had a keep-alive.
     /// </summary>
-    private sealed class FailingTransportChannel(ITelemetryContext telemetry, Action<IServiceRequest> onRequest) : ITransportChannel
+    private sealed class FailingTransportChannel(ITelemetryContext telemetry, Action onClose) : ITransportChannel
     {
         public TransportChannelFeatures SupportedFeatures => TransportChannelFeatures.None;
 
@@ -311,20 +311,27 @@ public class SessionLifetimeTests
 
         public EndpointConfiguration EndpointConfiguration { get; } = EndpointConfiguration.Create();
 
-        public IServiceMessageContext MessageContext { get; } = new ServiceMessageContext(telemetry);
+        public byte[] ChannelThumbprint => [];
+
+        public byte[] ClientChannelCertificate => [];
+
+        public byte[] ServerChannelCertificate => [];
+
+        public IServiceMessageContext MessageContext { get; } = ServiceMessageContext.Create(telemetry);
 
         public int OperationTimeout { get; set; } = 30_000;
 
-        public ValueTask<IServiceResponse> SendRequestAsync(IServiceRequest request, CancellationToken ct = default)
-        {
-            onRequest(request);
+        public ValueTask<IServiceResponse> SendRequestAsync(IServiceRequest request, CancellationToken ct = default) =>
             throw new ServiceResultException(StatusCodes.BadNotConnected);
-        }
 
         public ValueTask ReconnectAsync(ITransportWaitingConnection? connection = null, CancellationToken ct = default) =>
             throw new NotSupportedException();
 
-        public ValueTask CloseAsync(CancellationToken ct = default) => ValueTask.CompletedTask;
+        public ValueTask CloseAsync(CancellationToken ct = default)
+        {
+            onClose();
+            return ValueTask.CompletedTask;
+        }
 
         public void Dispose()
         {

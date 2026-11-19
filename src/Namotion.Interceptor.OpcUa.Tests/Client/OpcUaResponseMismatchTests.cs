@@ -60,7 +60,7 @@ public class OpcUaResponseMismatchTests
         // Arrange
         var session = CreateConnectedSession();
         session
-            .Setup(value => value.WriteAsync(It.IsAny<RequestHeader>(), It.IsAny<WriteValueCollection>(), It.IsAny<CancellationToken>()))
+            .Setup(value => value.WriteAsync(It.IsAny<RequestHeader>(), It.IsAny<ArrayOf<WriteValue>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidCastException("Unable to cast object of type 'Opc.Ua.PublishResponse' to type 'Opc.Ua.WriteResponse'."));
 
         var scheduledSyncs = 0;
@@ -181,16 +181,16 @@ public class OpcUaResponseMismatchTests
         var session = CreateConnectedSession();
         uint nextHandle = 0;
         session
-            .Setup(value => value.WriteAsync(It.IsAny<RequestHeader>(), It.IsAny<WriteValueCollection>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader requestHeader, WriteValueCollection nodesToWrite, CancellationToken _) =>
+            .Setup(value => value.WriteAsync(It.IsAny<RequestHeader>(), It.IsAny<ArrayOf<WriteValue>>(), It.IsAny<CancellationToken>()))
+            .Returns((RequestHeader requestHeader, ArrayOf<WriteValue> nodesToWrite, CancellationToken _) =>
             {
                 requestHeader.RequestHandle = ++nextHandle;
-                return new WriteResponse
+                return new ValueTask<WriteResponse>(new WriteResponse
                 {
                     ResponseHeader = new ResponseHeader { RequestHandle = requestHeader.RequestHandle + responseHandleOffset },
-                    Results = new StatusCodeCollection(nodesToWrite.Select(_ => new StatusCode(StatusCodes.Good))),
+                    Results = Enumerable.Repeat(StatusCodes.Good, nodesToWrite.Count).ToArray(),
                     DiagnosticInfos = []
-                };
+                });
             });
 
         return session;

@@ -4,6 +4,7 @@ using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 using Opc.Ua.Export;
+using Opc.Ua.Identity;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
@@ -90,6 +91,21 @@ public class OpcUaServerConfiguration
     public bool AutoAcceptUntrustedCertificates { get; set; }
 
     /// <summary>
+    /// Gets or sets the authenticators that accept user tokens other than anonymous ones, for example the SDK's
+    /// <c>UserNamePasswordAuthenticator</c> or <c>X509Authenticator</c>. They are registered with every server instance,
+    /// including after a restart. Default is empty: the server advertises and accepts anonymous logins only.
+    /// </summary>
+    /// <remarks>
+    /// When this list is not empty, the server advertises one user token policy per token type the authenticators
+    /// accept, and no anonymous policy unless one of them accepts anonymous tokens, such as the SDK's
+    /// <c>AnonymousAuthenticator</c>. Unlike the SDK's own hosting, which keeps anonymous access when only custom
+    /// authenticators are added, a configured list turns anonymous logins off unless one of them accepts them. The SDK
+    /// keeps one authenticator per token type and issued token profile, and for issued tokens per issuer, so checks
+    /// for the same token type have to be combined in one authenticator; <see cref="Validate"/> rejects duplicates.
+    /// </remarks>
+    public IReadOnlyList<IUserTokenAuthenticator> UserTokenAuthenticators { get; set; } = [];
+
+    /// <summary>
     /// Gets or sets the base path for certificate stores.
     /// Default is "pki". Change this to isolate certificate stores for parallel test execution.
     /// </summary>
@@ -105,7 +121,7 @@ public class OpcUaServerConfiguration
     /// Override this method to customize application configuration, security settings, or certificate handling.
     /// </summary>
     /// <returns>A configured <see cref="ApplicationInstance"/> ready for hosting an OPC UA server.</returns>
-    public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
+    public virtual Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
         var application = new ApplicationInstance(ResolvedTelemetryContext)
         {
@@ -115,7 +131,7 @@ public class OpcUaServerConfiguration
 
         var applicationUri = ApplicationUri ?? $"urn:{System.Net.Dns.GetHostName()}:Namotion.Interceptor:{ApplicationName}";
 
-        var config = new ApplicationConfiguration
+        var config = new ApplicationConfiguration(ResolvedTelemetryContext)
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Server,
@@ -164,7 +180,7 @@ public class OpcUaServerConfiguration
             ServerConfiguration = new ServerConfiguration
             {
                 // Base addresses kept minimal (tcp only). Add https if required later.
-                BaseAddresses = { BaseAddress },
+                BaseAddresses = [BaseAddress],
                 SecurityPolicies =
                 [
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.Sign, SecurityPolicyUri = SecurityPolicies.Basic256Sha256 },
@@ -175,12 +191,7 @@ public class OpcUaServerConfiguration
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.SignAndEncrypt, SecurityPolicyUri = SecurityPolicies.Aes256_Sha256_RsaPss },
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.None, SecurityPolicyUri = SecurityPolicies.None }
                 ],
-                UserTokenPolicies =
-                [
-                    new UserTokenPolicy(UserTokenType.Anonymous) { SecurityPolicyUri = SecurityPolicies.None },
-                    new UserTokenPolicy(UserTokenType.UserName) { SecurityPolicyUri = SecurityPolicies.Basic256Sha256 },
-                    new UserTokenPolicy(UserTokenType.Certificate) { SecurityPolicyUri = SecurityPolicies.Basic256Sha256 }
-                ],
+                UserTokenPolicies = CreateUserTokenPolicies(),
                 DiagnosticsEnabled = true,
                 MaxSessionCount = 100,
                 MinSessionTimeout = 10_000,
@@ -196,7 +207,6 @@ public class OpcUaServerConfiguration
                 MaxMessageQueueSize = 10_000,
                 MaxNotificationQueueSize = 10_000,
                 MaxNotificationsPerPublish = 10_000,
-                MinMetadataSamplingInterval = 1000,
                 MaxEventQueueSize = 10_000,
                 AuditingEnabled = true,
                 // From XML -> minimal operation limits relevant for typical interactions.
@@ -213,14 +223,43 @@ public class OpcUaServerConfiguration
                 ServerCapabilities = ["DA"]
             },
             DisableHiResClock = true,
-            CertificateValidator = new CertificateValidator(ResolvedTelemetryContext)
         };
 
-        // Register the certificate validator with the configuration.
-        await config.CertificateValidator.UpdateAsync(config).ConfigureAwait(false);
+        config.CertificateManager = CertificateManagerFactory.Create(config.SecurityConfiguration, ResolvedTelemetryContext);
 
         application.ApplicationConfiguration = config;
-        return application;
+        return Task.FromResult(application);
+    }
+
+    /// <summary>
+    /// Creates the user token policies the server advertises: anonymous only without
+    /// <see cref="UserTokenAuthenticators"/>, otherwise one policy per token type they accept. Tokens other than
+    /// anonymous ones are encrypted with Basic256Sha256, also on an unsecured channel.
+    /// </summary>
+    protected ArrayOf<UserTokenPolicy> CreateUserTokenPolicies()
+    {
+        if (UserTokenAuthenticators.Count == 0)
+        {
+            return new[] { new UserTokenPolicy(UserTokenType.Anonymous) { SecurityPolicyUri = SecurityPolicies.None } }.ToArrayOf();
+        }
+
+        var policies = new List<UserTokenPolicy>();
+        foreach (var authenticator in UserTokenAuthenticators)
+        {
+            var issuedTokenType = authenticator.TokenType == UserTokenType.IssuedToken ? authenticator.IssuedTokenProfileUri : null;
+            if (policies.Exists(policy => policy.TokenType == authenticator.TokenType && policy.IssuedTokenType == issuedTokenType))
+            {
+                continue;
+            }
+
+            policies.Add(new UserTokenPolicy(authenticator.TokenType)
+            {
+                SecurityPolicyUri = authenticator.TokenType == UserTokenType.Anonymous ? SecurityPolicies.None : SecurityPolicies.Basic256Sha256,
+                IssuedTokenType = issuedTokenType
+            });
+        }
+
+        return policies.ToArrayOf();
     }
 
     /// <summary>
@@ -235,7 +274,41 @@ public class OpcUaServerConfiguration
                 "ApplicationUri must not be empty or whitespace when set",
                 nameof(ApplicationUri));
         }
+
+        for (var i = 0; i < UserTokenAuthenticators.Count; i++)
+        {
+            for (var j = 0; j < i; j++)
+            {
+                if (ReplacesInRegistry(UserTokenAuthenticators[i], UserTokenAuthenticators[j]))
+                {
+                    throw new ArgumentException(
+                        $"UserTokenAuthenticators contains more than one authenticator for the token type {UserTokenAuthenticators[i].TokenType}; " +
+                        "the server keeps only one per token type and issuer, so combine their checks in one authenticator.",
+                        nameof(UserTokenAuthenticators));
+                }
+            }
+        }
     }
+
+    /// <summary>
+    /// Gets whether the SDK's identity registry would replace <paramref name="existing"/> when <paramref name="added"/>
+    /// is registered: same token type and issued token profile, and the same issuer unless either has none.
+    /// </summary>
+    private static bool ReplacesInRegistry(IUserTokenAuthenticator added, IUserTokenAuthenticator existing)
+    {
+        if (added.TokenType != existing.TokenType ||
+            !string.Equals(added.IssuedTokenProfileUri, existing.IssuedTokenProfileUri, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var addedIssuer = GetIssuer(added);
+        var existingIssuer = GetIssuer(existing);
+        return addedIssuer is null || existingIssuer is null || string.Equals(addedIssuer, existingIssuer, StringComparison.Ordinal);
+    }
+
+    private static string? GetIssuer(IUserTokenAuthenticator authenticator) =>
+        authenticator.TokenType == UserTokenType.IssuedToken ? (authenticator as IIssuerTokenAuthenticator)?.IssuerUri : null;
 
     public virtual string[] GetNamespaceUris()
     {
@@ -251,7 +324,6 @@ public class OpcUaServerConfiguration
 
     public virtual void LoadPredefinedNodes(NodeStateCollection collection, ISystemContext context)
     {
-        LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.NodeSet2.xml", collection, context);
         LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.Di.NodeSet2.xml", collection, context);
         LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.PADIM.NodeSet2.xml", collection, context);
         LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.Machinery.NodeSet2.xml", collection, context);
@@ -263,7 +335,8 @@ public class OpcUaServerConfiguration
         var assembly = typeof(TAssemblyType).Assembly;
         using var stream = assembly.GetManifestResourceStream($"{assembly.FullName!.Split(',')[0]}.{name}");
 
-        var nodeSet = UANodeSet.Read(stream ?? throw new ArgumentException("Embedded resource could not be found.", nameof(name)));
+        var nodeSet = UANodeSet.Read(stream ?? throw new ArgumentException("Embedded resource could not be found.", nameof(name)))
+            ?? throw new InvalidOperationException($"Embedded resource '{name}' is not a valid node set.");
         nodeSet.Import(context, nodes);
     }
 }

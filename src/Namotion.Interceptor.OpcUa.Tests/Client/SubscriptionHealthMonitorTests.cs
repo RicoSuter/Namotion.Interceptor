@@ -48,17 +48,18 @@ public class SubscriptionHealthMonitorTests
     }
 
     [Theory]
-    [InlineData(StatusCodes.BadNodeIdUnknown)]
-    [InlineData(StatusCodes.BadNodeIdInvalid)]
-    [InlineData(StatusCodes.BadAttributeIdInvalid)]
-    [InlineData(StatusCodes.BadIndexRangeInvalid)]
-    [InlineData(StatusCodes.BadTypeMismatch)]
-    [InlineData(StatusCodes.BadSecurityModeInsufficient)]
-    [InlineData(StatusCodes.BadNotWritable)]
-    [InlineData(StatusCodes.BadWriteNotSupported)]
-    public void WhenItemHasPermanentBadStatus_ThenIsRetryableReturnsFalse(uint statusCode)
+    [InlineData(nameof(StatusCodes.BadNodeIdUnknown))]
+    [InlineData(nameof(StatusCodes.BadNodeIdInvalid))]
+    [InlineData(nameof(StatusCodes.BadAttributeIdInvalid))]
+    [InlineData(nameof(StatusCodes.BadIndexRangeInvalid))]
+    [InlineData(nameof(StatusCodes.BadTypeMismatch))]
+    [InlineData(nameof(StatusCodes.BadSecurityModeInsufficient))]
+    [InlineData(nameof(StatusCodes.BadNotWritable))]
+    [InlineData(nameof(StatusCodes.BadWriteNotSupported))]
+    public void WhenItemHasPermanentBadStatus_ThenIsRetryableReturnsFalse(string statusCodeName)
     {
         // Arrange
+        var statusCode = StatusCodeNames.Resolve(statusCodeName);
         var item = CreateMonitoredItem(statusCode, created: true);
 
         // Act
@@ -69,18 +70,19 @@ public class SubscriptionHealthMonitorTests
     }
 
     [Theory]
-    [InlineData(StatusCodes.BadTooManyMonitoredItems)]
-    [InlineData(StatusCodes.BadOutOfService)]
-    [InlineData(StatusCodes.BadTimeout)]
-    [InlineData(StatusCodes.BadCommunicationError)]
+    [InlineData(nameof(StatusCodes.BadTooManyMonitoredItems))]
+    [InlineData(nameof(StatusCodes.BadOutOfService))]
+    [InlineData(nameof(StatusCodes.BadTimeout))]
+    [InlineData(nameof(StatusCodes.BadCommunicationError))]
     // Access-scoped codes stay retryable: a server-side permission or AccessLevel change can make
     // the same monitored item succeed without a reconnect, and the health monitor is what notices.
-    [InlineData(StatusCodes.BadUserAccessDenied)]
-    [InlineData(StatusCodes.BadNotReadable)]
-    [InlineData(StatusCodes.BadNotImplemented)]
-    public void WhenItemHasTransientBadStatus_ThenIsRetryableReturnsTrue(uint statusCode)
+    [InlineData(nameof(StatusCodes.BadUserAccessDenied))]
+    [InlineData(nameof(StatusCodes.BadNotReadable))]
+    [InlineData(nameof(StatusCodes.BadNotImplemented))]
+    public void WhenItemHasTransientBadStatus_ThenIsRetryableReturnsTrue(string statusCodeName)
     {
         // Arrange
+        var statusCode = StatusCodeNames.Resolve(statusCodeName);
         var item = CreateMonitoredItem(statusCode, created: true);
 
         // Act
@@ -180,11 +182,11 @@ public class SubscriptionHealthMonitorTests
         Assert.Empty(recovered);
     }
 
-    private static MonitoredItem CreateMonitoredItem(uint statusCode, bool created)
+    private static MonitoredItem CreateMonitoredItem(StatusCode statusCode, bool created)
     {
         var item = new MonitoredItem(NullTelemetryContext.Instance)
         {
-            StartNodeId = new NodeId("ns=2;s=TestNode"),
+            StartNodeId = NodeId.Parse("ns=2;s=TestNode"),
             AttributeId = Opc.Ua.Attributes.Value,
             DisplayName = "TestItem"
         };

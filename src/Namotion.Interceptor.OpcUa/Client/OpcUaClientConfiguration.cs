@@ -389,12 +389,12 @@ public class OpcUaClientConfiguration
     /// </summary>
     /// <remarks>
     /// An override that changes security settings after calling the base must call
-    /// <c>CertificateValidator.UpdateAsync</c> on the configuration again, because the validator copies them only
-    /// then. Set <c>SecurityConfiguration.ApplicationCertificate.Certificate</c> with its private key to provide
-    /// the client certificate yourself; it is then used as is.
+    /// <c>CertificateManager.UpdateAsync</c> with the security configuration again, because the certificate manager
+    /// copies them only then. The client certificate is always loaded from the store that
+    /// <c>SecurityConfiguration.ApplicationCertificate</c> describes.
     /// </remarks>
     /// <returns>A configured <see cref="ApplicationInstance"/> ready for connecting to OPC UA servers.</returns>
-    public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
+    public virtual Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
         var application = new ApplicationInstance(ResolvedTelemetryContext)
         {
@@ -404,7 +404,7 @@ public class OpcUaClientConfiguration
 
         var applicationUri = ApplicationUri ?? $"urn:{System.Net.Dns.GetHostName()}:Namotion.Interceptor:{ApplicationName}";
 
-        var config = new ApplicationConfiguration
+        var config = new ApplicationConfiguration(ResolvedTelemetryContext)
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Client,
@@ -450,13 +450,12 @@ public class OpcUaClientConfiguration
                 DefaultSessionTimeout = (int)SessionTimeout.TotalMilliseconds
             },
             DisableHiResClock = true,
-            CertificateValidator = new CertificateValidator(ResolvedTelemetryContext)
         };
 
-        await config.CertificateValidator.UpdateAsync(config).ConfigureAwait(false);
+        config.CertificateManager = CertificateManagerFactory.Create(config.SecurityConfiguration, ResolvedTelemetryContext);
 
         application.ApplicationConfiguration = config;
-        return application;
+        return Task.FromResult(application);
     }
 
     /// <summary>

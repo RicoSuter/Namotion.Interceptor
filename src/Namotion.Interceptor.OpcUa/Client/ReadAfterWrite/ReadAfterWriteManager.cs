@@ -34,7 +34,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
     // Reusable lists for due reads (avoid allocation per timer tick)
     private readonly List<NodeId> _dueNodeIds = new();
-    private readonly List<(NodeId NodeId, RegisteredSubjectProperty Property, Lock ApplyLock)> _dueReadsList = new();
+    private readonly List<(NodeId NodeId, RegisteredSubjectProperty Property)> _dueReadsList = new();
 
     private DateTime _earliestReadTime = DateTime.MaxValue;
     private ISession? _lastKnownSession;
@@ -306,7 +306,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 _pendingReads.Remove(nodeId);
                 if (_trackedProperties.TryGetValue(nodeId, out var tracked))
                 {
-                    _dueReadsList.Add((nodeId, tracked.Property, tracked.ApplyLock));
+                    _dueReadsList.Add((nodeId, tracked.Property));
                 }
             }
 
@@ -339,23 +339,20 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             try
             {
                 var chunkSize = OpcUaValueReader.GetNodesPerRead(session, dueCount);
-                var readValues = new ReadValueIdCollection(chunkSize);
                 for (var offset = 0; offset < dueCount; offset += chunkSize)
                 {
                     var count = Math.Min(chunkSize, dueCount - offset);
-
-                    // Reused across chunks: the previous read has completed, so the SDK no longer holds it.
-                    readValues.Clear();
+                    var readValues = new ReadValueId[count];
                     for (var i = 0; i < count; i++)
                     {
-                        readValues.Add(new ReadValueId
+                        readValues[i] = new ReadValueId
                         {
                             NodeId = _dueReadsList[offset + i].NodeId,
                             AttributeId = Opc.Ua.Attributes.Value
-                        });
+                        };
                     }
 
-                    DataValueCollection results;
+                    ArrayOf<DataValue> results;
                     try
                     {
                         results = await OpcUaValueReader.ReadAsync(
@@ -382,8 +379,8 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                             continue;
                         }
 
-                        var (_, property, applyLock) = _dueReadsList[offset + i];
-                        var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
+                        var (nodeId, property) = _dueReadsList[offset + i];
+                        var sourceTimestamp = result.SourceTimestamp.ToClrTimestamp();
 
                         // Skips a result that is already stale without converting it; the check under the lock decides.
                         if (IsStale(property, sourceTimestamp))
@@ -392,19 +389,13 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                             continue;
                         }
 
-                        var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
+                        var value = _configuration.ValueConverter.ConvertToPropertyValue(
+                            result.WrappedValue.ToClrValue(), property);
 
-                        // Checked and applied under the notifications' lock: a notification landing between a separate
-                        // check and apply would be overwritten by this older read until the value next changes on the server.
-                        lock (applyLock)
+                        if (!TryApplyRead(nodeId, property, sourceTimestamp, receivedTimestamp, value))
                         {
-                            if (IsStale(property, sourceTimestamp))
-                            {
-                                skippedCount++;
-                                continue;
-                            }
-
-                            property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
+                            skippedCount++;
+                            continue;
                         }
 
                         successCount++;
@@ -444,6 +435,53 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         finally
         {
             RescheduleTimer();
+        }
+    }
+
+    /// <summary>
+    /// Checks and applies a read value under the lock the property's notifications apply under, so a
+    /// notification cannot land between the check and the apply and be overwritten by this older read.
+    /// The lock is looked up again once taken, because a recreate can move the property to another
+    /// subscription while the read was in flight. Returns false when the value is stale or the property
+    /// is no longer tracked.
+    /// </summary>
+    private bool TryApplyRead(
+        NodeId nodeId,
+        RegisteredSubjectProperty property,
+        DateTimeOffset sourceTimestamp,
+        DateTimeOffset receivedTimestamp,
+        object? value)
+    {
+        var applyLock = TryGetApplyLock(nodeId);
+        while (applyLock is not null)
+        {
+            Lock? currentApplyLock;
+            lock (applyLock)
+            {
+                currentApplyLock = TryGetApplyLock(nodeId);
+                if (currentApplyLock == applyLock)
+                {
+                    if (IsStale(property, sourceTimestamp))
+                    {
+                        return false;
+                    }
+
+                    property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
+                    return true;
+                }
+            }
+
+            applyLock = currentApplyLock;
+        }
+
+        return false;
+    }
+
+    private Lock? TryGetApplyLock(NodeId nodeId)
+    {
+        lock (_lock)
+        {
+            return _trackedProperties.TryGetValue(nodeId, out var tracked) ? tracked.ApplyLock : null;
         }
     }
 

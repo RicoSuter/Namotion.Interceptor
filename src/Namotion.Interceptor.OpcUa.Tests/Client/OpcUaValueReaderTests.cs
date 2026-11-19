@@ -36,7 +36,7 @@ public class OpcUaValueReaderTests
             server.Session, CancellationToken.None, CreateNodesToRead(3), TimestampsToReturn.Source, CancellationToken.None);
 
         // Assert
-        Assert.Equal(["Node0", "Node1", "Node2"], results.Select(result => (string)result.Value));
+        Assert.Equal(["Node0", "Node1", "Node2"], results.ToArray()!.Select(result => (string)result.WrappedValue.ToClrValue()!));
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public class OpcUaValueReaderTests
                 It.IsAny<RequestHeader>(),
                 It.IsAny<double>(),
                 It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<ArrayOf<ReadValueId>>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidCastException("Unable to cast object of type 'Opc.Ua.PublishResponse' to type 'Opc.Ua.ReadResponse'."));
 
@@ -101,15 +101,15 @@ public class OpcUaValueReaderTests
             server.Session, CancellationToken.None, CreateNodesToRead(2), TimestampsToReturn.Source, CancellationToken.None);
 
         // Assert
-        Assert.Equal(expected, results.Select(result => (string)result.Value));
+        Assert.Equal(expected, results.ToArray()!.Select(result => (string)result.WrappedValue.ToClrValue()!));
     }
 
-    private static ReadValueIdCollection CreateNodesToRead(int count) =>
-        new(Enumerable.Range(0, count).Select(index => new ReadValueId
+    private static ArrayOf<ReadValueId> CreateNodesToRead(int count) =>
+        Enumerable.Range(0, count).Select(index => new ReadValueId
         {
             NodeId = new NodeId("Node" + index, 2),
             AttributeId = Opc.Ua.Attributes.Value
-        }));
+        }).ToArray();
 
     /// <summary>
     /// Assigns request handles the way the SDK does while sending, and answers each node with its identifier.
@@ -128,10 +128,10 @@ public class OpcUaValueReaderTests
                     It.IsAny<RequestHeader>(),
                     It.IsAny<double>(),
                     It.IsAny<TimestampsToReturn>(),
-                    It.IsAny<ReadValueIdCollection>(),
+                    It.IsAny<ArrayOf<ReadValueId>>(),
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync((RequestHeader requestHeader, double _, TimestampsToReturn _, ReadValueIdCollection nodesToRead, CancellationToken _) =>
-                    Answer(requestHeader, nodesToRead));
+                .Returns((RequestHeader requestHeader, double _, TimestampsToReturn _, ArrayOf<ReadValueId> nodesToRead, CancellationToken _) =>
+                    new ValueTask<ReadResponse>(Answer(requestHeader, nodesToRead)));
             Session = session.Object;
         }
 
@@ -145,20 +145,18 @@ public class OpcUaValueReaderTests
         /// <summary>Gets or sets how many results a response carries beyond its node count.</summary>
         public int ResultCountAdjustment { get; init; }
 
-        private ReadResponse Answer(RequestHeader requestHeader, ReadValueIdCollection nodesToRead)
+        private ReadResponse Answer(RequestHeader requestHeader, ArrayOf<ReadValueId> nodesToRead)
         {
             RequestHeaders.Add(requestHeader);
             requestHeader.RequestHandle = ++_nextHandle;
 
-            var identifiers = nodesToRead.Select(node => (string)node.NodeId.Identifier).ToArray();
+            var identifiers = nodesToRead.ToArray()!.Select(node => node.NodeId.IdentifierAsString).ToArray();
             return new ReadResponse
             {
                 ResponseHeader = new ResponseHeader { RequestHandle = requestHeader.RequestHandle + ResponseHandleOffset },
-                Results = new DataValueCollection(Enumerable.Range(0, identifiers.Length + ResultCountAdjustment).Select(index => new DataValue
-                {
-                    Value = index < identifiers.Length ? identifiers[index] : "Extra",
-                    StatusCode = StatusCodes.Good
-                })),
+                Results = Enumerable.Range(0, identifiers.Length + ResultCountAdjustment)
+                    .Select(index => new DataValue(new Variant(index < identifiers.Length ? identifiers[index] : "Extra"), StatusCodes.Good))
+                    .ToArray(),
                 DiagnosticInfos = []
             };
         }

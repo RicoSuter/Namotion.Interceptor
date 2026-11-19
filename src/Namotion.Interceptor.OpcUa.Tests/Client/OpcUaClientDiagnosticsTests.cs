@@ -484,6 +484,6 @@ public class OpcUaClientSessionDiagnosticsTests : IAssemblyFixture<SharedOpcUaSe
         NodeId? sessionId = source.Diagnostics.SessionId;
 
         // Assert
-        Assert.Same(source.CurrentSession!.SessionId, sessionId);
+        Assert.Equal(source.CurrentSession!.SessionId, sessionId);
     }
 }

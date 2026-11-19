@@ -12,9 +12,9 @@ public class ConnectorTesterOpcUaClientConfiguration : OpcUaClientConfiguration
     public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
         var application = await base.CreateApplicationInstanceAsync().ConfigureAwait(false);
-        if (SecurityTokenLifetime is { } securityTokenLifetime)
+        if (SecurityTokenLifetime is { } securityTokenLifetime && application.ApplicationConfiguration?.TransportQuotas is { } transportQuotas)
         {
-            application.ApplicationConfiguration.TransportQuotas.SecurityTokenLifetime = (int)securityTokenLifetime.TotalMilliseconds;
+            transportQuotas.SecurityTokenLifetime = (int)securityTokenLifetime.TotalMilliseconds;
         }
 
         return application;
