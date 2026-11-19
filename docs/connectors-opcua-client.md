@@ -551,6 +551,8 @@ Reconnection runs in cycles bounded by `MaxReconnectDuration` (default: 30 secon
 
 When a subscription stops publishing while the session itself stays connected, the health check loop removes the subscriptions, creates them again on the same session and reloads the server state. When that fails part way, the next health check runs it again.
 
+The connector's own value reads and writes still in flight on a session that is replaced or disposed are canceled instead of waiting for `OperationTimeout`. A canceled write fails and is parked in the write retry queue. Other calls on the session, including calls made through `CurrentSession`, are not canceled this way and can wait until `OperationTimeout`.
+
 #### Consistency Guarantees and Trade-offs
 
 **Guarantee**: After a reconnection completes, all client property values will match the server's current state. The full state read (buffer + read all values + replay + resume pattern) ensures no property is left stale, regardless of what happened to subscription notifications during the disconnect.

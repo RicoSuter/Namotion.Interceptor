@@ -340,7 +340,7 @@ public class SubscriptionManagerDiagnosticsTests
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
         await using var pollingManager = new PollingManager(
             source,
-            sessionProvider: () => null,
+            sessionProvider: () => default,
             propertyWriter,
             configuration,
             source.PollingMetrics,
@@ -596,7 +596,7 @@ public class SubscriptionManagerDiagnosticsTests
             });
 
         return new ReadAfterWriteManager(
-            () => session.Object, source, configuration, new ReadAfterWriteMetrics(), static _ => { }, NullLogger.Instance);
+            () => (session.Object, CancellationToken.None), source, configuration, new ReadAfterWriteMetrics(), static _ => { }, NullLogger.Instance);
     }
 
     private static MonitoredItem CreateNameItem(TestRoot root) =>

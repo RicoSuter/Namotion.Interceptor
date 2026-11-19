@@ -33,7 +33,7 @@ public class OpcUaValueReaderTests
 
         // Act
         var results = await OpcUaValueReader.ReadAsync(
-            server.Session, CreateNodesToRead(3), TimestampsToReturn.Source, CancellationToken.None);
+            server.Session, CancellationToken.None, CreateNodesToRead(3), TimestampsToReturn.Source, CancellationToken.None);
 
         // Assert
         Assert.Equal(["Node0", "Node1", "Node2"], results.ToArray()!.Select(result => (string)result.WrappedValue.ToClrValue()!));
@@ -49,7 +49,7 @@ public class OpcUaValueReaderTests
         for (var i = 0; i < 3; i++)
         {
             await OpcUaValueReader.ReadAsync(
-                server.Session, CreateNodesToRead(1), TimestampsToReturn.Source, CancellationToken.None);
+                server.Session, CancellationToken.None, CreateNodesToRead(1), TimestampsToReturn.Source, CancellationToken.None);
         }
 
         // Assert
@@ -64,7 +64,7 @@ public class OpcUaValueReaderTests
 
         // Act & Assert
         await Assert.ThrowsAsync<OpcUaResponseMismatchException>(async () => await OpcUaValueReader.ReadAsync(
-            server.Session, CreateNodesToRead(1), TimestampsToReturn.Source, CancellationToken.None));
+            server.Session, CancellationToken.None, CreateNodesToRead(1), TimestampsToReturn.Source, CancellationToken.None));
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public class OpcUaValueReaderTests
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<OpcUaResponseMismatchException>(async () => await OpcUaValueReader.ReadAsync(
-            session.Object, CreateNodesToRead(1), TimestampsToReturn.Source, CancellationToken.None));
+            session.Object, CancellationToken.None, CreateNodesToRead(1), TimestampsToReturn.Source, CancellationToken.None));
         Assert.Contains("PublishResponse", exception.Message);
     }
 
@@ -98,7 +98,7 @@ public class OpcUaValueReaderTests
 
         // Act
         var results = await OpcUaValueReader.ReadAsync(
-            server.Session, CreateNodesToRead(2), TimestampsToReturn.Source, CancellationToken.None);
+            server.Session, CancellationToken.None, CreateNodesToRead(2), TimestampsToReturn.Source, CancellationToken.None);
 
         // Assert
         Assert.Equal(expected, results.ToArray()!.Select(result => (string)result.WrappedValue.ToClrValue()!));
