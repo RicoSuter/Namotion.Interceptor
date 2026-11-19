@@ -25,7 +25,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     private volatile SessionReconnectHandler _reconnectHandler;
 
-    private Session? _session;
+    // Swapped only by SetSession. The session and its lifetime are one object, so a reader never pairs a
+    // session with another session's lifetime.
+    private SessionLease? _sessionLease;
 
     private readonly object _reconnectingLock = new();
 
@@ -59,7 +61,14 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Gets the current session. WARNING: Can change at any time due to reconnection. Never cache - read immediately before use.
     /// </summary>
-    public Session? CurrentSession => Volatile.Read(ref _session);
+    public Session? CurrentSession => Volatile.Read(ref _sessionLease)?.Session;
+
+    /// <summary>
+    /// Gets the current session with a token that is canceled once that session stops being current, or
+    /// <c>default</c> without a session, see <see cref="KillTransportChannel"/>.
+    /// </summary>
+    internal (ISession? Session, CancellationToken Lifetime) CurrentSessionWithLifetime =>
+        Volatile.Read(ref _sessionLease) is { } lease ? (lease.Session, lease.Lifetime) : default;
 
     /// <summary>
     /// Gets a value indicating whether the session is currently connected and not reconnecting.
@@ -67,7 +76,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </summary>
     public bool IsConnected =>
         Volatile.Read(ref _isReconnecting) == 0 &&
-        (Volatile.Read(ref _session)?.Connected ?? false);
+        (CurrentSession?.Connected ?? false);
 
     /// <summary>
     /// The minimum time between two full state syncs scheduled by <see cref="ScheduleFullStateSyncAfterResponseMismatch"/>.
@@ -261,7 +270,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         {
             PollingManager = new PollingManager(
                 source,
-                sessionProvider: () => CurrentSession,
+                sessionProvider: () => CurrentSessionWithLifetime,
                 propertyWriter,
                 _configuration,
                 pollingMetrics,
@@ -276,7 +285,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         if (_configuration.EnableReadAfterWrite)
         {
             ReadAfterWriteManager = new ReadAfterWriteManager(
-                sessionProvider: () => CurrentSession,
+                sessionProvider: () => CurrentSessionWithLifetime,
                 source,
                 configuration,
                 readAfterWriteMetrics,
@@ -345,7 +354,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             : null;
 
         var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
-        var oldSession = Volatile.Read(ref _session);
+        var oldSession = CurrentSession;
 
         // Resolved before the try so a ServiceResultException from user code is not reported as a certificate error.
         var identity = configuration.CreateUserIdentity != null
@@ -401,8 +410,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
         if (oldSession is not null)
         {
-            // Kill old transport immediately so any in-flight WriteAsync calls fail fast
-            // and release SourceWriteLock, unblocking LoadInitialStateAndResumeAsync.
             oldSession.KeepAlive -= OnKeepAlive;
             KillTransportChannel(oldSession);
             _sessionsToDispose.Enqueue(oldSession);
@@ -475,7 +482,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 return;
             }
 
-            var session = Volatile.Read(ref _session);
+            var session = CurrentSession;
             if (session is null || !ReferenceEquals(sender, session))
             {
                 return;
@@ -564,7 +571,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                     return;
                 }
 
-                var oldSession = Volatile.Read(ref _session);
+                var oldSession = CurrentSession;
                 var transferSucceeded = false;
 
                 if (!ReferenceEquals(oldSession, reconnectedSession))
@@ -752,7 +759,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             Interlocked.Exchange(ref _responseMismatchSyncPending, 0);
 
             // Read and clear session inside lock to prevent race with OnReconnectComplete
-            sessionToDispose = Volatile.Read(ref _session);
+            sessionToDispose = CurrentSession;
             SetSession(null);
             ReadAfterWriteManager?.ClearPendingReads();
         }
@@ -766,7 +773,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             // to a dead transport, which can disrupt the server's publish pipeline for other clients.
             await DisposeSessionAsync(sessionToDispose, cancellationToken).ConfigureAwait(false);
 
-            // Kill transport after close to ensure any remaining in-flight operations fail fast.
+            // Kill the transport in case the close left it open.
             KillTransportChannel(sessionToDispose);
         }
     }
@@ -978,7 +985,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </summary>
     internal async Task DisconnectTransportAsync(CancellationToken cancellationToken)
     {
-        var session = Volatile.Read(ref _session);
+        var session = CurrentSession;
         if (session is not null)
         {
             await CloseTransportChannelAsync(session, cancellationToken).ConfigureAwait(false);
@@ -1003,7 +1010,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         // reloads and replays state; the authoritative reload makes discarding these updates safe.
         _propertyWriter.StartBuffering();
 
-        var oldSession = Volatile.Read(ref _session);
+        var oldSession = CurrentSession;
         if (oldSession is not null)
         {
             oldSession.KeepAlive -= OnKeepAlive;
@@ -1043,8 +1050,13 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Kills a session's transport channel immediately (synchronous).
-    /// Used for fast failover during reconnection — makes in-flight operations fail fast.
+    /// Kills a session's transport channel immediately (synchronous), which stops its traffic.
+    /// The SDK drops the requests in flight on the channel without completing them, so each ends only at its
+    /// operation timeout or through its cancellation token. The connector's own value reads and writes link
+    /// their token to the session lifetime that <see cref="SetSession"/> cancels, so they end promptly; other
+    /// calls on the session, including those made through <see cref="CurrentSession"/>, are not canceled this
+    /// way and can wait until the operation timeout. Closing the session first, as a clear does, fails them
+    /// instead.
     /// </summary>
     private void KillTransportChannel(Session session)
     {
@@ -1130,7 +1142,17 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             try { pendingSession.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing pending old session."); }
         }
 
-        var sessionToDispose = Volatile.Read(ref _session);
+        // Cleared before the close, as in ClearSessionAsync, so no reader takes a closing session and the
+        // connector's value reads and writes on it are canceled even when the close times out.
+        Session? sessionToDispose;
+        lock (_reconnectingLock)
+        {
+            sessionToDispose = CurrentSession;
+            SetSession(null);
+        }
+
+        DrainPendingSessionTransitions();
+
         if (sessionToDispose is not null)
         {
             var timeout = _configuration.SessionDisposalTimeout;
@@ -1149,11 +1171,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 // Force immediate disposal without waiting for server acknowledgment
                 try { sessionToDispose.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error force-disposing session."); }
             }
-
-            SetSession(null);
         }
-
-        DrainPendingSessionTransitions();
 
         var application = Interlocked.Exchange(ref _application, null);
         if (application is not null)
@@ -1164,19 +1182,56 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Atomically updates the underlying session reference and enqueues a pending notification.
-    /// Spurious writes of the same instance do not enqueue. The pending notification is fired by
-    /// <see cref="DrainPendingSessionTransitions"/>, which callers must invoke after releasing
-    /// any locks (notably <see cref="_reconnectingLock"/>) so that user-supplied event handlers
-    /// run without those locks held.
+    /// Atomically updates the underlying session reference, cancels the previous session's lifetime and
+    /// enqueues a pending notification. Spurious writes of the same instance change nothing. The pending
+    /// notification is fired by <see cref="DrainPendingSessionTransitions"/>, which callers must invoke
+    /// after releasing any locks (notably <see cref="_reconnectingLock"/>) so that user-supplied event
+    /// handlers run without those locks held.
     /// </summary>
-    private void SetSession(Session? newSession)
+    internal void SetSession(Session? newSession)
     {
-        var oldSession = Interlocked.Exchange(ref _session, newSession);
-        if (!ReferenceEquals(oldSession, newSession))
+        SessionLease? oldLease;
+        SessionLease? newLease = null;
+        do
         {
-            _pendingSessionTransitions.Enqueue((oldSession, newSession));
+            oldLease = Volatile.Read(ref _sessionLease);
+            if (ReferenceEquals(oldLease?.Session, newSession))
+            {
+                return;
+            }
+
+            newLease ??= newSession is null ? null : new SessionLease(newSession);
         }
+        while (!ReferenceEquals(Interlocked.CompareExchange(ref _sessionLease, newLease, oldLease), oldLease));
+
+        oldLease?.End();
+        _pendingSessionTransitions.Enqueue((oldLease?.Session, newSession));
+    }
+
+    /// <summary>
+    /// A session with a token that is canceled once the session stops being current.
+    /// </summary>
+    private sealed class SessionLease
+    {
+        // Never disposed: it owns no timer or wait handle, and disposing it could drop the callbacks that
+        // CancelAsync has not run yet.
+        private readonly CancellationTokenSource _lifetime = new();
+
+        public SessionLease(Session session)
+        {
+            Session = session;
+            Lifetime = _lifetime.Token;
+        }
+
+        public Session Session { get; }
+
+        public CancellationToken Lifetime { get; }
+
+        /// <summary>
+        /// Cancels <see cref="Lifetime"/>. The token reports cancellation on return, and its callbacks, which
+        /// complete the requests observing it, run on the thread pool, so this is safe to call under a lock.
+        /// </summary>
+        public void End() => _ = _lifetime.CancelAsync();
     }
 
     /// <summary>

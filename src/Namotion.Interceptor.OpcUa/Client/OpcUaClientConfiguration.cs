@@ -450,11 +450,6 @@ public class OpcUaClientConfiguration
                 DefaultSessionTimeout = (int)SessionTimeout.TotalMilliseconds
             },
             DisableHiResClock = true,
-            TraceConfiguration = new TraceConfiguration
-            {
-                OutputFilePath = "Logs/UaClient.log",
-                TraceMasks = 0
-            }
         };
 
         config.CertificateManager = CertificateManagerFactory.Create(config.SecurityConfiguration, ResolvedTelemetryContext);

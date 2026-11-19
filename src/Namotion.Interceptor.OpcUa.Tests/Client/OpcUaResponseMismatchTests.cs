@@ -157,7 +157,7 @@ public class OpcUaResponseMismatchTests
 
     private static OutboundWriter CreateWriter(ISession session, Action onResponseMismatch, ILogger logger) =>
         new(
-            () => session,
+            () => (session, CancellationToken.None),
             readAfterWriteManager: null,
             onResponseMismatch,
             CreateConfiguration(),
