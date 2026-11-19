@@ -16,11 +16,11 @@ public partial class HomeBlazeInstallation
     internal static readonly TimeSpan InstallMonitorInterval = TimeSpan.FromSeconds(2);
 
     // Guards the install state and the files it decides on, so InstallUpdate and the monitor never interleave.
-    internal readonly Lock _installLock = new();
-    internal readonly SemaphoreSlim _installSignal = new(0, 1);
+    private readonly Lock _installLock = new();
+    private readonly SemaphoreSlim _installSignal = new(0, 1);
 
     // Monotonic time of the last request, for the pick-up timeout; written and read under _installLock.
-    internal long _requestTimestamp;
+    private long _requestTimestamp;
 
     /// <summary>
     /// Whether an updater sidecar runs next to this installation, judged by its heartbeat in the data directory.
@@ -122,5 +122,188 @@ public partial class HomeBlazeInstallation
     {
         UpdateInstallState = state;
         UpdateInstallStatus = message;
+    }
+
+    /// <summary>
+    /// Moves an active install one step: picked up, finished or timed out. Only the monitor and the tests call it.
+    /// </summary>
+    internal void AdvanceInstall()
+    {
+        lock (_installLock)
+        {
+            try
+            {
+                var files = GetUpdaterFiles();
+                if (files is null)
+                {
+                    return;
+                }
+
+                if (UpdateInstallState == UpdateInstallState.Requested)
+                {
+                    AdvanceRequested(files);
+                }
+
+                if (UpdateInstallState == UpdateInstallState.Installing)
+                {
+                    EvaluateRun(files);
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(exception, "Reading the update files failed");
+                CompleteInstall(UpdateInstallState.Failed, exception.Message);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                _logger.LogWarning(exception, "Advancing the update install failed");
+                CompleteInstall(UpdateInstallState.Failed, exception.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds the install state from the files a previous process left, before the first poll: a run without a
+    /// result means the updater is still finishing the recreate that started this process.
+    /// </summary>
+    internal void RestoreInstall()
+    {
+        lock (_installLock)
+        {
+            try
+            {
+                var files = GetUpdaterFiles();
+                if (files is null)
+                {
+                    return;
+                }
+
+                // The process that wrote a request the updater has not taken is gone.
+                files.TryDeleteRequest();
+
+                if (files.ReadRun() is null)
+                {
+                    files.DeleteRunAndResult();
+                    return;
+                }
+
+                SetInstallState(UpdateInstallState.Installing, "Installing update…");
+                EvaluateRun(files);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(exception, "Reading the update files failed");
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // ExecuteAsync calls this before the loops start, so an escaping exception would stop the installation.
+                _logger.LogWarning(exception, "Restoring the update install failed");
+            }
+        }
+    }
+
+    private void AdvanceRequested(UpdaterFiles files)
+    {
+        // Reading the run before deleting keeps a request the updater took at the last moment from counting as lost.
+        if (files.ReadRun() is not null)
+        {
+            SetInstallState(UpdateInstallState.Installing, "Installing update…");
+            return;
+        }
+
+        if (_timeProvider.GetElapsedTime(_requestTimestamp) < PickUpTimeout)
+        {
+            return;
+        }
+
+        files.TryDeleteRequest();
+        if (files.ReadRun() is not null)
+        {
+            SetInstallState(UpdateInstallState.Installing, "Installing update…");
+            return;
+        }
+
+        CompleteInstall(UpdateInstallState.Failed, "The updater did not pick up the request.");
+    }
+
+    private void EvaluateRun(UpdaterFiles files)
+    {
+        var run = files.ReadRun();
+        if (run is null)
+        {
+            CompleteInstall(UpdateInstallState.Failed, "The update files were removed.");
+            return;
+        }
+
+        if (files.TryReadExitCode(out var exitCode))
+        {
+            CompleteRun(files, run, exitCode);
+            return;
+        }
+
+        if (_timeProvider.GetUtcNow() - run.RequestedAt >= InstallTimeout)
+        {
+            files.DeleteRunAndResult();
+            CompleteInstall(UpdateInstallState.Failed, "The update did not finish within 30 minutes.");
+        }
+    }
+
+    private void CompleteRun(UpdaterFiles files, UpdaterRun run, int exitCode)
+    {
+        var log = files.ReadLog();
+        var running = new BuildIdentity(Version, Commit);
+        if (exitCode != 0)
+        {
+            _logger.LogWarning("Installing the update failed with exit code {ExitCode}: {Log}", exitCode, log);
+            CompleteInstall(UpdateInstallState.Failed, GetLastLine(log) ?? $"The update failed with exit code {exitCode}.");
+        }
+        else if (run.Requested != running)
+        {
+            CompleteInstall(UpdateInstallState.Succeeded, $"Updated from {run.Requested.Describe()} to {running.Describe()}");
+        }
+        else
+        {
+            CompleteInstall(UpdateInstallState.UpToDate, "No newer image was found for the configured tag.");
+        }
+
+        files.DeleteRunAndResult();
+    }
+
+    private void CompleteInstall(UpdateInstallState state, string message)
+    {
+        SetInstallState(state, message);
+        LastUpdateInstall = _timeProvider.GetUtcNow();
+        _logger.LogInformation("Update install {State}: {Message}", state, message);
+    }
+
+    private static string? GetLastLine(string? log) =>
+        log?.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+
+    private async Task RunInstallMonitorAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            if (!IsInstallingUpdate)
+            {
+                await WaitAsync(_installSignal, Timeout.InfiniteTimeSpan, stoppingToken);
+                continue;
+            }
+
+            try
+            {
+                AdvanceInstall();
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
+            {
+                // The host never observes ExecuteTask, so an escaping exception would silently end the monitor.
+                _logger.LogError(exception, "Monitoring the update install failed unexpectedly");
+                lock (_installLock)
+                {
+                    CompleteInstall(UpdateInstallState.Failed, exception.Message);
+                }
+            }
+
+            await WaitAsync(_installSignal, InstallMonitorInterval, stoppingToken);
+        }
     }
 }

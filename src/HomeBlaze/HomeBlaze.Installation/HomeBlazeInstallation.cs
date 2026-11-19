@@ -343,9 +343,10 @@ public partial class HomeBlazeInstallation : BackgroundService,
             // Read after subscribing, so a change in between is not missed.
             RefreshDeveloperMode();
             ReconcileClients();
+            RestoreInstall();
             Status = ServiceStatus.Running;
 
-            await Task.WhenAll(RunPollingAsync(stoppingToken), RunUpdateChecksAsync(stoppingToken));
+            await Task.WhenAll(RunPollingAsync(stoppingToken), RunUpdateChecksAsync(stoppingToken), RunInstallMonitorAsync(stoppingToken));
         }
         finally
         {
