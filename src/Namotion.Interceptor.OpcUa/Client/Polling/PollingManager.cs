@@ -19,7 +19,7 @@ internal sealed class PollingManager : IAsyncDisposable
 {
     private readonly OpcUaSubjectClientSource _source;
     private readonly ILogger _logger;
-    private readonly Func<ISession?> _sessionProvider;
+    private readonly Func<(ISession? Session, CancellationToken Lifetime)> _sessionProvider;
     private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly CircuitBreaker _circuitBreaker;
@@ -38,7 +38,7 @@ internal sealed class PollingManager : IAsyncDisposable
     private int _disposed;
 
     public PollingManager(OpcUaSubjectClientSource source,
-        Func<ISession?> sessionProvider,
+        Func<(ISession? Session, CancellationToken Lifetime)> sessionProvider,
         SubjectPropertyWriter propertyWriter,
         OpcUaClientConfiguration configuration,
         PollingMetrics metrics,
@@ -213,7 +213,7 @@ internal sealed class PollingManager : IAsyncDisposable
             return;
         }
 
-        var session = _sessionProvider();
+        var (session, sessionLifetime) = _sessionProvider();
         if (session is null || !session.Connected)
         {
             _logger.LogDebug("No active session available for polling (null: {IsNull}, connected: {Connected})",
@@ -244,15 +244,18 @@ internal sealed class PollingManager : IAsyncDisposable
             // Each batch is one read, so it may not exceed the server's read limit.
             var batchLimit = OpcUaValueReader.GetNodesPerRead(session, _configuration.PollingBatchSize);
 
-            // Process in batches using direct indexing
-            for (int i = 0; i < itemsToRead.Length; i += batchLimit)
+            // Stops once the session is no longer current: its remaining batches would fail at once, and the next
+            // poll detects the session change and reads every item again.
+            for (int i = 0; i < itemsToRead.Length && !sessionLifetime.IsCancellationRequested; i += batchLimit)
             {
                 var batchSize = Math.Min(batchLimit, itemsToRead.Length - i);
                 var batch = new ArraySegment<PollingItem>(itemsToRead, i, batchSize);
-                await ReadBatchAsync(session, batch, cancellationToken).ConfigureAwait(false);
+                await ReadBatchAsync(session, sessionLifetime, batch, cancellationToken).ConfigureAwait(false);
             }
 
-            pollSucceeded = true;
+            // An ended session is neither a failure nor a slow poll: the next poll reads every item on the new session.
+            pollCancelled = sessionLifetime.IsCancellationRequested;
+            pollSucceeded = !pollCancelled;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -316,7 +319,7 @@ internal sealed class PollingManager : IAsyncDisposable
         return Equals(a, b);
     }
 
-    private async Task ReadBatchAsync(ISession session, ArraySegment<PollingItem> batch, CancellationToken cancellationToken)
+    private async Task ReadBatchAsync(ISession session, CancellationToken sessionLifetime, ArraySegment<PollingItem> batch, CancellationToken cancellationToken)
     {
         try
         {
@@ -331,7 +334,7 @@ internal sealed class PollingManager : IAsyncDisposable
             }
 
             var results = await OpcUaValueReader.ReadAsync(
-                session, nodesToRead, TimestampsToReturn.Both, cancellationToken).ConfigureAwait(false);
+                session, sessionLifetime, nodesToRead, TimestampsToReturn.Both, cancellationToken).ConfigureAwait(false);
 
             // Process results - count metrics per item for accurate monitoring
             for (var i = 0; i < results.Count; i++)
@@ -357,6 +360,10 @@ internal sealed class PollingManager : IAsyncDisposable
         catch (Exception) when (cancellationToken.IsCancellationRequested)
         {
             throw new OperationCanceledException(cancellationToken);
+        }
+        catch (Exception ex) when (sessionLifetime.IsCancellationRequested && ex is not OpcUaResponseMismatchException)
+        {
+            _logger.LogDebug(ex, "Skipped a batch of {Count} polled items because its session is no longer current.", batch.Count);
         }
         catch (Exception ex)
         {

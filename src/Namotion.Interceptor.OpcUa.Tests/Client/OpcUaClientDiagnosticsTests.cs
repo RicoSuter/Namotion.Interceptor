@@ -85,7 +85,7 @@ public class OpcUaClientDiagnosticsTests
         try
         {
             // Act
-            SetCurrentSession(sessionManager, session);
+            sessionManager.SetSession(session);
             polling = source.Diagnostics.Polling!;
             readAfterWrite = source.Diagnostics.ReadAfterWrite!;
 
@@ -98,7 +98,7 @@ public class OpcUaClientDiagnosticsTests
         finally
         {
             // Act
-            SetCurrentSession(sessionManager, null);
+            sessionManager.SetSession(null);
         }
 
         // Assert
@@ -108,7 +108,7 @@ public class OpcUaClientDiagnosticsTests
         try
         {
             // Act
-            SetCurrentSession(sessionManager, session);
+            sessionManager.SetSession(session);
             var pollingAfterRestore = source.Diagnostics.Polling;
             var readAfterWriteAfterRestore = source.Diagnostics.ReadAfterWrite;
 
@@ -119,7 +119,7 @@ public class OpcUaClientDiagnosticsTests
         finally
         {
             // Act
-            SetCurrentSession(sessionManager, null);
+            sessionManager.SetSession(null);
         }
 
         // Act
@@ -151,7 +151,7 @@ public class OpcUaClientDiagnosticsTests
         SetSessionManager(source, sessionManager);
 
         var session = (ManagedSession)RuntimeHelpers.GetUninitializedObject(typeof(ManagedSession));
-        SetCurrentSession(sessionManager, session);
+        sessionManager.SetSession(session);
         try
         {
             var pollingDiagnostics = source.Diagnostics.Polling!;
@@ -171,7 +171,7 @@ public class OpcUaClientDiagnosticsTests
         }
         finally
         {
-            SetCurrentSession(sessionManager, null);
+            sessionManager.SetSession(null);
         }
     }
 
@@ -367,11 +367,6 @@ public class OpcUaClientDiagnosticsTests
         typeof(OpcUaSubjectClientSource)
             .GetField("_sessionManager", BindingFlags.Instance | BindingFlags.NonPublic)!
             .SetValue(source, sessionManager);
-
-    private static void SetCurrentSession(SessionManager sessionManager, ManagedSession? session) =>
-        typeof(SessionManager)
-            .GetField("_session", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .SetValue(sessionManager, session);
 
     private static async Task<(bool CompletedWhileLocked, int[] Results)> ReadCountsWhileDictionaryLocksAreHeldAsync(
         (object Owner, string FieldName, Func<int> Getter)[] cases)

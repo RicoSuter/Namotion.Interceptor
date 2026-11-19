@@ -317,7 +317,7 @@ public class SubscriptionManagerDiagnosticsTests
         await using var source = CreateClientSource(configuration: configuration);
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
         await using var readAfterWriteManager = new ReadAfterWriteManager(
-            () => null, source, configuration, new ReadAfterWriteMetrics(), _ => { }, NullLogger.Instance);
+            () => default, source, configuration, new ReadAfterWriteMetrics(), _ => { }, NullLogger.Instance);
         await using var manager = CreateManager(
             source, propertyWriter, configuration, new ConcurrentQueue<Exception>(), readAfterWriteManager: readAfterWriteManager);
 
@@ -351,7 +351,7 @@ public class SubscriptionManagerDiagnosticsTests
         await using var source = CreateClientSource(configuration: configuration);
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
         await using var readAfterWriteManager = new ReadAfterWriteManager(
-            () => null, source, configuration, new ReadAfterWriteMetrics(), _ => { }, NullLogger.Instance);
+            () => default, source, configuration, new ReadAfterWriteMetrics(), _ => { }, NullLogger.Instance);
         await using var manager = CreateManager(
             source, propertyWriter, configuration, new ConcurrentQueue<Exception>(), readAfterWriteManager: readAfterWriteManager);
 
@@ -623,7 +623,7 @@ public class SubscriptionManagerDiagnosticsTests
         OpcUaClientConfiguration configuration) =>
         new(
             source,
-            sessionProvider: () => null,
+            sessionProvider: () => default,
             propertyWriter,
             configuration,
             source.PollingMetrics,
@@ -680,7 +680,7 @@ public class SubscriptionManagerDiagnosticsTests
             });
 
         return new ReadAfterWriteManager(
-            () => session.Object, source, configuration, new ReadAfterWriteMetrics(), static _ => { }, NullLogger.Instance);
+            () => (session.Object, CancellationToken.None), source, configuration, new ReadAfterWriteMetrics(), static _ => { }, NullLogger.Instance);
     }
 
     private static uint TrackNameProperty(SubscriptionManager manager, OpcUaSubjectClientSource source)
