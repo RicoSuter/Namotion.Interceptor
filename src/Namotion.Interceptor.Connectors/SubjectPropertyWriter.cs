@@ -178,6 +178,45 @@ public sealed class SubjectPropertyWriter
     }
 
     /// <summary>
+    /// Ends buffering after <see cref="LoadInitialStateAndResumeAsync"/> failed: the buffered updates are applied in
+    /// order and later updates are applied directly, so a failed load does not withhold them until the next attempt.
+    /// The source stays <see cref="SourceState.Synchronizing"/> until a later load succeeds, because no initial state
+    /// was applied.
+    /// </summary>
+    /// <remarks>
+    /// The generation changes as well, so a load still running from before cannot apply its snapshot over the
+    /// updates applied here.
+    /// </remarks>
+    internal void ResumeWithoutLoad()
+    {
+        lock (_lock)
+        {
+            var updates = _updates;
+            if (updates is null)
+            {
+                return;
+            }
+
+            _generation++;
+            foreach (var action in updates)
+            {
+                try
+                {
+                    action();
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Failed to apply subject update.");
+                }
+            }
+
+            // Must be after replay: Write() reads _updates without lock on the fast path.
+            _updates = null;
+            Volatile.Write(ref _bufferedUpdateCount, 0);
+        }
+    }
+
+    /// <summary>
     /// Writes a property update to the subject. During initialization, the update is buffered;
     /// otherwise it is applied immediately. This buffering is transparent to the caller.
     /// </summary>

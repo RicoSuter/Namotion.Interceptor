@@ -17,7 +17,10 @@ public class OpcUaClientConfigurationTests
             ServerUrl = "opc.tcp://localhost:4840",
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
-            SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance)
+            SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
+
+            // Short enough for every duration these tests use, which must span two intervals.
+            ReconnectInterval = TimeSpan.FromSeconds(1)
         };
 
         if (maxReconnectDuration.HasValue)
@@ -38,6 +41,18 @@ public class OpcUaClientConfigurationTests
         var exception = Assert.Throws<ArgumentException>(() => config.Validate());
         Assert.Contains("MaxReconnectDuration", exception.Message);
         Assert.Contains("at least 5 seconds", exception.Message);
+    }
+
+    [Fact]
+    public void Validate_WithMaxReconnectDurationShorterThanTwoReconnectIntervals_ThrowsArgumentException()
+    {
+        // Arrange
+        var config = CreateValidConfiguration(maxReconnectDuration: TimeSpan.FromSeconds(10));
+        config.ReconnectInterval = TimeSpan.FromSeconds(6);
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => config.Validate());
+        Assert.Contains("ReconnectInterval", exception.Message);
     }
 
     [Fact]

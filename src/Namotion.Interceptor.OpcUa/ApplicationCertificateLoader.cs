@@ -38,12 +38,27 @@ internal static class ApplicationCertificateLoader
     /// the certificate propagates.
     /// </summary>
     /// <returns>The loaded certificate with its private key, owned by the caller.</returns>
-    public static async Task<Certificate> EnsureLoadedAsync(
+    public static Task<Certificate> EnsureLoadedAsync(
         ApplicationInstance application,
         bool autoCreate,
         ushort lifetimeInMonths,
         ITelemetryContext telemetryContext,
         ILogger logger,
+        CancellationToken cancellationToken) =>
+        EnsureLoadedAsync(application, autoCreate, lifetimeInMonths, telemetryContext, logger, logExpiryWarning: true, cancellationToken);
+
+    /// <summary>
+    /// Ensures the application certificate is loaded like <see cref="EnsureLoadedAsync(ApplicationInstance, bool, ushort, ITelemetryContext, ILogger, CancellationToken)"/>,
+    /// and logs the expiry warning only when <paramref name="logExpiryWarning"/> is true, for a caller that checks
+    /// the certificate repeatedly and limits how often the warning repeats.
+    /// </summary>
+    internal static async Task<Certificate> EnsureLoadedAsync(
+        ApplicationInstance application,
+        bool autoCreate,
+        ushort lifetimeInMonths,
+        ITelemetryContext telemetryContext,
+        ILogger logger,
+        bool logExpiryWarning,
         CancellationToken cancellationToken)
     {
         var configuration = GetConfiguration(application);
@@ -101,7 +116,11 @@ internal static class ApplicationCertificateLoader
                     certificate = replacement;
                 }
 
-                LogExpiryWarning(certificate, manageStore && string.IsNullOrEmpty(configuredThumbprint), identifier.StorePath ?? string.Empty, logger);
+                if (logExpiryWarning)
+                {
+                    LogExpiryWarning(certificate, manageStore && string.IsNullOrEmpty(configuredThumbprint), identifier.StorePath ?? string.Empty, logger);
+                }
+
                 return certificate;
             }
             catch
@@ -118,7 +137,7 @@ internal static class ApplicationCertificateLoader
 
     /// <summary>
     /// Deletes the own store folder of <paramref name="identifier"/> with every certificate and private key in it,
-    /// under the same lock as <see cref="EnsureLoadedAsync"/>. An empty store path or a failure to delete is logged
+    /// under the same lock as <see cref="EnsureLoadedAsync(ApplicationInstance, bool, ushort, ITelemetryContext, ILogger, CancellationToken)"/>. An empty store path or a failure to delete is logged
     /// as a warning and otherwise ignored.
     /// </summary>
     public static async Task CleanStoreAsync(CertificateIdentifier identifier, ILogger logger, CancellationToken cancellationToken)
@@ -193,14 +212,22 @@ internal static class ApplicationCertificateLoader
         return string.Equals(storeType, CertificateStoreType.Directory, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Gets whether <paramref name="certificate"/> expires within the window in which the expiry warning is logged,
+    /// or has expired.
+    /// </summary>
+    internal static bool IsWithinExpiryWarningWindow(Certificate certificate) =>
+        certificate.NotAfter.ToUniversalTime() - DateTime.UtcNow < ExpiryWarningWindow;
+
     private static void LogExpiryWarning(Certificate certificate, bool replacesSelfSigned, string storePath, ILogger logger)
     {
-        var notAfter = certificate.NotAfter.ToUniversalTime();
-        var remaining = notAfter - DateTime.UtcNow;
-        if (remaining >= ExpiryWarningWindow)
+        if (!IsWithinExpiryWarningWindow(certificate))
         {
             return;
         }
+
+        var notAfter = certificate.NotAfter.ToUniversalTime();
+        var remaining = notAfter - DateTime.UtcNow;
 
         if (remaining <= TimeSpan.Zero)
         {

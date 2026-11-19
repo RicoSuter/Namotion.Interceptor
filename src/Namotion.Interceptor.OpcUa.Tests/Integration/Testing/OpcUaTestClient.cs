@@ -91,7 +91,6 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                     TelemetryContext = telemetryContext,
 
                     ReconnectInterval = TimeSpan.FromSeconds(5),
-                    ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
                     MaxReconnectDuration = TimeSpan.FromSeconds(15),
                     SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5),
 

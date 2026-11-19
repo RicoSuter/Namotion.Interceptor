@@ -80,7 +80,7 @@ public class OpcUaClientDiagnosticsTests
 
         PollingDiagnostics polling;
         ReadAfterWriteDiagnostics readAfterWrite;
-        var session = (Session)RuntimeHelpers.GetUninitializedObject(typeof(Session));
+        var session = (ManagedSession)RuntimeHelpers.GetUninitializedObject(typeof(ManagedSession));
 
         try
         {
@@ -150,7 +150,7 @@ public class OpcUaClientDiagnosticsTests
             message: "The polling manager should start with the session manager");
         SetSessionManager(source, sessionManager);
 
-        var session = (Session)RuntimeHelpers.GetUninitializedObject(typeof(Session));
+        var session = (ManagedSession)RuntimeHelpers.GetUninitializedObject(typeof(ManagedSession));
         sessionManager.SetSession(session);
         try
         {

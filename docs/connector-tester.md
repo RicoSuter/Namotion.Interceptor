@@ -96,7 +96,7 @@ Each connector implements `IFaultInjectable` (separate from the production `ISub
 
 - **Kill** (`FaultType.Kill`): Hard kill. Stops the connector entirely. The background service loop auto-restarts.
   - *OPC UA Server*: Cancels the current attempt's loop token and closes transport listeners (TCP RST to all clients) before shutting the server down and restarting. The backoff after a failed start runs inside the attempt, so a kill arriving during it is accepted and cancels a token whose work has already ended: it does nothing for as long as the backoff lasts, which after repeated failures is up to 32 seconds. Only a kill landing between one attempt being released and the next being created has nothing to cancel and is dropped, and that call returns successfully having done nothing.
-  - *OPC UA Client*: Attempts graceful session close, then kills the transport channel. Health check detects missing session and triggers full reconnection.
+  - *OPC UA Client*: Disposes the transport channel and drops liveness. The managed session detects the loss and reconnects.
   - *MQTT Server*: Cancels the current attempt's loop token, so the processing loop exits and the broker restarts. Its backoff after a failed start behaves like the OPC UA server's, over a fixed five seconds.
   - *MQTT Client*: Cancels the current iteration's token, so the connection monitor exits and the transport is replaced. The replacement loop publishes no current attempt, so a second Kill during teardown, reconnect backoff, or replacement connection attempts has none to cancel and is dropped.
   - *WebSocket Server*: Cancels the current attempt's loop token, triggering full teardown and rebuild of the Kestrel HTTP listener. The attempt is released before the five second backoff a failed attempt takes rather than after it, so a kill arriving anywhere in that window has no attempt to cancel and is dropped: the call returns successfully having done nothing.
@@ -104,7 +104,7 @@ Each connector implements `IFaultInjectable` (separate from the production `ISub
 
 - **Disconnect** (`FaultType.Disconnect`): Soft kill. Breaks the transport connection without stopping the connector. Lets the connector's built-in reconnection logic detect the failure and recover.
   - *OPC UA Server*: Delegates to Kill (no meaningful "soft disconnect" for a multi-connection server).
-  - *OPC UA Client*: Disposes the transport channel. Keep-alive failure triggers `SessionReconnectHandler.BeginReconnect`, which reactivates the session on a new channel; the client then abandons the preserved session and reconnects manually.
+  - *OPC UA Client*: Closes the transport channel gracefully. The managed session detects the loss and reconnects, reactivating the server session it still holds.
   - *MQTT Server*: Enumerates connected clients and disconnects each one individually.
   - *MQTT Client*: Calls `DisconnectAsync()` on the MQTT client for a graceful disconnect.
   - *WebSocket Server*: Closes all client connections via `CloseAllConnectionsAsync()`.
@@ -122,13 +122,13 @@ The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconn
 
 | Connector | Status | Notes |
 |-----------|--------|-------|
-| OPC UA | Working | Server kill drops TCP connections, client kill abandons session. 1 min convergence timeout. `decimal` round-trips through `double`. |
+| OPC UA | Working | Server kill drops TCP connections, client kill disposes the transport. 1 min convergence timeout. `decimal` round-trips through `double`. |
 | MQTT | Working | Server and client kill/disconnect. 2 min convergence timeout. |
 | WebSocket | Working | Server kill cancels the current attempt, client kill aborts socket. Sequence gap detection triggers reconnection. |
 
 ### Connector-Specific Behaviors
 
-**OPC UA**: Uses `OpcUaValueConverter` for type mapping. `decimal` values lose precision beyond ~15 significant digits due to `decimal` -> `double` -> `decimal` round-trip. `BufferTime=100ms` batches changes. Server chaos closes transport listeners before dispose, so clients get an immediate TCP RST rather than waiting for keep-alive timeout. Client chaos disposes the session without `CloseAsync`, simulating an abrupt disconnection.
+**OPC UA**: Uses `OpcUaValueConverter` for type mapping. `decimal` values lose precision beyond ~15 significant digits due to `decimal` -> `double` -> `decimal` round-trip. `BufferTime=100ms` batches changes. Server chaos closes transport listeners before dispose, so clients get an immediate TCP RST rather than waiting for keep-alive timeout. Client chaos disposes the transport channel without closing the session, simulating an abrupt disconnection.
 
 **OPC UA secured** (`opcua-chaos-secured`): the `opcua-chaos` profile with `OpcUa.MinimumSecurityMode` set to `SignAndEncrypt`, so the clients load or create their certificates and all traffic is signed and encrypted. Each participant keeps its certificate store in `logs/{run}/pki/{participant}` for the whole run, so certificates survive chaos restarts, and both sides accept the other's certificate. Clients request a one minute security token lifetime, so secure channels renew within a cycle, and log `OPC UA session created on ... with security mode SignAndEncrypt` for every new session.
 
@@ -217,7 +217,7 @@ Cycle log files are created as `pending` and renamed to `pass` or `FAIL` on comp
 
 **Use the log files to analyze results and diagnose problems.** On failure, the `FAIL` log contains full snapshot diffs showing exactly which participants diverged and what their state was. Look for:
 - Chaos event timing (`Chaos: force-killing ...`) to correlate disruptions with convergence delays.
-- Reconnection logs (`OPC UA server connection lost. Beginning reconnect...`, `SDK reconnection initialization completed successfully.`) to verify recovery.
+- Reconnection logs (`OPC UA connection state changed from Connected to Reconnecting`, `... from Reconnecting to Connected`) to verify recovery.
 - Mutation counts in the statistics block to confirm all engines were active.
 - Snapshot diffs at the end of failed cycles to identify which properties or participants didn't converge.
 
@@ -264,16 +264,16 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 | Scenario | Kill | Disconnect | Recovery Mechanism |
 |----------|------|------------|-------------------|
 | Abrupt server crash | Current attempt cancelled, TCP listeners closed (RST to clients) | Delegates to Kill | Background loop auto-restarts with exponential backoff (1s-30s + jitter) |
-| Abrupt client crash | Session disposed without CloseSession RPC | Transport channel disposed, session preserved | Health check detects missing session, triggers full reconnection |
-| Network partition | N/A | Client transport disposed, keep-alive detects within 5-10s | SDK `SessionReconnectHandler` reactivates the session, the client abandons the preserved session and reconnects manually with a full state read |
-| Server restart (clean state) | Full server restart, new node manager | N/A | SDK recreates the session with fresh subscriptions, then a full state read |
-| Session stall / hung reconnect | N/A | N/A | Stall detection after 30s forces SDK handler reset, triggers manual reconnection |
+| Abrupt client crash | Transport channel disposed without CloseSession RPC | Transport channel closed, session preserved | Managed session reconnects, then full state reload |
+| Network partition | N/A | Client transport closed, keep-alive detects within 5-10s | Managed session reactivates the server session on a new channel, then full state reload |
+| Server restart (clean state) | Full server restart, new node manager | N/A | Managed session creates a new server session and restores the subscriptions, then full state reload |
+| Server stays away | N/A | N/A | Managed session retries in cycles bounded by `MaxReconnectDuration` (30s), each exhausted cycle counted as a failed attempt |
 | Subscription creation failure | N/A | N/A | `SubscriptionHealthMonitor` retries failed items every 5s, falls back to polling |
 | Port already in use on restart | N/A | N/A | Retried with exponential backoff |
 | Resource exhaustion (polling) | N/A | N/A | Circuit breaker (5 failures, 30s cooldown) |
 | Concurrent server + client chaos | Both engines run independently, overlapping disruptions possible | Same | Each connector recovers independently |
 | Bidirectional mutations during chaos | Server and clients mutate concurrently during disruptions | Same | WriteRetryQueue buffers outbound writes, full state sync on reconnect |
-| Secured transport (`opcua-chaos-secured`) | Certificates reloaded from the store on every restart and manual reconnect | Same | Secure channels renew their token about every 45 seconds between disruptions |
+| Secured transport (`opcua-chaos-secured`) | Certificates reloaded from the store on every restart; the client's managed session keeps its certificate through reconnects | Same | Secure channels renew their token about every 45 seconds between disruptions |
 
 ### Covered (WebSocket)
 
@@ -291,12 +291,12 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 | Scenario | Why Not Covered | Production Impact |
 |----------|-----------------|-------------------|
 | Partial network failure (slow/lossy connections) | Keep-alive uses binary pass/fail detection | Low - TCP keepalive settings at OS level handle this |
-| Certificate expiry mid-session | The OPC UA client and server replace an expired self-signed certificate only when they connect or start | Low for tests, relevant for >6 month production deployments |
+| Certificate expiry mid-session | Not injected by the chaos profiles; the OPC UA client checks its certificate hourly and after a reconnect cycle that failed with a certificate error, the server replaces an expired one only when it starts | Low for tests, relevant for >6 month production deployments |
 | Server returning persistent error status codes | Polling ignores some error codes | Low - circuit breaker limits impact |
 | Out-of-order or duplicate notifications | Not injected by the chaos profiles | Very low - the OPC UA client skips a value from an older notification message of the same subscription |
 | Notification duplication after subscription transfer | Full state read overwrites stale values | Low - brief inconsistency only |
 | Server overload / adaptive backpressure | No response-time-based throttling | Low - not a connectivity failure |
-| Flapping connections (rapid up/down cycles) | Backoff resets on each success | Low - stall detection provides upper bound |
+| Flapping connections (rapid up/down cycles) | Backoff resets on each success | Low - every recovery ends with a full state reload |
 
 ### What the Tester Detects
 

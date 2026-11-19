@@ -100,13 +100,13 @@ public class OpcUaClientLivenessTests
     }
 
     /// <summary>
-    /// The SDK's own reconnect raises liveness the moment it completes with a new session, and the
-    /// full state sync that reconnect schedules runs on the next health check tick. A sync that
-    /// fails clears the session, so the tick running it owes the drop. The swallowed failure must
-    /// remain visible after the next health tick reconnects successfully.
+    /// The managed session raises liveness the moment it reports itself connected again, and the
+    /// full state sync that recovery schedules runs on the next health check tick. A sync that
+    /// fails is retried by a later tick on the same session. The swallowed failure must remain
+    /// visible after the retry succeeds.
     /// </summary>
     [Fact]
-    public async Task WhenTheStateSyncAfterAnSdkReconnectFails_ThenFailureRemainsVisibleAfterRecovery()
+    public async Task WhenTheStateSyncAfterAReconnectFails_ThenItIsRetriedOnTheSameSessionAndTheFailureStaysVisible()
     {
         // Arrange
         var logger = new TestLogger(_output);
@@ -135,12 +135,12 @@ public class OpcUaClientLivenessTests
             loggerFactory,
             converter,
 
-            // Wide enough that the rise asserted below cannot be a health check tick's, and that
-            // reconnection stall detection (two ticks) cannot take the recovery away from the SDK.
+            // Wide enough that the rise asserted below cannot be a health check tick's.
             healthCheckInterval: TimeSpan.FromSeconds(60),
 
             // Detected quickly, so liveness drops before the reconnect completes. The restarted server
-            // rejects the old session id, so the SDK recreates the session with fresh subscriptions.
+            // rejects the old session id, so the managed session creates a new server session and
+            // restores the subscriptions onto it.
             keepAliveInterval: TimeSpan.FromSeconds(1));
 
         await using var source = new OpcUaSubjectClientSource(
@@ -160,8 +160,8 @@ public class OpcUaClientLivenessTests
                 message: "The first health check tick should report the session as operational");
 
             // Act - a restart rather than a transport disconnect: a disconnect leaves the session
-            // valid on the server, so the SDK reactivates it instead of replacing it with a new
-            // session and fresh subscriptions.
+            // valid on the server, so the managed session reactivates it instead of creating a new
+            // server session.
             converter.Arm();
             await server.RestartAsync();
 
@@ -170,30 +170,29 @@ public class OpcUaClientLivenessTests
                 timeout: TimeSpan.FromSeconds(30),
                 message: "The failing keep-alive should drop liveness");
 
-            // Assert - raised again by the completed reconnect on the reconnect callback's own thread,
-            // far inside the health check interval, so no tick can be what raised it.
+            // Assert - raised again by the managed session's transition back to Connected, far
+            // inside the health check interval, so no tick can be what raised it.
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(30),
-                message: "The completed SDK reconnect should raise liveness again");
+                message: "The recovered connection should raise liveness again");
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational == false,
+                () => converter.PoisonWasHandedOut && source.Diagnostics.LastError is not null,
                 timeout: TimeSpan.FromSeconds(75),
-                message: "The failed full state sync should drop liveness with the session it cleared");
+                message: "The full state sync after the reconnect should fail and be reported");
 
-            Assert.True(converter.PoisonWasHandedOut);
-            Assert.Null(source.Diagnostics.SessionId);
-
+            // The managed session keeps the recovered session; the sync is retried on it.
             var error = source.Diagnostics.LastError;
-            Assert.NotNull(error);
+            Assert.NotNull(source.Diagnostics.SessionId);
+            Assert.NotEqual(SourceState.Synchronized, source.State);
 
             // Act
             converter.Disarm();
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational == true,
+                () => source.State == SourceState.Synchronized,
                 timeout: TimeSpan.FromSeconds(75),
-                message: "The health loop should reconnect after the failed full state sync");
+                message: "The next health check should retry the full state sync and complete it");
 
             // Assert
             Assert.Same(error, source.Diagnostics.LastError);
@@ -304,7 +303,6 @@ public class OpcUaClientLivenessTests
         RetryTime = retryTime ?? TimeSpan.FromSeconds(10),
 
         ReconnectInterval = TimeSpan.FromSeconds(1),
-        ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
         MaxReconnectDuration = TimeSpan.FromSeconds(20),
 
         SessionTimeout = TimeSpan.FromSeconds(30),

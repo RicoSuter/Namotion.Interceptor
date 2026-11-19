@@ -21,9 +21,9 @@ public interface IOpcUaSubjectClientSource : IHostedService
     /// the connector does not cover natively (Methods, Alarms &amp; Conditions).
     /// </summary>
     /// <remarks>
-    /// Read immediately before each use. The session can be null and the instance can change
-    /// (manual reconnect, SDK reconnect with a new session, stall reset). Do not cache the reference.
-    /// Subscribe to <see cref="CurrentSessionChanged"/> to react to swaps.
+    /// Read immediately before each use. The session is null before the first connection and between
+    /// connect attempts, and the instance changes when the source restarts its connection. The same
+    /// instance survives reconnects. Subscribe to <see cref="CurrentSessionChanged"/> to react to swaps.
     /// </remarks>
     ISession? CurrentSession { get; }
 

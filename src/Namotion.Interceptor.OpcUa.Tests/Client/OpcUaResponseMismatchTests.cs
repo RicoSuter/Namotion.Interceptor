@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
@@ -117,6 +118,90 @@ public class OpcUaResponseMismatchTests
         // Assert
         Assert.Equal(1, syncsWithinInterval);
         Assert.Equal(2, CountFullStateSyncs(logger));
+    }
+
+    [Fact]
+    public async Task WhenAFullStateSyncAfterAMismatchFails_ThenItsRetryWaitsForTheInterval()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var timeProvider = new ManualTimeProvider();
+        var source = CreateSourceWhoseLoadFails();
+        await using var sessionManager = CreateSessionManager(source, logger, timeProvider);
+
+        sessionManager.ScheduleFullStateSyncAfterResponseMismatch();
+        await sessionManager.PerformFullStateSyncIfNeededAsync(CancellationToken.None);
+
+        // Act
+        await sessionManager.PerformFullStateSyncIfNeededAsync(CancellationToken.None);
+        var syncsWithinInterval = CountFullStateSyncs(logger);
+
+        timeProvider.Advance(SessionManager.ResponseMismatchSyncInterval);
+        await sessionManager.PerformFullStateSyncIfNeededAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, syncsWithinInterval);
+        Assert.Equal(2, CountFullStateSyncs(logger));
+        Assert.All(
+            logger.Entries.Where(entry => entry.Message.StartsWith(FullStateSyncStarted)),
+            entry => Assert.Contains("response to a different request", entry.Message));
+    }
+
+    [Fact]
+    public async Task WhenAFullStateSyncAfterARecoveryFails_ThenTheNextTickRetries()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var source = CreateSourceWhoseLoadFails();
+        await using var sessionManager = CreateSessionManager(source, logger, new ManualTimeProvider());
+
+        sessionManager.RequestFullStateSync();
+        await sessionManager.PerformFullStateSyncIfNeededAsync(CancellationToken.None);
+
+        // Act
+        await sessionManager.PerformFullStateSyncIfNeededAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, CountFullStateSyncs(logger));
+    }
+
+    [Fact]
+    public async Task WhenAFullStateSyncAfterAMismatchFails_ThenNotificationsAreAppliedWithoutWaitingForTheRetry()
+    {
+        // Arrange
+        var source = CreateSourceWhoseLoadFails();
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+        await using var sessionManager = new SessionManager(
+            source,
+            propertyWriter,
+            CreateConfigurationWithoutBackgroundReads(),
+            source.PollingMetrics,
+            source.ReadAfterWriteMetrics,
+            NullLogger.Instance,
+            new ManualTimeProvider());
+        var root = (TestRoot)source.RootSubject;
+
+        sessionManager.ScheduleFullStateSyncAfterResponseMismatch();
+        await sessionManager.PerformFullStateSyncIfNeededAsync(CancellationToken.None);
+
+        // Act
+        propertyWriter.Write(root, static subject => subject.Name = "AfterFailedSync");
+
+        // Assert
+        Assert.Equal("AfterFailedSync", root.Name);
+        Assert.Equal(SourceState.Synchronizing, source.State);
+    }
+
+    /// <summary>
+    /// Creates a source that owns a property with a node ID but has no session, so its full state read throws.
+    /// </summary>
+    private static OpcUaSubjectClientSource CreateSourceWhoseLoadFails()
+    {
+        var source = CreateClientSource(configuration: CreateConfigurationWithoutBackgroundReads());
+        var property = ((TestRoot)source.RootSubject).GetPropertyReference(nameof(TestRoot.Name));
+        property.SetPropertyData(source.OpcUaNodeIdKey, new NodeId("Name", 2));
+        Assert.True(source.Ownership.ClaimSource(property));
+        return source;
     }
 
     [Fact]

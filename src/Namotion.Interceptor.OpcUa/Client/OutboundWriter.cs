@@ -51,7 +51,10 @@ internal sealed class OutboundWriter
         try
         {
             var (session, sessionLifetime) = _sessionProvider();
-            if (session is null || !session.Connected || sessionLifetime.IsCancellationRequested)
+            // A reconnecting managed session holds service calls until it has recovered. Failing here
+            // instead keeps the write in the retry queue, where a later local write can supersede it.
+            if (session is null || !session.Connected || sessionLifetime.IsCancellationRequested ||
+                session is ManagedSession { Reconnecting: true })
             {
                 return WriteResult.Failure(changes, new InvalidOperationException("OPC UA session is not connected."));
             }
