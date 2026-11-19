@@ -22,6 +22,8 @@ The `Installation` subject shows which HomeBlaze version runs, how it was built,
 | `LatestVersion`, `LatestReleaseDate`, `LatestReleaseUrl` | The latest release, only checked for release builds |
 | `CommitsBehind`, `CompareUrl` | How many commits of its branch an edge build lacks, and the GitHub page that lists them; only checked for edge builds |
 | `LastUpdateCheck`, `UpdateCheckStatus` | When the last check finished, and why it failed, cannot run, or could not place the commit of an edge build on its branch |
+| `IsUpdaterAvailable` | Whether the updater runs next to this installation, see [Install updates](#install-updates) |
+| `UpdateInstallState`, `UpdateInstallStatus`, `LastUpdateInstall` | The progress of the current or last install, what it did or why it failed, and when it finished |
 
 The installation widget shows the version, channel and build, an available release or the number of new commits, the update check status, the data volume and the environment on a page.
 
@@ -33,7 +35,7 @@ A client receives notifications like any other notification target, for example 
 
 ## Update check
 
-The update check is on by default for release and edge builds. For a development build, an edge build without a commit or branch, or a repository URL that is missing, not on GitHub or not in the owner/name form, `UpdateCheckStatus` says why no check is possible. To install an update, pull the new image as described in [Installation](installation.md#docker).
+The update check is on by default for release and edge builds. For a development build, an edge build without a commit or branch, or a repository URL that is missing, not on GitHub or not in the owner/name form, `UpdateCheckStatus` says why no check is possible. To install an update, use `Install update` (see [Install updates](#install-updates)) or pull the new image as described in [Installation](installation.md#docker).
 
 A check of a release build asks the GitHub API for the latest release. A check of an edge build asks the GitHub API to compare its commit with the branch it was built from, normally `master`, and reads how many commits the branch has that the build lacks; the request leaves out the changed files, so its answer stays small however far behind the build is. When the commit is not on the branch, for example after the branch was rewritten, `UpdateCheckStatus` says so while `CommitsBehind` still counts the commits the build lacks. When GitHub cannot compare them, for example because the commit or the branch no longer exists, `UpdateCheckStatus` says so and `UpdateAvailable`, `CommitsBehind` and `CompareUrl` are cleared. Neither changes `Status` nor delays the next check.
 
@@ -44,3 +46,22 @@ The first check runs 5 to 60 minutes after each start, then every `UpdateCheckIn
 A failed check is retried after 1 hour, doubling each time up to 24 hours. A longer wait that GitHub asks for wins, also capped at 24 hours. The error stays in `UpdateCheckStatus` until a check succeeds and does not change `Status`. GitHub allows 60 unauthenticated requests per hour per IP address, shared by everything behind that address, so other clients can use them up and the check fails with "GitHub rate limit reached." A request that takes longer than 30 seconds fails the check with "GitHub did not answer in time."
 
 `Check for updates` checks immediately, also while the scheduled check is off, at most once per minute. It is refused while the installation is stopped or while GitHub asked to wait.
+
+## Install updates
+
+A Docker installation can install an update from the UI when the `updater` service of the compose file runs, see [Installation](installation.md#docker). `IsUpdaterAvailable` turns true within a poll after it starts.
+
+`Install update` asks for confirmation, then asks the updater to pull the image of the tag in the compose file and recreate the `homeblaze` container with it. It is available while the updater runs, the installation runs, an update is available and no install is in progress, so after a new release with the scheduled check off, run `Check for updates` first. MCP clients and agents cannot call it.
+
+| `UpdateInstallState` | Meaning |
+|-----|-----|
+| `None` | No install since the start |
+| `Requested` | Waiting for the updater to take the request; fails after 30 seconds |
+| `Installing` | The updater pulls the image and recreates the container; fails 30 minutes after the request |
+| `Succeeded` | HomeBlaze runs the new version; `UpdateInstallStatus` names the old and new version, or the commits for an edge build |
+| `UpToDate` | No newer image exists for the tag, for example with a pinned version or while the image of a new release or commit is not published yet |
+| `Failed` | Compose failed or the updater did not answer; `UpdateInstallStatus` shows the last line of its output |
+
+While the container is recreated, open tabs reconnect on their own. The new process reports the outcome, so the result stays visible until the next restart. The full output of the last install stays in `.update-log` in the data folder and, for a failure, in the log.
+
+The updater only runs `docker compose pull homeblaze` and `docker compose up -d homeblaze` in the folder of the compose file. It applies changes of the `homeblaze` service in the compose file, but never updates other services or itself, and never chooses a version. It expects the service to be named `homeblaze` and the data folder to be `./data`, as in the shipped compose file, and does not support a project started with `docker compose -p`.

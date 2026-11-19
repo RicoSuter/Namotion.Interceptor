@@ -26,7 +26,7 @@ Copy [docker-compose.yml](https://github.com/RicoSuter/Namotion.Interceptor/blob
 docker compose up -d
 ```
 
-HomeBlaze is then available at http://localhost:8080 and opens on its welcome page. To upgrade, run `docker compose pull` and `docker compose up -d`.
+HomeBlaze is then available at http://localhost:8080 and opens on its welcome page. To upgrade, run `docker compose pull` and `docker compose up -d`, or use `Install update` with the `updater` profile.
 
 ### Data folder
 
@@ -52,6 +52,7 @@ While the setting is empty, a new data folder is not filled with the starting se
 | Profile | Service | Address |
 |---------|---------|---------|
 | `seq` | Seq log server, receives logs and traces | http://localhost:5341 |
+| `updater` | Installs updates from the UI, see [Updates](updates.md#install-updates) | none |
 
 Seq reads a secret from a `.env` file next to the compose file. Create it once before the first start of the profile:
 
@@ -63,6 +64,16 @@ docker compose --profile seq up -d
 Keep `.env`: Seq creates the user `admin` with `SEQ_ADMIN_PASSWORD` on its first start and asks for a new password at the first login.
 
 HomeBlaze sends its logs and traces to Seq through `ConnectionStrings__seq`. Without the `seq` profile the export fails silently and HomeBlaze keeps working; remove the setting if you never use Seq. See [Monitoring](monitoring.md).
+
+The updater lets the `Install update` operation of the Installation subject pull and restart HomeBlaze, so an update needs no shell on the host. Turn it on once in the folder of the compose file:
+
+```bash
+echo "COMPOSE_DIR=$PWD" >> .env
+echo "COMPOSE_PROFILES=updater" >> .env
+docker compose up -d
+```
+
+`COMPOSE_DIR` must be the absolute path of this folder: the updater mounts it at the same path so compose finds `./data` on the host. Update it when the folder moves. `COMPOSE_PROFILES` keeps the profile on for every later `docker compose up -d`. The updater holds the Docker socket, which gives it root access to the host, and can read the files of the folder, including `.env`. It runs only Docker's official `docker:cli` image and the script in the compose file, and listens on no port. Without these lines nothing changes.
 
 MCP clients connect to `http://<host>:8080/mcp` using the MCP Streamable HTTP transport. The compose file enables MCP read-only; set `McpServer__ReadOnly` to `"false"` to allow writes.
 
