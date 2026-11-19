@@ -1,6 +1,8 @@
 @using System.Globalization
 @using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Components
+@using HomeBlaze.Components.Components
+@using Namotion.Interceptor.Registry
 @using HomeBlaze.Services.Display
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(HomeBlazeInstallation))]
@@ -54,7 +56,22 @@
                             <MudLink Href="@releaseUrl.AbsoluteUri" Target="_blank" rel="noopener noreferrer" Typo="Typo.caption">Release notes</MudLink>
                         }
                     }
+                    @if (installation.InstallUpdate_IsEnabled)
+                    {
+                        <MudSpacer />
+                        <OperationButtonView Property="@installation.TryGetRegisteredProperty(nameof(HomeBlazeInstallation.InstallUpdate))"
+                                             Variant="Variant.Outlined"
+                                             Color="Color.Warning" />
+                    }
                 </MudStack>
+            }
+            @if (installation.IsInstallingUpdate)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Warning" Rounded="true" data-testid="installation-widget-install-progress" />
+            }
+            @if (installation.UpdateInstallStatus is { } installStatus)
+            {
+                <MudText Typo="Typo.caption" Color="@GetInstallStatusColor(installation.UpdateInstallState)" data-testid="installation-widget-install-status">@installStatus</MudText>
             }
             @if (installation.UpdateCheckStatus is { } updateCheckStatus)
             {
@@ -96,6 +113,13 @@
 
     private static string FormatDate(DateTimeOffset? date) =>
         date is { } value ? $"({value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)})" : string.Empty;
+
+    private static Color GetInstallStatusColor(UpdateInstallState state) => state switch
+    {
+        UpdateInstallState.Failed => Color.Error,
+        UpdateInstallState.UpToDate => Color.Info,
+        _ => Color.Default
+    };
 
     private static string FormatDataVolume(HomeBlazeInstallation installation) =>
         installation.DataVolumeFreeSpace is { } free && installation.DataVolumeTotalSize is { } total
