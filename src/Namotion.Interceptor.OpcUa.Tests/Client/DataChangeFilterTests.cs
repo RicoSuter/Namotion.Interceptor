@@ -43,7 +43,7 @@ public class DataChangeFilterTests
         var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert - No filter when no options specified
-        Assert.Null(item.Filter);
+        Assert.Null(item.Options.Filter);
     }
 
     [Fact]
@@ -60,8 +60,8 @@ public class DataChangeFilterTests
         var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert
-        Assert.NotNull(item.Filter);
-        var filter = item.Filter as DataChangeFilter;
+        Assert.NotNull(item.Options.Filter);
+        var filter = item.Options.Filter as DataChangeFilter;
         Assert.NotNull(filter);
         Assert.Equal((uint)DeadbandType.Absolute, filter.DeadbandType);
         Assert.Equal(0.5, filter.DeadbandValue);
@@ -81,8 +81,8 @@ public class DataChangeFilterTests
         var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert
-        Assert.NotNull(item.Filter);
-        var filter = item.Filter as DataChangeFilter;
+        Assert.NotNull(item.Options.Filter);
+        var filter = item.Options.Filter as DataChangeFilter;
         Assert.NotNull(filter);
         Assert.Equal((uint)DeadbandType.Percent, filter.DeadbandType);
         Assert.Equal(2.5, filter.DeadbandValue);
@@ -102,8 +102,8 @@ public class DataChangeFilterTests
         var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert
-        Assert.NotNull(item.Filter);
-        var filter = item.Filter as DataChangeFilter;
+        Assert.NotNull(item.Options.Filter);
+        var filter = item.Options.Filter as DataChangeFilter;
         Assert.NotNull(filter);
         Assert.Equal(DataChangeTrigger.StatusValueTimestamp, filter.Trigger);
     }
@@ -122,7 +122,7 @@ public class DataChangeFilterTests
         var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert
-        Assert.Equal(0, item.SamplingInterval);
+        Assert.Equal(TimeSpan.Zero, item.Options.SamplingInterval);
     }
 
     [Fact]
@@ -148,8 +148,8 @@ public class DataChangeFilterTests
         var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert - Attribute values (Absolute, 0.5) override config defaults (Percent, 10.0)
-        Assert.NotNull(item.Filter);
-        var filter = item.Filter as DataChangeFilter;
+        Assert.NotNull(item.Options.Filter);
+        var filter = item.Options.Filter as DataChangeFilter;
         Assert.NotNull(filter);
         Assert.Equal((uint)DeadbandType.Absolute, filter.DeadbandType);
         Assert.Equal(0.5, filter.DeadbandValue);
@@ -177,8 +177,8 @@ public class DataChangeFilterTests
         var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert - Uses config defaults since Counter has no filter settings in attribute
-        Assert.NotNull(item.Filter);
-        var filter = item.Filter as DataChangeFilter;
+        Assert.NotNull(item.Options.Filter);
+        var filter = item.Options.Filter as DataChangeFilter;
         Assert.NotNull(filter);
         Assert.Equal((uint)DeadbandType.Percent, filter.DeadbandType);
         Assert.Equal(5.0, filter.DeadbandValue);
@@ -205,7 +205,7 @@ public class DataChangeFilterTests
         var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert
-        Assert.Equal(10u, item.QueueSize);
+        Assert.Equal(10u, item.Options.QueueSize);
     }
 
     [Fact]
@@ -229,7 +229,7 @@ public class DataChangeFilterTests
         var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert
-        Assert.False(item.DiscardOldest);
+        Assert.False(item.Options.DiscardOldest);
     }
 
     [Fact]
@@ -253,8 +253,8 @@ public class DataChangeFilterTests
         var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert - Should be Status (0), not confused with sentinel (-1)
-        Assert.NotNull(item.Filter);
-        var filter = item.Filter as DataChangeFilter;
+        Assert.NotNull(item.Options.Filter);
+        var filter = item.Options.Filter as DataChangeFilter;
         Assert.NotNull(filter);
         Assert.Equal(DataChangeTrigger.Status, filter.Trigger);
     }
@@ -281,8 +281,8 @@ public class DataChangeFilterTests
         var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert - Should be None (0), not confused with sentinel (-1)
-        Assert.NotNull(item.Filter);
-        var filter = item.Filter as DataChangeFilter;
+        Assert.NotNull(item.Options.Filter);
+        var filter = item.Options.Filter as DataChangeFilter;
         Assert.NotNull(filter);
         Assert.Equal((uint)DeadbandType.None, filter.DeadbandType);
     }
@@ -308,7 +308,7 @@ public class DataChangeFilterTests
         var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert - Should be -1, not confused with sentinel (int.MinValue)
-        Assert.Equal(-1, item.SamplingInterval);
+        Assert.Equal(TimeSpan.FromMilliseconds(-1), item.Options.SamplingInterval);
     }
 
     [Fact]
@@ -325,8 +325,8 @@ public class DataChangeFilterTests
         var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert - Both DeadbandType and DeadbandValue are set from attribute
-        Assert.NotNull(item.Filter);
-        var filter = item.Filter as DataChangeFilter;
+        Assert.NotNull(item.Options.Filter);
+        var filter = item.Options.Filter as DataChangeFilter;
         Assert.NotNull(filter);
         Assert.Equal((uint)DeadbandType.Absolute, filter.DeadbandType);
         Assert.Equal(0.5, filter.DeadbandValue);

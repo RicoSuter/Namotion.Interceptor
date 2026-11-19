@@ -119,19 +119,12 @@ internal sealed class PollingManager : IAsyncDisposable
     /// Adds a monitored item to polling fallback.
     /// Called when subscription creation fails for this item.
     /// </summary>
-    public void AddItem(MonitoredItem monitoredItem)
+    public void AddItem(NodeId nodeId, RegisteredSubjectProperty property)
     {
-        var key = monitoredItem.StartNodeId.ToString();
-
-        // Extract RegisteredSubjectProperty from handle
-        if (monitoredItem.Handle is not RegisteredSubjectProperty property)
-        {
-            _logger.LogWarning("Cannot add item {NodeId} to polling - invalid handle", key);
-            return;
-        }
+        var key = nodeId.ToString();
 
         var pollingItem = new PollingItem(
-            monitoredItem.StartNodeId,
+            nodeId,
             Property: property,
             LastValue: null
         );

@@ -22,12 +22,7 @@ public class PollingManagerTests
         await using var source = CreateClientSource();
         var property = new RegisteredSubject((TestRoot)source.RootSubject)
             .TryGetProperty(nameof(TestRoot.Name))!;
-        var item = new MonitoredItem(NullTelemetryContext.Instance)
-        {
-            StartNodeId = new NodeId("Name", 2),
-            AttributeId = Opc.Ua.Attributes.Value,
-            Handle = property
-        };
+        var nodeId = new NodeId("Name", 2);
         await using var manager = new PollingManager(
             source,
             sessionProvider: () => default,
@@ -39,21 +34,21 @@ public class PollingManagerTests
 
         // Act & Assert
         Assert.Equal(0, manager.PollingItemCount);
-        manager.AddItem(item);
+        manager.AddItem(nodeId, property);
         Assert.Equal(1, manager.PollingItemCount);
-        manager.AddItem(item);
+        manager.AddItem(nodeId, property);
         Assert.Equal(1, manager.PollingItemCount);
         manager.RemoveItemsForSubject(source.RootSubject);
         Assert.Equal(0, manager.PollingItemCount);
-        manager.AddItem(item);
+        manager.AddItem(nodeId, property);
         Assert.Equal(1, manager.PollingItemCount);
         manager.Clear();
         Assert.Equal(0, manager.PollingItemCount);
-        manager.AddItem(item);
+        manager.AddItem(nodeId, property);
         Assert.Equal(1, manager.PollingItemCount);
         await manager.DisposeAsync();
         Assert.Equal(0, manager.PollingItemCount);
-        manager.AddItem(item);
+        manager.AddItem(nodeId, property);
         Assert.Equal(0, manager.PollingItemCount);
     }
 
@@ -103,12 +98,7 @@ public class PollingManagerTests
 
         var property = new RegisteredSubject((TestRoot)source.RootSubject)
             .TryGetProperty(nameof(TestRoot.Name))!;
-        var item = new MonitoredItem(NullTelemetryContext.Instance)
-        {
-            StartNodeId = new NodeId("Name", 2),
-            AttributeId = Opc.Ua.Attributes.Value,
-            Handle = property
-        };
+        var nodeId = new NodeId("Name", 2);
 
         var metrics = new PollingMetrics();
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
@@ -120,7 +110,7 @@ public class PollingManagerTests
             metrics,
             reportedErrors.Enqueue,
             NullLogger.Instance);
-        manager.AddItem(item);
+        manager.AddItem(nodeId, property);
 
         // Act
         manager.Start();
@@ -184,12 +174,6 @@ public class PollingManagerTests
 
         var property = new RegisteredSubject((TestRoot)source.RootSubject)
             .TryGetProperty(nameof(TestRoot.Name))!;
-        var item = new MonitoredItem(NullTelemetryContext.Instance)
-        {
-            StartNodeId = new NodeId("Name", 2),
-            AttributeId = Opc.Ua.Attributes.Value,
-            Handle = property
-        };
 
         var metrics = new PollingMetrics();
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
@@ -205,7 +189,7 @@ public class PollingManagerTests
             metrics,
             reportedErrors.Enqueue,
             NullLogger.Instance);
-        manager.AddItem(item);
+        manager.AddItem(new NodeId("Name", 2), property);
         manager.Start();
         await readStarted.Task.WaitAsync(TestTimeouts.Default);
 
@@ -273,12 +257,7 @@ public class PollingManagerTests
 
         var property = new RegisteredSubject((TestRoot)source.RootSubject)
             .TryGetProperty(nameof(TestRoot.Name))!;
-        var item = new MonitoredItem(NullTelemetryContext.Instance)
-        {
-            StartNodeId = new NodeId("Name", 2),
-            AttributeId = Opc.Ua.Attributes.Value,
-            Handle = property
-        };
+        var nodeId = new NodeId("Name", 2);
 
         var metrics = new PollingMetrics();
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
@@ -290,7 +269,7 @@ public class PollingManagerTests
             metrics,
             ReportError,
             NullLogger.Instance);
-        manager.AddItem(item);
+        manager.AddItem(nodeId, property);
 
         // Act
         manager.Start();
@@ -360,12 +339,7 @@ public class PollingManagerTests
 
         foreach (var (name, index) in new[] { (nameof(TestRoot.Name), 0), (nameof(TestRoot.Number_Unit), 1) })
         {
-            manager.AddItem(new MonitoredItem(NullTelemetryContext.Instance)
-            {
-                StartNodeId = new NodeId("Polled" + index, 2),
-                AttributeId = Opc.Ua.Attributes.Value,
-                Handle = registeredSubject.TryGetProperty(name)!
-            });
+            manager.AddItem(new NodeId("Polled" + index, 2), registeredSubject.TryGetProperty(name)!);
         }
 
         // Act

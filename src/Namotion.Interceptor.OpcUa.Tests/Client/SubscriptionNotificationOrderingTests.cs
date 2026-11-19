@@ -5,9 +5,9 @@ using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
-using Opc.Ua;
-using Opc.Ua.Client;
+using Opc.Ua.Client.Subscriptions;
 using static Namotion.Interceptor.OpcUa.Tests.Client.ClientSourceTestFactory;
+using static Namotion.Interceptor.OpcUa.Tests.Client.SubscriptionTestFactory;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
@@ -123,28 +123,12 @@ public class SubscriptionNotificationOrderingTests
         harness.Notify(sequenceNumber: 500, (name, "OldSubscription"));
 
         // Act
-        // A reconnect to a restarted server recreates the subscription, which numbers from 1 again.
+        // Recreating the subscriptions hands out a new subscription object, which numbers from 1 again.
         harness.ReplaceSubscription();
         harness.Notify(sequenceNumber: 1, (name, "NewSubscription"));
 
         // Assert
         Assert.Equal("NewSubscription", harness.Root.Name);
-    }
-
-    [Fact]
-    public async Task WhenTheServerSessionIsCreatedAgain_ThenTheRestartedNumberingIsNotRankedAgainstTheEarlierMessages()
-    {
-        // Arrange - the same subscription object survives, but the server numbers from 1 again.
-        await using var harness = await Harness.CreateAsync();
-        var name = harness.Track(nameof(TestRoot.Name));
-        harness.Notify(sequenceNumber: 1000, (name, "before"));
-
-        // Act
-        harness.ResetNotificationRanking();
-        harness.Notify(sequenceNumber: 1, (name, "after"));
-
-        // Assert
-        Assert.Equal("after", harness.Root.Name);
     }
 
     [Fact]
@@ -162,6 +146,94 @@ public class SubscriptionNotificationOrderingTests
 
         // Assert
         Assert.Equal("New2", harness.Root.Name);
+    }
+
+    [Theory]
+    [InlineData(SubscriptionState.Created)]
+    [InlineData(SubscriptionState.Deleted)]
+    public async Task WhenTheSubscriptionIsCreatedAgainOnTheServer_ThenItsMessagesAreNotRankedAgainstTheEarlierOnes(
+        SubscriptionState state)
+    {
+        // Arrange
+        await using var harness = await Harness.CreateAsync();
+        var name = harness.Track(nameof(TestRoot.Name));
+        harness.Notify(sequenceNumber: 500, (name, "BeforeRecreate"));
+
+        // Act
+        await harness.ChangeStateAsync(state);
+        harness.Notify(sequenceNumber: 1, (name, "AfterRecreate"));
+
+        // Assert
+        Assert.Equal("AfterRecreate", harness.Root.Name);
+    }
+
+    [Fact]
+    public async Task WhenTheServerSessionIsCreatedAgain_ThenTheRestartedNumberingIsNotRankedAgainstTheEarlierMessages()
+    {
+        // Arrange
+        await using var harness = await Harness.CreateAsync();
+        var name = harness.Track(nameof(TestRoot.Name));
+        harness.Notify(sequenceNumber: 1000, (name, "BeforeNewSession"));
+
+        // Act
+        harness.ResetNotificationRanking();
+        harness.Notify(sequenceNumber: 1, (name, "AfterNewSession"));
+
+        // Assert
+        Assert.Equal("AfterNewSession", harness.Root.Name);
+    }
+
+    [Theory]
+    [InlineData(SubscriptionState.Modified)]
+    [InlineData(SubscriptionState.Error)]
+    public async Task WhenTheSubscriptionStateChangesWithoutARecreate_ThenAnOlderMessageIsStillSkipped(
+        SubscriptionState state)
+    {
+        // Arrange
+        await using var harness = await Harness.CreateAsync();
+        var name = harness.Track(nameof(TestRoot.Name));
+        harness.Notify(sequenceNumber: 500, (name, "Newer"));
+
+        // Act
+        await harness.ChangeStateAsync(state);
+        harness.Notify(sequenceNumber: 499, (name, "Older"));
+
+        // Assert
+        Assert.Equal("Newer", harness.Root.Name);
+    }
+
+    [Fact]
+    public async Task WhenAnItemIsDeliveredByAnotherPartition_ThenItsMessageIsNotRankedAgainstTheFirstPartition()
+    {
+        // Arrange
+        await using var harness = await Harness.CreateAsync();
+        var name = harness.Track(nameof(TestRoot.Name));
+        harness.NotifyFromPartition(partitionServerId: 1, sequenceNumber: 500, (name, "FirstPartition"));
+
+        // Act
+        // Sequence numbers are per partition, so the lower number says nothing about the order.
+        harness.NotifyFromPartition(partitionServerId: 2, sequenceNumber: 1, (name, "SecondPartition"));
+
+        // Assert
+        Assert.Equal("SecondPartition", harness.Root.Name);
+    }
+
+    [Fact]
+    public async Task WhenAnotherPartitionDeliversInBetween_ThenAnOlderMessageOfTheSamePartitionIsStillSkipped()
+    {
+        // Arrange
+        await using var harness = await Harness.CreateAsync();
+        var name = harness.Track(nameof(TestRoot.Name));
+        var unit = harness.Track(nameof(TestRoot.Number_Unit));
+        harness.NotifyFromPartition(partitionServerId: 1, sequenceNumber: 10, (name, "Newer"));
+
+        // Act
+        harness.NotifyFromPartition(partitionServerId: 2, sequenceNumber: 3, (unit, "items"));
+        harness.NotifyFromPartition(partitionServerId: 1, sequenceNumber: 9, (name, "Older"));
+
+        // Assert
+        Assert.Equal("Newer", harness.Root.Name);
+        Assert.Equal("items", harness.Root.Number_Unit);
     }
 
     [Fact]
@@ -262,8 +334,7 @@ public class SubscriptionNotificationOrderingTests
         private readonly OpcUaSubjectClientSource _source;
         private readonly SubscriptionManager _manager;
         private readonly SubjectPropertyWriter _propertyWriter;
-        private readonly List<Subscription> _replacedSubscriptions = [];
-        private Subscription _subscription;
+        private ISubscription _subscription = CreateSubscription();
 
         private Harness(
             OpcUaSubjectClientSource source,
@@ -275,7 +346,6 @@ public class SubscriptionNotificationOrderingTests
             _propertyWriter = propertyWriter;
             _manager = manager;
             Errors = errors;
-            _subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
         }
 
         public TestRoot Root => (TestRoot)_source.RootSubject;
@@ -308,58 +378,53 @@ public class SubscriptionNotificationOrderingTests
 
         public uint Track(string propertyName)
         {
-            var property = new RegisteredSubject(Root).TryGetProperty(propertyName)!;
-            var monitoredItem = new MonitoredItem(NullTelemetryContext.Instance)
-            {
-                StartNodeId = new NodeId(propertyName, 2),
-                AttributeId = Opc.Ua.Attributes.Value,
-                Handle = property
-            };
-            _subscription.AddItem(monitoredItem);
-            _manager.TrackMonitoredItem(monitoredItem);
+            var monitoredItem = CreateMonitoredItem();
+            _manager.TrackMonitoredItem(monitoredItem, CreateRequest(_source, propertyName));
             return monitoredItem.ClientHandle;
         }
 
         /// <summary>
         /// Switches later notifications to a new subscription object and returns the previous one.
         /// </summary>
-        public Subscription ReplaceSubscription()
+        public ISubscription ReplaceSubscription()
         {
             var previous = _subscription;
-            _subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
-            _replacedSubscriptions.Add(previous);
+            _subscription = CreateSubscription();
             return previous;
         }
+
+        /// <summary>
+        /// Reports a state change of the current subscription, as the engine does.
+        /// </summary>
+        public void ResetNotificationRanking() => _manager.ResetNotificationRanking();
+
+        public ValueTask ChangeStateAsync(SubscriptionState state) =>
+            _manager.OnSubscriptionStateChangedAsync(_subscription, state, PublishState.None);
 
         public void Notify(uint sequenceNumber, params (uint ClientHandle, string Value)[] values)
             => Notify(_subscription, sequenceNumber, values);
 
-        public void ResetNotificationRanking() => _manager.ResetNotificationRanking();
+        public void Notify(ISubscription subscription, uint sequenceNumber, params (uint ClientHandle, string Value)[] values)
+            => Deliver(subscription, partitionServerId: 0, sequenceNumber, values);
 
-        public void Notify(Subscription subscription, uint sequenceNumber, params (uint ClientHandle, string Value)[] values)
+        public void NotifyFromPartition(
+            uint partitionServerId, uint sequenceNumber, params (uint ClientHandle, string Value)[] values)
+            => Deliver(_subscription, partitionServerId, sequenceNumber, values);
+
+        private void Deliver(
+            ISubscription subscription, uint partitionServerId, uint sequenceNumber,
+            (uint ClientHandle, string Value)[] values)
         {
-            var notification = new DataChangeNotification
-            {
-                MonitoredItems = [.. values.Select(value => new MonitoredItemNotification
-                {
-                    ClientHandle = value.ClientHandle,
-                    Value = new DataValue(value.Value, StatusCodes.Good, DateTime.UtcNow)
-                })],
-                DiagnosticInfos = [],
-                SequenceNumber = sequenceNumber
-            };
+            var notification = values
+                .Select(value => CreateDataChange(value.ClientHandle, value.Value, DateTime.UtcNow, partitionServerId))
+                .ToArray();
 
-            _manager.OnFastDataChange(subscription, notification, []);
+            _manager.OnDataChange(subscription, sequenceNumber, notification);
         }
 
         public async ValueTask DisposeAsync()
         {
             await _manager.DisposeAsync();
-            _subscription.Dispose();
-            foreach (var subscription in _replacedSubscriptions)
-            {
-                subscription.Dispose();
-            }
             await _source.DisposeAsync();
         }
     }

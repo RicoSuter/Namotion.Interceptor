@@ -1,18 +1,18 @@
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
-using Opc.Ua.Client;
+using Opc.Ua.Client.Subscriptions.MonitoredItems;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
 /// <summary>
-/// Factory for creating MonitoredItem instances from configuration.
+/// Factory for creating monitored item requests from configuration.
 /// Extracted from OpcUaClientConfiguration for single responsibility.
 /// </summary>
 internal static class MonitoredItemFactory
 {
     /// <summary>
-    /// Creates a MonitoredItem for the given property and node ID using the configuration defaults.
+    /// Creates a monitored item request for the given property and node ID using the configuration defaults.
     /// Mapper configuration overrides (SamplingInterval, QueueSize, DiscardOldest, DataChangeTrigger, DeadbandType, DeadbandValue)
     /// are applied if present on the property.
     /// </summary>
@@ -20,45 +20,25 @@ internal static class MonitoredItemFactory
     /// <param name="nodeId">The OPC UA node ID to monitor.</param>
     /// <param name="property">The property to associate with the monitored item.</param>
     /// <param name="rootSubject">The root subject used for mapping resolution.</param>
-    /// <returns>A configured MonitoredItem ready to be added to a subscription.</returns>
-    public static MonitoredItem Create(OpcUaClientConfiguration configuration, NodeId nodeId, RegisteredSubjectProperty property, IInterceptorSubject rootSubject)
+    /// <returns>A request ready to be added to a subscription.</returns>
+    public static MonitoredItemRequest Create(OpcUaClientConfiguration configuration, NodeId nodeId, RegisteredSubjectProperty property, IInterceptorSubject rootSubject)
     {
         var mapping = configuration.Mapper.TryGetMapping(property, rootSubject, out var m) ? m : null;
-        var item = new MonitoredItem(configuration.ResolvedTelemetryContext)
+
+        var options = new MonitoredItemOptions
         {
             StartNodeId = nodeId,
             AttributeId = Opc.Ua.Attributes.Value,
             MonitoringMode = MonitoringMode.Reporting,
-            Handle = property
+
+            // -1 lets the server use the subscription's publishing interval.
+            SamplingInterval = TimeSpan.FromMilliseconds(mapping?.SamplingInterval ?? configuration.DefaultSamplingInterval ?? -1),
+            QueueSize = mapping?.QueueSize ?? configuration.DefaultQueueSize ?? 0,
+            DiscardOldest = mapping?.DiscardOldest ?? configuration.DefaultDiscardOldest ?? true,
+            Filter = CreateDataChangeFilter(configuration, mapping)
         };
 
-        // Apply sampling/queue settings from Mapper configuration
-        var samplingInterval = mapping?.SamplingInterval ?? configuration.DefaultSamplingInterval;
-        if (samplingInterval.HasValue)
-        {
-            item.SamplingInterval = samplingInterval.Value;
-        }
-
-        var queueSize = mapping?.QueueSize ?? configuration.DefaultQueueSize;
-        if (queueSize.HasValue)
-        {
-            item.QueueSize = queueSize.Value;
-        }
-
-        var discardOldest = mapping?.DiscardOldest ?? configuration.DefaultDiscardOldest;
-        if (discardOldest.HasValue)
-        {
-            item.DiscardOldest = discardOldest.Value;
-        }
-
-        // Apply filter (only if any filter option is specified)
-        var filter = CreateDataChangeFilter(configuration, mapping);
-        if (filter != null)
-        {
-            item.Filter = filter;
-        }
-
-        return item;
+        return new MonitoredItemRequest(property, options);
     }
 
     /// <summary>
