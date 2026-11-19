@@ -49,7 +49,7 @@ internal sealed class UpdaterFiles
     /// </summary>
     public void WriteRequest(BuildIdentity identity)
     {
-        TryDelete(RequestFileName);
+        TryDeleteRequest();
         DeleteRunAndResult();
 
         var temporaryPath = GetPath(RequestFileName + ".tmp");
@@ -59,9 +59,24 @@ internal sealed class UpdaterFiles
     }
 
     /// <summary>
-    /// Deletes the request and returns whether it still existed; false means the sidecar took it or nothing was requested.
+    /// Deletes the request and returns whether this call removed it; false means the updater took it first or nothing was requested.
     /// </summary>
-    public bool TryDeleteRequest() => TryDelete(RequestFileName);
+    public bool TryDeleteRequest()
+    {
+        // The rename makes the sidecar's concurrent mv and this delete mutually exclusive, so the result is exact; do not simplify to File.Delete.
+        var claimedPath = GetPath(RequestFileName + ".claimed");
+        try
+        {
+            File.Move(GetPath(RequestFileName), claimedPath, overwrite: true);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+
+        File.Delete(claimedPath);
+        return true;
+    }
 
     /// <summary>
     /// The run the sidecar took over, its request time being the last write time the request carried; null without one.
@@ -119,22 +134,15 @@ internal sealed class UpdaterFiles
         }
     }
 
-    private bool TryDelete(string fileName)
+    private void TryDelete(string fileName)
     {
-        var path = GetPath(fileName);
-        if (!File.Exists(path))
-        {
-            return false;
-        }
-
         try
         {
-            File.Delete(path);
-            return true;
+            File.Delete(GetPath(fileName));
         }
         catch (DirectoryNotFoundException)
         {
-            return false;
+            // The data directory itself is gone, so the file is too.
         }
     }
 }

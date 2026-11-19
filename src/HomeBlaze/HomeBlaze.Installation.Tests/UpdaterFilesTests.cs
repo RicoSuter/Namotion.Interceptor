@@ -136,6 +136,21 @@ public sealed class UpdaterFilesTests : IDisposable
     }
 
     [Fact]
+    public void WhenTheRequestIsDeleted_ThenNoClaimedFileRemains()
+    {
+        // Arrange
+        var files = CreateFiles();
+        files.WriteRequest(new BuildIdentity("0.5.0", null));
+
+        // Act
+        var deleted = files.TryDeleteRequest();
+
+        // Assert
+        Assert.True(deleted);
+        Assert.Empty(_directory.GetFiles());
+    }
+
+    [Fact]
     public void WhenTheRequestIsGone_ThenTryDeleteRequestReturnsFalse()
     {
         // Arrange
