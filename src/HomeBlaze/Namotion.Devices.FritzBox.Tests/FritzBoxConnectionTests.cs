@@ -192,7 +192,11 @@ public class FritzBoxConnectionTests
     {
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
-        var options = new FritzBoxConnectionOptions("127.0.0.1", fake.Username, password, null) { DescriptionPort = fake.HttpPort };
+        var options = new FritzBoxConnectionOptions("127.0.0.1", fake.Username, password, null)
+        {
+            DescriptionPort = fake.HttpPort,
+            RequestTimeout = TestTimeouts.Default
+        };
         using var connection = await FritzBoxConnection.OpenAsync(options, NullLogger.Instance, CancellationToken.None);
 
         // Act

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.FritzBox.Client;
 using Namotion.Devices.FritzBox.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace Namotion.Devices.FritzBox.Tests;
@@ -329,7 +330,11 @@ public class FritzBoxPollerTests
     private static async Task<FritzBoxConnection> OpenAsync(FakeFritzBox fake)
     {
         var connection = await FritzBoxConnection.OpenAsync(
-            new FritzBoxConnectionOptions("127.0.0.1", fake.Username, fake.Password, null) { DescriptionPort = fake.HttpPort },
+            new FritzBoxConnectionOptions("127.0.0.1", fake.Username, fake.Password, null)
+            {
+                DescriptionPort = fake.HttpPort,
+                RequestTimeout = TestTimeouts.Default
+            },
             NullLogger.Instance,
             CancellationToken.None);
         await connection.ResolveInternetServiceAsync(CancellationToken.None);
