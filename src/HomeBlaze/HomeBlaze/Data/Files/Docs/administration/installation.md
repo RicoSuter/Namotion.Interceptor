@@ -73,7 +73,7 @@ echo "COMPOSE_PROFILES=updater" >> .env
 docker compose up -d
 ```
 
-`COMPOSE_DIR` must be the absolute path of this folder: the updater mounts it at the same path so compose finds `./data` on the host. Update it when the folder moves. `COMPOSE_PROFILES` keeps the profile on for every later `docker compose up -d`. The updater holds the Docker socket, which gives it root access to the host, and can read the files of the folder, including `.env`. It runs only Docker's official `docker:cli` image and the script in the compose file, and listens on no port. Without these lines nothing changes.
+`COMPOSE_DIR` must be the absolute path of this folder: the updater mounts it at the same path so compose finds `./data` on the host. Update it when the folder moves. `COMPOSE_PROFILES` keeps the profile on for every later `docker compose up -d`. To use Seq as well, list both profiles, `COMPOSE_PROFILES=updater,seq`, and run plain `docker compose up -d`, since `--profile` replaces the list in `.env`. The updater holds the Docker socket, which gives it root access to the host, and can read the files of the folder, including `.env`. It runs only Docker's official `docker:cli` image and the script in the compose file, and listens on no port. Without these lines nothing changes.
 
 MCP clients connect to `http://<host>:8080/mcp` using the MCP Streamable HTTP transport. The compose file enables MCP read-only; set `McpServer__ReadOnly` to `"false"` to allow writes.
 

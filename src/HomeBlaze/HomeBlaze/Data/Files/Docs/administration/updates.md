@@ -49,7 +49,7 @@ A failed check is retried after 1 hour, doubling each time up to 24 hours. A lon
 
 ## Install updates
 
-A Docker installation can install an update from the UI when the `updater` service of the compose file runs, see [Installation](installation.md#docker). `IsUpdaterAvailable` turns true within a poll after it starts.
+A Docker installation can install an update from the UI when the `updater` service of the compose file runs, see [Installation](installation.md#docker). `IsUpdaterAvailable` turns true within a poll after it starts. It can read false while an install runs, because the updater does not touch its heartbeat while compose runs.
 
 `Install update` asks for confirmation, then asks the updater to pull the image of the tag in the compose file and recreate the `homeblaze` container with it. It is available while the updater runs, the installation runs, an update is available and no install is in progress, so after a new release with the scheduled check off, run `Check for updates` first. MCP clients and agents cannot call it.
 
