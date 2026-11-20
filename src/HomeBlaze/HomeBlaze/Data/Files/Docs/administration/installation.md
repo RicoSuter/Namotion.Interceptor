@@ -26,7 +26,7 @@ Copy [docker-compose.yml](https://github.com/RicoSuter/Namotion.Interceptor/blob
 docker compose up -d
 ```
 
-HomeBlaze is then available at http://localhost:8080 and opens on its welcome page. To upgrade, run `docker compose pull` and `docker compose up -d`.
+HomeBlaze is then available at http://localhost:8080 and opens on its welcome page. To upgrade, run `docker compose pull` and `docker compose up -d`, or install updates from the UI with the [updater](#updater).
 
 ### Data folder
 
@@ -52,6 +52,7 @@ While the setting is empty, a new data folder is not filled with the starting se
 | Profile | Service | Address |
 |---------|---------|---------|
 | `seq` | Seq log server, receives logs and traces | http://localhost:5341 |
+| `updater` | Installs updates from the UI, see [Updater](#updater) | none |
 
 Seq reads a secret from a `.env` file next to the compose file. Create it once before the first start of the profile:
 
@@ -60,9 +61,42 @@ echo "SEQ_ADMIN_PASSWORD=$(openssl rand -hex 16)" >> .env
 docker compose --profile seq up -d
 ```
 
+With the `updater` profile in `.env`, list both profiles instead, see [Updater](#updater).
+
 Keep `.env`: Seq creates the user `admin` with `SEQ_ADMIN_PASSWORD` on its first start and asks for a new password at the first login.
 
 HomeBlaze sends its logs and traces to Seq through `ConnectionStrings__seq`. Without the `seq` profile the export fails silently and HomeBlaze keeps working; remove the setting if you never use Seq. See [Monitoring](monitoring.md).
+
+### Updater
+
+The updater lets the `Install update` operation of the Installation subject pull and restart HomeBlaze, so an update needs no shell on the host. Turn it on once in the folder of the compose file:
+
+```bash
+printf "\nCOMPOSE_DIR='%s'\nCOMPOSE_PROFILES=updater\n" "$PWD" >> .env
+chmod 600 .env
+docker compose up -d
+```
+
+`COMPOSE_DIR` is the absolute path of this folder. The updater mounts it at the same path, read-only except for `data/`, so compose finds `./data` on the host. Update it when the folder moves. Enabling the profile without `COMPOSE_DIR` makes compose refuse to start the updater because of a missing path.
+
+`COMPOSE_PROFILES` keeps the profile on for every later `docker compose up -d`. To use Seq as well, list both profiles, `COMPOSE_PROFILES=updater,seq`, and run plain `docker compose up -d`, since `--profile` replaces the list in `.env`. Without these lines nothing changes.
+
+The updater holds the Docker socket, which gives it root access to the host. It can read the compose folder, including `.env`, and writes only `data/`. It runs only Docker's official `docker:cli` image and the script in the compose file, and listens on no port. Keep the compose folder dedicated to HomeBlaze, never a home directory. Anything that can write the data folder can request an update.
+
+On hosts that enforce SELinux, for example Fedora, RHEL and Podman machines, the updater cannot reach the socket. Add a `docker-compose.override.yml` next to the compose file:
+
+```yaml
+services:
+  updater:
+    security_opt:
+      - label=disable
+```
+
+To turn the updater off, remove the two lines from `.env` and run `docker compose --profile updater rm -sf updater`.
+
+An install keeps the previous image on the host; `docker image prune` removes unused ones.
+
+The compose of the updater may compute the configuration of the container differently from the compose on the host. The first install after running `docker compose up -d` on the host can therefore recreate HomeBlaze although no newer image exists; later installs only recreate it for a new image or a changed `homeblaze` service.
 
 MCP clients connect to `http://<host>:8080/mcp` using the MCP Streamable HTTP transport. The compose file enables MCP read-only; set `McpServer__ReadOnly` to `"false"` to allow writes.
 
