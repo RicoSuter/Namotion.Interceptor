@@ -11,6 +11,10 @@ internal sealed class LoopbackHttpServer : IAsyncDisposable
     private readonly HttpListener _listener;
     private readonly Func<HttpListenerContext, Task> _handler;
     private readonly Task _loop;
+
+    // Completed by DisposeAsync after closing the listener; the loop ends on it rather than on Close, which can lose
+    // the pending accept, see SonosEventListener.
+    private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _disposed;
 
     internal LoopbackHttpServer(Func<HttpListenerContext, Task> handler)
@@ -48,7 +52,14 @@ internal sealed class LoopbackHttpServer : IAsyncDisposable
             HttpListenerContext context;
             try
             {
-                context = await _listener.GetContextAsync();
+                var accept = _listener.GetContextAsync();
+                if (await Task.WhenAny(accept, _closed.Task) != accept)
+                {
+                    _ = accept.ContinueWith(static task => _ = task.Exception, TaskContinuationOptions.OnlyOnFaulted);
+                    return;
+                }
+
+                context = await accept;
             }
             catch (Exception exception) when (exception is HttpListenerException or ObjectDisposedException or InvalidOperationException)
             {
@@ -113,6 +124,7 @@ internal sealed class LoopbackHttpServer : IAsyncDisposable
         // Close without Stop first: closing a stopped HttpListener on Linux and macOS binds its port again to
         // unregister it, which fails or tears down another listener when the port was taken in between.
         _listener.Close();
+        _closed.TrySetResult();
         await _loop;
     }
 }

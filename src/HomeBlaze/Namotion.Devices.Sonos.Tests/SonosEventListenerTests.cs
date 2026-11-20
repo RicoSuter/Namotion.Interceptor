@@ -648,6 +648,32 @@ public class SonosEventListenerTests
     }
 
     [Fact]
+    public async Task WhenClosingTheListenerLosesThePendingAccept_ThenDisposeStillCompletes()
+    {
+        // Arrange
+        using var httpClient = new HttpClient();
+        var listener = CreateListener(httpClient);
+        var acceptStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // The managed HttpListener on Linux and macOS never completes an accept that starts while Close runs.
+        var lostAccept = new TaskCompletionSource<HttpListenerContext>(TaskCreationOptions.RunContinuationsAsynchronously);
+        listener.AcceptContextAsync = _ =>
+        {
+            acceptStarted.TrySetResult();
+            return lostAccept.Task;
+        };
+        LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
+        await acceptStarted.Task.WaitAsync(WaitTimeout);
+
+        // Act
+        var dispose = listener.DisposeAsync().AsTask();
+
+        // Assert
+        await dispose.WaitAsync(WaitTimeout);
+        Assert.False(listener.IsListening);
+    }
+
+    [Fact]
     public async Task WhenHandlerIsRunning_ThenDisposeWaitsForItToFinish()
     {
         // Arrange
