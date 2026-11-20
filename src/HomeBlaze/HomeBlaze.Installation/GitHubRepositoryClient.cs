@@ -5,9 +5,10 @@ using System.Text.Json;
 namespace HomeBlaze.Installation;
 
 /// <summary>
-/// The newest published release, with the version without its <c>v</c> prefix.
+/// The newest published release, with the version without its <c>v</c> prefix, and the time on GitHub's clock when
+/// GitHub answered, from its <c>Date</c> header.
 /// </summary>
-internal sealed record LatestRelease(string Version, DateTimeOffset? PublishedAt, Uri? Url);
+internal sealed record LatestRelease(string Version, DateTimeOffset? PublishedAt, Uri? Url, DateTimeOffset? AnsweredAt);
 
 /// <summary>
 /// How a commit relates to the head of a branch: the commits of the branch the commit lacks, the commits of the commit
@@ -81,7 +82,8 @@ internal sealed class GitHubRepositoryClient
     /// </summary>
     public async Task<LatestRelease?> GetLatestReleaseAsync(CancellationToken cancellationToken)
     {
-        using var document = await GetAsync("releases/latest", cancellationToken);
+        var answer = await GetAsync("releases/latest", cancellationToken);
+        using var document = answer.Document;
         if (document is null)
         {
             return null;
@@ -93,7 +95,8 @@ internal sealed class GitHubRepositoryClient
             root.TryGetProperty("published_at", out var publishedAt) &&
             publishedAt.ValueKind == JsonValueKind.String &&
             publishedAt.TryGetDateTimeOffset(out var date) ? date : null,
-            GetUri(root, "html_url"));
+            GetUri(root, "html_url"),
+            answer.Date);
     }
 
     /// <summary>
@@ -105,7 +108,7 @@ internal sealed class GitHubRepositoryClient
         // Only the first page carries the changed files with their patches; the second one still carries the counts, also
         // when it holds no commit. The commit is the base, so ahead_by counts the commits of the branch it lacks.
         var path = $"compare/{Uri.EscapeDataString(commit)}...{EscapePath(branch)}?per_page=1&page=2";
-        using var document = await GetAsync(path, cancellationToken);
+        using var document = (await GetAsync(path, cancellationToken)).Document;
         if (document is null)
         {
             return null;
@@ -120,9 +123,9 @@ internal sealed class GitHubRepositoryClient
 
     /// <summary>
     /// Sends a GET request for <paramref name="path"/> below the repository and returns the parsed answer, or null
-    /// when GitHub answers 404.
+    /// when GitHub answers 404, with the <c>Date</c> header of the answer.
     /// </summary>
-    private async Task<JsonDocument?> GetAsync(string path, CancellationToken cancellationToken)
+    private async Task<(JsonDocument? Document, DateTimeOffset? Date)> GetAsync(string path, CancellationToken cancellationToken)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(_requestTimeout);
@@ -135,7 +138,7 @@ internal sealed class GitHubRepositoryClient
         using var response = await _createHttpClient().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, requestToken);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
-            return null;
+            return (null, response.Headers.Date);
         }
 
         if (!response.IsSuccessStatusCode)
@@ -144,7 +147,7 @@ internal sealed class GitHubRepositoryClient
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(requestToken);
-        return await JsonDocument.ParseAsync(stream, cancellationToken: requestToken);
+        return (await JsonDocument.ParseAsync(stream, cancellationToken: requestToken), response.Headers.Date);
     }
 
     private static Uri? GetRepositoryApiUri(string? repositoryUrl, out string? unsupportedReason)
