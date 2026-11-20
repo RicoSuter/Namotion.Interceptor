@@ -52,8 +52,11 @@ services:
           echo "The updater restarted while an install ran." >> data/.update-log
           echo 1 > data/.update-result.tmp && mv data/.update-result.tmp data/.update-result
         fi
+        tick=0
         while true; do
-          touch data/.updater-heartbeat
+          # The heartbeat only marks the updater as available, so every 30 seconds is enough; requests are still taken within 5 seconds.
+          if [ $$tick -eq 0 ]; then touch data/.updater-heartbeat; fi
+          tick=$$(( (tick + 1) % 6 ))
           if [ -f data/.update-request ]; then
             rm -f data/.update-result
             if mv data/.update-request data/.update-running 2>/dev/null; then
