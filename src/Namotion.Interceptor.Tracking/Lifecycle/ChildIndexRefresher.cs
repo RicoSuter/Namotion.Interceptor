@@ -55,7 +55,7 @@ internal static class ChildIndexRefresher
             }
             finally
             {
-                TrackingWriteObserver.OnChildrenMoved(span, property.Subject);
+                DerivedGraphDependencies.ChildrenMoved(span, property.Subject);
             }
         }
         finally

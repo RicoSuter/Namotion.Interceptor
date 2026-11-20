@@ -53,27 +53,34 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
     }
 
     /// <summary>
-    /// Records nothing on this thread until <see cref="Resume"/>; a recording started inside records normally.
-    /// Returns false, and suspends nothing, when no recording runs on this thread.
+    /// Records nothing on this thread until the returned suspension is disposed; a recording started inside records
+    /// normally. Suspends nothing when no recording runs on this thread.
     /// </summary>
-    internal static bool TrySuspend()
+    internal static Suspension Suspend()
     {
         var recorder = _current;
         if (recorder is null || recorder._depth == 0)
         {
-            return false;
+            return default;
         }
 
         recorder.PushFrame(default, isSuspended: true, previousReads: null);
-        return true;
+        return new Suspension(recorder);
     }
 
-    /// <summary>Ends the suspension of a <see cref="TrySuspend"/> that returned true.</summary>
-    internal static void Resume()
+    /// <summary>The suspension <see cref="Suspend"/> started; disposing it ends the suspension, and a default instance does nothing.</summary>
+    internal readonly struct Suspension(DerivedPropertyRecorder? recorder) : IDisposable
     {
-        var recorder = _current!;
-        recorder.FinishRecording();
-        recorder.ClearLastRecording();
+        public void Dispose()
+        {
+            if (recorder is null)
+            {
+                return;
+            }
+
+            recorder.FinishRecording();
+            recorder.ClearLastRecording();
+        }
     }
 
     private void PushFrame(in PropertyReference property, bool isSuspended, DerivedPropertyData?[]? previousReads)

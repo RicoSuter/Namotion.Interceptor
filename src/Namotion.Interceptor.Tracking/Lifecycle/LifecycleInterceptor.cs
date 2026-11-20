@@ -63,7 +63,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <returns>True when the subject was attached and the callback ran.</returns>
     public bool TryRunWhileAttached(IInterceptorSubject subject, Action whenAttached)
     {
-        using var lifecycleLock = SubjectLifecycleAttachments.EnterLifecycleLock(isWriteReconciliation: false);
+        using var lifecycleLock = PostLockQueue.EnterLock(isWriteReconciliation: false);
         lock (_attachedSubjects)
         {
             if (!_attachedSubjects.ContainsKey(subject))
@@ -88,7 +88,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     public void AttachSubjectToContext(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
-        using var lifecycleLock = SubjectLifecycleAttachments.EnterLifecycleLock(isWriteReconciliation: false);
+        using var lifecycleLock = PostLockQueue.EnterLock(isWriteReconciliation: false);
         try
         {
             lock (_attachedSubjects)
@@ -97,7 +97,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 var areChildrenAttached = false;
                 try
                 {
-                    using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
+                    using var suspension = DerivedPropertyRecorder.Suspend();
                     FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
 
                     foreach (var child in collectedSubjects)
@@ -117,7 +117,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     // child's registry handler may have registered it.
                     if (isRoot && !areChildrenAttached)
                     {
-                        TrackingWriteObserver.OnGraphChanged(subject);
+                        DerivedGraphDependencies.Changed(subject);
                     }
                 }
             }
@@ -131,12 +131,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     public void DetachSubjectFromContext(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
-        using var lifecycleLock = SubjectLifecycleAttachments.EnterLifecycleLock(isWriteReconciliation: false);
+        using var lifecycleLock = PostLockQueue.EnterLock(isWriteReconciliation: false);
         try
         {
             lock (_attachedSubjects)
             {
-                using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
+                using var suspension = DerivedPropertyRecorder.Suspend();
                 FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
 
                 foreach (var child in collectedSubjects)
@@ -182,7 +182,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
-            TrackingWriteObserver.OnGraphChanged(subject);
+            DerivedGraphDependencies.Changed(subject);
         }
 
         SubjectAttached?.Invoke(change);
@@ -229,7 +229,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
-            TrackingWriteObserver.OnGraphChanged(subject, property.Subject);
+            DerivedGraphDependencies.Changed(subject, property.Subject);
         }
 
         if (isFirstAttach)
@@ -296,7 +296,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
-            TrackingWriteObserver.OnGraphChanged(subject);
+            DerivedGraphDependencies.Changed(subject);
         }
     }
 
@@ -347,7 +347,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
         finally
         {
-            TrackingWriteObserver.OnGraphChanged(subject, property.Subject);
+            DerivedGraphDependencies.Changed(subject, property.Subject);
         }
 
         if (children is not null)
@@ -424,10 +424,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
-        using var lifecycleLock = SubjectLifecycleAttachments.EnterLifecycleLock(isWriteReconciliation: true);
+        using var lifecycleLock = PostLockQueue.EnterLock(isWriteReconciliation: true);
         lock (_attachedSubjects)
         {
-            using var suspension = SubjectLifecycleAttachments.SuspendDerivedRecording();
+            using var suspension = DerivedPropertyRecorder.Suspend();
             var lastProcessed = _lastProcessedValues.GetValueOrDefault(context.Property);
 
             // Read the actual backing store value to handle concurrent writes correctly.

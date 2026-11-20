@@ -360,17 +360,16 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         _ = person.FirstName;
 
         // Act
-        var isSuspended = DerivedPropertyRecorder.TrySuspend();
+        var suspension = DerivedPropertyRecorder.Suspend();
         var isRecordingWhileSuspended = recorder.IsRecording;
         var isEvaluatingWhileSuspended = DerivedPropertyRecorder.IsEvaluatingOnThisThread;
         _ = person.LastName;
-        DerivedPropertyRecorder.Resume();
+        suspension.Dispose();
         _ = person.Father;
         var recorded = GetProperties(recorder.FinishRecording());
         recorder.ClearLastRecording();
 
         // Assert
-        Assert.True(isSuspended);
         Assert.False(isRecordingWhileSuspended);
         Assert.True(isEvaluatingWhileSuspended);
         Assert.Equal(
@@ -386,7 +385,7 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         var person = new Person(InterceptorSubjectContext.Create());
         var recorder = DerivedPropertyRecorder.Current;
         recorder.StartRecording(new PropertyReference(person, "OuterDerived"));
-        var isSuspended = DerivedPropertyRecorder.TrySuspend();
+        var suspension = DerivedPropertyRecorder.Suspend();
 
         // Act
         recorder.StartRecording(new PropertyReference(person, "InnerDerived"));
@@ -394,12 +393,11 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
         var innerRecorded = GetProperties(recorder.FinishRecording());
         recorder.ClearLastRecording();
         _ = person.LastName;
-        DerivedPropertyRecorder.Resume();
+        suspension.Dispose();
         var outerRecorded = GetProperties(recorder.FinishRecording());
         recorder.ClearLastRecording();
 
         // Assert
-        Assert.True(isSuspended);
         Assert.Equal([new PropertyReference(person, nameof(Person.FirstName))], innerRecorded);
         Assert.Empty(outerRecorded);
     }
@@ -408,10 +406,9 @@ public sealed class DerivedPropertyRecorderTests : IDisposable
     public void WhenNothingIsRecorded_ThenSuspendingDoesNothing()
     {
         // Act
-        var isSuspended = DerivedPropertyRecorder.TrySuspend();
+        using var suspension = DerivedPropertyRecorder.Suspend();
 
         // Assert
-        Assert.False(isSuspended);
         Assert.False(DerivedPropertyRecorder.IsEvaluatingOnThisThread);
         Assert.Null(PropertyAccessObservation.ReadObserver);
     }
