@@ -132,6 +132,7 @@ public class GpioInterruptTests
         await subject.StartAsync(CancellationToken.None);
         await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
 
+        driver.SetInputLevel(17, PinValue.High);
         using var edgeDispatching = new ManualResetEventSlim();
         Task? edgeTask = null;
         driver.CallbackRemoving = pinNumber =>
@@ -180,7 +181,6 @@ public class GpioInterruptTests
             Controller = controller,
             PinNumber = 17,
             Mode = GpioPinMode.Output,
-            Status = ServiceStatus.Running
         };
         pin.Attach(controller, _ => { }, _ => { });
 
@@ -253,7 +253,6 @@ public class GpioInterruptTests
                 Controller = controller,
                 PinNumber = i,
                 Mode = GpioPinMode.Output,
-                Status = ServiceStatus.Running
             };
             pin.Attach(controller, _ => { }, _ => { });
             pins.Add(pin);

@@ -20,7 +20,6 @@ public class GpioWriteTests
             Controller = controller,
             PinNumber = 17,
             Mode = GpioPinMode.Output,
-            Status = ServiceStatus.Running
         };
         pin.Attach(controller, _ => { }, _ => { });
 
@@ -45,7 +44,6 @@ public class GpioWriteTests
             Controller = controller,
             PinNumber = 17,
             Mode = GpioPinMode.Output,
-            Status = ServiceStatus.Running,
             Value = true
         };
         pin.Attach(controller, _ => { }, _ => { });
@@ -65,19 +63,15 @@ public class GpioWriteTests
         using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
-        var pin = new GpioPin
-        {
-            Controller = controller,
-            PinNumber = 17,
-            Mode = GpioPinMode.Input, // Input mode
-            Status = ServiceStatus.Running
-        };
+        var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Input };
+        pin.Attach(controller, _ => { }, _ => { });
 
         // Act
         pin.Value = true;
 
-        // Assert - No writes should have happened for input pin
+        // Assert - No writes should have happened for input pin; a write to an input fails its verification
         Assert.DoesNotContain(simulationDriver.WriteHistory, w => w.PinNumber == 17);
+        Assert.Equal(ServiceStatus.Running, pin.Status);
     }
 
     [Fact]
@@ -88,13 +82,9 @@ public class GpioWriteTests
         using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
-        var pin = new GpioPin
-        {
-            Controller = controller,
-            PinNumber = 17,
-            Mode = GpioPinMode.Output,
-            Status = ServiceStatus.Unavailable // Not running
-        };
+        var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Output };
+        pin.Attach(controller, _ => { }, _ => { });
+        pin.Status = ServiceStatus.Unavailable;
 
         // Act
         pin.Value = true;
@@ -139,7 +129,6 @@ public class GpioWriteTests
             Controller = controller,
             PinNumber = 17,
             Mode = GpioPinMode.Output,
-            Status = ServiceStatus.Running
         };
         pin.Attach(controller, _ => { }, _ => { });
 

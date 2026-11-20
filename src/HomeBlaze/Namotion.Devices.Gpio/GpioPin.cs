@@ -375,29 +375,30 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
     {
         // Cleared before the read, so that an edge during the read queues another one.
         Volatile.Write(ref _isBusyEdgeReadQueued, 0);
+
+        // On the thread pool, where a thrown exception would end the process. The failure is reported under the lock of
+        // the read, so that it never lands on a pin that was attached again in between.
         try
         {
-            PollHardwareLevel();
-        }
-        catch (Exception exception)
-        {
-            // On the thread pool, where a thrown exception would end the process.
-            try
+            lock (_lock)
             {
-                lock (_lock)
-                {
-                    // A pin detached or attached again since the read has a status of its own.
-                    if (Controller == null || Status != ServiceStatus.Running)
-                        return;
+                if (Controller == null || Status != ServiceStatus.Running || _debounceTimer is not null)
+                    return;
 
+                try
+                {
+                    SetValueFromLevel(Controller.Read(PinNumber) == PinValue.High);
+                }
+                catch (Exception exception)
+                {
                     StatusMessage = $"Failed to read GPIO pin {PinNumber} after an edge: {exception.Message}";
                     Status = ServiceStatus.Error;
                 }
             }
-            catch (Exception)
-            {
-                // Nothing is left to report it to.
-            }
+        }
+        catch (Exception)
+        {
+            // Nothing is left to report it to.
         }
     }
 

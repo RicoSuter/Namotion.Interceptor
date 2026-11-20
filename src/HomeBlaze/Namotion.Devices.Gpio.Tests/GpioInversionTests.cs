@@ -175,8 +175,7 @@ public class GpioInversionTests
         {
             PinNumber = 17,
             Mode = mode,
-            IsInverted = isInverted,
-            Status = ServiceStatus.Running
+            IsInverted = isInverted
         };
 
         if (mode == GpioPinMode.Output)
@@ -186,6 +185,7 @@ public class GpioInversionTests
             return pin;
         }
 
+        pin.Status = ServiceStatus.Running;
         pin.Controller = controller;
         pin.Value = (controller.Read(17) == PinValue.High) != isInverted;
         return pin;

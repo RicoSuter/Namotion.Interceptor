@@ -13,8 +13,8 @@ internal sealed class LatchingGpioDriver : GpioDriver
 {
     private readonly Lock _lock = new();
 
-    // Guards _eventHandlers. Taken after _lock when a callback is added or removed, and alone while the callbacks of an
-    // edge run, like libgpiod 2.x.
+    // Guards _eventHandlers. Taken after _lock when a callback is added or removed, a mode is set or a pin is closed,
+    // and alone while the callbacks of an edge run, like libgpiod 2.x.
     private readonly Lock _callbackLock = new();
     private readonly Dictionary<int, PinState> _pins = new();
     private readonly Dictionary<int, List<PinChangeEventHandler>> _eventHandlers = new();
@@ -104,6 +104,17 @@ internal sealed class LatchingGpioDriver : GpioDriver
     }
 
     /// <summary>
+    /// Sets the level a pin reads as an input.
+    /// </summary>
+    public void SetInputLevel(int pinNumber, PinValue level)
+    {
+        lock (_lock)
+        {
+            GetState(pinNumber).InputLevel = level;
+        }
+    }
+
+    /// <summary>
     /// Sets the state a pin has before it is opened.
     /// </summary>
     public void SetUpPin(int pinNumber, PinMode mode, PinValue inputLevel, PinValue latch)
@@ -188,6 +199,7 @@ internal sealed class LatchingGpioDriver : GpioDriver
     protected override void ClosePin(int pinNumber)
     {
         lock (_lock)
+        lock (_callbackLock)
         {
             if (FailsReadBeforeMode || SetsModeBeforeLevel)
             {
@@ -306,6 +318,7 @@ internal sealed class LatchingGpioDriver : GpioDriver
     private void SetMode(int pinNumber, PinMode mode, PinValue? initialValue)
     {
         lock (_lock)
+        lock (_callbackLock)
         {
             var state = GetState(pinNumber);
             var isOutputRequested = mode == PinMode.Output &&
