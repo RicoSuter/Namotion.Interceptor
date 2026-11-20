@@ -31,13 +31,14 @@ public class GpioConfigurationReloadTests
     public async Task WhenConfigurationIsReloaded_ThenPinsRunWithTheSettingsOfTheFile()
     {
         // Arrange
-        var driver = new LatchingGpioDriver();
+        var driver = new LatchingGpioDriver { SetsModeBeforeLevel = true };
         driver.SetUpPin(5, PinMode.Output, inputLevel: PinValue.Low, latch: PinValue.High);
         var subject = CreateSubject(driver);
         var serializer = GpioTestSubject.CreateSerializer(subject);
         await using var running = await GpioTestSubject.StartAsync(subject);
         await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
         var pinBeforeReload = subject.Pins[17];
+        var drivenLevelCountBeforeReload = driver.GetDrivenLevels(5).Length;
 
         // Act
         serializer.UpdateConfiguration(subject, ReloadedJson);
@@ -51,21 +52,27 @@ public class GpioConfigurationReloadTests
             Assert.Equal(ServiceStatus.Running, entry.Value.Status);
         });
 
+        // Pin 17 was an input and pin 27 had another pull, so both are opened again in their mode.
         var led = subject.Pins[17];
         Assert.Equal(GpioPinMode.Output, led.Mode);
+        Assert.Equal(2, driver.GetOpenCount(17));
         Assert.Equal(PinMode.Output, driver.GetMode(17));
         Assert.Equal("Led (Pin 17)", led.Title);
         Assert.Equal("Relay", subject.Pins[27].Name);
+        Assert.Equal(2, driver.GetOpenCount(27));
         Assert.Equal(PinMode.InputPullUp, driver.GetMode(27));
         Assert.Equal(ServiceStatus.Stopped, pinBeforeReload.Status);
 
         // Pin 6 was an output and is missing from the file, so it starts like a new pin.
         Assert.Equal(GpioPinMode.Input, subject.Pins[6].Mode);
+        Assert.Equal(2, driver.GetOpenCount(6));
         Assert.Equal(PinMode.Input, driver.GetMode(6));
 
+        // Pin 5 stays an output, so it keeps its line and its level.
         Assert.True(subject.Pins[5].Value);
+        Assert.Equal(1, driver.GetOpenCount(5));
         Assert.Equal(PinValue.High, driver.GetLatch(5));
-        Assert.DoesNotContain(PinValue.Low, driver.GetDrivenLevels(5));
+        Assert.Empty(driver.GetDrivenLevels(5).Skip(drivenLevelCountBeforeReload));
 
         await led.TurnOnAsync(CancellationToken.None);
         Assert.Equal(PinValue.High, driver.GetLatch(17));
@@ -298,37 +305,6 @@ public class GpioConfigurationReloadTests
     }
 
     [Fact]
-    public async Task WhenModeOfAPinChangesInAReloadedConfiguration_ThenItIsReopenedInItsMode()
-    {
-        // Arrange
-        var driver = new LatchingGpioDriver { SetsModeBeforeLevel = true };
-        driver.SetUpPin(5, PinMode.Output, inputLevel: PinValue.Low, latch: PinValue.High);
-        var subject = CreateSubject(driver);
-        var serializer = GpioTestSubject.CreateSerializer(subject);
-        await using var running = await GpioTestSubject.StartAsync(subject);
-        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
-        var drivenLevelCountBeforeReload = driver.GetDrivenLevels(5).Length;
-
-        // Act
-        serializer.UpdateConfiguration(subject, ReloadedJson);
-        await subject.ApplyConfigurationAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(1, driver.GetOpenCount(5));
-        Assert.Empty(driver.GetDrivenLevels(5).Skip(drivenLevelCountBeforeReload));
-        Assert.True(subject.Pins[5].Value);
-
-        // Pin 6 was an output and is missing from the file, pin 17 was an input and pin 27 had another pull.
-        Assert.Equal(2, driver.GetOpenCount(6));
-        Assert.Equal(PinMode.Input, driver.GetMode(6));
-        Assert.Equal(2, driver.GetOpenCount(17));
-        Assert.Equal(PinMode.Output, driver.GetMode(17));
-        Assert.Equal(2, driver.GetOpenCount(27));
-        Assert.Equal(PinMode.InputPullUp, driver.GetMode(27));
-        Assert.All(subject.Pins.Values, pin => Assert.Equal(ServiceStatus.Running, pin.Status));
-    }
-
-    [Fact]
     public async Task WhenInversionOfAnOutputChangesInAReloadedConfiguration_ThenItKeepsItsLevelAndTheValueFollows()
     {
         // Arrange
@@ -460,7 +436,6 @@ public class GpioConfigurationReloadTests
 
         // Act
         serializer.UpdateConfiguration(subject, jsonWithNullPins);
-        driver.SimulatePinValueChange(17, PinValue.High);
         await subject.ApplyConfigurationAsync(CancellationToken.None);
 
         // Assert

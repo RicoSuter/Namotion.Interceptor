@@ -8,6 +8,49 @@ namespace Namotion.Devices.Gpio.Tests;
 public class GpioStartupTests
 {
     [Fact]
+    public async Task WhenPollingFailsAndThenSucceeds_ThenTheStatusReturnsToRunning()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var subject = GpioTestSubject.Create(driver);
+        subject.PollingInterval = TimeSpan.FromMilliseconds(10);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+        driver.FailsReads = true;
+        await AsyncTestHelpers.WaitUntilAsync(() =>
+            subject.Status == ServiceStatus.Error && subject.StatusMessage?.StartsWith("Polling error: ") == true);
+
+        // Act
+        driver.FailsReads = false;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running && subject.StatusMessage is null);
+    }
+
+    [Fact]
+    public async Task WhenPollingFailsAndThenSucceedsAfterAnAdcFailedToStart_ThenTheStatusReportsTheAdcAgain()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var adcFactory = new RecordingAdcFactory { FailsNextMcp3008Creation = true };
+        var subject = GpioTestSubject.Create(driver, adcFactory: adcFactory);
+        subject.Mcp3008 = GpioTestSubject.CreateMcp3008Configuration();
+        subject.PollingInterval = TimeSpan.FromMilliseconds(10);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject, GpioTestSubject.Mcp3008PinNumbers);
+        driver.FailsReads = true;
+        await AsyncTestHelpers.WaitUntilAsync(() =>
+            subject.Status == ServiceStatus.Error && subject.StatusMessage?.StartsWith("Polling error: ") == true);
+
+        // Act
+        driver.FailsReads = false;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running);
+        Assert.Equal("MCP3008 init failed: No MCP3008 answered.", subject.StatusMessage);
+    }
+
+    [Fact]
     public async Task WhenAppliedConfigurationEnabledSimulation_ThenStartKeepsItsController()
     {
         // Arrange

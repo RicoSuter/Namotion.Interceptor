@@ -68,12 +68,14 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     private GpioController? _controller;
     private bool _isControllerSimulated;
     private bool _isControllerRaspberryPi;
+    private int _pinCount;
     private readonly Dictionary<int, GpioPin> _attachedPins = new();
     private Mcp3008? _mcp3008;
     private Ads1115? _ads1115;
 
-    // Guarded by _controllerLock. Set while Status reports a polling error, which a later successful poll clears.
-    private bool _isPollingFailed;
+    // Guarded by _controllerLock. The status message Connect published, which a successful poll restores after a
+    // polling error.
+    private string? _connectedStatusMessage;
 
     // Guarded by _controllerLock. The stopping token is canceled only after Dispose released the lock, so the service
     // loop and an applied configuration check this to create nothing after Dispose.
@@ -309,12 +311,6 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         return null;
     }
 
-    /// <summary>
-    /// Gets whether the board is a Raspberry Pi of any model, whose I2C bus 1 is on GPIO 2 and 3.
-    /// </summary>
-    private bool IsRaspberryPiBoard(bool isRaspberryPiDriver) =>
-        isRaspberryPiDriver || (_isRaspberryPiBoard ?? IsRaspberryPiModel.Value);
-
     private static bool ReadIsRaspberryPiModel()
     {
         if (!OperatingSystem.IsLinux())
@@ -333,7 +329,6 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         }
     }
 
-    // A file with "pins": null configures no pin, so every pin starts like a new pin.
     partial void OnPinsChanging(ref Dictionary<int, GpioPin> newValue, ref bool cancel)
     {
         newValue ??= new Dictionary<int, GpioPin>();
@@ -402,7 +397,6 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
                 return;
             }
 
-            _isPollingFailed = true;
             StatusMessage = $"Polling error: {exception.Message}";
             Status = ServiceStatus.Error;
         }
@@ -412,13 +406,13 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     {
         lock (_controllerLock)
         {
-            if (!_isPollingFailed || _isDisposed)
+            // While connected, only a polling error sets Error. Dispose releases the controller.
+            if (Status != ServiceStatus.Error || _controller is null)
             {
                 return;
             }
 
-            _isPollingFailed = false;
-            StatusMessage = null;
+            StatusMessage = _connectedStatusMessage;
             Status = ServiceStatus.Running;
         }
     }
@@ -447,7 +441,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
             StatusMessage = "Initializing GPIO controller...";
             Status = ServiceStatus.Starting;
-            return Connect(openOutputPinNumbers: [], failureMessages: []);
+            return Connect(failureMessages: []);
         }
     }
 
@@ -462,8 +456,8 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
             }
 
             var failureMessages = new List<string>();
-            var openOutputPinNumbers = Stop(keepController: _isControllerSimulated == UseSimulation, failureMessages);
-            if (Connect(openOutputPinNumbers, failureMessages) == InitializationResult.Success && _connectedSignal.CurrentCount == 0)
+            Stop(keepController: _isControllerSimulated == UseSimulation, failureMessages);
+            if (Connect(failureMessages) == InitializationResult.Success && _connectedSignal.CurrentCount == 0)
             {
                 _connectedSignal.Release();
             }
@@ -474,29 +468,24 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     /// <summary>
     /// Creates the controller unless Stop kept one, opens the pins of <see cref="Pins"/> in their mode except those
-    /// reserved for a configured ADC, and then creates the configured ADCs. A pin in
-    /// <paramref name="openOutputPinNumbers"/> is open as an output on the kept controller: it keeps its line when it
-    /// stays an output, and is closed first otherwise. Sets <see cref="Status"/> and reports
-    /// <paramref name="failureMessages"/> and those of the pins and ADCs in <see cref="StatusMessage"/>. Called under
-    /// <see cref="_controllerLock"/> with no pin attached and no ADC.
+    /// reserved for a configured ADC, and then creates the configured ADCs. A pin that Stop left open as an output on
+    /// the kept controller keeps its line when it stays an output, and is closed first otherwise. Sets
+    /// <see cref="Status"/> and reports <paramref name="failureMessages"/> and those of the pins and ADCs in
+    /// <see cref="StatusMessage"/>. Called under <see cref="_controllerLock"/> with no pin attached and no ADC.
     /// </summary>
-    private InitializationResult Connect(HashSet<int> openOutputPinNumbers, List<string> failureMessages)
+    private InitializationResult Connect(List<string> failureMessages)
     {
-        _isPollingFailed = false;
-
-        int pinCount;
         try
         {
             if (_controller is null)
             {
                 (_controller, _isControllerSimulated, _isControllerRaspberryPi) = CreateController();
+                _pinCount = _controller.PinCount;
             }
-
-            pinCount = _controller.PinCount;
         }
         catch (PlatformNotSupportedException)
         {
-            ReleaseController(openOutputPinNumbers, failureMessages);
+            ReleaseController(failureMessages);
             AnalogChannels = new Dictionary<int, AnalogChannel>();
             StatusMessage = "GPIO not supported on this platform";
             Status = ServiceStatus.Unavailable;
@@ -504,7 +493,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         }
         catch (Exception exception)
         {
-            ReleaseController(openOutputPinNumbers, failureMessages);
+            ReleaseController(failureMessages);
             AnalogChannels = new Dictionary<int, AnalogChannel>();
             StatusMessage = $"Failed to initialize GPIO: {exception.Message}";
             Status = ServiceStatus.Error;
@@ -512,6 +501,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         }
 
         var controller = _controller;
+        var pinCount = _pinCount;
         var isRaspberryPi = _isControllerRaspberryPi;
         var existingPins = Pins;
         var pins = new Dictionary<int, GpioPin>(pinCount);
@@ -539,7 +529,8 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
         var mcp3008 = Mcp3008;
         var ads1115 = Ads1115;
-        var isI2cBus1Reserved = ads1115 is { I2cBus: 1 } && !_isControllerSimulated && IsRaspberryPiBoard(isRaspberryPi);
+        var isI2cBus1Reserved = ads1115 is { I2cBus: 1 } && !_isControllerSimulated &&
+            (isRaspberryPi || (_isRaspberryPiBoard ?? IsRaspberryPiModel.Value));
         foreach (var (pinNumber, pin) in pins)
         {
             // A throwing subscriber of a pin must not keep the other pins from starting.
@@ -549,15 +540,12 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
                 if (reservedMessage is null)
                 {
                     _attachedPins[pinNumber] = pin;
-                    pin.Attach(controller, _registerInterrupt, _unregisterInterrupt, openOutputPinNumbers.Contains(pinNumber));
+                    pin.Attach(controller, _registerInterrupt, _unregisterInterrupt);
                     continue;
                 }
 
                 // Closed before the ADCs are created, which open it.
-                if (openOutputPinNumbers.Contains(pinNumber))
-                {
-                    ClosePin(pinNumber, failureMessages);
-                }
+                ClosePin(pinNumber, failureMessages);
 
                 pin.StatusMessage = reservedMessage;
                 pin.Status = ServiceStatus.Unavailable;
@@ -600,7 +588,8 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         AnalogChannels = analogChannels;
 
         // Set before the status, so that Running is published with its message.
-        StatusMessage = failureMessages.Count > 0 ? string.Join("; ", failureMessages) : null;
+        _connectedStatusMessage = failureMessages.Count > 0 ? string.Join("; ", failureMessages) : null;
+        StatusMessage = _connectedStatusMessage;
         Status = ServiceStatus.Running;
         return InitializationResult.Success;
     }
@@ -611,13 +600,11 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     /// open, so that its line keeps its level. Never throws: a failure is added to <paramref name="failureMessages"/>
     /// and the rest is still released. Called under <see cref="_controllerLock"/>.
     /// </summary>
-    /// <returns>The numbers of the pins left open as outputs.</returns>
-    private HashSet<int> Stop(bool keepController, List<string> failureMessages)
+    private void Stop(bool keepController, List<string> failureMessages)
     {
-        var openOutputPinNumbers = new HashSet<int>();
         if (_controller is null)
         {
-            return openOutputPinNumbers;
+            return;
         }
 
         foreach (var (pinNumber, pin) in _attachedPins)
@@ -643,11 +630,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
             try
             {
-                if (keepController && _controller.IsPinOpen(pinNumber) && _controller.GetPinMode(pinNumber) == PinMode.Output)
-                {
-                    openOutputPinNumbers.Add(pinNumber);
-                }
-                else if (_controller.IsPinOpen(pinNumber))
+                if (_controller.IsPinOpen(pinNumber) && !(keepController && _controller.GetPinMode(pinNumber) == PinMode.Output))
                 {
                     _controller.ClosePin(pinNumber);
                 }
@@ -682,10 +665,8 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         _ads1115 = null;
         if (!keepController)
         {
-            ReleaseController([], failureMessages);
+            ReleaseController(failureMessages);
         }
-
-        return openOutputPinNumbers;
     }
 
     // Called under _controllerLock with the controller.
@@ -705,8 +686,8 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     }
 
     // Called under _controllerLock. A controller disposes its driver, so the one over an injected driver is dropped
-    // instead, after closing its open pins, and the next controller uses that driver again.
-    private void ReleaseController(HashSet<int> openPinNumbers, List<string> failureMessages)
+    // instead, and the next controller uses that driver again.
+    private void ReleaseController(List<string> failureMessages)
     {
         if (_controller is null)
         {
@@ -715,11 +696,6 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
         if (_driver is not null && !_isControllerSimulated)
         {
-            foreach (var pinNumber in openPinNumbers)
-            {
-                ClosePin(pinNumber, failureMessages);
-            }
-
             _controller = null;
             return;
         }
@@ -884,21 +860,19 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     {
         PinChangeEventHandler handler = (_, arguments) =>
         {
+            if (!Pins.TryGetValue(arguments.PinNumber, out var pin))
+            {
+                return;
+            }
+
             // Runs on the driver's thread, where a thrown exception would end the process.
-            GpioPin? pin = null;
             try
             {
-                if (Pins.TryGetValue(arguments.PinNumber, out pin))
-                {
-                    pin.ApplyHardwareLevel(arguments.ChangeType == PinEventTypes.Rising);
-                }
+                pin.ApplyHardwareLevel(arguments.ChangeType == PinEventTypes.Rising);
             }
             catch (Exception exception)
             {
-                if (pin is not null)
-                {
-                    TrySetError(pin, $"Failed to apply an edge of GPIO pin {arguments.PinNumber}: {exception.Message}");
-                }
+                TrySetError(pin, $"Failed to apply an edge of GPIO pin {arguments.PinNumber}: {exception.Message}");
             }
         };
 

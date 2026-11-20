@@ -376,10 +376,10 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
     /// <summary>
     /// Opens the pin on <paramref name="controller"/> in its <see cref="Mode"/> and starts it, or sets
     /// <see cref="Status"/> to <see cref="ServiceStatus.Unavailable"/> with the reason. An output opens at the level
-    /// the pin has. Called with the pin number set and the pin closed on the controller, or open as an output when
-    /// <paramref name="isOpenAsOutput"/>: then an output keeps its line and its level, and another mode closes it first.
+    /// the pin has. Called with the pin number set and the pin closed on the controller, or open as an output: then an
+    /// output keeps its line and its level, and another mode closes it first.
     /// </summary>
-    internal void Attach(GpioController controller, Action<int> registerInterrupt, Action<int> unregisterInterrupt, bool isOpenAsOutput)
+    internal void Attach(GpioController controller, Action<int> registerInterrupt, Action<int> unregisterInterrupt)
     {
         // Under the lock, so that a mode change waits until the pin runs and is then applied to the hardware.
         lock (_lock)
@@ -392,6 +392,7 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
             PinValue level;
             try
             {
+                var isOpenAsOutput = controller.IsPinOpen(PinNumber) && controller.GetPinMode(PinNumber) == PinMode.Output;
                 if (Mode == GpioPinMode.Output)
                 {
                     // Opening the line again would drive it low for a moment on drivers that set the direction before

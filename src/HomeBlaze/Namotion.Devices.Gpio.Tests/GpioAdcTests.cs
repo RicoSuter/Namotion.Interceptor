@@ -137,6 +137,26 @@ public class GpioAdcTests
     }
 
     [Fact]
+    public async Task WhenAds1115IsConfiguredWithSimulationOnARaspberryPi_ThenGpio2And3AreNotReserved()
+    {
+        // Arrange
+        var subject = GpioTestSubject.Create(new LatchingGpioDriver(), isRaspberryPi: true, isRaspberryPiBoard: true);
+        subject.UseSimulation = true;
+        subject.Ads1115 = new Ads1115Configuration { I2cBus = 1 };
+
+        // Act
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running);
+
+        // Assert
+        foreach (var pinNumber in new[] { 2, 3 })
+        {
+            Assert.Equal(ServiceStatus.Running, subject.Pins[pinNumber].Status);
+            Assert.Null(subject.Pins[pinNumber].StatusMessage);
+        }
+    }
+
+    [Fact]
     public async Task WhenAnOutputBecomesAPinOfAnAdc_ThenItIsClosedBeforeTheAdcIsCreated()
     {
         // Arrange
@@ -172,8 +192,6 @@ public class GpioAdcTests
 
         // Assert
         Assert.Contains("dispose MCP3008 21", events);
-        Assert.Contains("close 12", events);
-        Assert.Contains("create MCP3008 12", events);
         var closeIndex = events.IndexOf("close 12");
         var createIndex = events.IndexOf("create MCP3008 12");
         Assert.True(closeIndex >= 0 && createIndex > closeIndex);
