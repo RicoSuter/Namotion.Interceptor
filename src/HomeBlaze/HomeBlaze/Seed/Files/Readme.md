@@ -15,4 +15,4 @@ This is a new HomeBlaze installation. Everything you see is stored as files in t
 - Add devices and servers in the browser, or place their JSON files in the data folder.
 - Read the [documentation](Docs/home.md), starting with [installation](Docs/administration/installation.md) and [configuration](Docs/administration/configuration.md).
 
-History is recorded with the SQLite history store in `Servers/SqliteHistory.json`.
+History is recorded with the SQLite history store in `Services/SqliteHistory.json`.
