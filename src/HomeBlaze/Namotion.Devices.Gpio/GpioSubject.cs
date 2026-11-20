@@ -365,15 +365,16 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
             Status = ServiceStatus.Starting;
 
             // An applied configuration that enabled the simulation has created the controller already.
-            var controllerResult = _controller is null ? TryCreateController() : InitializationResult.Success;
-
-            // Also without a controller, which an ADS1115 does not need.
-            var adcFailureMessage = SynchronizeAdcs(Mcp3008, Ads1115);
-            if (controllerResult != InitializationResult.Success)
+            if (_controller is null)
             {
-                StatusMessage = CombineMessages(StatusMessage, adcFailureMessage);
-                return controllerResult;
+                var controllerResult = TryCreateController();
+                if (controllerResult != InitializationResult.Success)
+                {
+                    return controllerResult;
+                }
             }
+
+            var adcFailureMessage = SynchronizeAdcs(Mcp3008, Ads1115);
 
             // Set before the status, so that Running is published with its message.
             StatusMessage = adcFailureMessage;
@@ -676,6 +677,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
             }
 
             // Handle simulation mode change (only when no injected driver)
+            var isControllerRecreated = false;
             if (_driver == null && UseSimulation != _currentlyUsingSimulation)
             {
                 // Signal waiting loop that configuration changed
@@ -694,21 +696,19 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
                 }
 
                 // Recreate controller with new driver
-                if (TryCreateController() == InitializationResult.Success)
-                {
-                    Status = ServiceStatus.Running;
-                    StatusMessage = null;
-                }
+                isControllerRecreated = TryCreateController() == InitializationResult.Success;
             }
 
             // A reloaded configuration has replaced the pins with new instances that hold neither a pin number nor the
             // controller, so the pins are discovered also when no ADC changed.
             var adcFailureMessage = SynchronizeAdcs(Mcp3008, Ads1115);
 
-            // While running, the status message reports only an ADC that could not be created.
-            if (Status == ServiceStatus.Running)
+            // While running, the status message reports only an ADC that could not be created. Set before the status,
+            // so that Running is published with its message.
+            if (isControllerRecreated || Status == ServiceStatus.Running)
             {
                 StatusMessage = adcFailureMessage;
+                Status = ServiceStatus.Running;
             }
         }
 
@@ -717,9 +717,9 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     /// <summary>
     /// Disposes each ADC whose configuration differs from the given one, discovers the pins with the given
-    /// configurations and then creates each configured ADC that does not exist, the MCP3008 only while a controller
-    /// exists. Rebuilds <see cref="AnalogChannels"/> when an ADC configuration differed, also when this throws. Called
-    /// under <see cref="_controllerLock"/>.
+    /// configurations and then, while a controller exists, creates each configured ADC that does not exist. Rebuilds
+    /// <see cref="AnalogChannels"/> when an ADC configuration differed, also when this throws. Called under
+    /// <see cref="_controllerLock"/>.
     /// </summary>
     /// <returns>The failure message of an ADC that could not be created, or null.</returns>
     private string? SynchronizeAdcs(Mcp3008Configuration? mcp3008, Ads1115Configuration? ads1115)
@@ -755,9 +755,15 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
             // Detaches and closes the pins a new ADC uses, so the ADC is created after this.
             DiscoverPins(mcp3008, ads1115);
 
-            // An ADC that exists is unchanged and is kept. The MCP3008 waits for the controller, which reserves its pins.
+            // Without a controller, the channels of an ADC are never read, so no ADC is created. An ADC that exists is
+            // unchanged and is kept.
+            if (_controller is null)
+            {
+                return null;
+            }
+
             string? failureMessage = null;
-            if (mcp3008 is not null && _mcp3008 is null && _controller is not null)
+            if (mcp3008 is not null && _mcp3008 is null)
             {
                 failureMessage = TryCreateMcp3008(mcp3008);
             }
@@ -947,7 +953,9 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     private void PollAdcChannels()
     {
         // Under the controller lock, so that an apply or Dispose cannot dispose an ADC during a read, which would set
-        // its channel to Error for good or close the pins of a bit-banged read. Takes no pin lock.
+        // its channel to Error for good or close the pins of a bit-banged read. Takes no pin lock. A configuration apply
+        // or Dispose thus waits for one poll pass, normally milliseconds; an ADS1115 that never finishes a conversion
+        // can hold it for a few seconds once, after which its channel is Error and skipped.
         lock (_controllerLock)
         {
             foreach (var channel in AnalogChannels.Values)
@@ -964,8 +972,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
                     }
                     else if (channel.Source == AdcSource.Ads1115 && _ads1115 != null)
                     {
-                        var inputMultiplexer = (InputMultiplexer)channel.ChannelNumber;
-                        var raw = _ads1115.ReadRaw(inputMultiplexer);
+                        var raw = _ads1115.ReadRaw(GetSingleEndedInput(channel.ChannelNumber));
                         channel.RawValue = raw;
                         channel.Value = raw / 32767.0;
                     }
@@ -978,6 +985,9 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
             }
         }
     }
+
+    // The enum values 0 to 3 are differential pairs, such as AIN0_AIN1; the single-ended inputs AIN0 to AIN3 follow.
+    private static InputMultiplexer GetSingleEndedInput(int channelNumber) => InputMultiplexer.AIN0 + channelNumber;
 
     public override void Dispose()
     {

@@ -1,5 +1,6 @@
 using System.Device.Gpio;
 using HomeBlaze.Abstractions;
+using Iot.Device.Ads1115;
 using Namotion.Devices.Gpio.Configuration;
 using Namotion.Interceptor.Testing;
 using Xunit;
@@ -328,7 +329,7 @@ public class GpioStartupTests
     }
 
     [Fact]
-    public async Task WhenAds1115IsAppliedWithoutController_ThenItIsCreated()
+    public async Task WhenAdcsAreAppliedWithoutController_ThenNoneIsCreated()
     {
         // Arrange
         var adcFactory = new RecordingAdcFactory();
@@ -341,12 +342,40 @@ public class GpioStartupTests
             await subject.ApplyConfigurationAsync(CancellationToken.None);
 
             // Assert
-            Assert.Equal(["create ADS1115 1"], adcFactory.Events);
-            Assert.Equal(Enumerable.Range(8, 4), subject.AnalogChannels.Keys.Order());
-            Assert.All(subject.AnalogChannels.Values, channel => Assert.Equal(AdcSource.Ads1115, channel.Source));
+            Assert.Empty(adcFactory.Events);
+            Assert.Empty(subject.AnalogChannels);
         }
         finally
         {
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAds1115ChannelsArePolled_ThenTheSingleEndedInputsAreSelected()
+    {
+        // Arrange
+        var adcFactory = new RecordingAdcFactory();
+        var subject = CreateAdcSubject(new LatchingGpioDriver(), adcFactory);
+        subject.Ads1115 = new Ads1115Configuration { I2cBus = 1 };
+
+        // Act
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            // The fake reads all bits set, so a polled channel reads -1.
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+                subject.AnalogChannels.Count == 4 && subject.AnalogChannels.Values.All(channel => channel.RawValue == -1));
+
+            // Assert
+            Assert.Equal(
+                [InputMultiplexer.AIN0, InputMultiplexer.AIN1, InputMultiplexer.AIN2, InputMultiplexer.AIN3],
+                adcFactory.Ads1115InputMultiplexers.Distinct());
+            Assert.All(subject.AnalogChannels.Values, channel => Assert.Equal(ServiceStatus.Running, channel.Status));
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
             subject.Dispose();
         }
     }
@@ -378,7 +407,8 @@ public class GpioStartupTests
             }
         };
 
-        var startTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => subject.StartAsync(CancellationToken.None));
+        // The poll runs on a thread pool thread, which the gate blocks for the short bound below.
+        await subject.StartAsync(CancellationToken.None);
         try
         {
             await readStarted.Task.WaitAsync(TestTimeouts.Default);
@@ -397,7 +427,6 @@ public class GpioStartupTests
         finally
         {
             readGate.TrySetResult();
-            await startTask.WaitAsync(TestTimeouts.Default);
             await subject.StopAsync(CancellationToken.None);
             subject.Dispose();
         }

@@ -473,6 +473,7 @@ public class GpioConfigurationReloadTests
             await Assert.ThrowsAsync<IOException>(() => subject.ApplyConfigurationAsync(CancellationToken.None));
             Assert.Equal(1, adcFactory.Count("dispose MCP3008 21"));
             Assert.Equal(0, adcFactory.Count("create MCP3008 26"));
+            Assert.Empty(subject.AnalogChannels);
 
             // Act
             await subject.ApplyConfigurationAsync(CancellationToken.None);
@@ -484,36 +485,6 @@ public class GpioConfigurationReloadTests
             Assert.Equal(ServiceStatus.Running, subject.Pins[21].Status);
             Assert.Equal(8, subject.AnalogChannels.Count);
             Assert.Null(subject.StatusMessage);
-        }
-        finally
-        {
-            await subject.StopAsync(CancellationToken.None);
-            subject.Dispose();
-        }
-    }
-
-    [Fact]
-    public async Task WhenPinDiscoveryThrowsAfterAnAdcWasDisposed_ThenItsChannelsAreRemoved()
-    {
-        // Arrange
-        var driver = new LatchingGpioDriver();
-        var adcFactory = new RecordingAdcFactory();
-        var (subject, serializer) = CreateSubject(driver, adcFactory: adcFactory);
-        subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
-        await subject.StartAsync(CancellationToken.None);
-        try
-        {
-            await WaitUntilAllPinsRunAsync(subject, Mcp3008PinNumbers);
-            Assert.Equal(8, subject.AnalogChannels.Count);
-            driver.FailingCallbackRemovalPinNumber = 26;
-            serializer.UpdateConfiguration(subject, JsonWithMovedMcp3008ClockPin);
-
-            // Act
-            await Assert.ThrowsAsync<IOException>(() => subject.ApplyConfigurationAsync(CancellationToken.None));
-
-            // Assert
-            Assert.Equal(1, adcFactory.Count("dispose MCP3008 21"));
-            Assert.Empty(subject.AnalogChannels);
         }
         finally
         {

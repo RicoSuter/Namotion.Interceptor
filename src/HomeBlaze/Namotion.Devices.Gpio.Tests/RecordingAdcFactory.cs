@@ -15,6 +15,7 @@ internal sealed class RecordingAdcFactory
 {
     private readonly Lock _lock = new();
     private readonly List<string> _events = new();
+    private readonly List<InputMultiplexer> _ads1115InputMultiplexers = new();
 
     /// <summary>
     /// Whether the next creation of an MCP3008 throws an <see cref="IOException"/>, once.
@@ -46,6 +47,20 @@ internal sealed class RecordingAdcFactory
     }
 
     /// <summary>
+    /// Gets the input multiplexer setting of each write to the configuration register of an ADS1115, in order.
+    /// </summary>
+    public InputMultiplexer[] Ads1115InputMultiplexers
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _ads1115InputMultiplexers.ToArray();
+            }
+        }
+    }
+
+    /// <summary>
     /// Gets how many events start with the given text.
     /// </summary>
     public int Count(string eventPrefix) => Events.Count(recordedEvent => recordedEvent.StartsWith(eventPrefix, StringComparison.Ordinal));
@@ -69,7 +84,16 @@ internal sealed class RecordingAdcFactory
         Record($"create ADS1115 {configuration.I2cBus}");
         return new Ads1115(new RecordingI2cDevice(
             new I2cConnectionSettings(configuration.I2cBus, configuration.Address),
+            RecordAds1115InputMultiplexer,
             () => Record($"dispose ADS1115 {configuration.I2cBus}")));
+    }
+
+    private void RecordAds1115InputMultiplexer(InputMultiplexer inputMultiplexer)
+    {
+        lock (_lock)
+        {
+            _ads1115InputMultiplexers.Add(inputMultiplexer);
+        }
     }
 
     private void Record(string recordedEvent)
@@ -112,8 +136,13 @@ internal sealed class RecordingAdcFactory
     }
 
     // Reads all bits set, which an ADS1115 reports as no conversion running.
-    private sealed class RecordingI2cDevice(I2cConnectionSettings connectionSettings, Action disposed) : I2cDevice
+    private sealed class RecordingI2cDevice(
+        I2cConnectionSettings connectionSettings,
+        Action<InputMultiplexer> configurationWritten,
+        Action disposed) : I2cDevice
     {
+        private const byte ConfigurationRegister = 1;
+
         public override I2cConnectionSettings ConnectionSettings { get; } = connectionSettings;
 
         public override byte ReadByte() => 0xFF;
@@ -126,6 +155,11 @@ internal sealed class RecordingAdcFactory
 
         public override void Write(ReadOnlySpan<byte> buffer)
         {
+            // The register address, then the big-endian register value, whose bits 14 to 12 select the input.
+            if (buffer.Length == 3 && buffer[0] == ConfigurationRegister)
+            {
+                configurationWritten((InputMultiplexer)((buffer[1] >> 4) & 0b111));
+            }
         }
 
         public override void WriteRead(ReadOnlySpan<byte> writeBuffer, Span<byte> readBuffer) => readBuffer.Fill(0xFF);
