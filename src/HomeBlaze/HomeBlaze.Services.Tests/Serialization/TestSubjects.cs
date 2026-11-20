@@ -317,3 +317,22 @@ public partial class SubjectWithUnreadableConfiguration : IConfigurable
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
+
+/// <summary>A subject whose constructor gives its configuration values that differ from the defaults of their types.</summary>
+[InterceptorSubject]
+public partial class SubjectWithDefaults : IConfigurable
+{
+    [Configuration]
+    public partial string Label { get; set; }
+
+    [Configuration]
+    public partial int Interval { get; set; }
+
+    public SubjectWithDefaults()
+    {
+        Label = "default label";
+        Interval = 30;
+    }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}

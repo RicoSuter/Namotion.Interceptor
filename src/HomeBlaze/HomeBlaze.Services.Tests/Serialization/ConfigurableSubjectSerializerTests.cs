@@ -31,7 +31,8 @@ public class ConfigurableSubjectSerializerTests
             typeof(Level3Subject),
             typeof(SubjectWithMixedProperties),
             typeof(SubjectWithConstructorDependency),
-            typeof(SubjectWithAnyChild)
+            typeof(SubjectWithAnyChild),
+            typeof(SubjectWithDefaults)
         ]);
 
         var services = new ServiceCollection();
@@ -620,6 +621,45 @@ public class ConfigurableSubjectSerializerTests
         // Assert
         Assert.Equal("updated-one", subject.ConfigOne);
         Assert.Equal(100, subject.ConfigTwo); // Unchanged
+    }
+
+    [Fact]
+    public void WhenKeyIsMissing_ThenReplaceConfigurationSetsTheTypeDefault()
+    {
+        // Arrange
+        var subject = new SubjectWithDefaults(CreateContextWithConfigurationAttributes())
+        {
+            Label = "configured",
+            Interval = 5
+        };
+        var json = """{ "label": "updated" }""";
+
+        // Act
+        _serializer.ReplaceConfiguration(subject, json, skipped: null);
+
+        // Assert
+        Assert.Equal("updated", subject.Label);
+        Assert.Equal(30, subject.Interval);
+    }
+
+    [Fact]
+    public void WhenKeyWithNullDefaultIsMissing_ThenReplaceConfigurationSetsNullAndDetachesTheOldSubject()
+    {
+        // Arrange
+        var oldChild = new ChildSubject { ChildConfig = "child" };
+        var parent = new ParentWithChildSubject(CreateContextWithConfigurationAttributes())
+        {
+            Name = "parent",
+            Child = oldChild
+        };
+        var json = """{ "name": "parent" }""";
+
+        // Act
+        _serializer.ReplaceConfiguration(parent, json, skipped: null);
+
+        // Assert
+        Assert.Null(parent.Child);
+        Assert.Equal(0, oldChild.GetReferenceCount());
     }
 
     [Fact]
