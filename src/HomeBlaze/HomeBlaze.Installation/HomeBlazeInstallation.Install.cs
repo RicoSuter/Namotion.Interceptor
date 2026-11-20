@@ -19,8 +19,9 @@ public partial class HomeBlazeInstallation
     private readonly Lock _installLock = new();
     private readonly SemaphoreSlim _installSignal = new(0, 1);
 
-    // Monotonic time of the last request, for the pick-up timeout; written and read under _installLock.
-    private long _requestTimestamp;
+    // Monotonic time of the request this process wrote, for the pick-up and install timeouts; null after a restore,
+    // where only the wall clock against the request time is left. Written and read under _installLock.
+    private long? _requestTimestamp;
 
     /// <summary>
     /// Whether an updater sidecar runs next to this installation, judged by its heartbeat in the data directory.
@@ -29,6 +30,9 @@ public partial class HomeBlazeInstallation
     [Category("Update")]
     public partial bool IsUpdaterAvailable { get; internal set; }
 
+    /// <summary>
+    /// The progress of the current or last install of an update.
+    /// </summary>
     [State(IsDiscrete = true, Position = 469)]
     [Category("Update")]
     public partial UpdateInstallState UpdateInstallState { get; internal set; }
@@ -47,10 +51,17 @@ public partial class HomeBlazeInstallation
     [Category("Update")]
     public partial DateTimeOffset? LastUpdateInstall { get; internal set; }
 
+    /// <summary>
+    /// Whether an install is requested or running.
+    /// </summary>
     [Derived]
     public bool IsInstallingUpdate =>
         UpdateInstallState is UpdateInstallState.Requested or UpdateInstallState.Installing;
 
+    /// <summary>
+    /// Whether Install update can run: the updater runs, the installation runs, an update is available and no install
+    /// is in progress.
+    /// </summary>
     [Derived]
     [PropertyAttribute(nameof(InstallUpdate), KnownAttributes.IsEnabled)]
     public bool InstallUpdate_IsEnabled =>
@@ -149,16 +160,35 @@ public partial class HomeBlazeInstallation
                     EvaluateRun(files);
                 }
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                _logger.LogWarning(exception, "Reading the update files failed");
-                CompleteInstall(UpdateInstallState.Failed, exception.Message);
-            }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                _logger.LogWarning(exception, "Advancing the update install failed");
-                CompleteInstall(UpdateInstallState.Failed, exception.Message);
+                // The monitor must not stop on a bad data folder, so the failure ends the install instead of escaping.
+                if (UpdateInstallState == UpdateInstallState.Requested && IsRequestTakenAfterFailure())
+                {
+                    _logger.LogWarning(exception, "Advancing the update install failed after the updater took the request");
+                    SetInstallState(UpdateInstallState.Installing, "Installing update…");
+                    return;
+                }
+
+                CompleteInstall(UpdateInstallState.Failed, exception.Message, exception: exception);
             }
+        }
+    }
+
+    /// <summary>
+    /// Withdraws the request, best effort, and returns whether the updater took it, so a failed install never leaves a
+    /// request the updater could still run.
+    /// </summary>
+    private bool IsRequestTakenAfterFailure()
+    {
+        try
+        {
+            return GetUpdaterFiles() is { } files && !files.TryDeleteRequest() && files.ReadRun() is not null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(exception, "Withdrawing the update request failed");
+            return false;
         }
     }
 
@@ -172,6 +202,7 @@ public partial class HomeBlazeInstallation
         {
             try
             {
+                _requestTimestamp = null;
                 var files = GetUpdaterFiles();
                 if (files is null)
                 {
@@ -195,13 +226,9 @@ public partial class HomeBlazeInstallation
                 SetInstallState(UpdateInstallState.Installing, "Installing update…");
                 EvaluateRun(files);
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                _logger.LogWarning(exception, "Reading the update files failed");
-            }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                // ExecuteAsync calls this before the loops start, so an escaping exception would stop the installation.
+                // ExecuteAsync calls this before the loops start, so a bad data folder must not stop the installation.
                 _logger.LogWarning(exception, "Restoring the update install failed");
             }
         }
@@ -216,7 +243,7 @@ public partial class HomeBlazeInstallation
             return;
         }
 
-        if (_timeProvider.GetElapsedTime(_requestTimestamp) < PickUpTimeout)
+        if (_requestTimestamp is { } requestTimestamp && _timeProvider.GetElapsedTime(requestTimestamp) < PickUpTimeout)
         {
             return;
         }
@@ -246,7 +273,12 @@ public partial class HomeBlazeInstallation
             return;
         }
 
-        if (_timeProvider.GetUtcNow() - run.RequestedAt >= InstallTimeout)
+        // The wall clock may jump, so it only counts for a run this process did not request.
+        var elapsed = _requestTimestamp is { } requestTimestamp
+            ? _timeProvider.GetElapsedTime(requestTimestamp)
+            : _timeProvider.GetUtcNow() - run.RequestedAt;
+
+        if (elapsed >= InstallTimeout)
         {
             files.DeleteRunAndResult();
             CompleteInstall(UpdateInstallState.Failed, "The update did not finish within 30 minutes.");
@@ -260,8 +292,7 @@ public partial class HomeBlazeInstallation
         var running = new BuildIdentity(Version, Commit);
         if (exitCode != 0)
         {
-            _logger.LogWarning("Installing the update failed with exit code {ExitCode}: {Log}", exitCode, log);
-            CompleteInstall(UpdateInstallState.Failed, GetLastLine(log) ?? $"The update failed with exit code {exitCode}.");
+            CompleteInstall(UpdateInstallState.Failed, GetLastLine(log) ?? $"The update failed with exit code {exitCode}.", log);
         }
         else if (run.Requested != running)
         {
@@ -273,11 +304,22 @@ public partial class HomeBlazeInstallation
         }
     }
 
-    private void CompleteInstall(UpdateInstallState state, string message)
+    private void CompleteInstall(UpdateInstallState state, string message, string? log = null, Exception? exception = null)
     {
         SetInstallState(state, message);
         LastUpdateInstall = _timeProvider.GetUtcNow();
-        _logger.LogInformation("Update install {State}: {Message}", state, message);
+        if (state != UpdateInstallState.Failed)
+        {
+            _logger.LogInformation("Update install {State}: {Message}", state, message);
+        }
+        else if (log is not null)
+        {
+            _logger.LogWarning(exception, "Update install failed: {Message}\n{Log}", message, log);
+        }
+        else
+        {
+            _logger.LogWarning(exception, "Update install failed: {Message}", message);
+        }
     }
 
     private static string? GetLastLine(string? log) =>
@@ -300,10 +342,9 @@ public partial class HomeBlazeInstallation
             catch (Exception exception) when (exception is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
             {
                 // The host never observes ExecuteTask, so an escaping exception would silently end the monitor.
-                _logger.LogError(exception, "Monitoring the update install failed unexpectedly");
                 lock (_installLock)
                 {
-                    CompleteInstall(UpdateInstallState.Failed, exception.Message);
+                    CompleteInstall(UpdateInstallState.Failed, exception.Message, exception: exception);
                 }
             }
 

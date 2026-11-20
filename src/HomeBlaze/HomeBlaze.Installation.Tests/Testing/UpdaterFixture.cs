@@ -14,6 +14,7 @@ internal sealed class UpdaterFixture : IDisposable
     public static readonly DateTimeOffset Start = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
 
     private readonly IInterceptorSubjectContext _context;
+    private readonly DataDirectoryProvider _dataDirectoryProvider;
 
     public UpdaterFixture(BuildInformation? build = null, TimeProvider? timeProvider = null)
     {
@@ -22,7 +23,8 @@ internal sealed class UpdaterFixture : IDisposable
         TestTimeProvider = TimeProvider as TestTimeProvider;
 
         _context = SubjectContextFactory.Create(new ServiceCollection());
-        _context.AddService<IDataDirectoryProvider>(new DataDirectoryProvider(Directory.FullName));
+        _dataDirectoryProvider = new DataDirectoryProvider(Directory.FullName);
+        _context.AddService<IDataDirectoryProvider>(_dataDirectoryProvider);
         Installation = Attach(build ?? HomeBlazeInstallationTests.CreateBuild());
     }
 
@@ -67,6 +69,9 @@ internal sealed class UpdaterFixture : IDisposable
         File.Move(temporaryPath, PathOf(UpdaterFiles.ResultFileName), overwrite: true);
     }
 
+    /// <summary>The next read of the data directory throws, as a broken data folder would; later reads succeed.</summary>
+    public void FailNextDataDirectoryAccess() => _dataDirectoryProvider.FailNextAccess = true;
+
     /// <summary>
     /// The process that the recreated container starts, sharing the data folder and the clock.
     /// </summary>
@@ -84,6 +89,20 @@ internal sealed class UpdaterFixture : IDisposable
 
     private sealed class DataDirectoryProvider(string directory) : IDataDirectoryProvider
     {
-        public string DataDirectory { get; } = directory;
+        public bool FailNextAccess { get; set; }
+
+        public string DataDirectory
+        {
+            get
+            {
+                if (FailNextAccess)
+                {
+                    FailNextAccess = false;
+                    throw new IOException("The data directory is not available");
+                }
+
+                return directory;
+            }
+        }
     }
 }

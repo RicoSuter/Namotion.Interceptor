@@ -183,6 +183,23 @@ public sealed class UpdaterFilesTests : IDisposable
         Assert.Equal("pulled", files.ReadLog());
     }
 
+    [Fact]
+    public void WhenTheLogIsLargerThan64Kilobytes_ThenItsEndIsRead()
+    {
+        // Arrange
+        var lines = Enumerable.Range(0, 10_000).Select(index => $"line {index:D5}").ToList();
+        File.WriteAllText(PathOf(UpdaterFiles.LogFileName), string.Join('\n', lines) + "\nError: the last line\n");
+
+        // Act
+        var log = CreateFiles().ReadLog();
+
+        // Assert
+        Assert.NotNull(log);
+        Assert.True(log.Length <= 64 * 1024);
+        Assert.EndsWith("line 09999\nError: the last line\n", log);
+        Assert.Matches(@"^line \d{5}\n", log);
+    }
+
     [Theory]
     [InlineData("0.5.0", "abc1234def", "0.5.0")]
     [InlineData("edge", "abc1234def", "abc1234")]

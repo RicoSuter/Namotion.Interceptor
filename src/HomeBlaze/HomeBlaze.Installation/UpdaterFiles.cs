@@ -1,9 +1,10 @@
 using System.Globalization;
+using System.Text;
 
 namespace HomeBlaze.Installation;
 
 /// <summary>
-/// The installation's start of a run, read from the running file: what was requested and when.
+/// A run the updater took over: the requested build identity and the request time.
 /// </summary>
 internal sealed record UpdaterRun(BuildIdentity Requested, DateTimeOffset RequestedAt);
 
@@ -13,11 +14,23 @@ internal sealed record UpdaterRun(BuildIdentity Requested, DateTimeOffset Reques
 /// </summary>
 internal sealed class UpdaterFiles
 {
+    /// <summary>Touched by the updater while it runs.</summary>
     public const string HeartbeatFileName = ".updater-heartbeat";
+
+    /// <summary>Written by HomeBlaze to ask for an install.</summary>
     public const string RequestFileName = ".update-request";
+
+    /// <summary>The request, renamed by the updater when it takes it.</summary>
     public const string RunningFileName = ".update-running";
+
+    /// <summary>Written by the updater with the exit code of compose.</summary>
     public const string ResultFileName = ".update-result";
+
+    /// <summary>Written by the updater with the output of compose.</summary>
     public const string LogFileName = ".update-log";
+
+    private const int MaximumFileLength = 4 * 1024;
+    private const int MaximumLogLength = 64 * 1024;
 
     private readonly string _directory;
     private readonly TimeProvider _timeProvider;
@@ -84,7 +97,7 @@ internal sealed class UpdaterFiles
     public UpdaterRun? ReadRun()
     {
         var lastWrite = GetLastWriteTime(RunningFileName);
-        var content = TryReadAllText(RunningFileName);
+        var content = TryReadStart(RunningFileName);
         return lastWrite is null || content is null
             ? null
             : new UpdaterRun(BuildIdentity.Parse(content), lastWrite.Value);
@@ -95,7 +108,7 @@ internal sealed class UpdaterFiles
     /// </summary>
     public bool TryReadExitCode(out int exitCode)
     {
-        var content = TryReadAllText(ResultFileName);
+        var content = TryReadStart(ResultFileName);
         if (content is null)
         {
             exitCode = 0;
@@ -106,7 +119,31 @@ internal sealed class UpdaterFiles
         return true;
     }
 
-    public string? ReadLog() => TryReadAllText(LogFileName);
+    /// <summary>
+    /// The output of compose, at most its last 64 KB starting at a full line; null without a log.
+    /// </summary>
+    public string? ReadLog()
+    {
+        try
+        {
+            using var stream = OpenRead(LogFileName);
+            if (stream.Length <= MaximumLogLength)
+            {
+                return ReadText(stream, (int)stream.Length);
+            }
+
+            // One byte more than the limit tells whether the cut fell on a line start, so no full line is dropped.
+            stream.Seek(-(MaximumLogLength + 1), SeekOrigin.End);
+            var buffer = new byte[MaximumLogLength + 1];
+            var length = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
+            var lineStart = Array.IndexOf(buffer, (byte)'\n', 0, length) + 1;
+            return Encoding.UTF8.GetString(buffer, lineStart, length - lineStart);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;
+        }
+    }
 
     public void DeleteRunAndResult()
     {
@@ -122,16 +159,28 @@ internal sealed class UpdaterFiles
         return file.Exists ? new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero) : null;
     }
 
-    private string? TryReadAllText(string fileName)
+    private string? TryReadStart(string fileName)
     {
         try
         {
-            return File.ReadAllText(GetPath(fileName));
+            using var stream = OpenRead(fileName);
+            return ReadText(stream, (int)Math.Min(stream.Length, MaximumFileLength));
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
             return null;
         }
+    }
+
+    // The updater may replace or remove a file while it is open, which must not fail the read or the updater.
+    private FileStream OpenRead(string fileName) =>
+        new(GetPath(fileName), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+
+    private static string ReadText(FileStream stream, int maximumLength)
+    {
+        var buffer = new byte[maximumLength];
+        var length = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
+        return Encoding.UTF8.GetString(buffer, 0, length);
     }
 
     private void TryDelete(string fileName)

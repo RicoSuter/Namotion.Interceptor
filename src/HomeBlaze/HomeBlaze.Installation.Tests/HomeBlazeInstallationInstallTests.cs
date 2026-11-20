@@ -122,6 +122,8 @@ public class HomeBlazeInstallationInstallTests
         // Act & Assert
         var exception = Assert.Throws<InvalidOperationException>(fixture.Installation.InstallUpdate);
         Assert.Equal("No updater runs next to this installation.", exception.Message);
+        Assert.False(fixture.Installation.IsUpdaterAvailable);
+        Assert.False(fixture.Installation.InstallUpdate_IsEnabled);
     }
 
     [Fact]
@@ -255,6 +257,7 @@ public class HomeBlazeInstallationInstallTests
         // Assert
         Assert.Equal(UpdateInstallState.Failed, fixture.Installation.UpdateInstallState);
         Assert.Equal(expectedStatus, fixture.Installation.UpdateInstallStatus);
+        Assert.Equal(UpdaterFixture.Start, fixture.Installation.LastUpdateInstall);
     }
 
     [Fact]
@@ -274,7 +277,169 @@ public class HomeBlazeInstallationInstallTests
         // Assert
         Assert.Equal(UpdateInstallState.Failed, fixture.Installation.UpdateInstallState);
         Assert.Equal("The update did not finish within 30 minutes.", fixture.Installation.UpdateInstallStatus);
+        Assert.Equal(UpdaterFixture.Start.AddMinutes(30), fixture.Installation.LastUpdateInstall);
         Assert.False(File.Exists(fixture.PathOf(UpdaterFiles.RunningFileName)));
+    }
+
+    [Fact]
+    public void WhenTheInstallRunsFor29Minutes59Seconds_ThenItStaysInstalling()
+    {
+        // Arrange
+        using var fixture = new UpdaterFixture();
+        fixture.MakeReady();
+        fixture.Installation.InstallUpdate();
+        fixture.PickUp();
+        fixture.Installation.AdvanceInstall();
+
+        // Act
+        fixture.TestTimeProvider!.Advance(new TimeSpan(0, 29, 59));
+        fixture.Installation.AdvanceInstall();
+        var stateBeforeTimeout = fixture.Installation.UpdateInstallState;
+        fixture.TestTimeProvider.Advance(TimeSpan.FromSeconds(1));
+        fixture.Installation.AdvanceInstall();
+
+        // Assert
+        Assert.Equal(UpdateInstallState.Installing, stateBeforeTimeout);
+        Assert.Equal(UpdateInstallState.Failed, fixture.Installation.UpdateInstallState);
+    }
+
+    [Fact]
+    public void WhenTheWallClockJumpsDuringAnInstall_ThenTheTimeoutFollowsTheMonotonicClock()
+    {
+        // Arrange
+        using var fixture = new UpdaterFixture();
+        fixture.MakeReady();
+        fixture.Installation.InstallUpdate();
+        fixture.PickUp();
+        fixture.Installation.AdvanceInstall();
+
+        // Act
+        fixture.TestTimeProvider!.UtcNow = UpdaterFixture.Start.AddMinutes(31);
+        fixture.Installation.AdvanceInstall();
+
+        // Assert
+        Assert.Equal(UpdateInstallState.Installing, fixture.Installation.UpdateInstallState);
+        Assert.True(File.Exists(fixture.PathOf(UpdaterFiles.RunningFileName)));
+    }
+
+    [Fact]
+    public void WhenARestoredRunIsOlderThan30Minutes_ThenTheInstallFails()
+    {
+        // Arrange
+        using var fixture = new UpdaterFixture();
+        fixture.MakeReady();
+        fixture.Installation.InstallUpdate();
+        fixture.PickUp();
+        fixture.TestTimeProvider!.Advance(TimeSpan.FromMinutes(31));
+        var newProcess = fixture.CreateSecondInstallation(CreateBuild());
+
+        // Act
+        newProcess.RestoreInstall();
+
+        // Assert
+        Assert.Equal(UpdateInstallState.Failed, newProcess.UpdateInstallState);
+        Assert.Equal("The update did not finish within 30 minutes.", newProcess.UpdateInstallStatus);
+    }
+
+    [Fact]
+    public void WhenReadingTheResultFails_ThenTheInstallFails()
+    {
+        // Arrange
+        using var fixture = new UpdaterFixture();
+        fixture.MakeReady();
+        fixture.Installation.InstallUpdate();
+        fixture.PickUp();
+        fixture.Installation.AdvanceInstall();
+        Directory.CreateDirectory(fixture.PathOf(UpdaterFiles.ResultFileName));
+
+        // Act
+        fixture.Installation.AdvanceInstall();
+
+        // Assert
+        Assert.Equal(UpdateInstallState.Failed, fixture.Installation.UpdateInstallState);
+        Assert.Equal(UpdaterFixture.Start, fixture.Installation.LastUpdateInstall);
+    }
+
+    [Fact]
+    public void WhenTheRunFileDisappearsWhileInstalling_ThenTheInstallFails()
+    {
+        // Arrange
+        using var fixture = new UpdaterFixture();
+        fixture.MakeReady();
+        fixture.Installation.InstallUpdate();
+        fixture.PickUp();
+        fixture.Installation.AdvanceInstall();
+        File.Delete(fixture.PathOf(UpdaterFiles.RunningFileName));
+
+        // Act
+        fixture.Installation.AdvanceInstall();
+
+        // Assert
+        Assert.Equal(UpdateInstallState.Failed, fixture.Installation.UpdateInstallState);
+        Assert.Equal("The update files were removed.", fixture.Installation.UpdateInstallStatus);
+    }
+
+    [Fact]
+    public void WhenAnInstallFinishedAndInstallUpdateIsCalledAgain_ThenANewRequestIsWritten()
+    {
+        // Arrange
+        using var fixture = new UpdaterFixture();
+        fixture.MakeReady();
+        fixture.Installation.InstallUpdate();
+        fixture.PickUp();
+        fixture.Finish(0, string.Empty);
+        fixture.Installation.AdvanceInstall();
+        Assert.Equal(UpdateInstallState.UpToDate, fixture.Installation.UpdateInstallState);
+
+        // A leftover run and result, as an interrupted updater could leave them.
+        File.WriteAllText(fixture.PathOf(UpdaterFiles.RunningFileName), "0.4.0\n");
+        fixture.Finish(0, string.Empty);
+
+        // Act
+        fixture.Installation.InstallUpdate();
+
+        // Assert
+        Assert.Equal(UpdateInstallState.Requested, fixture.Installation.UpdateInstallState);
+        Assert.True(File.Exists(fixture.PathOf(UpdaterFiles.RequestFileName)));
+        Assert.False(File.Exists(fixture.PathOf(UpdaterFiles.RunningFileName)));
+        Assert.False(File.Exists(fixture.PathOf(UpdaterFiles.ResultFileName)));
+    }
+
+    [Fact]
+    public void WhenAdvancingFailsBeforeTheUpdaterTookTheRequest_ThenTheRequestIsWithdrawnAndTheInstallFails()
+    {
+        // Arrange
+        using var fixture = new UpdaterFixture();
+        fixture.MakeReady();
+        fixture.Installation.InstallUpdate();
+        fixture.FailNextDataDirectoryAccess();
+
+        // Act
+        fixture.Installation.AdvanceInstall();
+
+        // Assert
+        Assert.Equal(UpdateInstallState.Failed, fixture.Installation.UpdateInstallState);
+        Assert.Equal("The data directory is not available", fixture.Installation.UpdateInstallStatus);
+        Assert.False(File.Exists(fixture.PathOf(UpdaterFiles.RequestFileName)));
+    }
+
+    [Fact]
+    public void WhenAdvancingFailsAfterTheUpdaterTookTheRequest_ThenTheStateIsInstalling()
+    {
+        // Arrange
+        using var fixture = new UpdaterFixture();
+        fixture.MakeReady();
+        fixture.Installation.InstallUpdate();
+        fixture.PickUp();
+        fixture.FailNextDataDirectoryAccess();
+
+        // Act
+        fixture.Installation.AdvanceInstall();
+
+        // Assert
+        Assert.Equal(UpdateInstallState.Installing, fixture.Installation.UpdateInstallState);
+        Assert.Equal("Installing update…", fixture.Installation.UpdateInstallStatus);
+        Assert.True(File.Exists(fixture.PathOf(UpdaterFiles.RunningFileName)));
     }
 
     [Fact]
@@ -297,6 +462,27 @@ public class HomeBlazeInstallationInstallTests
         Assert.Equal(UpdateInstallState.Installing, stateBeforeResult);
         Assert.Equal(UpdateInstallState.Succeeded, newProcess.UpdateInstallState);
         Assert.Equal("Updated from 0.5.0 to 0.6.0", newProcess.UpdateInstallStatus);
+        Assert.Equal(UpdaterFixture.Start, newProcess.LastUpdateInstall);
+    }
+
+    [Fact]
+    public void WhenTheNewProcessFindsAFailedResult_ThenTheInstallFails()
+    {
+        // Arrange
+        using var fixture = new UpdaterFixture();
+        fixture.MakeReady();
+        fixture.Installation.InstallUpdate();
+        fixture.PickUp();
+        fixture.Finish(1, "The updater restarted while an install ran.\n");
+        var newProcess = fixture.CreateSecondInstallation(CreateBuild());
+
+        // Act
+        newProcess.RestoreInstall();
+
+        // Assert
+        Assert.Equal(UpdateInstallState.Failed, newProcess.UpdateInstallState);
+        Assert.Equal("The updater restarted while an install ran.", newProcess.UpdateInstallStatus);
+        Assert.False(File.Exists(fixture.PathOf(UpdaterFiles.RunningFileName)));
     }
 
     [Fact]
@@ -316,6 +502,24 @@ public class HomeBlazeInstallationInstallTests
         // Assert
         Assert.Equal(UpdateInstallState.Succeeded, newProcess.UpdateInstallState);
         Assert.Equal($"Updated from {Commit[..7]} to 1234567", newProcess.UpdateInstallStatus);
+    }
+
+    [Fact]
+    public void WhenAnEdgeBuildKeepsItsCommit_ThenTheInstallIsUpToDate()
+    {
+        // Arrange
+        using var fixture = new UpdaterFixture(CreateBuild("edge", tag: null));
+        fixture.MakeReady();
+        fixture.Installation.InstallUpdate();
+        fixture.PickUp();
+        fixture.Finish(0, string.Empty);
+        var newProcess = fixture.CreateSecondInstallation(CreateBuild("edge", tag: null));
+
+        // Act
+        newProcess.RestoreInstall();
+
+        // Assert
+        Assert.Equal(UpdateInstallState.UpToDate, newProcess.UpdateInstallState);
     }
 
     [Fact]
@@ -405,6 +609,21 @@ public class HomeBlazeInstallationInstallTests
 
         // Assert
         Assert.Equal(UpdateInstallState.None, installation.UpdateInstallState);
+    }
+
+    [Fact]
+    public void WhenRestoredWithoutDataDirectory_ThenNothingChanges()
+    {
+        // Arrange
+        var installation = CreateInstallation(CreateBuild());
+
+        // Act
+        installation.RestoreInstall();
+
+        // Assert
+        Assert.Equal(UpdateInstallState.None, installation.UpdateInstallState);
+        Assert.Null(installation.UpdateInstallStatus);
+        Assert.Null(installation.LastUpdateInstall);
     }
 
     private sealed class ThrowingDataDirectoryProvider : IDataDirectoryProvider

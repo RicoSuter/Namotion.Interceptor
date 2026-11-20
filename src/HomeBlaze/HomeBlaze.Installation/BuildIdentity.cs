@@ -1,8 +1,7 @@
 namespace HomeBlaze.Installation;
 
 /// <summary>
-/// The version and commit of a build; an install succeeded when the identity of the running build differs from the
-/// requested one, which for an edge build, whose version stays "edge", means a different commit.
+/// The version and commit of a build; an edge build keeps the version <c>edge</c>, so its commit tells two edge builds apart.
 /// </summary>
 internal sealed record BuildIdentity(string Version, string? Commit)
 {
