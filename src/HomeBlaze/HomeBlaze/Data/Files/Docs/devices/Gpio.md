@@ -76,6 +76,20 @@ sudo apt install libgpiod3
 
 On older distributions, the package may be named `libgpiod2`.
 
+### Docker
+
+The container image has no libgpiod, so GPIO works in Docker on a Raspberry Pi 3, 4 or Zero 2 W through the Raspberry Pi register driver: it reads and writes the pins through `/dev/gpiomem` and registers for pin changes through sysfs. A container mounts sysfs read-only, so map the device and make the GPIO part of sysfs writable, as the commented lines in the compose file do:
+
+```yaml
+    volumes:
+      - /sys/class/gpio:/sys/class/gpio
+      - /sys/devices/platform/soc:/sys/devices/platform/soc
+    devices:
+      - /dev/gpiomem
+```
+
+Both volumes are needed: the pin folders that `/sys/class/gpio` lists live under `/sys/devices/platform/soc`. They give the container, which runs as root, write access to the sysfs entries of the system-on-chip devices. Without them every pin shows `Unavailable` with `Read-only file system : '/sys/class/gpio/export'`. Raspberry Pi 5 and other boards need libgpiod and are not supported in the container.
+
 ### Supported Platforms
 
 - **Raspberry Pi 3/4/5** - Full GPIO support (pin count detected automatically)
@@ -301,6 +315,7 @@ Common causes:
 - Pin reserved for I2C (GPIO 2, 3) or SPI (GPIO 7-11) on Raspberry Pi
 - Pin in use by another process
 - Hardware-specific pin reservation
+- In Docker, `Read-only file system : '/sys/class/gpio/export'`: the two `/sys` volumes are missing, see [Docker](#docker)
 
 ### No pins available (empty Pins dictionary)
 

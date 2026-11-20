@@ -11,13 +11,15 @@ services:
       - "4840:4840"   # OPC UA server subject
     volumes:
       - ./data:/data  # Root.json, Files/, History/, OpcUa/, DataProtection-Keys/; filled with defaults on first start, Files/Docs is replaced on every start
+      # - /sys/class/gpio:/sys/class/gpio  # Raspberry Pi 3/4 and Zero 2 W GPIO, with /dev/gpiomem below: pin changes go through sysfs
+      # - /sys/devices/platform/soc:/sys/devices/platform/soc
     environment:
       TZ: Europe/Zurich
       McpServer__Enabled: "true"
       McpServer__ReadOnly: "true"  # set to "false" to let MCP clients write values
       ConnectionStrings__seq: http://seq:5341
     # devices:
-    #   - /dev/gpiomem  # Raspberry Pi 3/4 GPIO; Pi 5 is not supported in the container (needs libgpiod)
+    #   - /dev/gpiomem  # Raspberry Pi 3/4 and Zero 2 W GPIO, with the two /sys volumes above; Pi 5 is not supported in the container (needs libgpiod)
 
   updater:
     # Opt-in: lets the Installation subject install updates, see the installation guide. Holds the Docker socket,
