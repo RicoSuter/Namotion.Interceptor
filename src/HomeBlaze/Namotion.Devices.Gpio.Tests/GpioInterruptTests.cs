@@ -12,6 +12,26 @@ namespace Namotion.Devices.Gpio.Tests;
 public class GpioInterruptTests
 {
     [Fact]
+    public async Task WhenPollingFailsAndThenSucceeds_ThenTheStatusReturnsToRunning()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var subject = GpioTestSubject.Create(driver);
+        subject.PollingInterval = TimeSpan.FromMilliseconds(10);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+        driver.FailsReads = true;
+        await AsyncTestHelpers.WaitUntilAsync(() =>
+            subject.Status == ServiceStatus.Error && subject.StatusMessage?.StartsWith("Polling error: ") == true);
+
+        // Act
+        driver.FailsReads = false;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running && subject.StatusMessage is null);
+    }
+
+    [Fact]
     public async Task WhenInputOfStartedSubjectGoesHighAndLow_ThenValueFollows()
     {
         // Arrange

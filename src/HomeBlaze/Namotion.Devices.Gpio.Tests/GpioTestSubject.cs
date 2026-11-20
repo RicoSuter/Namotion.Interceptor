@@ -27,16 +27,19 @@ internal sealed class GpioTestSubject : IAsyncDisposable
 
     /// <summary>
     /// Creates a subject on the given driver whose ADCs touch no hardware, polling once an hour so that a test reads
-    /// the state the start or an apply left.
+    /// the state the start or an apply left. The driver is that of a Raspberry Pi register driver board when
+    /// <paramref name="isRaspberryPi"/> is set, and the board is a Raspberry Pi of another model when
+    /// <paramref name="isRaspberryPiBoard"/> is set.
     /// </summary>
     public static GpioSubject Create(
         GpioDriver driver,
         bool isRaspberryPi = false,
         RecordingAdcFactory? adcFactory = null,
-        Dictionary<int, GpioPin>? pins = null)
+        Dictionary<int, GpioPin>? pins = null,
+        bool isRaspberryPiBoard = false)
     {
         adcFactory ??= new RecordingAdcFactory();
-        var subject = new GpioSubject(driver, isRaspberryPi, adcFactory.CreateMcp3008, adcFactory.CreateAds1115)
+        var subject = new GpioSubject(driver, isRaspberryPi, adcFactory.CreateMcp3008, adcFactory.CreateAds1115, isRaspberryPiBoard)
         {
             PollingInterval = TimeSpan.FromHours(1)
         };

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Device.Gpio;
 using HomeBlaze.Abstractions;
 using Namotion.Devices.Gpio.Simulation;
@@ -9,7 +10,8 @@ namespace Namotion.Devices.Gpio.Tests;
 /// <summary>
 /// Applies configurations to a running subject, which stops the GPIO hardware handling and connects again: as the
 /// storage applies a changed file (the serializer replaces the configuration properties, which deserializes new pins,
-/// and then the configuration is applied) and as the pin editor saves a pin (the same pins, then applied).
+/// and then the configuration is applied) and as the pin editor saves a pin (the same pins, then applied). The
+/// controller and the lines of outputs that stay outputs are kept while the driver stays the same.
 /// </summary>
 public class GpioConfigurationReloadTests
 {
@@ -265,6 +267,267 @@ public class GpioConfigurationReloadTests
         // Assert
         Assert.Equal(ServiceStatus.Stopped, subject.Status);
         Assert.Null(subject.StatusMessage);
+        Assert.All(subject.Pins.Values, pin => Assert.Equal(ServiceStatus.Stopped, pin.Status));
+    }
+
+    [Fact]
+    public async Task WhenDriverSetsModeBeforeLevel_ThenAnOutputThatStaysAnOutputKeepsItsLineAndLevel()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver { SetsModeBeforeLevel = true };
+        var subject = CreateSubject(driver);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+        var pin = subject.Pins[5];
+        await pin.TurnOnAsync(CancellationToken.None);
+        var drivenLevelCountBeforeApply = driver.GetDrivenLevels(5).Length;
+
+        // Act
+        pin.Name = "Relay";
+        await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, pin.Status);
+        Assert.True(pin.Value);
+        Assert.Equal(PinValue.High, driver.GetLatch(5));
+        Assert.Empty(driver.GetDrivenLevels(5).Skip(drivenLevelCountBeforeApply));
+        Assert.Equal(1, driver.GetOpenCount(5));
+
+        await pin.TurnOffAsync(CancellationToken.None);
+        Assert.Equal(PinValue.Low, driver.GetLatch(5));
+    }
+
+    [Fact]
+    public async Task WhenModeOfAPinChangesInAReloadedConfiguration_ThenItIsReopenedInItsMode()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver { SetsModeBeforeLevel = true };
+        driver.SetUpPin(5, PinMode.Output, inputLevel: PinValue.Low, latch: PinValue.High);
+        var subject = CreateSubject(driver);
+        var serializer = GpioTestSubject.CreateSerializer(subject);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+        var drivenLevelCountBeforeReload = driver.GetDrivenLevels(5).Length;
+
+        // Act
+        serializer.UpdateConfiguration(subject, ReloadedJson);
+        await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, driver.GetOpenCount(5));
+        Assert.Empty(driver.GetDrivenLevels(5).Skip(drivenLevelCountBeforeReload));
+        Assert.True(subject.Pins[5].Value);
+
+        // Pin 6 was an output and is missing from the file, pin 17 was an input and pin 27 had another pull.
+        Assert.Equal(2, driver.GetOpenCount(6));
+        Assert.Equal(PinMode.Input, driver.GetMode(6));
+        Assert.Equal(2, driver.GetOpenCount(17));
+        Assert.Equal(PinMode.Output, driver.GetMode(17));
+        Assert.Equal(2, driver.GetOpenCount(27));
+        Assert.Equal(PinMode.InputPullUp, driver.GetMode(27));
+        Assert.All(subject.Pins.Values, pin => Assert.Equal(ServiceStatus.Running, pin.Status));
+    }
+
+    [Fact]
+    public async Task WhenInversionOfAnOutputChangesInAReloadedConfiguration_ThenItKeepsItsLevelAndTheValueFollows()
+    {
+        // Arrange
+        const string jsonWithInvertedPin5 = """
+            {
+              "$type": "Namotion.Devices.Gpio.GpioSubject",
+              "pins": {
+                "5": { "mode": "Output", "isInverted": true }
+              }
+            }
+            """;
+        var driver = new LatchingGpioDriver { SetsModeBeforeLevel = true };
+        var subject = CreateSubject(driver);
+        var serializer = GpioTestSubject.CreateSerializer(subject);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+        await subject.Pins[5].TurnOnAsync(CancellationToken.None);
+        var drivenLevelCountBeforeReload = driver.GetDrivenLevels(5).Length;
+
+        // Act
+        serializer.UpdateConfiguration(subject, jsonWithInvertedPin5);
+        await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, subject.Pins[5].Status);
+        Assert.False(subject.Pins[5].Value);
+        Assert.Equal(PinValue.High, driver.GetLatch(5));
+        Assert.Empty(driver.GetDrivenLevels(5).Skip(drivenLevelCountBeforeReload));
+    }
+
+    [Fact]
+    public async Task WhenSimulationIsTurnedOff_ThenOutputsOpenAtTheLevelOfTheHardware()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        driver.SetUpPin(5, PinMode.Output, inputLevel: PinValue.Low, latch: PinValue.Low);
+        var subject = CreateSubject(driver);
+        subject.UseSimulation = true;
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+        await subject.Pins[5].TurnOnAsync(CancellationToken.None);
+        Assert.Equal(0, driver.GetOpenCount(5));
+
+        // Act
+        subject.UseSimulation = false;
+        await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, subject.Pins[5].Status);
+        Assert.False(subject.Pins[5].Value);
+        Assert.Equal(PinValue.Low, driver.GetLatch(5));
+        Assert.DoesNotContain(PinValue.High, driver.GetDrivenLevels(5));
+    }
+
+    [Fact]
+    public async Task WhenSubscriberOfAPinThrowsWhileItStops_ThenTheApplyStartsEveryPinAndReportsIt()
+    {
+        // Arrange
+        var subject = CreateSubject(new LatchingGpioDriver());
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+        var pin = subject.Pins[3];
+        var isThrowing = true;
+        ((INotifyPropertyChanged)pin).PropertyChanged += (_, arguments) =>
+        {
+            if (isThrowing && arguments.PropertyName == nameof(GpioPin.Status) && pin.Status == ServiceStatus.Stopped)
+            {
+                isThrowing = false;
+                throw new InvalidOperationException("The subscriber failed.");
+            }
+        };
+
+        // Act
+        await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, subject.Status);
+        Assert.Equal("GPIO pin 3 could not be stopped: The subscriber failed.", subject.StatusMessage);
+        Assert.All(subject.Pins.Values, entry => Assert.Equal(ServiceStatus.Running, entry.Status));
+
+        await subject.ApplyConfigurationAsync(CancellationToken.None);
+        Assert.Equal(ServiceStatus.Running, subject.Status);
+        Assert.Null(subject.StatusMessage);
+        Assert.All(subject.Pins.Values, entry => Assert.Equal(ServiceStatus.Running, entry.Status));
+    }
+
+    [Fact]
+    public async Task WhenSubscriberOfAPinThrowsWhileItStarts_ThenTheOtherPinsStartAndThePinReportsIt()
+    {
+        // Arrange
+        var subject = CreateSubject(new LatchingGpioDriver());
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+        var pin = subject.Pins[3];
+        ((INotifyPropertyChanged)pin).PropertyChanged += (_, arguments) =>
+        {
+            if (arguments.PropertyName == nameof(GpioPin.Status) && pin.Status == ServiceStatus.Running)
+            {
+                throw new InvalidOperationException("The subscriber failed.");
+            }
+        };
+
+        // Act
+        await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, subject.Status);
+        Assert.Equal("GPIO pin 3 could not be started: The subscriber failed.", subject.StatusMessage);
+        Assert.Equal(ServiceStatus.Error, pin.Status);
+        Assert.Equal("GPIO pin 3 could not be started: The subscriber failed.", pin.StatusMessage);
+        Assert.All(subject.Pins.Where(entry => entry.Key != 3), entry => Assert.Equal(ServiceStatus.Running, entry.Value.Status));
+    }
+
+    [Fact]
+    public async Task WhenReloadedConfigurationHasNullPins_ThenEveryPinStartsLikeANewPin()
+    {
+        // Arrange
+        const string jsonWithNullPins = """
+            {
+              "$type": "Namotion.Devices.Gpio.GpioSubject",
+              "pins": null
+            }
+            """;
+        var driver = new SimulationGpioDriver();
+        var subject = CreateSubject(driver);
+        var serializer = GpioTestSubject.CreateSerializer(subject);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+
+        // Act
+        serializer.UpdateConfiguration(subject, jsonWithNullPins);
+        driver.SimulatePinValueChange(17, PinValue.High);
+        await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, subject.Status);
+        Assert.Equal(28, subject.Pins.Count);
+        Assert.All(subject.Pins, entry =>
+        {
+            Assert.Equal(entry.Key, entry.Value.PinNumber);
+            Assert.Equal(GpioPinMode.Input, entry.Value.Mode);
+            Assert.Equal(ServiceStatus.Running, entry.Value.Status);
+        });
+    }
+
+    [Fact]
+    public async Task WhenInterruptsCannotBeRegistered_ThenAnApplyReportsNoPinThatCouldNotBeReleased()
+    {
+        // Arrange
+        var subject = CreateSubject(new LatchingGpioDriver { FailsCallbacks = true });
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await AsyncTestHelpers.WaitUntilAsync(() =>
+            subject.Status == ServiceStatus.Running && subject.Pins.Count == 28 && subject.Pins[17].Status == ServiceStatus.Unavailable);
+        Assert.Equal("The callback of pin 17 could not be added.", subject.Pins[17].StatusMessage);
+
+        // Act
+        await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, subject.Status);
+        Assert.Null(subject.StatusMessage);
+        Assert.Equal(ServiceStatus.Running, subject.Pins[5].Status);
+    }
+
+    [Fact]
+    public async Task WhenPlatformIsNotSupported_ThenTheConfiguredPinsAreKept()
+    {
+        // Arrange
+        var subject = CreateSubject(new LatchingGpioDriver { IsPlatformNotSupported = true });
+        var pinsBefore = subject.Pins;
+        try
+        {
+            // Act
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal(ServiceStatus.Unavailable, subject.Status);
+            Assert.Equal("GPIO not supported on this platform", subject.StatusMessage);
+            Assert.Same(pinsBefore, subject.Pins);
+            Assert.Equal([5, 6, 17, 27], subject.Pins.Keys.Order());
+        }
+        finally
+        {
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenDriverCannotBeDisposed_ThenDisposeStillStopsTheSubjectAndEndsTheServiceLoop()
+    {
+        // Arrange
+        var subject = CreateSubject(new LatchingGpioDriver { FailsDispose = true });
+        await subject.StartAsync(CancellationToken.None);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+
+        // Act & Assert
+        Assert.Throws<IOException>(subject.Dispose);
+        await subject.ExecuteTask!.WaitAsync(TestTimeouts.Default);
+        Assert.Equal(ServiceStatus.Stopped, subject.Status);
         Assert.All(subject.Pins.Values, pin => Assert.Equal(ServiceStatus.Stopped, pin.Status));
     }
 

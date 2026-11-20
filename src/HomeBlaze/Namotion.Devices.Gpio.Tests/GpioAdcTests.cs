@@ -109,14 +109,16 @@ public class GpioAdcTests
     }
 
     [Theory]
-    [InlineData(true, 1, true)]
-    [InlineData(false, 1, false)]
-    [InlineData(true, 0, false)]
-    public async Task WhenAds1115IsConfigured_ThenGpio2And3AreReservedOnlyForI2cBus1OfARaspberryPi(bool isRaspberryPi, int i2cBus, bool isReserved)
+    [InlineData(true, false, 1, true)]
+    [InlineData(false, true, 1, true)]
+    [InlineData(false, false, 1, false)]
+    [InlineData(true, false, 0, false)]
+    public async Task WhenAds1115IsConfigured_ThenGpio2And3AreReservedOnlyForI2cBus1OfARaspberryPi(
+        bool isRaspberryPi, bool isRaspberryPiBoard, int i2cBus, bool isReserved)
     {
         // Arrange
         var driver = new LatchingGpioDriver();
-        var subject = GpioTestSubject.Create(driver, isRaspberryPi);
+        var subject = GpioTestSubject.Create(driver, isRaspberryPi, isRaspberryPiBoard: isRaspberryPiBoard);
         subject.Ads1115 = new Ads1115Configuration { I2cBus = i2cBus };
 
         // Act
@@ -129,6 +131,54 @@ public class GpioAdcTests
             Assert.Equal(isReserved ? "Used by I2C (ADS1115)" : null, subject.Pins[pinNumber].StatusMessage);
             Assert.Equal(isReserved ? 0 : 1, driver.GetOpenCount(pinNumber));
         }
+
+        // Only the boards of the Raspberry Pi register driver start new pins with their power-on pull.
+        Assert.Equal(isRaspberryPi ? GpioPinMode.InputPullDown : GpioPinMode.Input, subject.Pins[17].Mode);
+    }
+
+    [Fact]
+    public async Task WhenAnOutputBecomesAPinOfAnAdc_ThenItIsClosedBeforeTheAdcIsCreated()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var adcFactory = new RecordingAdcFactory();
+        var subject = GpioTestSubject.Create(driver, adcFactory: adcFactory, pins: new Dictionary<int, GpioPin>
+        {
+            [12] = new() { Mode = GpioPinMode.Output }
+        });
+        subject.Mcp3008 = GpioTestSubject.CreateMcp3008Configuration();
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject, GpioTestSubject.Mcp3008PinNumbers);
+
+        var events = new List<string>();
+        driver.PinClosed = pinNumber =>
+        {
+            lock (events)
+            {
+                events.Add($"close {pinNumber}");
+            }
+        };
+        adcFactory.EventRecorded = recordedEvent =>
+        {
+            lock (events)
+            {
+                events.Add(recordedEvent);
+            }
+        };
+
+        // Act
+        subject.Mcp3008 = GpioTestSubject.CreateMcp3008Configuration() with { ClockPin = 12 };
+        await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains("dispose MCP3008 21", events);
+        Assert.Contains("close 12", events);
+        Assert.Contains("create MCP3008 12", events);
+        var closeIndex = events.IndexOf("close 12");
+        var createIndex = events.IndexOf("create MCP3008 12");
+        Assert.True(closeIndex >= 0 && createIndex > closeIndex);
+        Assert.Equal("Used by the MCP3008", subject.Pins[12].StatusMessage);
+        Assert.Equal(ServiceStatus.Running, subject.Pins[21].Status);
     }
 
     [Fact]
