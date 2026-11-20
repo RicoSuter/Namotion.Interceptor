@@ -81,6 +81,10 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     // loop and an applied configuration check this to create nothing after Dispose.
     private bool _isDisposed;
 
+    // Guarded by _controllerLock. Set when the service loop ended, so that an applied configuration connects nothing
+    // until the service starts again.
+    private bool _isServiceStopped;
+
     /// <summary>
     /// Optional MCP3008 ADC configuration. Its pins are not opened as GPIO pins: they show
     /// <see cref="ServiceStatus.Unavailable"/> with the message "Used by the MCP3008".
@@ -345,6 +349,11 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        lock (_controllerLock)
+        {
+            _isServiceStopped = false;
+        }
+
         try
         {
             while (!stoppingToken.IsCancellationRequested)
@@ -382,8 +391,12 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         {
             if (!_isDisposed)
             {
-                Status = ServiceStatus.Stopping;
-                StatusMessage = "Shutting down...";
+                // Released, so that no driver thread outlives the service: libgpiod 2.x observes edges on foreground
+                // threads that end only when the driver is disposed, and they would keep the process from exiting.
+                _isServiceStopped = true;
+                Stop(keepController: false, []);
+                StatusMessage = null;
+                Status = ServiceStatus.Stopped;
             }
         }
     }
@@ -450,7 +463,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     {
         lock (_controllerLock)
         {
-            if (_isDisposed)
+            if (_isDisposed || _isServiceStopped)
             {
                 return Task.CompletedTask;
             }

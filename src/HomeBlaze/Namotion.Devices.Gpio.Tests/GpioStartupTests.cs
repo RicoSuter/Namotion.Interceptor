@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Device.Gpio;
 using HomeBlaze.Abstractions;
 using Namotion.Interceptor.Testing;
@@ -7,6 +8,36 @@ namespace Namotion.Devices.Gpio.Tests;
 
 public class GpioStartupTests
 {
+    [Fact]
+    public async Task WhenTheServiceStops_ThenEveryPinIsReleasedAndAnAppliedConfigurationOpensNone()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var closedPinNumbers = new ConcurrentBag<int>();
+        driver.PinClosed = closedPinNumbers.Add;
+        var subject = GpioTestSubject.Create(driver, pins: new Dictionary<int, GpioPin>
+        {
+            [17] = new() { Mode = GpioPinMode.Output },
+            [22] = new() { Mode = GpioPinMode.Input }
+        });
+        await subject.StartAsync(CancellationToken.None);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+
+        // Act
+        await subject.StopAsync(CancellationToken.None);
+        await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, subject.Status);
+        Assert.Contains(17, closedPinNumbers);
+        Assert.Contains(22, closedPinNumbers);
+        Assert.All(subject.Pins.Values, pin => Assert.Equal(ServiceStatus.Stopped, pin.Status));
+        Assert.Equal(1, driver.GetOpenCount(17));
+        Assert.Equal(1, driver.GetOpenCount(22));
+
+        subject.Dispose();
+    }
+
     [Fact]
     public async Task WhenPollingFailsAndThenSucceeds_ThenTheStatusReturnsToRunning()
     {
