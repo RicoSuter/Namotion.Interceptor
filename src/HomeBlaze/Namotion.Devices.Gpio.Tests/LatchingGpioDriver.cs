@@ -21,6 +21,11 @@ internal sealed class LatchingGpioDriver : GpioDriver
     public bool FailsReadBeforeMode { get; init; }
 
     /// <summary>
+    /// Called after the mode of a pin was set, outside the lock of the driver, with the pin number.
+    /// </summary>
+    public Action<int>? PinModeSet { get; set; }
+
+    /// <summary>
     /// Sets the state a pin has before it is opened.
     /// </summary>
     public void SetUpPin(int pinNumber, PinMode mode, PinValue inputLevel, PinValue latch)
@@ -58,6 +63,28 @@ internal sealed class LatchingGpioDriver : GpioDriver
     }
 
     /// <summary>
+    /// Gets how often the pin was opened.
+    /// </summary>
+    public int GetOpenCount(int pinNumber)
+    {
+        lock (_lock)
+        {
+            return GetState(pinNumber).OpenCount;
+        }
+    }
+
+    /// <summary>
+    /// Gets how often the mode of the pin was set.
+    /// </summary>
+    public int GetModeSetCount(int pinNumber)
+    {
+        lock (_lock)
+        {
+            return GetState(pinNumber).ModeSetCount;
+        }
+    }
+
+    /// <summary>
     /// Gets every level the pin drove as an output since it was set up, in order.
     /// </summary>
     public PinValue[] GetDrivenLevels(int pinNumber)
@@ -74,6 +101,10 @@ internal sealed class LatchingGpioDriver : GpioDriver
 
     protected override void OpenPin(int pinNumber)
     {
+        lock (_lock)
+        {
+            GetState(pinNumber).OpenCount++;
+        }
     }
 
     protected override void ClosePin(int pinNumber)
@@ -92,7 +123,10 @@ internal sealed class LatchingGpioDriver : GpioDriver
 
             state.Mode = mode;
             state.IsModeSet = true;
+            state.ModeSetCount++;
         }
+
+        PinModeSet?.Invoke(pinNumber);
     }
 
     protected override void SetPinMode(int pinNumber, PinMode mode, PinValue initialValue)
@@ -188,6 +222,10 @@ internal sealed class LatchingGpioDriver : GpioDriver
         public PinValue Latch { get; set; } = PinValue.Low;
 
         public bool IsModeSet { get; set; }
+
+        public int OpenCount { get; set; }
+
+        public int ModeSetCount { get; set; }
 
         public List<PinValue> DrivenLevels { get; } = new();
     }

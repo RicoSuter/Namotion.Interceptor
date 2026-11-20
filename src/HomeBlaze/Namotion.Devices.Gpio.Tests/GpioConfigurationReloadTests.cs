@@ -2,6 +2,7 @@ using System.Device.Gpio;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Namotion.Devices.Gpio.Configuration;
 using Namotion.Devices.Gpio.Simulation;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Testing;
@@ -27,6 +28,28 @@ public class GpioConfigurationReloadTests
           }
         }
         """;
+
+    private const string JsonWithMcp3008 = """
+        {
+          "$type": "Namotion.Devices.Gpio.GpioSubject",
+          "mcp3008": { "clockPin": 21, "mosiPin": 20, "misoPin": 19, "chipSelectPin": 16 },
+          "pins": {
+            "17": { "name": "Led", "mode": "Output" }
+          }
+        }
+        """;
+
+    private const string JsonWithoutMcp3008 = """
+        {
+          "$type": "Namotion.Devices.Gpio.GpioSubject",
+          "mcp3008": null,
+          "pins": {
+            "17": { "name": "Led", "mode": "Output" }
+          }
+        }
+        """;
+
+    private static readonly int[] Mcp3008PinNumbers = [16, 19, 20, 21];
 
     [Fact]
     public async Task WhenConfigurationIsReloaded_ThenPinsKeepTheirNumbersAndApplyTheFile()
@@ -222,7 +245,252 @@ public class GpioConfigurationReloadTests
         }
     }
 
-    private static (GpioSubject Subject, ConfigurableSubjectSerializer Serializer) CreateSubject(GpioDriver driver)
+    [Fact]
+    public async Task WhenPinIsLeftOutOfReloadedConfigurationOnRaspberryPi_ThenItStartsWithItsPowerOnPull()
+    {
+        // Arrange
+        const string jsonWithoutPin5 = """
+            {
+              "$type": "Namotion.Devices.Gpio.GpioSubject",
+              "pins": {
+                "17": { "name": "Led", "mode": "Output" }
+              }
+            }
+            """;
+        var driver = new LatchingGpioDriver();
+        var (subject, serializer) = CreateSubject(driver, isRaspberryPi: true);
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitUntilAllPinsRunAsync(subject);
+            Assert.Equal(PinMode.Output, driver.GetMode(5));
+
+            // Act
+            serializer.UpdateConfiguration(subject, jsonWithoutPin5);
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal(GpioPinMode.InputPullUp, subject.Pins[5].Mode);
+            Assert.Equal(PinMode.InputPullUp, driver.GetMode(5));
+            Assert.Equal(GpioPinMode.InputPullDown, subject.Pins[27].Mode);
+            Assert.Equal(PinMode.InputPullDown, driver.GetMode(27));
+            Assert.Equal(ServiceStatus.Running, subject.Pins[5].Status);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenConfigurationWithMcp3008IsReloaded_ThenItsPinsAreNeverOpened()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var (subject, serializer) = CreateSubject(driver);
+        subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitUntilAllPinsRunAsync(subject, Mcp3008PinNumbers);
+
+            // Act
+            serializer.UpdateConfiguration(subject, JsonWithMcp3008);
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+            serializer.UpdateConfiguration(subject, JsonWithMcp3008);
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            foreach (var pinNumber in Mcp3008PinNumbers)
+            {
+                var pin = subject.Pins[pinNumber];
+                Assert.Equal(pinNumber, pin.PinNumber);
+                Assert.Equal(ServiceStatus.Unavailable, pin.Status);
+                Assert.Equal("Used by the MCP3008", pin.StatusMessage);
+                Assert.Null(pin.Controller);
+                Assert.Equal(0, driver.GetOpenCount(pinNumber));
+                Assert.Equal(0, driver.GetModeSetCount(pinNumber));
+            }
+
+            Assert.Equal(ServiceStatus.Running, subject.Pins[17].Status);
+            Assert.Equal(PinMode.Output, driver.GetMode(17));
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenMcp3008IsRemovedOnReload_ThenItsPinsOpenAsGpioPins()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var (subject, serializer) = CreateSubject(driver);
+        subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitUntilAllPinsRunAsync(subject, Mcp3008PinNumbers);
+
+            // Act
+            serializer.UpdateConfiguration(subject, JsonWithoutMcp3008);
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Null(subject.Mcp3008);
+            foreach (var pinNumber in Mcp3008PinNumbers)
+            {
+                var pin = subject.Pins[pinNumber];
+                Assert.Equal(pinNumber, pin.PinNumber);
+                Assert.Equal(ServiceStatus.Running, pin.Status);
+                Assert.Null(pin.StatusMessage);
+                Assert.Equal(PinMode.Input, driver.GetMode(pinNumber));
+                Assert.Equal(1, driver.GetModeSetCount(pinNumber));
+            }
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenMcp3008IsAddedOnReload_ThenItsPinsAreDetachedAndReserved()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var (subject, serializer) = CreateSubject(driver);
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitUntilAllPinsRunAsync(subject);
+            var pinsBeforeReload = Mcp3008PinNumbers.Select(pinNumber => subject.Pins[pinNumber]).ToArray();
+            var modeSetCountsBeforeReload = Mcp3008PinNumbers.Select(driver.GetModeSetCount).ToArray();
+
+            // Act
+            serializer.UpdateConfiguration(subject, JsonWithMcp3008);
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            Assert.All(pinsBeforeReload, pin =>
+            {
+                Assert.Equal(ServiceStatus.Stopped, pin.Status);
+                Assert.Null(pin.Controller);
+            });
+            Assert.Equal(modeSetCountsBeforeReload, Mcp3008PinNumbers.Select(driver.GetModeSetCount));
+            foreach (var pinNumber in Mcp3008PinNumbers)
+            {
+                var pin = subject.Pins[pinNumber];
+                Assert.Equal(pinNumber, pin.PinNumber);
+                Assert.Equal(ServiceStatus.Unavailable, pin.Status);
+                Assert.Equal("Used by the MCP3008", pin.StatusMessage);
+            }
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAds1115IsConfiguredOnI2cBus1_ThenGpio2And3AreReserved()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var (subject, _) = CreateSubject(driver);
+        subject.Ads1115 = new Ads1115Configuration { I2cBus = 1 };
+
+        // Act
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitUntilAllPinsRunAsync(subject, [2, 3]);
+
+            // Assert
+            foreach (var pinNumber in new[] { 2, 3 })
+            {
+                var pin = subject.Pins[pinNumber];
+                Assert.Equal(pinNumber, pin.PinNumber);
+                Assert.Equal("Used by I2C (ADS1115)", pin.StatusMessage);
+                Assert.Equal(0, driver.GetOpenCount(pinNumber));
+                Assert.Equal(0, driver.GetModeSetCount(pinNumber));
+            }
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAds1115IsConfiguredOnOtherI2cBus_ThenGpio2And3AreGpioPins()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var (subject, _) = CreateSubject(driver);
+        subject.Ads1115 = new Ads1115Configuration { I2cBus = 0 };
+
+        // Act
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            // Assert
+            await WaitUntilAllPinsRunAsync(subject);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenPinsAreReplacedWhileTheyAreDiscovered_ThenTheReplacedPinsAreAttached()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var (subject, _) = CreateSubject(driver);
+        var pinBeforeReplacement = subject.Pins[17];
+        var replacementPin = new GpioPin { Mode = GpioPinMode.InputPullUp };
+        var isReplaced = false;
+        driver.PinModeSet = pinNumber =>
+        {
+            // Runs on the service loop while it discovers the pins, the way a reload replaces them without the lock.
+            if (pinNumber == 5 && !isReplaced)
+            {
+                isReplaced = true;
+                subject.Pins = new Dictionary<int, GpioPin> { [17] = replacementPin };
+            }
+        };
+
+        // Act
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitUntilAllPinsRunAsync(subject);
+
+            // Assert
+            Assert.True(isReplaced);
+            Assert.Same(replacementPin, subject.Pins[17]);
+            Assert.Equal(17, replacementPin.PinNumber);
+            Assert.Equal(PinMode.InputPullUp, driver.GetMode(17));
+            Assert.Equal(ServiceStatus.Stopped, pinBeforeReplacement.Status);
+            Assert.All(subject.Pins, entry => Assert.Equal(entry.Key, entry.Value.PinNumber));
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    private static (GpioSubject Subject, ConfigurableSubjectSerializer Serializer) CreateSubject(GpioDriver driver, bool isRaspberryPi = false)
     {
         var services = new ServiceCollection();
         var context = SubjectContextFactory.Create(services);
@@ -232,7 +500,7 @@ public class GpioConfigurationReloadTests
         typeProvider.AddAssembly(typeof(GpioSubject).Assembly);
         var serializer = new ConfigurableSubjectSerializer(typeProvider, services.BuildServiceProvider());
 
-        var subject = new GpioSubject(driver)
+        var subject = new GpioSubject(driver, isRaspberryPi)
         {
             // Long, so that a poll does not correct what the reload did.
             PollingInterval = TimeSpan.FromHours(1),
@@ -247,9 +515,10 @@ public class GpioConfigurationReloadTests
         return (subject, serializer);
     }
 
-    private static Task WaitUntilAllPinsRunAsync(GpioSubject subject) =>
+    private static Task WaitUntilAllPinsRunAsync(GpioSubject subject, int[]? reservedPinNumbers = null) =>
         AsyncTestHelpers.WaitUntilAsync(() =>
             subject.Status == ServiceStatus.Running &&
             subject.Pins.Count == 28 &&
-            subject.Pins.Values.All(pin => pin.Status == ServiceStatus.Running));
+            subject.Pins.All(entry => entry.Value.Status ==
+                (reservedPinNumbers?.Contains(entry.Key) == true ? ServiceStatus.Unavailable : ServiceStatus.Running)));
 }

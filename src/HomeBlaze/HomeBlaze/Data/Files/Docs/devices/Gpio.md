@@ -27,7 +27,7 @@ The GPIO device provides access to GPIO pins on various Linux-based single-board
 
 | Operation | Description |
 |-----------|-------------|
-| `ApplyRaspberryPiDefaults` | Names the pins with a fixed function (I2C, SPI, UART, PWM, HAT EEPROM) and applies the power-on pull of a Raspberry Pi 3, 4 or Zero 2 W (pull-up for GPIO 0 to 8, pull-down for GPIO 9 to 27), both only to unconfigured pins: those without a name in plain `Input` mode or in the mode of their power-on pull, as new pins on a Raspberry Pi start. Other pins and the pins of a configured MCP3008 are not changed, so applying it again changes nothing. Saves the configuration when a pin changed. Check the defaults before using it on a Raspberry Pi 5. |
+| `ApplyRaspberryPiDefaults` | Names the pins with a fixed function (I2C, SPI, UART, PWM, HAT EEPROM) and applies the power-on pull of a Raspberry Pi 3, 4, 400, Zero 2 W or Compute Module 3 or 4 (pull-up for GPIO 0 to 8, pull-down for GPIO 9 to 27), both only to unconfigured pins: those without a name in plain `Input` mode or in the mode of their power-on pull, as new pins on a Raspberry Pi start. Other pins and the pins of a configured MCP3008 are not changed, so applying it again changes nothing. Saves the configuration when a pin changed. Check the defaults before using it on a Raspberry Pi 5. |
 
 ### JSON Configuration Example
 
@@ -78,7 +78,7 @@ On older distributions, the package may be named `libgpiod2`.
 
 ### Docker
 
-The container image has no libgpiod, so GPIO works in Docker on a Raspberry Pi 3, 4 or Zero 2 W through the Raspberry Pi register driver: it reads and writes the pins through `/dev/gpiomem` and registers for pin changes through sysfs. A container mounts sysfs read-only, so map the device and make the GPIO part of sysfs writable, as the commented lines in the compose file do:
+The container image has no libgpiod, so GPIO works in Docker on a Raspberry Pi 3, 4, 400, Zero 2 W or Compute Module 3 or 4 through the Raspberry Pi register driver: it reads and writes the pins through `/dev/gpiomem` and registers for pin changes through sysfs. A container mounts sysfs read-only, so map the device and make the GPIO part of sysfs writable, as the commented lines in the compose file do:
 
 ```yaml
     volumes:
@@ -143,14 +143,14 @@ The state of a pin is read-only; an output changes only through these operations
 Pins report their status via `ServiceStatus`:
 
 - **Running** - Pin is operational
-- **Unavailable** - Pin reserved by system (I2C, SPI) or platform not supported
+- **Unavailable** - Pin reserved by system (I2C, SPI), used by a configured ADC (see [Pins of an ADC](#pins-of-an-adc)) or platform not supported
 - **Error** - Hardware fault detected (e.g., write verification failed)
 
 ## Hardware Synchronization
 
 ### Output Pins
 
-When the GPIO controller starts, an output is opened at the level the pin has, and `Value` follows from it: after a restart of HomeBlaze the level it drove, so a restart does not switch outputs, and after a reboot of the Pi its power-on pull. This applies to the Raspberry Pi register driver (`/dev/gpiomem`, Raspberry Pi 3, 4 and Zero 2 W). With libgpiod 1.x (package `libgpiod2`), which cannot read a pin before it is opened, an output starts low and `Value` is read back from it. With libgpiod 2.x (package `libgpiod3`) or sysfs, an output keeps its level, but a high level can drop low for a moment while the pin becomes an output, at startup and when the mode changes to `Output`, because these drivers set the direction before the level. This is not verified on hardware. On a Raspberry Pi 3, 4 or Zero 2 W, GPIO 9 to 27 are pulled down while the Pi boots, so an active-low relay on one of them can switch on during boot and then stays on when HomeBlaze starts: connect an active-low relay to GPIO 4, 5 or 6, which are pulled up at boot, or add an external pull-up.
+When the GPIO controller starts, an output is opened at the level the pin has, and `Value` follows from it: after a restart of HomeBlaze the level it drove, so a restart does not switch outputs, and after a reboot of the Pi its power-on pull. This applies to the Raspberry Pi register driver (`/dev/gpiomem`, Raspberry Pi 3, 4, 400, Zero 2 W and Compute Module 3 and 4). With libgpiod 1.x (package `libgpiod2`), which cannot read a pin before it is opened, an output starts low and `Value` is read back from it. With libgpiod 2.x (package `libgpiod3`) or sysfs, an output keeps its level, but a high level can drop low for a moment while the pin becomes an output, at startup and when the mode changes to `Output`, because these drivers set the direction before the level. This is not verified on hardware. On a Raspberry Pi 3, 4, 400, Zero 2 W or Compute Module 3 or 4, GPIO 9 to 27 are pulled down while the Pi boots, so an active-low relay on one of them can switch on during boot and then stays on when HomeBlaze starts: connect an active-low relay to GPIO 4, 5 or 6, which are pulled up at boot, or add an external pull-up.
 
 When `TurnOn` or `SetValue` sets an output pin to true:
 1. The level is written to GPIO hardware (low for an inverted pin)
@@ -201,13 +201,24 @@ The pin editor shows this table and hints for the selected mode.
 
 Pin configurations are persisted and restored on restart:
 - When `GpioSubject` loads, existing pin configurations from JSON are reused
-- New pins (not in configuration) start with the power-on pull of the board on a Raspberry Pi 3, 4 or Zero 2 W (`InputPullUp` for GPIO 0 to 8, `InputPullDown` for GPIO 9 to 27), so an unconnected pin does not float; on other boards, a Raspberry Pi 5 and in simulation mode they start as `Input`. Pins in the configuration keep their mode, also a plain `Input`
+- New pins (not in configuration) start with the power-on pull of the board on a Raspberry Pi 3, 4, 400, Zero 2 W or Compute Module 3 or 4 (`InputPullUp` for GPIO 0 to 8, `InputPullDown` for GPIO 9 to 27), so an unconnected pin does not float; on other boards, a Raspberry Pi 5 and in simulation mode they start as `Input`. Pins in the configuration keep their mode, also a plain `Input`
 - Changes to `Name`, `Mode`, `IsInverted` and `DebounceTime` made in the pin editor or with a control on a page are saved, and `ApplyRaspberryPiDefaults` saves the changes it makes; changes made from code are not saved by themselves
-- Changes to the GPIO JSON file apply while HomeBlaze runs: all pins are reopened with the settings of the file, a pin missing from it starts like a new pin, and an output keeps its level
+- Changes to the GPIO JSON file apply while HomeBlaze runs: all pins are reopened with the settings of the file, a pin missing from it starts like a new pin, and an output keeps its level. The pins of a configured ADC are not reopened
 
 ## Analog Input (ADC)
 
 The GPIO device supports two ADC chips. Both can be configured simultaneously.
+
+### Pins of an ADC
+
+The pins a configured ADC uses are not opened as GPIO pins, at startup and when the configuration changes, so that opening them does not take them from the ADC. They stay in `Pins` with their pin number, `Status` `Unavailable` and a `StatusMessage`:
+
+| ADC | Pins | StatusMessage |
+|-----|------|---------------|
+| MCP3008 | `ClockPin`, `MosiPin`, `MisoPin` and `ChipSelectPin` | `Used by the MCP3008` |
+| ADS1115 on `I2cBus` 1 | GPIO 2 (SDA) and 3 (SCL), where a Raspberry Pi has I2C bus 1 | `Used by I2C (ADS1115)` |
+
+When the configuration of an ADC changes, the pins it no longer uses are opened as GPIO pins, and the pins it now uses are released before the ADC starts. A pin that was opened as a GPIO pin before, such as GPIO 2 and 3 before the ADS1115 was added, may need a reboot of the board to get its I2C function back.
 
 ### Channel Indexing
 
@@ -316,6 +327,7 @@ sudo apt install libgpiod3
 
 Common causes:
 - Pin reserved for I2C (GPIO 2, 3) or SPI (GPIO 7-11) on Raspberry Pi
+- `Used by the MCP3008` or `Used by I2C (ADS1115)`: the pin belongs to a configured ADC, see [Pins of an ADC](#pins-of-an-adc)
 - Pin in use by another process
 - Hardware-specific pin reservation
 - In Docker, `Read-only file system : '/sys/class/gpio/export'`: the two `/sys` volumes are missing, see [Docker](#docker)
@@ -331,7 +343,7 @@ This occurs when:
 
 ### Input switches between true and false on its own
 
-An unconnected or high-impedance input is floating, so its level is random. New pins on a Raspberry Pi 3, 4 or Zero 2 W start with the power-on pull, so this mainly happens for a pin set to plain `Input`. A two-color LED module on a pin set to plain `Input` changed `Value` 200 to 240 times per minute, even with the default 50 ms debounce. Give the pin a defined level with `InputPullUp` or `InputPullDown`, or run the `ApplyRaspberryPiDefaults` operation ("Apply Raspberry Pi Defaults"), which sets the power-on pull on unconfigured pins. A pin that drives something, such as an LED, should be an `Output`.
+An unconnected or high-impedance input is floating, so its level is random. New pins on a Raspberry Pi 3, 4, 400, Zero 2 W or Compute Module 3 or 4 start with the power-on pull, so this mainly happens for a pin set to plain `Input`. A two-color LED module on a pin set to plain `Input` changed `Value` 200 to 240 times per minute, even with the default 50 ms debounce. Give the pin a defined level with `InputPullUp` or `InputPullDown`, or run the `ApplyRaspberryPiDefaults` operation ("Apply Raspberry Pi Defaults"), which sets the power-on pull on unconfigured pins. A pin that drives something, such as an LED, should be an `Output`.
 
 ### Write verification failed
 

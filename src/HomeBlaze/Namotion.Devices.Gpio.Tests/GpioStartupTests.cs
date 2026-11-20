@@ -8,6 +8,34 @@ namespace Namotion.Devices.Gpio.Tests;
 public class GpioStartupTests
 {
     [Fact]
+    public async Task WhenAppliedConfigurationEnabledSimulation_ThenStartReusesItsController()
+    {
+        // Arrange
+        var subject = new GpioSubject { UseSimulation = true };
+        await subject.ApplyConfigurationAsync(CancellationToken.None);
+        var controller = subject.Pins[4].Controller;
+        var replacementPin = new GpioPin();
+        subject.Pins = new Dictionary<int, GpioPin>(subject.Pins) { [17] = replacementPin };
+
+        // Act
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running && replacementPin.Status == ServiceStatus.Running);
+
+            // Assert
+            Assert.NotNull(controller);
+            Assert.Same(controller, replacementPin.Controller);
+            Assert.Same(controller, subject.Pins[4].Controller);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task WhenInvertedOutputStartsAfterReboot_ThenItKeepsThePowerOnPull()
     {
         // Arrange
