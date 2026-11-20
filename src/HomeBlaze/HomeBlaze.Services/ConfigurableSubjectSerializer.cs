@@ -394,13 +394,7 @@ public class ConfigurableSubjectSerializer
             value = JsonSerializer.Deserialize(valueJson, propertyType, options);
             return true;
         }
-        catch (NotSupportedException exception) when (skipped is not null)
-        {
-            skipped(new SkippedConfigurationProperty(propertyName, propertyType, valueJson, exception));
-            value = null;
-            return false;
-        }
-        catch (JsonException exception)
+        catch (Exception exception) when (exception is JsonException || (exception is NotSupportedException && skipped is not null))
         {
             skipped?.Invoke(new SkippedConfigurationProperty(propertyName, propertyType, valueJson, exception));
             value = null;
@@ -427,10 +421,7 @@ public class ConfigurableSubjectSerializer
     /// for <paramref name="naming"/>.
     /// </summary>
     /// <remarks>
-    /// <see cref="Deserialize(string, ConfigurationNaming)"/>, <see cref="UpdateConfiguration(IInterceptorSubject, string, ConfigurationNaming)"/>
-    /// and <see cref="ReplaceConfiguration(IInterceptorSubject, string, Action{SkippedConfigurationProperty}, ConfigurationNaming)"/>
-    /// skip a property whose value does not convert, and report it only to a caller that passes a callback for the
-    /// skipped properties.
+    /// Use it to check a value before one of the methods that skip a value that does not convert.
     /// </remarks>
     public bool CanDeserialize(
         string json, Type propertyType, ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
@@ -478,7 +469,8 @@ public class ConfigurableSubjectSerializer
     /// <summary>
     /// Updates like <see cref="UpdateConfiguration(IInterceptorSubject, string, Action{SkippedConfigurationProperty}, ConfigurationNaming)"/>
     /// and gives every configuration property that the JSON does not have the value of a new subject of its type,
-    /// see <see cref="GetDefaultConfiguration"/>, so that the subject holds what a subject created from the JSON holds.
+    /// see <see cref="GetDefaultConfiguration"/>, so that the subject holds what a subject created from the JSON holds,
+    /// apart from a value that does not convert, which keeps its value.
     /// </summary>
     /// <remarks>
     /// For a type without a default configuration, a property that the JSON does not have keeps its value.

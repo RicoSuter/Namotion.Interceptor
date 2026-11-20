@@ -624,6 +624,26 @@ public class ConfigurableSubjectSerializerTests
     }
 
     [Fact]
+    public void WhenTypeHasNoDefaultConfiguration_ThenReplaceConfigurationKeepsTheValueOfAMissingKey()
+    {
+        // Arrange
+        var serializer = new ConfigurableSubjectSerializer(new TypeProvider(), new ServiceCollection().BuildServiceProvider());
+        var subject = new SubjectWithDefaults(CreateContextWithConfigurationAttributes())
+        {
+            Label = "configured",
+            Interval = 5
+        };
+        var json = """{ "label": "updated" }""";
+
+        // Act
+        serializer.ReplaceConfiguration(subject, json, skipped: null);
+
+        // Assert
+        Assert.Equal("updated", subject.Label);
+        Assert.Equal(5, subject.Interval);
+    }
+
+    [Fact]
     public void WhenKeyIsMissing_ThenReplaceConfigurationSetsTheTypeDefault()
     {
         // Arrange
