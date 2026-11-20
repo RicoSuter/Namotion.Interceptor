@@ -340,9 +340,8 @@ public class ConfigurableSubjectSerializer
     }
 
     /// <summary>
-    /// Sets the configuration properties of a registered subject from <paramref name="root"/>. A property that
-    /// <paramref name="root"/> does not have is left alone without <paramref name="defaults"/>, and otherwise gets
-    /// its value from them, or null when they do not have it either, because defaults are written without nulls.
+    /// Sets the configuration properties of a registered subject from <paramref name="root"/>, and a property that
+    /// <paramref name="root"/> does not have from <paramref name="defaults"/> when they are given.
     /// </summary>
     private void SetConfigurationProperties(
         IInterceptorSubject subject,
@@ -362,6 +361,7 @@ public class ConfigurableSubjectSerializer
             }
             else if (defaults is { } defaultValues)
             {
+                // Defaults are written without nulls, so a key they do not have has a null default.
                 valueJson = defaultValues.TryGetProperty(jsonName, out var defaultValue) ? defaultValue.GetRawText() : "null";
             }
             else
@@ -403,10 +403,8 @@ public class ConfigurableSubjectSerializer
     }
 
     /// <summary>
-    /// Describes the properties that the callback for the skipped properties of <see cref="Deserialize(string, Action{IInterceptorSubject}, Action{SkippedConfigurationProperty}, ConfigurationNaming)"/>
-    /// <see cref="UpdateConfiguration(IInterceptorSubject, string, Action{SkippedConfigurationProperty}, ConfigurationNaming)"/>
-    /// or <see cref="ReplaceConfiguration(IInterceptorSubject, string, Action{SkippedConfigurationProperty}, ConfigurationNaming)"/>
-    /// got, each by its key in JSON with the given naming.
+    /// Describes the properties that a method of this class handed to its callback for skipped properties, each by
+    /// its key in JSON with the given naming.
     /// </summary>
     public static string DescribeSkippedProperties(
         IEnumerable<SkippedConfigurationProperty> skipped,
