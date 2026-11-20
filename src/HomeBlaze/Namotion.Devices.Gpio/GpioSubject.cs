@@ -4,6 +4,7 @@ using System.Device.Gpio;
 using System.Device.I2c;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Storage.Abstractions;
 using Iot.Device.Adc;
 using Iot.Device.Ads1115;
 using Iot.Device.Spi;
@@ -11,6 +12,7 @@ using Microsoft.Extensions.Hosting;
 using Namotion.Devices.Gpio.Configuration;
 using Namotion.Devices.Gpio.Simulation;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Devices.Gpio;
 
@@ -29,6 +31,25 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     private readonly GpioDriver? _driver;
     private readonly ConcurrentDictionary<int, PinChangeEventHandler> _interruptHandlers = new();
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
+
+    private static readonly Dictionary<int, string> RaspberryPiPinNames = new()
+    {
+        [0] = "ID_SD (HAT EEPROM)",
+        [1] = "ID_SC (HAT EEPROM)",
+        [2] = "I2C1 SDA",
+        [3] = "I2C1 SCL",
+        [4] = "GPCLK0",
+        [7] = "SPI0 CE1",
+        [8] = "SPI0 CE0",
+        [9] = "SPI0 MISO",
+        [10] = "SPI0 MOSI",
+        [11] = "SPI0 SCLK",
+        [12] = "PWM0",
+        [13] = "PWM1",
+        [14] = "UART TX",
+        [15] = "UART RX",
+        [18] = "PCM CLK / PWM0"
+    };
 
     private GpioController? _controller;
     private bool _currentlyUsingSimulation;
@@ -82,19 +103,19 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     /// Analog channels from configured ADC (empty if no ADC configured).
     /// </summary>
     [State]
-    public partial Dictionary<int, AnalogChannel> AnalogChannels { get; set; }
+    public partial Dictionary<int, AnalogChannel> AnalogChannels { get; internal set; }
 
     /// <summary>
     /// Current status of the GPIO controller.
     /// </summary>
     [State(IsDiscrete = true)]
-    public partial ServiceStatus Status { get; set; }
+    public partial ServiceStatus Status { get; internal set; }
 
     /// <summary>
     /// Status message (e.g., "Platform not supported").
     /// </summary>
     [State]
-    public partial string? StatusMessage { get; set; }
+    public partial string? StatusMessage { get; internal set; }
 
     /// <inheritdoc />
     public string Title => "GPIO";
@@ -125,42 +146,88 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     }
 
     /// <summary>
-    /// Sets friendly names for Raspberry Pi GPIO pins based on their common functions.
+    /// Applies the defaults of a Raspberry Pi 3, 4 or Zero 2 W to the unconfigured pins, those without a name in plain
+    /// <see cref="GpioPinMode.Input"/> mode: the name of a pin with a fixed function, and the pull the Pi applies at
+    /// power-on, up for GPIO 0 to 8 and down for GPIO 9 to 27. Other pins and the pins of a configured
+    /// <see cref="Mcp3008"/> are not changed, so applying it again changes nothing. Saves the configuration when a pin
+    /// changed, also when a later pin failed.
     /// </summary>
-    [Operation(Title = "Set Raspberry Pi Pin Names")]
-    public void SetRaspberryPiPinNames()
+    /// <exception cref="InvalidOperationException">The mode of a pin could not be changed, or the configuration writer stored nothing.</exception>
+    [Operation(Title = "Apply Raspberry Pi Defaults", Description = "Names the pins with a fixed function and applies the power-on pulls of a Raspberry Pi 3, 4 or Zero 2 W to unconfigured pins. Check the defaults before using it on a Raspberry Pi 5.")]
+    public async Task ApplyRaspberryPiDefaultsAsync(CancellationToken cancellationToken)
     {
-        var pinNames = new Dictionary<int, string>
+        var mcp3008 = Mcp3008;
+        var isChanged = false;
+        var isCompleted = false;
+        try
         {
-            [2] = "I2C1 SDA",
-            [3] = "I2C1 SCL",
-            [4] = "GPCLK0",
-            [7] = "SPI0 CE1",
-            [8] = "SPI0 CE0",
-            [9] = "SPI0 MISO",
-            [10] = "SPI0 MOSI",
-            [11] = "SPI0 SCLK",
-            [12] = "PWM0",
-            [13] = "PWM1",
-            [14] = "UART TX",
-            [15] = "UART RX",
-            [17] = "GPIO17",
-            [18] = "PCM CLK / PWM0",
-            [22] = "GPIO22",
-            [23] = "GPIO23",
-            [24] = "GPIO24",
-            [25] = "GPIO25",
-            [27] = "GPIO27"
-        };
-
-        foreach (var (pinNumber, name) in pinNames)
-        {
-            if (Pins.TryGetValue(pinNumber, out var pin))
+            foreach (var (pinNumber, pin) in Pins)
             {
-                pin.Name = name;
+                if (!string.IsNullOrEmpty(pin.Name) || pin.Mode != GpioPinMode.Input ||
+                    (mcp3008 is not null && IsMcp3008Pin(mcp3008, pinNumber)))
+                {
+                    continue;
+                }
+
+                if (pinNumber <= 27)
+                {
+                    pin.Mode = pinNumber <= 8 ? GpioPinMode.InputPullUp : GpioPinMode.InputPullDown;
+                    isChanged = true;
+                }
+
+                if (RaspberryPiPinNames.TryGetValue(pinNumber, out var name))
+                {
+                    pin.Name = name;
+                    isChanged = true;
+                }
+            }
+
+            isCompleted = true;
+        }
+        finally
+        {
+            if (isChanged)
+            {
+                await SaveConfigurationAsync(isLoopCompleted: isCompleted, cancellationToken);
             }
         }
     }
+
+    /// <summary>
+    /// Writes the configuration through the configuration writer of a parent, if any. After a failed loop it never
+    /// throws, so that the exception of the loop propagates from the finally block.
+    /// </summary>
+    private async Task SaveConfigurationAsync(bool isLoopCompleted, CancellationToken cancellationToken)
+    {
+        var configurationWriter = this.TryGetFirstParent<IConfigurationWriter>();
+        if (configurationWriter is null)
+        {
+            return;
+        }
+
+        if (!isLoopCompleted)
+        {
+            try
+            {
+                await configurationWriter.WriteConfigurationAsync(this, cancellationToken);
+            }
+            catch (Exception)
+            {
+                // The exception of the loop is the one reported.
+            }
+
+            return;
+        }
+
+        if (!await configurationWriter.WriteConfigurationAsync(this, cancellationToken))
+        {
+            throw new InvalidOperationException("The Raspberry Pi defaults were applied but the configuration could not be saved.");
+        }
+    }
+
+    private static bool IsMcp3008Pin(Mcp3008Configuration configuration, int pinNumber) =>
+        pinNumber == configuration.ClockPin || pinNumber == configuration.MosiPin ||
+        pinNumber == configuration.MisoPin || pinNumber == configuration.ChipSelectPin;
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -296,53 +363,77 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         }
     }
 
-    private GpioPin CreateAndOpenPin(int pinNumber)
-    {
-        var pin = new GpioPin
-        {
-            PinNumber = pinNumber,
-            Mode = GpioPinMode.Input
-        };
-
-        InitializePin(pin);
-        return pin;
-    }
-
     private void InitializePin(GpioPin pin)
     {
         if (_controller == null)
             throw new InvalidOperationException("Controller not initialized");
 
+        pin.CancelDebounce();
         pin.Controller = _controller;
         pin.RegisterInterrupt = RegisterInterrupt;
         pin.UnregisterInterrupt = UnregisterInterrupt;
 
         try
         {
-            var pinMode = pin.Mode switch
+            if (pin.Mode == GpioPinMode.Output)
             {
-                GpioPinMode.Input => PinMode.Input,
-                GpioPinMode.InputPullUp => PinMode.InputPullUp,
-                GpioPinMode.InputPullDown => PinMode.InputPullDown,
-                GpioPinMode.Output => PinMode.Output,
-                _ => PinMode.Input
-            };
-            _controller.OpenPin(pin.PinNumber, pinMode);
+                // The level is read before the mode is set, so an output keeps the level it has: the latch after a
+                // restart, the power-on pull after a reboot. This relies on opening without a mode not changing the
+                // pin. A driver that cannot read a pin before its mode is set (libgpiod 1.x) opens it as an output its
+                // own way, and the level is read back from it.
+                _controller.OpenPin(pin.PinNumber);
+                PinValue level;
+                if (TryReadLevel(_controller, pin.PinNumber, out var levelBeforeMode))
+                {
+                    level = levelBeforeMode;
+                    _controller.OpenPin(pin.PinNumber, PinMode.Output, level);
+                }
+                else
+                {
+                    _controller.OpenPin(pin.PinNumber, PinMode.Output);
+                    level = _controller.Read(pin.PinNumber);
+                }
 
-            pin.Value = _controller.Read(pin.PinNumber) == PinValue.High;
-            pin.Status = ServiceStatus.Running;
-            pin.StatusMessage = null;
-
-            // Only register interrupt for input pins
-            if (pin.Mode != GpioPinMode.Output)
+                pin.Value = pin.ToValue(level);
+            }
+            else
             {
+                var pinMode = pin.Mode switch
+                {
+                    GpioPinMode.InputPullUp => PinMode.InputPullUp,
+                    GpioPinMode.InputPullDown => PinMode.InputPullDown,
+                    _ => PinMode.Input
+                };
+
+                _controller.OpenPin(pin.PinNumber, pinMode);
+                pin.Value = pin.ToValue(_controller.Read(pin.PinNumber));
+
+                // Registered before the pin reports Running, so that an edge after that has a handler.
                 RegisterInterrupt(pin.PinNumber);
             }
+
+            pin.Status = ServiceStatus.Running;
+            pin.StatusMessage = null;
         }
         catch (Exception exception)
         {
             pin.Status = ServiceStatus.Unavailable;
             pin.StatusMessage = exception.Message;
+        }
+    }
+
+    private static bool TryReadLevel(GpioController controller, int pinNumber, out PinValue level)
+    {
+        try
+        {
+            level = controller.Read(pinNumber);
+            return true;
+        }
+        catch (IOException)
+        {
+            // The libgpiod V1 driver reads a pin only once its mode is set.
+            level = default;
+            return false;
         }
     }
 
@@ -371,18 +462,9 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     private void VerifyPins()
     {
-        if (_controller == null) return;
-
         foreach (var pin in Pins.Values)
         {
-            if (pin.Status != ServiceStatus.Running)
-                continue;
-
-            var actualValue = _controller.Read(pin.PinNumber) == PinValue.High;
-            if (pin.Value != actualValue)
-            {
-                pin.Value = actualValue;
-            }
+            pin.PollHardwareLevel();
         }
     }
 
@@ -405,6 +487,8 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
                 {
                     UnregisterInterrupt(pinNumber);
                 }
+
+                DetachPins();
 
                 // Dispose old controller
                 _controller.Dispose();
@@ -525,9 +609,18 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
         PinChangeEventHandler handler = (_, arguments) =>
         {
-            if (Pins.TryGetValue(arguments.PinNumber, out var pin) && pin.Status == ServiceStatus.Running)
+            if (!Pins.TryGetValue(arguments.PinNumber, out var pin))
+                return;
+
+            try
             {
-                pin.Value = arguments.ChangeType == PinEventTypes.Rising;
+                pin.ApplyHardwareLevel(arguments.ChangeType == PinEventTypes.Rising);
+            }
+            catch (Exception exception)
+            {
+                // Runs on the driver's thread, where a thrown exception would end the process.
+                pin.Status = ServiceStatus.Error;
+                pin.StatusMessage = $"Failed to apply an edge of GPIO pin {pin.PinNumber}: {exception.Message}";
             }
         };
 
@@ -545,6 +638,14 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         if (_interruptHandlers.TryRemove(pinNumber, out var handler))
         {
             _controller.UnregisterCallbackForPinValueChangedEvent(pinNumber, handler);
+        }
+    }
+
+    private void DetachPins()
+    {
+        foreach (var pin in Pins.Values)
+        {
+            pin.Detach();
         }
     }
 
@@ -590,6 +691,8 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
             {
                 UnregisterInterrupt(pinNumber);
             }
+
+            DetachPins();
         }
 
         // Dispose hardware

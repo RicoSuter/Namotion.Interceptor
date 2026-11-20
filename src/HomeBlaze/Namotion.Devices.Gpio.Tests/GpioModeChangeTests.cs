@@ -34,6 +34,35 @@ public class GpioModeChangeTests
     }
 
     [Fact]
+    public void WhenInputWithStaleLatchChangesToOutput_ThenItNeverDrivesTheStaleLevel()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        driver.SetUpPin(17, PinMode.Input, inputLevel: PinValue.High, latch: PinValue.Low);
+        using var controller = new GpioController(PinNumberingScheme.Logical, driver);
+        controller.OpenPin(17, PinMode.Input);
+        var pin = new GpioPin
+        {
+            Controller = controller,
+            UnregisterInterrupt = _ => { },
+            PinNumber = 17,
+            Mode = GpioPinMode.Input,
+            Status = ServiceStatus.Running,
+            Value = true
+        };
+
+        // Act
+        pin.Mode = GpioPinMode.Output;
+
+        // Assert
+        Assert.Equal(PinMode.Output, driver.GetMode(17));
+        Assert.DoesNotContain(PinValue.Low, driver.GetDrivenLevels(17));
+        Assert.Equal(PinValue.High, driver.GetLatch(17));
+        Assert.True(pin.Value);
+        Assert.Equal(ServiceStatus.Running, pin.Status);
+    }
+
+    [Fact]
     public void ModeChange_OutputToInput_RegistersInterruptAndReadsValue()
     {
         // Arrange

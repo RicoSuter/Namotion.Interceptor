@@ -18,15 +18,15 @@ namespace Namotion.Devices.Gpio
         public string? IconColor { get; }
         public string IconName { get; }
         [HomeBlaze.Abstractions.Attributes.State]
-        public int RawValue { get; set; }
+        public int RawValue { get; }
         public Namotion.Devices.Gpio.AdcSource Source { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
-        public HomeBlaze.Abstractions.ServiceStatus Status { get; set; }
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
         [HomeBlaze.Abstractions.Attributes.State]
-        public string? StatusMessage { get; set; }
+        public string? StatusMessage { get; }
         public string Title { get; }
         [HomeBlaze.Abstractions.Attributes.State]
-        public double Value { get; set; }
+        public double Value { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
@@ -38,12 +38,17 @@ namespace Namotion.Devices.Gpio
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class GpioPin : HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
+        public static readonly System.TimeSpan MaximumDebounceTime;
         public GpioPin() { }
         public GpioPin(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan DebounceTime { get; set; }
         [Namotion.Interceptor.Attributes.Derived]
         public string? IconColor { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool IsInverted { get; set; }
         [Namotion.Interceptor.Attributes.Derived]
         public bool? IsOn { get; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
@@ -52,11 +57,14 @@ namespace Namotion.Devices.Gpio
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string? Name { get; set; }
         [HomeBlaze.Abstractions.Attributes.State(Position=0)]
-        public int PinNumber { get; set; }
+        public int PinNumber { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetValue", "IsEnabled")]
+        public bool SetValue_IsEnabled { get; }
         [HomeBlaze.Abstractions.Attributes.State]
-        public HomeBlaze.Abstractions.ServiceStatus Status { get; set; }
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
         [HomeBlaze.Abstractions.Attributes.State]
-        public string? StatusMessage { get; set; }
+        public string? StatusMessage { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string Title { get; }
         [Namotion.Interceptor.Attributes.Derived]
@@ -69,7 +77,7 @@ namespace Namotion.Devices.Gpio
         [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("TurnOn", "IsEnabled")]
         public bool TurnOn_IsEnabled { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=2)]
-        public bool Value { get; set; }
+        public bool Value { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
@@ -77,6 +85,10 @@ namespace Namotion.Devices.Gpio
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the logical value of an output pin.", Position=4, Title="Set Value")]
+        public System.Threading.Tasks.Task SetValueAsync(bool value, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Position=3, Title="Toggle")]
+        public System.Threading.Tasks.Task ToggleAsync(System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Icon="ToggleOff", Position=2, Title="Turn Off")]
         public System.Threading.Tasks.Task TurnOffAsync(System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Icon="ToggleOn", Position=1, Title="Turn On")]
@@ -104,7 +116,7 @@ namespace Namotion.Devices.Gpio
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public Namotion.Devices.Gpio.Configuration.Ads1115Configuration? Ads1115 { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
-        public System.Collections.Generic.Dictionary<int, Namotion.Devices.Gpio.AnalogChannel> AnalogChannels { get; set; }
+        public System.Collections.Generic.Dictionary<int, Namotion.Devices.Gpio.AnalogChannel> AnalogChannels { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string? IconColor { get; }
         public string IconName { get; }
@@ -118,9 +130,9 @@ namespace Namotion.Devices.Gpio
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public System.TimeSpan RetryInterval { get; set; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
-        public HomeBlaze.Abstractions.ServiceStatus Status { get; set; }
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
         [HomeBlaze.Abstractions.Attributes.State]
-        public string? StatusMessage { get; set; }
+        public string? StatusMessage { get; }
         public string Title { get; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=400)]
@@ -128,6 +140,10 @@ namespace Namotion.Devices.Gpio
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Names the pins with a fixed function and applies the power-on pulls of a Raspberr" +
+            "y Pi 3, 4 or Zero 2 W to unconfigured pins. Check the defaults before using it o" +
+            "n a Raspberry Pi 5.", Title="Apply Raspberry Pi Defaults")]
+        public System.Threading.Tasks.Task ApplyRaspberryPiDefaultsAsync(System.Threading.CancellationToken cancellationToken) { }
         public override void Dispose() { }
         protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
@@ -135,8 +151,6 @@ namespace Namotion.Devices.Gpio
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Title="Set Raspberry Pi Pin Names")]
-        public void SetRaspberryPiPinNames() { }
     }
 }
 namespace Namotion.Devices.Gpio.Configuration
