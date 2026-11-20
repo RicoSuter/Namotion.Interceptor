@@ -22,6 +22,11 @@ internal sealed class RecordingAdcFactory
     public bool FailsNextMcp3008Creation { get; set; }
 
     /// <summary>
+    /// Called on each transfer of an MCP3008, such as a read of a channel, before it completes.
+    /// </summary>
+    public Action? Mcp3008Transferring { get; set; }
+
+    /// <summary>
     /// Called with each recorded event, after it was recorded.
     /// </summary>
     public Action<string>? EventRecorded { get; set; }
@@ -54,7 +59,9 @@ internal sealed class RecordingAdcFactory
         }
 
         Record($"create MCP3008 {configuration.ClockPin}");
-        return new Mcp3008(new RecordingSpiDevice(() => Record($"dispose MCP3008 {configuration.ClockPin}")));
+        return new Mcp3008(new RecordingSpiDevice(
+            () => Mcp3008Transferring?.Invoke(),
+            () => Record($"dispose MCP3008 {configuration.ClockPin}")));
     }
 
     public Ads1115 CreateAds1115(Ads1115Configuration configuration)
@@ -75,7 +82,7 @@ internal sealed class RecordingAdcFactory
         EventRecorded?.Invoke(recordedEvent);
     }
 
-    private sealed class RecordingSpiDevice(Action disposed) : SpiDevice
+    private sealed class RecordingSpiDevice(Action transferring, Action disposed) : SpiDevice
     {
         public override SpiConnectionSettings ConnectionSettings { get; } = new(0, 0);
 
@@ -91,7 +98,11 @@ internal sealed class RecordingAdcFactory
         {
         }
 
-        public override void TransferFullDuplex(ReadOnlySpan<byte> writeBuffer, Span<byte> readBuffer) => readBuffer.Clear();
+        public override void TransferFullDuplex(ReadOnlySpan<byte> writeBuffer, Span<byte> readBuffer)
+        {
+            transferring();
+            readBuffer.Clear();
+        }
 
         protected override void Dispose(bool disposing)
         {

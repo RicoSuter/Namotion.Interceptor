@@ -218,7 +218,7 @@ The pins a configured ADC uses are not opened as GPIO pins, at startup and when 
 | MCP3008 | `ClockPin`, `MosiPin`, `MisoPin` and `ChipSelectPin` | `Used by the MCP3008` |
 | ADS1115 on `I2cBus` 1 | GPIO 2 (SDA) and 3 (SCL), where a Raspberry Pi has I2C bus 1 | `Used by I2C (ADS1115)` |
 
-A configured ADC starts when the GPIO controller starts, after its pins were reserved. When the configuration of an ADC changes, the old ADC stops first, then the pins it no longer uses are opened as GPIO pins and the pins it now uses are released, and then the new ADC starts. A pin that was opened as a GPIO pin before, such as GPIO 2 and 3 before the ADS1115 was added, may need a reboot of the board to get its I2C function back.
+A configured MCP3008 starts when the GPIO controller starts, after its pins were reserved. A configured ADS1115 uses I2C and starts also without the GPIO controller, such as on a board without GPIO support, but its channels are read only while the GPIO controller runs. When the configuration of an ADC changes, the old ADC stops first, then the pins it no longer uses are opened as GPIO pins and the pins it now uses are released, and then the new ADC starts. An ADC whose configuration did not change keeps running. A pin that was opened as a GPIO pin before, such as GPIO 2 and 3 before the ADS1115 was added, may need a reboot of the board to get its I2C function back.
 
 An ADC that fails to start has no channels in `AnalogChannels`, and the `StatusMessage` of the GPIO device shows `MCP3008 init failed: ...` or `ADS1115 init failed: ...`. It is started again the next time the configuration is applied, such as after the GPIO JSON file changed, or when the GPIO device starts again.
 

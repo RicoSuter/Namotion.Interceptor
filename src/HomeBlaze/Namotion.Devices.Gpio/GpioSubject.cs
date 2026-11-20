@@ -361,22 +361,23 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
                 return InitializationResult.PermanentFailure;
             }
 
-            Status = ServiceStatus.Starting;
             StatusMessage = "Initializing GPIO controller...";
+            Status = ServiceStatus.Starting;
 
             // An applied configuration that enabled the simulation has created the controller already.
-            if (_controller is null)
+            var controllerResult = _controller is null ? TryCreateController() : InitializationResult.Success;
+
+            // Also without a controller, which an ADS1115 does not need.
+            var adcFailureMessage = SynchronizeAdcs(Mcp3008, Ads1115);
+            if (controllerResult != InitializationResult.Success)
             {
-                var controllerResult = TryCreateController();
-                if (controllerResult != InitializationResult.Success)
-                {
-                    return controllerResult;
-                }
+                StatusMessage = CombineMessages(StatusMessage, adcFailureMessage);
+                return controllerResult;
             }
 
-            var adcFailureMessage = SynchronizeAdcs(Mcp3008, Ads1115);
-            Status = ServiceStatus.Running;
+            // Set before the status, so that Running is published with its message.
             StatusMessage = adcFailureMessage;
+            Status = ServiceStatus.Running;
 
             return InitializationResult.Success;
         }
@@ -716,8 +717,9 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     /// <summary>
     /// Disposes each ADC whose configuration differs from the given one, discovers the pins with the given
-    /// configurations and then, while a controller exists, creates each configured ADC that does not exist. Rebuilds
-    /// <see cref="AnalogChannels"/> when an ADC configuration differed. Called under <see cref="_controllerLock"/>.
+    /// configurations and then creates each configured ADC that does not exist, the MCP3008 only while a controller
+    /// exists. Rebuilds <see cref="AnalogChannels"/> when an ADC configuration differed, also when this throws. Called
+    /// under <see cref="_controllerLock"/>.
     /// </summary>
     /// <returns>The failure message of an ADC that could not be created, or null.</returns>
     private string? SynchronizeAdcs(Mcp3008Configuration? mcp3008, Ads1115Configuration? ads1115)
@@ -742,34 +744,39 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
             _appliedAds1115Config = null;
         }
 
-        // Detaches and closes the pins a new ADC uses, so the ADC is created after this.
-        DiscoverPins(mcp3008, ads1115);
-
         if (!isMcp3008Changed && !isAds1115Changed)
         {
+            DiscoverPins(mcp3008, ads1115);
             return null;
         }
 
-        string? failureMessage = null;
-        if (_controller is not null)
+        try
         {
-            if (mcp3008 is not null)
+            // Detaches and closes the pins a new ADC uses, so the ADC is created after this.
+            DiscoverPins(mcp3008, ads1115);
+
+            // An ADC that exists is unchanged and is kept. The MCP3008 waits for the controller, which reserves its pins.
+            string? failureMessage = null;
+            if (mcp3008 is not null && _mcp3008 is null && _controller is not null)
             {
                 failureMessage = TryCreateMcp3008(mcp3008);
             }
 
-            if (ads1115 is not null)
+            if (ads1115 is not null && _ads1115 is null)
             {
-                var ads1115FailureMessage = TryCreateAds1115(ads1115);
-                failureMessage = failureMessage is null || ads1115FailureMessage is null
-                    ? failureMessage ?? ads1115FailureMessage
-                    : $"{failureMessage}; {ads1115FailureMessage}";
+                failureMessage = CombineMessages(failureMessage, TryCreateAds1115(ads1115));
             }
-        }
 
-        AnalogChannels = CreateAnalogChannels();
-        return failureMessage;
+            return failureMessage;
+        }
+        finally
+        {
+            AnalogChannels = CreateAnalogChannels();
+        }
     }
+
+    private static string? CombineMessages(string? first, string? second) =>
+        first is null || second is null ? first ?? second : $"{first}; {second}";
 
     // Called under _controllerLock when the MCP3008 does not exist.
     private string? TryCreateMcp3008(Mcp3008Configuration configuration)
@@ -803,12 +810,34 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     private static Mcp3008 CreateMcp3008(Mcp3008Configuration configuration)
     {
-        var spi = new SoftwareSpi(
-            configuration.ClockPin,
-            configuration.MisoPin,
-            configuration.MosiPin,
-            configuration.ChipSelectPin);
-        return new Mcp3008(spi);
+        // Disposed when the constructor throws, which closes the pins it opened before, so that a retry can open them.
+        var controller = new GpioController();
+        SoftwareSpi spi;
+        try
+        {
+            spi = new SoftwareSpi(
+                configuration.ClockPin,
+                configuration.MisoPin,
+                configuration.MosiPin,
+                configuration.ChipSelectPin,
+                gpioController: controller,
+                shouldDispose: true);
+        }
+        catch
+        {
+            controller.Dispose();
+            throw;
+        }
+
+        try
+        {
+            return new Mcp3008(spi);
+        }
+        catch
+        {
+            spi.Dispose();
+            throw;
+        }
     }
 
     private static Ads1115 CreateAds1115(Ads1115Configuration configuration)
@@ -917,33 +946,35 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     private void PollAdcChannels()
     {
-        // Read once, because an applied configuration replaces them under the controller lock, which this does not take.
-        var mcp3008 = _mcp3008;
-        var ads1115 = _ads1115;
-        foreach (var channel in AnalogChannels.Values)
+        // Under the controller lock, so that an apply or Dispose cannot dispose an ADC during a read, which would set
+        // its channel to Error for good or close the pins of a bit-banged read. Takes no pin lock.
+        lock (_controllerLock)
         {
-            if (channel.Status != ServiceStatus.Running) continue;
+            foreach (var channel in AnalogChannels.Values)
+            {
+                if (channel.Status != ServiceStatus.Running) continue;
 
-            try
-            {
-                if (channel.Source == AdcSource.Mcp3008 && mcp3008 != null)
+                try
                 {
-                    var raw = mcp3008.Read(channel.ChannelNumber);
-                    channel.RawValue = raw;
-                    channel.Value = raw / 1023.0;
+                    if (channel.Source == AdcSource.Mcp3008 && _mcp3008 != null)
+                    {
+                        var raw = _mcp3008.Read(channel.ChannelNumber);
+                        channel.RawValue = raw;
+                        channel.Value = raw / 1023.0;
+                    }
+                    else if (channel.Source == AdcSource.Ads1115 && _ads1115 != null)
+                    {
+                        var inputMultiplexer = (InputMultiplexer)channel.ChannelNumber;
+                        var raw = _ads1115.ReadRaw(inputMultiplexer);
+                        channel.RawValue = raw;
+                        channel.Value = raw / 32767.0;
+                    }
                 }
-                else if (channel.Source == AdcSource.Ads1115 && ads1115 != null)
+                catch (Exception exception)
                 {
-                    var inputMultiplexer = (InputMultiplexer)channel.ChannelNumber;
-                    var raw = ads1115.ReadRaw(inputMultiplexer);
-                    channel.RawValue = raw;
-                    channel.Value = raw / 32767.0;
+                    channel.Status = ServiceStatus.Error;
+                    channel.StatusMessage = exception.Message;
                 }
-            }
-            catch (Exception exception)
-            {
-                channel.Status = ServiceStatus.Error;
-                channel.StatusMessage = exception.Message;
             }
         }
     }

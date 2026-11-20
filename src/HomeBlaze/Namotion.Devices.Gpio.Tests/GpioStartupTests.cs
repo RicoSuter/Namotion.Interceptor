@@ -155,7 +155,7 @@ public class GpioStartupTests
         await subject.StartAsync(CancellationToken.None);
         try
         {
-            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running);
+            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running && subject.StatusMessage is null);
 
             // Assert
             Assert.Equal(["create MCP3008 21"], adcFactory.Events);
@@ -217,7 +217,7 @@ public class GpioStartupTests
         await subject.StartAsync(CancellationToken.None);
         try
         {
-            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running);
+            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running && subject.StatusMessage is null);
 
             // Assert
             Assert.Equal(["create MCP3008 21", "create ADS1115 1"], adcFactory.Events);
@@ -248,8 +248,8 @@ public class GpioStartupTests
         await subject.StartAsync(CancellationToken.None);
         try
         {
-            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running);
-            Assert.Equal("MCP3008 init failed: No MCP3008 answered.", subject.StatusMessage);
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+                subject.Status == ServiceStatus.Running && subject.StatusMessage == "MCP3008 init failed: No MCP3008 answered.");
             Assert.Empty(subject.AnalogChannels);
 
             // Act
@@ -263,6 +263,141 @@ public class GpioStartupTests
         }
         finally
         {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenOnlyTheAds1115ConfigurationChanges_ThenTheMcp3008IsKept()
+    {
+        // Arrange
+        var adcFactory = new RecordingAdcFactory();
+        var subject = CreateAdcSubject(new LatchingGpioDriver(), adcFactory);
+        subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
+        subject.Ads1115 = new Ads1115Configuration { I2cBus = 1 };
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running && subject.StatusMessage is null);
+
+            // Act
+            subject.Ads1115 = new Ads1115Configuration { I2cBus = 1, Address = 0x49 };
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal(["create MCP3008 21", "create ADS1115 1", "dispose ADS1115 1", "create ADS1115 1"], adcFactory.Events);
+            Assert.Equal(Enumerable.Range(0, 12), subject.AnalogChannels.Keys.Order());
+            Assert.Null(subject.StatusMessage);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenMcp3008KeepsFailing_ThenTheAds1115IsKept()
+    {
+        // Arrange
+        var adcFactory = new RecordingAdcFactory { FailsNextMcp3008Creation = true };
+        var subject = CreateAdcSubject(new LatchingGpioDriver(), adcFactory);
+        subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
+        subject.Ads1115 = new Ads1115Configuration { I2cBus = 1 };
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+                subject.Status == ServiceStatus.Running && subject.StatusMessage == "MCP3008 init failed: No MCP3008 answered.");
+            adcFactory.FailsNextMcp3008Creation = true;
+
+            // Act
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal(["create ADS1115 1"], adcFactory.Events);
+            Assert.Equal(Enumerable.Range(8, 4), subject.AnalogChannels.Keys.Order());
+            Assert.Equal("MCP3008 init failed: No MCP3008 answered.", subject.StatusMessage);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAds1115IsAppliedWithoutController_ThenItIsCreated()
+    {
+        // Arrange
+        var adcFactory = new RecordingAdcFactory();
+        var subject = CreateAdcSubject(new LatchingGpioDriver(), adcFactory);
+        subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
+        subject.Ads1115 = new Ads1115Configuration { I2cBus = 1 };
+        try
+        {
+            // Act
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal(["create ADS1115 1"], adcFactory.Events);
+            Assert.Equal(Enumerable.Range(8, 4), subject.AnalogChannels.Keys.Order());
+            Assert.All(subject.AnalogChannels.Values, channel => Assert.Equal(AdcSource.Ads1115, channel.Source));
+        }
+        finally
+        {
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAdcIsDisposedDuringARead_ThenTheDisposalWaitsForTheRead()
+    {
+        // Arrange
+        var adcFactory = new RecordingAdcFactory();
+        var subject = CreateAdcSubject(new LatchingGpioDriver(), adcFactory);
+        subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
+
+        var readStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readGate = new TaskCompletionSource();
+        var readCompleted = new TaskCompletionSource();
+        adcFactory.Mcp3008Transferring = () =>
+        {
+            readStarted.TrySetResult();
+            readGate.Task.Wait();
+            readCompleted.TrySetResult();
+        };
+
+        bool? isReadCompletedAtDisposal = null;
+        adcFactory.EventRecorded = recordedEvent =>
+        {
+            if (recordedEvent == "dispose MCP3008 21")
+            {
+                isReadCompletedAtDisposal = readCompleted.Task.IsCompleted;
+            }
+        };
+
+        var startTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => subject.StartAsync(CancellationToken.None));
+        try
+        {
+            await readStarted.Task.WaitAsync(TestTimeouts.Default);
+            subject.Mcp3008 = null;
+
+            // Act
+            var applyTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => subject.ApplyConfigurationAsync(CancellationToken.None));
+            await Assert.ThrowsAsync<TimeoutException>(() => applyTask.WaitAsync(TimeSpan.FromMilliseconds(200)));
+            readGate.SetResult();
+            await applyTask.WaitAsync(TestTimeouts.Default);
+
+            // Assert
+            Assert.True(isReadCompletedAtDisposal);
+            Assert.Empty(subject.AnalogChannels);
+        }
+        finally
+        {
+            readGate.TrySetResult();
+            await startTask.WaitAsync(TestTimeouts.Default);
             await subject.StopAsync(CancellationToken.None);
             subject.Dispose();
         }
