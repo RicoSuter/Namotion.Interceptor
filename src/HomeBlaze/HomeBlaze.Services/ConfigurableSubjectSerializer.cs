@@ -186,9 +186,9 @@ public class ConfigurableSubjectSerializer
         }
         catch (Exception exception)
         {
-            // Cached as null, so it is logged once and the configuration is written in full.
+            // Cached as null, so it is logged once per type.
             _serviceProvider.GetService<ILogger<ConfigurableSubjectSerializer>>()?.LogWarning(
-                exception, "The default configuration of {Type} could not be read, so all its values are written.", type.FullName);
+                exception, "The default configuration of {Type} could not be read, so all its values are written and keys missing from a reloaded file keep their values.", type.FullName);
             return null;
         }
         finally
@@ -497,8 +497,8 @@ public class ConfigurableSubjectSerializer
         Action<SkippedConfigurationProperty>? skipped,
         ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
     {
-        var defaults = GetDefaultConfiguration(subject.GetType(), naming);
         using var document = JsonDocument.Parse(json);
+        var defaults = GetDefaultConfiguration(subject.GetType(), naming);
         SetConfigurationProperties(subject, document.RootElement, defaults, skipped, naming);
     }
 }
