@@ -85,7 +85,7 @@ namespace Namotion.Devices.Gpio
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the logical value of an output pin. Only for an output pin that is running.", Position=4, Title="Set Value")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the logical value of an output pin. Written to the pin while it is running.", Position=4, Title="Set Value")]
         public System.Threading.Tasks.Task SetValueAsync(bool value, System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Inverts the value of an output pin. Only for an output pin that is running.", Position=3, Title="Toggle")]
         public System.Threading.Tasks.Task ToggleAsync(System.Threading.CancellationToken cancellationToken) { }

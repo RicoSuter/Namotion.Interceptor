@@ -132,31 +132,20 @@ public class GpioInversionTests
         // Arrange
         var driver = new SimulationGpioDriver();
         driver.SimulatePinValueChange(17, PinValue.Low);
-        var subject = new GpioSubject(driver)
+        var subject = GpioTestSubject.Create(driver, pins: new Dictionary<int, GpioPin>
         {
-            Pins = new Dictionary<int, GpioPin>
-            {
-                [17] = new() { Mode = GpioPinMode.Output, IsInverted = true }
-            }
-        };
+            [17] = new() { Mode = GpioPinMode.Output, IsInverted = true }
+        });
 
         // Act
-        await subject.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running && subject.Pins[17].Status == ServiceStatus.Running);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
 
-            // Assert
-            Assert.Equal(PinValue.Low, driver.PinValues[17]);
-            Assert.DoesNotContain(driver.WriteHistory, write => write.PinNumber == 17 && write.Value == PinValue.High);
-            Assert.True(subject.Pins[17].Value);
-            Assert.True(subject.Pins[17].IsOn);
-        }
-        finally
-        {
-            await subject.StopAsync(CancellationToken.None);
-            subject.Dispose();
-        }
+        // Assert
+        Assert.Equal(PinValue.Low, driver.PinValues[17]);
+        Assert.DoesNotContain(driver.WriteHistory, write => write.PinNumber == 17 && write.Value == PinValue.High);
+        Assert.True(subject.Pins[17].Value);
+        Assert.True(subject.Pins[17].IsOn);
     }
 
     [Fact]
@@ -164,32 +153,20 @@ public class GpioInversionTests
     {
         // Arrange
         var driver = new SimulationGpioDriver();
-        var subject = new GpioSubject(driver)
+        var subject = GpioTestSubject.Create(driver, pins: new Dictionary<int, GpioPin>
         {
-            Pins = new Dictionary<int, GpioPin>
-            {
-                [18] = new() { Mode = GpioPinMode.InputPullUp, IsInverted = true, DebounceTime = TimeSpan.Zero }
-            }
-        };
+            [18] = new() { Mode = GpioPinMode.InputPullUp, IsInverted = true, DebounceTime = TimeSpan.Zero }
+        });
         driver.SimulatePinValueChange(18, PinValue.High);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+        Assert.False(subject.Pins[18].Value);
 
-        await subject.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running && subject.Pins[18].Status == ServiceStatus.Running);
-            Assert.False(subject.Pins[18].Value);
+        // Act
+        driver.SimulatePinValueChange(18, PinValue.Low);
 
-            // Act
-            driver.SimulatePinValueChange(18, PinValue.Low);
-
-            // Assert
-            Assert.True(subject.Pins[18].Value);
-        }
-        finally
-        {
-            await subject.StopAsync(CancellationToken.None);
-            subject.Dispose();
-        }
+        // Assert
+        Assert.True(subject.Pins[18].Value);
     }
 
     private static GpioPin CreateRunningPin(GpioController controller, GpioPinMode mode, bool isInverted)

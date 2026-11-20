@@ -33,14 +33,13 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     private readonly bool _isDriverRaspberryPi;
     private readonly Func<Mcp3008Configuration, Mcp3008> _createMcp3008;
     private readonly Func<Ads1115Configuration, Ads1115> _createAds1115;
+    private readonly Action<int> _registerInterrupt;
+    private readonly Action<int> _unregisterInterrupt;
     private readonly ConcurrentDictionary<int, PinChangeEventHandler> _interruptHandlers = new();
-    private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
+    private readonly SemaphoreSlim _connectedSignal = new(0, 1);
 
-    // Serializes creating and disposing the controller and attaching pins to it, which the service loop and an
-    // applied configuration both do. Never taken under a pin lock: attaching a pin takes the pin lock under this one.
+    // Guards the hardware fields below. Taken before a pin lock, never under one.
     private readonly Lock _controllerLock = new();
-
-    private const int MaximumDiscoveryAttempts = 3;
 
     private static readonly Dictionary<int, string> RaspberryPiPinNames = new()
     {
@@ -61,28 +60,16 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         [18] = "PCM CLK / PWM0"
     };
 
+    // Guarded by _controllerLock. The hardware exists only between Connect and Stop. The attached pins are the
+    // instances open on the controller, which a reload replaces in Pins.
     private GpioController? _controller;
-
-    // Guarded by _controllerLock. The pins that hold the controller, by pin number, updated pin by pin so that an
-    // exception leaves it accurate. A reload of the configuration replaces the instances in Pins, so these are the ones
-    // to detach.
-    private Dictionary<int, GpioPin> _attachedPins = new();
+    private readonly Dictionary<int, GpioPin> _attachedPins = new();
+    private Mcp3008? _mcp3008;
+    private Ads1115? _ads1115;
 
     // Guarded by _controllerLock. The stopping token is canceled only after Dispose released the lock, so the service
     // loop and an applied configuration check this to create nothing after Dispose.
     private bool _isDisposed;
-    private bool _currentlyUsingSimulation;
-
-    // Guarded by _controllerLock. Whether the controller drives the pins of a board that uses the Raspberry Pi register
-    // driver, whose power-on pulls new pins start with.
-    private bool _isRaspberryPi;
-
-    // Guarded by _controllerLock. The configuration an ADC was created with is set only together with the ADC and
-    // cleared when it is disposed, so that a configured ADC that does not exist is created by the next apply or start.
-    private Mcp3008? _mcp3008;
-    private Ads1115? _ads1115;
-    private Mcp3008Configuration? _appliedMcp3008Config;
-    private Ads1115Configuration? _appliedAds1115Config;
 
     /// <summary>
     /// Optional MCP3008 ADC configuration. Its pins are not opened as GPIO pins: they show
@@ -92,8 +79,9 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     public partial Mcp3008Configuration? Mcp3008 { get; set; }
 
     /// <summary>
-    /// Optional ADS1115 ADC configuration. On I2C bus 1, GPIO 2 (SDA) and 3 (SCL) are not opened as GPIO pins: they
-    /// show <see cref="ServiceStatus.Unavailable"/> with the message "Used by I2C (ADS1115)".
+    /// Optional ADS1115 ADC configuration. On I2C bus 1 of a board that uses the Raspberry Pi register driver, GPIO 2
+    /// (SDA) and 3 (SCL) are not opened as GPIO pins: they show <see cref="ServiceStatus.Unavailable"/> with the message
+    /// "Used by I2C (ADS1115)".
     /// </summary>
     [Configuration]
     public partial Ads1115Configuration? Ads1115 { get; set; }
@@ -119,7 +107,8 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     public partial bool UseSimulation { get; set; }
 
     /// <summary>
-    /// Auto-discovered GPIO pins indexed by pin number.
+    /// Auto-discovered GPIO pins indexed by pin number, which sets the <see cref="GpioPin.PinNumber"/> of each pin.
+    /// A replaced dictionary takes effect when the configuration is applied.
     /// </summary>
     [State]
     [Configuration]
@@ -156,7 +145,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     /// <summary>
     /// Creates a GpioSubject with optional context and GPIO driver.
     /// </summary>
-    /// <param name="driver">Optional GPIO driver. If null, uses system default or simulation based on UseSimulation.</param>
+    /// <param name="driver">Optional GPIO driver, which the subject disposes when it is disposed. If null, uses system default or simulation based on UseSimulation.</param>
     public GpioSubject(GpioDriver? driver = null)
         : this(driver, driver is RaspberryPi3Driver)
     {
@@ -164,9 +153,9 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     /// <summary>
     /// Creates a GpioSubject with an optional GPIO driver that drives the pins of a board that uses the Raspberry Pi
-    /// register driver (Raspberry Pi 3, 4, 400, Zero 2 W and Compute Module 3 and 4) when
-    /// <paramref name="isRaspberryPi"/> is true, so that new pins start with its power-on pull. The ADCs are created
-    /// with <paramref name="createMcp3008"/> and <paramref name="createAds1115"/>, by default on the hardware.
+    /// register driver when <paramref name="isRaspberryPi"/> is true, so that new pins start with its power-on pull.
+    /// The ADCs are created with <paramref name="createMcp3008"/> and <paramref name="createAds1115"/>, by default on
+    /// the hardware.
     /// </summary>
     internal GpioSubject(
         GpioDriver? driver,
@@ -178,6 +167,8 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         _isDriverRaspberryPi = isRaspberryPi;
         _createMcp3008 = createMcp3008 ?? CreateMcp3008;
         _createAds1115 = createAds1115 ?? CreateAds1115;
+        _registerInterrupt = RegisterInterrupt;
+        _unregisterInterrupt = UnregisterInterrupt;
 
         PollingInterval = TimeSpan.FromSeconds(5);
         RetryInterval = TimeSpan.FromSeconds(30);
@@ -190,7 +181,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     }
 
     /// <summary>
-    /// Applies the defaults of a Raspberry Pi 3, 4, 400, Zero 2 W or Compute Module 3 or 4 to the unconfigured pins,
+    /// Applies the defaults of a board that uses the Raspberry Pi register driver to the unconfigured pins,
     /// those without a name in plain <see cref="GpioPinMode.Input"/> mode or in the mode of their power-on pull: the
     /// name of a pin with a fixed function, and the pull the Pi applies at power-on, up for GPIO 0 to 8 and down for
     /// GPIO 9 to 27. Other pins and the pins of a configured <see cref="Mcp3008"/> are not changed, so applying it again
@@ -274,8 +265,8 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     }
 
     /// <summary>
-    /// Gets the mode with the pull a Raspberry Pi 3, 4, 400, Zero 2 W or Compute Module 3 or 4 applies at power-on: up
-    /// for GPIO 0 to 8, down for GPIO 9 to 27, and plain <see cref="GpioPinMode.Input"/> above.
+    /// Gets the mode with the pull a board that uses the Raspberry Pi register driver applies at power-on: up for GPIO
+    /// 0 to 8, down for GPIO 9 to 27, and plain <see cref="GpioPinMode.Input"/> above.
     /// </summary>
     private static GpioPinMode GetRaspberryPiPowerOnMode(int pinNumber) => pinNumber switch
     {
@@ -290,16 +281,17 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     /// <summary>
     /// Gets why a pin is reserved for a configured ADC, or null when it is not: the pins of an MCP3008, and GPIO 2 (SDA)
-    /// and 3 (SCL) for an ADS1115 on I2C bus 1.
+    /// and 3 (SCL) for an ADS1115 on I2C bus 1 of a board that uses the Raspberry Pi register driver.
     /// </summary>
-    private static string? GetReservedPinMessage(int pinNumber, Mcp3008Configuration? mcp3008, Ads1115Configuration? ads1115)
+    private static string? GetReservedPinMessage(
+        int pinNumber, Mcp3008Configuration? mcp3008, Ads1115Configuration? ads1115, bool isRaspberryPi)
     {
         if (mcp3008 is not null && IsMcp3008Pin(mcp3008, pinNumber))
         {
             return "Used by the MCP3008";
         }
 
-        if (ads1115 is { I2cBus: 1 } && pinNumber is 2 or 3)
+        if (isRaspberryPi && ads1115 is { I2cBus: 1 } && pinNumber is 2 or 3)
         {
             return "Used by I2C (ADS1115)";
         }
@@ -307,42 +299,58 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         return null;
     }
 
+    partial void OnPinsChanged(Dictionary<int, GpioPin> newValue)
+    {
+        foreach (var (pinNumber, pin) in newValue)
+        {
+            pin.PinNumber = pinNumber;
+        }
+    }
+
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            var result = TryInitialize();
-            if (result == InitializationResult.Success)
+            while (!stoppingToken.IsCancellationRequested)
             {
-                await RunPollingLoopAsync(stoppingToken);
-                // If polling loop exits (e.g., due to config change), continue outer loop
-                continue;
-            }
-
-            if (result == InitializationResult.PermanentFailure)
-            {
-                // Wait for configuration change (UseSimulation might be enabled)
-                try
+                var result = EnsureConnected();
+                if (result == InitializationResult.Success)
                 {
-                    await _configChangedSignal.WaitAsync(stoppingToken);
+                    try
+                    {
+                        VerifyPins();
+                        PollAdcChannels();
+                        await Task.Delay(PollingInterval, stoppingToken);
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        Status = ServiceStatus.Error;
+                        StatusMessage = $"Polling error: {exception.Message}";
+                        await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                    }
                 }
-                catch (OperationCanceledException)
+                else
                 {
-                    break;
+                    // An applied configuration that connects, such as one that enables the simulation, ends the wait.
+                    var timeout = result == InitializationResult.PermanentFailure ? Timeout.InfiniteTimeSpan : RetryInterval;
+                    await _connectedSignal.WaitAsync(timeout, stoppingToken);
                 }
-                continue;
-            }
-
-            // TransientFailure - retry after delay
-            if (!stoppingToken.IsCancellationRequested)
-            {
-                await Task.Delay(RetryInterval, stoppingToken);
             }
         }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // The service stops.
+        }
 
-        Status = ServiceStatus.Stopping;
-        StatusMessage = "Shutting down...";
+        lock (_controllerLock)
+        {
+            if (!_isDisposed)
+            {
+                Status = ServiceStatus.Stopping;
+                StatusMessage = "Shutting down...";
+            }
+        }
     }
 
     private enum InitializationResult
@@ -352,7 +360,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         PermanentFailure
     }
 
-    private InitializationResult TryInitialize()
+    private InitializationResult EnsureConnected()
     {
         lock (_controllerLock)
         {
@@ -361,75 +369,263 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
                 return InitializationResult.PermanentFailure;
             }
 
-            StatusMessage = "Initializing GPIO controller...";
-            Status = ServiceStatus.Starting;
-
-            // An applied configuration that enabled the simulation has created the controller already.
-            if (_controller is null)
+            // An applied configuration connects by itself.
+            if (_controller is not null)
             {
-                var controllerResult = TryCreateController();
-                if (controllerResult != InitializationResult.Success)
-                {
-                    return controllerResult;
-                }
+                return InitializationResult.Success;
             }
 
-            var adcFailureMessage = SynchronizeAdcs(Mcp3008, Ads1115);
-
-            // Set before the status, so that Running is published with its message.
-            StatusMessage = adcFailureMessage;
-            Status = ServiceStatus.Running;
-
-            return InitializationResult.Success;
+            StatusMessage = "Initializing GPIO controller...";
+            Status = ServiceStatus.Starting;
+            return Connect(outputLevels: null, failureMessages: []);
         }
     }
 
-    private InitializationResult TryCreateController()
+    /// <inheritdoc />
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
+        lock (_controllerLock)
+        {
+            if (_isDisposed)
+            {
+                return Task.CompletedTask;
+            }
+
+            var failureMessages = new List<string>();
+            var outputLevels = Stop(failureMessages);
+            if (Connect(outputLevels, failureMessages) == InitializationResult.Success && _connectedSignal.CurrentCount == 0)
+            {
+                _connectedSignal.Release();
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Creates the controller, opens the pins of <see cref="Pins"/> in their mode except those reserved for a
+    /// configured ADC, and then creates the configured ADCs. An output opens at its level in
+    /// <paramref name="outputLevels"/> when it has one. Sets <see cref="Status"/> and reports
+    /// <paramref name="failureMessages"/> and those of the ADCs in <see cref="StatusMessage"/>. Called under
+    /// <see cref="_controllerLock"/> with nothing connected.
+    /// </summary>
+    private InitializationResult Connect(Dictionary<int, PinValue>? outputLevels, List<string> failureMessages)
+    {
+        GpioController controller;
+        bool isRaspberryPi;
+        int pinCount;
         try
         {
-            if (_driver != null)
-            {
-                // Use injected driver (for testing)
-                _controller = new GpioController(PinNumberingScheme.Logical, _driver);
-                _currentlyUsingSimulation = false;
-                _isRaspberryPi = _isDriverRaspberryPi;
-            }
-            else if (UseSimulation)
-            {
-                // Use simulation driver (28 pins like Raspberry Pi)
-                _controller = new GpioController(PinNumberingScheme.Logical, new SimulationGpioDriver());
-                _currentlyUsingSimulation = true;
-                _isRaspberryPi = false;
-            }
-            else
-            {
-                // Use real hardware
-                var raspberryPiDriver = TryCreateRaspberryPiDriver();
-                _controller = raspberryPiDriver is not null
-                    ? new GpioController(PinNumberingScheme.Logical, raspberryPiDriver)
-                    : new GpioController();
-                _currentlyUsingSimulation = false;
-                _isRaspberryPi = raspberryPiDriver is not null;
-            }
-            return InitializationResult.Success;
+            (controller, isRaspberryPi) = CreateController();
+            _controller = controller;
+            pinCount = controller.PinCount;
         }
         catch (PlatformNotSupportedException)
         {
-            CreateUnavailablePins("GPIO not supported on this platform");
+            ReleaseController(failureMessages);
+            AnalogChannels = new Dictionary<int, AnalogChannel>();
+            Status = ServiceStatus.Unavailable;
+            StatusMessage = "GPIO not supported on this platform";
+            Pins = new Dictionary<int, GpioPin>();
             return InitializationResult.PermanentFailure;
         }
         catch (Exception exception)
         {
+            ReleaseController(failureMessages);
+            AnalogChannels = new Dictionary<int, AnalogChannel>();
             Status = ServiceStatus.Error;
             StatusMessage = $"Failed to initialize GPIO: {exception.Message}";
             return InitializationResult.TransientFailure;
         }
+
+        var existingPins = Pins;
+        var pins = new Dictionary<int, GpioPin>(pinCount);
+        var isEveryPinConfigured = existingPins.Count == pinCount;
+        for (var pinNumber = 0; pinNumber < pinCount; pinNumber++)
+        {
+            if (!existingPins.TryGetValue(pinNumber, out var pin))
+            {
+                isEveryPinConfigured = false;
+                pin = new GpioPin
+                {
+                    PinNumber = pinNumber,
+                    Mode = isRaspberryPi ? GetRaspberryPiPowerOnMode(pinNumber) : GpioPinMode.Input
+                };
+            }
+
+            pins[pinNumber] = pin;
+        }
+
+        // A reload replaces Pins without this lock and applies afterwards, which connects again with its pins.
+        if (!isEveryPinConfigured && ReferenceEquals(Pins, existingPins))
+        {
+            Pins = pins;
+        }
+
+        var mcp3008 = Mcp3008;
+        var ads1115 = Ads1115;
+        foreach (var (pinNumber, pin) in pins)
+        {
+            var reservedMessage = GetReservedPinMessage(pinNumber, mcp3008, ads1115, isRaspberryPi);
+            if (reservedMessage is not null)
+            {
+                pin.Status = ServiceStatus.Unavailable;
+                pin.StatusMessage = reservedMessage;
+                continue;
+            }
+
+            _attachedPins[pinNumber] = pin;
+            pin.Attach(controller, _registerInterrupt, _unregisterInterrupt,
+                outputLevels is not null && outputLevels.TryGetValue(pinNumber, out var outputLevel) ? outputLevel : null);
+        }
+
+        if (mcp3008 is not null)
+        {
+            try
+            {
+                _mcp3008 = _createMcp3008(mcp3008);
+            }
+            catch (Exception exception)
+            {
+                failureMessages.Add($"MCP3008 init failed: {exception.Message}");
+            }
+        }
+
+        if (ads1115 is not null)
+        {
+            try
+            {
+                _ads1115 = _createAds1115(ads1115);
+            }
+            catch (Exception exception)
+            {
+                failureMessages.Add($"ADS1115 init failed: {exception.Message}");
+            }
+        }
+
+        // Read before they are published, so that a restart never publishes a reading of 0.
+        var analogChannels = CreateAnalogChannels();
+        ReadAnalogChannels(analogChannels.Values);
+        AnalogChannels = analogChannels;
+
+        // Set before the status, so that Running is published with its message.
+        StatusMessage = failureMessages.Count > 0 ? string.Join("; ", failureMessages) : null;
+        Status = ServiceStatus.Running;
+        return InitializationResult.Success;
     }
 
     /// <summary>
-    /// Creates the Raspberry Pi register driver on a Raspberry Pi 3, 4, 400, Zero 2 W or Compute Module 3 or 4, or
-    /// returns null on other boards.
+    /// Detaches and closes the attached pins, disposes the ADCs and releases the controller. Never throws: a failure is
+    /// added to <paramref name="failureMessages"/> and the rest is still released. Called under
+    /// <see cref="_controllerLock"/>.
+    /// </summary>
+    /// <returns>The level of each output that was running, by pin number.</returns>
+    private Dictionary<int, PinValue> Stop(List<string> failureMessages)
+    {
+        var outputLevels = new Dictionary<int, PinValue>();
+        if (_controller is null)
+        {
+            return outputLevels;
+        }
+
+        foreach (var (pinNumber, pin) in _attachedPins)
+        {
+            // Detached before its interrupt is unregistered, so that a mode change cannot register a handler afterwards.
+            if (pin.Detach() is { } outputLevel)
+            {
+                outputLevels[pinNumber] = outputLevel;
+            }
+
+            try
+            {
+                UnregisterInterrupt(pinNumber);
+            }
+            catch (Exception exception)
+            {
+                failureMessages.Add($"GPIO pin {pinNumber} could not be released: {exception.Message}");
+            }
+
+            try
+            {
+                if (_controller.IsPinOpen(pinNumber))
+                {
+                    _controller.ClosePin(pinNumber);
+                }
+            }
+            catch (Exception exception)
+            {
+                failureMessages.Add($"GPIO pin {pinNumber} could not be closed: {exception.Message}");
+            }
+        }
+
+        _attachedPins.Clear();
+
+        try
+        {
+            _mcp3008?.Dispose();
+        }
+        catch (Exception exception)
+        {
+            failureMessages.Add($"MCP3008 could not be stopped: {exception.Message}");
+        }
+
+        try
+        {
+            _ads1115?.Dispose();
+        }
+        catch (Exception exception)
+        {
+            failureMessages.Add($"ADS1115 could not be stopped: {exception.Message}");
+        }
+
+        _mcp3008 = null;
+        _ads1115 = null;
+        ReleaseController(failureMessages);
+        return outputLevels;
+    }
+
+    // Called under _controllerLock. A controller disposes its driver, so the one over an injected driver is dropped
+    // instead, and the next controller uses that driver again.
+    private void ReleaseController(List<string> failureMessages)
+    {
+        var controller = _controller;
+        _controller = null;
+        if (_driver is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            controller?.Dispose();
+        }
+        catch (Exception exception)
+        {
+            failureMessages.Add($"GPIO controller could not be disposed: {exception.Message}");
+        }
+    }
+
+    private (GpioController Controller, bool IsRaspberryPi) CreateController()
+    {
+        if (_driver is not null)
+        {
+            return (new GpioController(PinNumberingScheme.Logical, _driver), _isDriverRaspberryPi);
+        }
+
+        if (UseSimulation)
+        {
+            return (new GpioController(PinNumberingScheme.Logical, new SimulationGpioDriver()), false);
+        }
+
+        var raspberryPiDriver = TryCreateRaspberryPiDriver();
+        return raspberryPiDriver is not null
+            ? (new GpioController(PinNumberingScheme.Logical, raspberryPiDriver), true)
+            : (new GpioController(), false);
+    }
+
+    /// <summary>
+    /// Creates the Raspberry Pi register driver on a board that uses it: a Raspberry Pi 3, 4, 400, Zero 2 W or Compute
+    /// Module 3 or 4. Returns null on other boards.
     /// </summary>
     private static RaspberryPi3Driver? TryCreateRaspberryPiDriver()
     {
@@ -450,367 +646,11 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         }
     }
 
-    private void CreateUnavailablePins(string message)
-    {
-        Status = ServiceStatus.Unavailable;
-        StatusMessage = message;
-        Pins = new Dictionary<int, GpioPin>();
-    }
-
-    /// <summary>
-    /// Fills <see cref="Pins"/> with a pin for every pin of the controller and attaches the pins that are not attached
-    /// yet, after detaching the instances they replaced. A new pin starts in plain <see cref="GpioPinMode.Input"/>
-    /// mode, on a board that uses the Raspberry Pi register driver in the mode of its power-on pull. A pin reserved for
-    /// a configured ADC is detached and closed instead, and shows <see cref="ServiceStatus.Unavailable"/>. Without a
-    /// controller, only the pin numbers are set. Called under <see cref="_controllerLock"/>.
-    /// </summary>
-    private void DiscoverPins(Mcp3008Configuration? mcp3008, Ads1115Configuration? ads1115)
-    {
-        if (_controller == null)
-        {
-            foreach (var (pinNumber, pin) in Pins)
-            {
-                pin.PinNumber = pinNumber;
-            }
-
-            return;
-        }
-
-        var pinCount = _controller.PinCount;
-
-        // A reloaded configuration replaces Pins without this lock and is followed by an apply, which waits for this
-        // lock and attaches the replaced pins. A replacement between the check and the assignment below is
-        // overwritten; the attempts only bound the loop.
-        for (var attempt = 0; attempt < MaximumDiscoveryAttempts; attempt++)
-        {
-            var existingPins = Pins;
-            var newPins = new Dictionary<int, GpioPin>(pinCount);
-            for (var pinNumber = 0; pinNumber < pinCount; pinNumber++)
-            {
-                var pin = existingPins.TryGetValue(pinNumber, out var existing)
-                    ? existing
-                    : new GpioPin { Mode = _isRaspberryPi ? GetRaspberryPiPowerOnMode(pinNumber) : GpioPinMode.Input };
-
-                _attachedPins.TryGetValue(pinNumber, out var attachedPin);
-                var reservedMessage = GetReservedPinMessage(pinNumber, mcp3008, ads1115);
-                if (reservedMessage is not null)
-                {
-                    if (attachedPin is not null)
-                    {
-                        DetachPin(pinNumber, attachedPin);
-                    }
-
-                    ReservePin(pinNumber, pin, reservedMessage);
-                }
-                else if (!ReferenceEquals(pin, attachedPin))
-                {
-                    if (attachedPin is not null)
-                    {
-                        DetachPin(pinNumber, attachedPin);
-                    }
-
-                    _attachedPins[pinNumber] = pin;
-                    pin.PinNumber = pinNumber;
-                    InitializePin(pin);
-                }
-
-                newPins[pinNumber] = pin;
-            }
-
-            var isStructureChanged = existingPins.Count != pinCount || existingPins.Keys.Any(key => !newPins.ContainsKey(key));
-            if (!isStructureChanged)
-            {
-                return;
-            }
-
-            if (ReferenceEquals(Pins, existingPins))
-            {
-                Pins = newPins;
-                return;
-            }
-        }
-    }
-
-    // Called under _controllerLock. Detached before the interrupt is unregistered, so that a mode change on the pin
-    // cannot register an interrupt handler after this pin number's handler was unregistered.
-    private void DetachPin(int pinNumber, GpioPin pin)
-    {
-        pin.Detach();
-        _attachedPins.Remove(pinNumber);
-        UnregisterInterrupt(pinNumber);
-    }
-
-    // Called under _controllerLock, before the ADC that uses the pin is created.
-    private void ReservePin(int pinNumber, GpioPin pin, string message)
-    {
-        pin.PinNumber = pinNumber;
-        pin.Status = ServiceStatus.Unavailable;
-        try
-        {
-            // Closed now, so that disposing this controller later does not close a pin that the ADC uses by then.
-            if (_controller!.IsPinOpen(pinNumber))
-            {
-                _controller.ClosePin(pinNumber);
-            }
-
-            pin.StatusMessage = message;
-        }
-        catch (Exception exception)
-        {
-            pin.StatusMessage = $"{message}, but the pin could not be closed: {exception.Message}";
-        }
-    }
-
-    private void InitializePin(GpioPin pin)
-    {
-        if (_controller == null)
-            throw new InvalidOperationException("Controller not initialized");
-
-        pin.CancelDebounce();
-        pin.Controller = _controller;
-        pin.RegisterInterrupt = RegisterInterrupt;
-        pin.UnregisterInterrupt = UnregisterInterrupt;
-
-        try
-        {
-            if (pin.Mode == GpioPinMode.Output)
-            {
-                // The level is read before the mode is set, so an output keeps the level it has: the latch after a
-                // restart, the power-on pull after a reboot. This relies on opening without a mode not changing the
-                // pin. A driver that cannot read a pin before its mode is set (libgpiod 1.x) opens it as an output its
-                // own way, and the level is read back from it.
-                _controller.OpenPin(pin.PinNumber);
-                PinValue level;
-                if (TryReadLevel(_controller, pin.PinNumber, out var levelBeforeMode))
-                {
-                    level = levelBeforeMode;
-                    _controller.OpenPin(pin.PinNumber, PinMode.Output, level);
-                }
-                else
-                {
-                    _controller.OpenPin(pin.PinNumber, PinMode.Output);
-                    level = _controller.Read(pin.PinNumber);
-                }
-
-                pin.Value = pin.ToValue(level);
-            }
-            else
-            {
-                var pinMode = pin.Mode switch
-                {
-                    GpioPinMode.InputPullUp => PinMode.InputPullUp,
-                    GpioPinMode.InputPullDown => PinMode.InputPullDown,
-                    _ => PinMode.Input
-                };
-
-                _controller.OpenPin(pin.PinNumber, pinMode);
-                pin.Value = pin.ToValue(_controller.Read(pin.PinNumber));
-
-                // Registered before the pin reports Running, so that an edge after that has a handler.
-                RegisterInterrupt(pin.PinNumber);
-            }
-
-            pin.Status = ServiceStatus.Running;
-            pin.StatusMessage = null;
-        }
-        catch (Exception exception)
-        {
-            pin.Status = ServiceStatus.Unavailable;
-            pin.StatusMessage = exception.Message;
-        }
-    }
-
-    private static bool TryReadLevel(GpioController controller, int pinNumber, out PinValue level)
-    {
-        try
-        {
-            level = controller.Read(pinNumber);
-            return true;
-        }
-        catch (IOException)
-        {
-            // The libgpiod V1 driver reads a pin only once its mode is set.
-            level = default;
-            return false;
-        }
-    }
-
-    private async Task RunPollingLoopAsync(CancellationToken stoppingToken)
-    {
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                VerifyPins();
-                PollAdcChannels();
-                await Task.Delay(PollingInterval, stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception exception)
-            {
-                Status = ServiceStatus.Error;
-                StatusMessage = $"Polling error: {exception.Message}";
-                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
-            }
-        }
-    }
-
     private void VerifyPins()
     {
         foreach (var pin in Pins.Values)
         {
             pin.PollHardwareLevel();
-        }
-    }
-
-    /// <inheritdoc />
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
-    {
-        lock (_controllerLock)
-        {
-            if (_isDisposed)
-            {
-                return Task.CompletedTask;
-            }
-
-            // Handle simulation mode change (only when no injected driver)
-            var isControllerRecreated = false;
-            if (_driver == null && UseSimulation != _currentlyUsingSimulation)
-            {
-                // Signal waiting loop that configuration changed
-                if (_configChangedSignal.CurrentCount == 0)
-                {
-                    _configChangedSignal.Release();
-                }
-
-                if (_controller != null)
-                {
-                    DetachAndUnregisterPins();
-
-                    // Dispose old controller
-                    _controller.Dispose();
-                    _controller = null;
-                }
-
-                // Recreate controller with new driver
-                isControllerRecreated = TryCreateController() == InitializationResult.Success;
-            }
-
-            // A reloaded configuration has replaced the pins with new instances that hold neither a pin number nor the
-            // controller, so the pins are discovered also when no ADC changed.
-            var adcFailureMessage = SynchronizeAdcs(Mcp3008, Ads1115);
-
-            // While running, the status message reports only an ADC that could not be created. Set before the status,
-            // so that Running is published with its message.
-            if (isControllerRecreated || Status == ServiceStatus.Running)
-            {
-                StatusMessage = adcFailureMessage;
-                Status = ServiceStatus.Running;
-            }
-        }
-
-        return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// Disposes each ADC whose configuration differs from the given one, discovers the pins with the given
-    /// configurations and then, while a controller exists, creates each configured ADC that does not exist. Rebuilds
-    /// <see cref="AnalogChannels"/> when an ADC configuration differed, also when this throws. Called under
-    /// <see cref="_controllerLock"/>.
-    /// </summary>
-    /// <returns>The failure message of an ADC that could not be created, or null.</returns>
-    private string? SynchronizeAdcs(Mcp3008Configuration? mcp3008, Ads1115Configuration? ads1115)
-    {
-        // Records have value equality, so an unchanged ADC configuration keeps its ADC.
-        var isMcp3008Changed = mcp3008 != _appliedMcp3008Config;
-        var isAds1115Changed = ads1115 != _appliedAds1115Config;
-
-        // Disposed before the pins are discovered, so that an ADC releasing its pins cannot change a pin that is opened
-        // as a GPIO pin again.
-        if (isMcp3008Changed)
-        {
-            _mcp3008?.Dispose();
-            _mcp3008 = null;
-            _appliedMcp3008Config = null;
-        }
-
-        if (isAds1115Changed)
-        {
-            _ads1115?.Dispose();
-            _ads1115 = null;
-            _appliedAds1115Config = null;
-        }
-
-        if (!isMcp3008Changed && !isAds1115Changed)
-        {
-            DiscoverPins(mcp3008, ads1115);
-            return null;
-        }
-
-        try
-        {
-            // Detaches and closes the pins a new ADC uses, so the ADC is created after this.
-            DiscoverPins(mcp3008, ads1115);
-
-            // Without a controller, the channels of an ADC are never read, so no ADC is created. An ADC that exists is
-            // unchanged and is kept.
-            if (_controller is null)
-            {
-                return null;
-            }
-
-            string? failureMessage = null;
-            if (mcp3008 is not null && _mcp3008 is null)
-            {
-                failureMessage = TryCreateMcp3008(mcp3008);
-            }
-
-            if (ads1115 is not null && _ads1115 is null)
-            {
-                failureMessage = CombineMessages(failureMessage, TryCreateAds1115(ads1115));
-            }
-
-            return failureMessage;
-        }
-        finally
-        {
-            AnalogChannels = CreateAnalogChannels();
-        }
-    }
-
-    private static string? CombineMessages(string? first, string? second) =>
-        first is null || second is null ? first ?? second : $"{first}; {second}";
-
-    // Called under _controllerLock when the MCP3008 does not exist.
-    private string? TryCreateMcp3008(Mcp3008Configuration configuration)
-    {
-        try
-        {
-            _mcp3008 = _createMcp3008(configuration);
-            _appliedMcp3008Config = configuration with { };
-            return null;
-        }
-        catch (Exception exception)
-        {
-            return $"MCP3008 init failed: {exception.Message}";
-        }
-    }
-
-    // Called under _controllerLock when the ADS1115 does not exist.
-    private string? TryCreateAds1115(Ads1115Configuration configuration)
-    {
-        try
-        {
-            _ads1115 = _createAds1115(configuration);
-            _appliedAds1115Config = configuration with { };
-            return null;
-        }
-        catch (Exception exception)
-        {
-            return $"ADS1115 init failed: {exception.Message}";
         }
     }
 
@@ -897,8 +737,6 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     private void RegisterInterrupt(int pinNumber)
     {
-        if (_controller == null) return;
-
         PinChangeEventHandler handler = (_, arguments) =>
         {
             if (!Pins.TryGetValue(arguments.PinNumber, out var pin))
@@ -916,8 +754,9 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
             }
         };
 
+        // Called by an attached pin, so the controller exists: Stop releases it only after detaching every pin.
         _interruptHandlers[pinNumber] = handler;
-        _controller.RegisterCallbackForPinValueChangedEvent(
+        _controller!.RegisterCallbackForPinValueChangedEvent(
             pinNumber,
             PinEventTypes.Rising | PinEventTypes.Falling,
             handler);
@@ -925,63 +764,49 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     private void UnregisterInterrupt(int pinNumber)
     {
-        if (_controller == null) return;
-
+        // Removed also when the driver throws: a handler left registered applies an edge of the pin of its number,
+        // which the handler registered by the next Connect applies too, so it changes nothing.
         if (_interruptHandlers.TryRemove(pinNumber, out var handler))
         {
-            _controller.UnregisterCallbackForPinValueChangedEvent(pinNumber, handler);
-        }
-    }
-
-    // Called under _controllerLock. The pins are detached before the interrupts are unregistered, so that a mode change
-    // cannot register a handler that is never unregistered.
-    private void DetachAndUnregisterPins()
-    {
-        foreach (var pin in _attachedPins.Values)
-        {
-            pin.Detach();
-        }
-
-        _attachedPins = new Dictionary<int, GpioPin>();
-
-        foreach (var pinNumber in _interruptHandlers.Keys.ToList())
-        {
-            UnregisterInterrupt(pinNumber);
+            _controller!.UnregisterCallbackForPinValueChangedEvent(pinNumber, handler);
         }
     }
 
     private void PollAdcChannels()
     {
-        // Under the controller lock, so that an apply or Dispose cannot dispose an ADC during a read, which would set
-        // its channel to Error for good or close the pins of a bit-banged read. Takes no pin lock. A configuration apply
-        // or Dispose thus waits for one poll pass, normally milliseconds; an ADS1115 that never finishes a conversion
-        // can hold it for a few seconds once, after which its channel is Error and skipped.
+        // Under the controller lock, so that an apply or Dispose never disposes an ADC during a read.
         lock (_controllerLock)
         {
-            foreach (var channel in AnalogChannels.Values)
-            {
-                if (channel.Status != ServiceStatus.Running) continue;
+            ReadAnalogChannels(AnalogChannels.Values);
+        }
+    }
 
-                try
+    // Called under _controllerLock.
+    private void ReadAnalogChannels(IEnumerable<AnalogChannel> channels)
+    {
+        foreach (var channel in channels)
+        {
+            if (channel.Status != ServiceStatus.Running) continue;
+
+            try
+            {
+                if (channel.Source == AdcSource.Mcp3008 && _mcp3008 != null)
                 {
-                    if (channel.Source == AdcSource.Mcp3008 && _mcp3008 != null)
-                    {
-                        var raw = _mcp3008.Read(channel.ChannelNumber);
-                        channel.RawValue = raw;
-                        channel.Value = raw / 1023.0;
-                    }
-                    else if (channel.Source == AdcSource.Ads1115 && _ads1115 != null)
-                    {
-                        var raw = _ads1115.ReadRaw(GetSingleEndedInput(channel.ChannelNumber));
-                        channel.RawValue = raw;
-                        channel.Value = raw / 32767.0;
-                    }
+                    var raw = _mcp3008.Read(channel.ChannelNumber);
+                    channel.RawValue = raw;
+                    channel.Value = raw / 1023.0;
                 }
-                catch (Exception exception)
+                else if (channel.Source == AdcSource.Ads1115 && _ads1115 != null)
                 {
-                    channel.Status = ServiceStatus.Error;
-                    channel.StatusMessage = exception.Message;
+                    var raw = _ads1115.ReadRaw(GetSingleEndedInput(channel.ChannelNumber));
+                    channel.RawValue = raw;
+                    channel.Value = raw / 32767.0;
                 }
+            }
+            catch (Exception exception)
+            {
+                channel.Status = ServiceStatus.Error;
+                channel.StatusMessage = exception.Message;
             }
         }
     }
@@ -994,24 +819,10 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         lock (_controllerLock)
         {
             _isDisposed = true;
+            Stop([]);
+            _driver?.Dispose();
             Status = ServiceStatus.Stopped;
             StatusMessage = null;
-
-            if (_controller != null)
-            {
-                DetachAndUnregisterPins();
-            }
-
-            // Dispose hardware
-            _mcp3008?.Dispose();
-            _ads1115?.Dispose();
-            _controller?.Dispose();
-
-            _mcp3008 = null;
-            _ads1115 = null;
-            _appliedMcp3008Config = null;
-            _appliedAds1115Config = null;
-            _controller = null;
         }
 
         base.Dispose();

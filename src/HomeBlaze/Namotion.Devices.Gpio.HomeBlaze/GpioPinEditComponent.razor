@@ -147,10 +147,10 @@
         {
             if (isInverted && pinNumber is >= 9 and <= 27)
             {
-                yield return (Severity.Warning, "On a Raspberry Pi 3, 4 or Zero 2 W, this pin is pulled down while the Pi boots, so an active-low relay can switch on during boot and then stays on when HomeBlaze starts. Use GPIO 4, 5 or 6 or an external pull-up.");
+                yield return (Severity.Warning, "On a Raspberry Pi 3, 4, 400, Zero 2 W or Compute Module 3 or 4, this pin is pulled down while the Pi boots, so an active-low relay can switch on during boot and then stays on when HomeBlaze starts. Use GPIO 4, 5 or 6 or an external pull-up.");
             }
 
-            yield return (Severity.Info, "On a Raspberry Pi 3, 4 or Zero 2 W, an output keeps the level the pin has when HomeBlaze starts: the level it drove after a restart, the power-on pull after a reboot of the Pi.");
+            yield return (Severity.Info, "On a Raspberry Pi 3, 4, 400, Zero 2 W or Compute Module 3 or 4, an output keeps the level the pin has when HomeBlaze starts: the level it drove after a restart, the power-on pull after a reboot of the Pi.");
         }
         else
         {

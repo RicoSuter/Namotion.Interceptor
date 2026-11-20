@@ -17,22 +17,14 @@ public class GpioInterruptTests
         // Arrange
         var driver = new SimulationGpioDriver();
         var subject = CreateSubjectWithInput(driver);
-        await subject.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running && subject.Pins[18].Status == ServiceStatus.Running);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
 
-            // Act & Assert
-            driver.SimulatePinValueChange(18, PinValue.High);
-            Assert.True(subject.Pins[18].Value);
-            driver.SimulatePinValueChange(18, PinValue.Low);
-            Assert.False(subject.Pins[18].Value);
-        }
-        finally
-        {
-            await subject.StopAsync(CancellationToken.None);
-            subject.Dispose();
-        }
+        // Act & Assert
+        driver.SimulatePinValueChange(18, PinValue.High);
+        Assert.True(subject.Pins[18].Value);
+        driver.SimulatePinValueChange(18, PinValue.Low);
+        Assert.False(subject.Pins[18].Value);
     }
 
     [Fact]
@@ -41,10 +33,9 @@ public class GpioInterruptTests
         // Arrange
         var driver = new SimulationGpioDriver();
         var subject = CreateSubjectWithInput(driver);
-        await subject.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running && subject.Pins[18].Status == ServiceStatus.Running);
-        await subject.StopAsync(CancellationToken.None);
-        subject.Dispose();
+        var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+        await running.DisposeAsync();
 
         // Act
         driver.SimulatePinValueChange(18, PinValue.High);
@@ -60,7 +51,7 @@ public class GpioInterruptTests
         var driver = new SimulationGpioDriver();
         var subject = CreateSubjectWithInput(driver);
         await subject.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running && subject.Pins[18].Status == ServiceStatus.Running);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
         await subject.StopAsync(CancellationToken.None);
         var pin = subject.Pins[18];
 
@@ -90,13 +81,10 @@ public class GpioInterruptTests
 
     private static GpioSubject CreateSubjectWithInput(SimulationGpioDriver driver)
     {
-        return new GpioSubject(driver)
+        return GpioTestSubject.Create(driver, pins: new Dictionary<int, GpioPin>
         {
-            Pins = new Dictionary<int, GpioPin>
-            {
-                [18] = new() { Mode = GpioPinMode.Input, DebounceTime = TimeSpan.Zero }
-            }
-        };
+            [18] = new() { Mode = GpioPinMode.Input, DebounceTime = TimeSpan.Zero }
+        });
     }
 
     [Fact]

@@ -5,8 +5,9 @@ namespace Namotion.Devices.Gpio.Tests;
 /// <summary>
 /// Test double of a register-based GPIO driver, such as the Raspberry Pi one, with 28 pins. Each pin has a mode, an
 /// input level (what it reads as an input, such as its power-on pull) and an output latch (initially low, written in
-/// any mode). An output reads and drives its latch. Changing the mode does not touch the latch, and setting an output
-/// with an initial value writes the latch before switching, like the Raspberry Pi register driver.
+/// any mode). An output reads and drives its latch. Changing the mode does not touch the latch, setting an output with
+/// an initial value writes the latch before switching, and closing a pin keeps its mode and latch, like the Raspberry
+/// Pi register driver.
 /// </summary>
 internal sealed class LatchingGpioDriver : GpioDriver
 {
@@ -15,35 +16,21 @@ internal sealed class LatchingGpioDriver : GpioDriver
     private readonly Dictionary<int, List<PinChangeEventHandler>> _eventHandlers = new();
 
     /// <summary>
-    /// Whether <see cref="Read"/> throws for a pin whose mode was not set since it was set up, like libgpiod, which
-    /// requests a line only when its mode is set.
+    /// Whether the driver behaves like libgpiod 1.x, which requests a line only when its mode is set and releases it
+    /// when the pin is closed: <see cref="Read"/> throws for a pin that is not requested, and a line requested as an
+    /// output without an initial value drives low.
     /// </summary>
     public bool FailsReadBeforeMode { get; init; }
 
     /// <summary>
-    /// Called after the mode of a pin was set, outside the lock of the driver, with the pin number.
+    /// Whether the driver finds no GPIO chip: reading the pin count throws an <see cref="IOException"/>.
     /// </summary>
-    public Action<int>? PinModeSet { get; set; }
-
-    /// <summary>
-    /// Called after a pin was opened, outside the lock of the driver, with the pin number.
-    /// </summary>
-    public Action<int>? PinOpened { get; set; }
-
-    /// <summary>
-    /// Called after a pin was closed, outside the lock of the driver, with the pin number.
-    /// </summary>
-    public Action<int>? PinClosed { get; set; }
+    public bool IsUnavailable { get; init; }
 
     /// <summary>
     /// The pin for which the next removal of a value changed callback throws an <see cref="IOException"/>, once.
     /// </summary>
     public int? FailingCallbackRemovalPinNumber { get; set; }
-
-    /// <summary>
-    /// The pin for which the next close throws an <see cref="IOException"/>, once.
-    /// </summary>
-    public int? FailingClosePinNumber { get; set; }
 
     /// <summary>
     /// Sets the state a pin has before it is opened.
@@ -94,17 +81,6 @@ internal sealed class LatchingGpioDriver : GpioDriver
     }
 
     /// <summary>
-    /// Gets how often the pin was closed.
-    /// </summary>
-    public int GetCloseCount(int pinNumber)
-    {
-        lock (_lock)
-        {
-            return GetState(pinNumber).CloseCount;
-        }
-    }
-
-    /// <summary>
     /// Gets how often the mode of the pin was set.
     /// </summary>
     public int GetModeSetCount(int pinNumber)
@@ -126,7 +102,7 @@ internal sealed class LatchingGpioDriver : GpioDriver
         }
     }
 
-    protected override int PinCount => 28;
+    protected override int PinCount => IsUnavailable ? throw new IOException("No GPIO chip found.") : 28;
 
     protected override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber) => pinNumber;
 
@@ -136,49 +112,22 @@ internal sealed class LatchingGpioDriver : GpioDriver
         {
             GetState(pinNumber).OpenCount++;
         }
-
-        PinOpened?.Invoke(pinNumber);
     }
 
     protected override void ClosePin(int pinNumber)
     {
         lock (_lock)
         {
-            if (FailingClosePinNumber == pinNumber)
+            if (FailsReadBeforeMode)
             {
-                FailingClosePinNumber = null;
-                throw new IOException($"Pin {pinNumber} could not be closed.");
+                GetState(pinNumber).IsModeSet = false;
             }
-
-            GetState(pinNumber).CloseCount++;
         }
-
-        PinClosed?.Invoke(pinNumber);
     }
 
-    protected override void SetPinMode(int pinNumber, PinMode mode)
-    {
-        lock (_lock)
-        {
-            var state = GetState(pinNumber);
-            if (mode == PinMode.Output && state.Mode != PinMode.Output)
-            {
-                state.DrivenLevels.Add(state.Latch);
-            }
+    protected override void SetPinMode(int pinNumber, PinMode mode) => SetMode(pinNumber, mode, initialValue: null);
 
-            state.Mode = mode;
-            state.IsModeSet = true;
-            state.ModeSetCount++;
-        }
-
-        PinModeSet?.Invoke(pinNumber);
-    }
-
-    protected override void SetPinMode(int pinNumber, PinMode mode, PinValue initialValue)
-    {
-        Write(pinNumber, initialValue);
-        SetPinMode(pinNumber, mode);
-    }
+    protected override void SetPinMode(int pinNumber, PinMode mode, PinValue initialValue) => SetMode(pinNumber, mode, initialValue);
 
     protected override PinMode GetPinMode(int pinNumber)
     {
@@ -253,6 +202,24 @@ internal sealed class LatchingGpioDriver : GpioDriver
         return new WaitForEventResult { EventTypes = PinEventTypes.None, TimedOut = true };
     }
 
+    private void SetMode(int pinNumber, PinMode mode, PinValue? initialValue)
+    {
+        lock (_lock)
+        {
+            var state = GetState(pinNumber);
+            var latch = initialValue ?? (FailsReadBeforeMode && !state.IsModeSet && mode == PinMode.Output ? PinValue.Low : state.Latch);
+            if (mode == PinMode.Output && (state.Mode != PinMode.Output || !state.IsModeSet || latch != state.Latch))
+            {
+                state.DrivenLevels.Add(latch);
+            }
+
+            state.Latch = latch;
+            state.Mode = mode;
+            state.IsModeSet = true;
+            state.ModeSetCount++;
+        }
+    }
+
     private PinState GetState(int pinNumber)
     {
         if (!_pins.TryGetValue(pinNumber, out var state))
@@ -275,8 +242,6 @@ internal sealed class LatchingGpioDriver : GpioDriver
         public bool IsModeSet { get; set; }
 
         public int OpenCount { get; set; }
-
-        public int CloseCount { get; set; }
 
         public int ModeSetCount { get; set; }
 

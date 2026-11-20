@@ -128,30 +128,18 @@ public class GpioRaspberryPiDefaultsTests
     {
         // Arrange
         var driver = new SimulationGpioDriver();
-        var subject = new GpioSubject(driver)
-        {
-            Pins = new Dictionary<int, GpioPin>()
-        };
+        var subject = GpioTestSubject.Create(driver);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
 
-        await subject.StartAsync(CancellationToken.None);
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running);
+        // Act
+        await subject.ApplyRaspberryPiDefaultsAsync(CancellationToken.None);
 
-            // Act
-            await subject.ApplyRaspberryPiDefaultsAsync(CancellationToken.None);
-
-            // Assert
-            Assert.Equal(PinMode.InputPullUp, driver.PinModes[4]);
-            Assert.Equal(PinMode.InputPullDown, driver.PinModes[17]);
-            Assert.Equal(GpioPinMode.InputPullUp, subject.Pins[4].Mode);
-            Assert.Equal(GpioPinMode.InputPullDown, subject.Pins[17].Mode);
-        }
-        finally
-        {
-            await subject.StopAsync(CancellationToken.None);
-            subject.Dispose();
-        }
+        // Assert
+        Assert.Equal(PinMode.InputPullUp, driver.PinModes[4]);
+        Assert.Equal(PinMode.InputPullDown, driver.PinModes[17]);
+        Assert.Equal(GpioPinMode.InputPullUp, subject.Pins[4].Mode);
+        Assert.Equal(GpioPinMode.InputPullDown, subject.Pins[17].Mode);
     }
 
     [Fact]
@@ -262,24 +250,16 @@ public class GpioRaspberryPiDefaultsTests
     {
         // Arrange
         var driver = new LatchingGpioDriver();
-        var subject = CreateSubjectWithDriver(driver, isRaspberryPi: true, new Dictionary<int, GpioPin>());
+        var subject = GpioTestSubject.Create(driver, isRaspberryPi: true);
 
         // Act
-        await subject.StartAsync(CancellationToken.None);
-        try
-        {
-            await WaitUntilAllPinsRunAsync(subject);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
 
-            // Assert
-            Assert.Equal(expectedMode, subject.Pins[pinNumber].Mode);
-            Assert.Equal(expectedDriverMode, driver.GetMode(pinNumber));
-            Assert.Null(subject.Pins[pinNumber].Name);
-        }
-        finally
-        {
-            await subject.StopAsync(CancellationToken.None);
-            subject.Dispose();
-        }
+        // Assert
+        Assert.Equal(expectedMode, subject.Pins[pinNumber].Mode);
+        Assert.Equal(expectedDriverMode, driver.GetMode(pinNumber));
+        Assert.Null(subject.Pins[pinNumber].Name);
     }
 
     [Fact]
@@ -287,27 +267,19 @@ public class GpioRaspberryPiDefaultsTests
     {
         // Arrange
         var driver = new LatchingGpioDriver();
-        var subject = CreateSubjectWithDriver(driver, isRaspberryPi: true, new Dictionary<int, GpioPin>
+        var subject = GpioTestSubject.Create(driver, isRaspberryPi: true, pins: new Dictionary<int, GpioPin>
         {
             [17] = new() { Mode = GpioPinMode.Input }
         });
 
         // Act
-        await subject.StartAsync(CancellationToken.None);
-        try
-        {
-            await WaitUntilAllPinsRunAsync(subject);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
 
-            // Assert
-            Assert.Equal(GpioPinMode.Input, subject.Pins[17].Mode);
-            Assert.Equal(PinMode.Input, driver.GetMode(17));
-            Assert.Equal(GpioPinMode.InputPullDown, subject.Pins[16].Mode);
-        }
-        finally
-        {
-            await subject.StopAsync(CancellationToken.None);
-            subject.Dispose();
-        }
+        // Assert
+        Assert.Equal(GpioPinMode.Input, subject.Pins[17].Mode);
+        Assert.Equal(PinMode.Input, driver.GetMode(17));
+        Assert.Equal(GpioPinMode.InputPullDown, subject.Pins[16].Mode);
     }
 
     [Fact]
@@ -315,25 +287,17 @@ public class GpioRaspberryPiDefaultsTests
     {
         // Arrange
         var driver = new LatchingGpioDriver();
-        var subject = CreateSubjectWithDriver(driver, isRaspberryPi: false, new Dictionary<int, GpioPin>());
+        var subject = GpioTestSubject.Create(driver, isRaspberryPi: false);
 
         // Act
-        await subject.StartAsync(CancellationToken.None);
-        try
-        {
-            await WaitUntilAllPinsRunAsync(subject);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
 
-            // Assert
-            foreach (var pinNumber in new[] { 4, 17 })
-            {
-                Assert.Equal(GpioPinMode.Input, subject.Pins[pinNumber].Mode);
-                Assert.Equal(PinMode.Input, driver.GetMode(pinNumber));
-            }
-        }
-        finally
+        // Assert
+        foreach (var pinNumber in new[] { 4, 17 })
         {
-            await subject.StopAsync(CancellationToken.None);
-            subject.Dispose();
+            Assert.Equal(GpioPinMode.Input, subject.Pins[pinNumber].Mode);
+            Assert.Equal(PinMode.Input, driver.GetMode(pinNumber));
         }
     }
 
@@ -342,28 +306,20 @@ public class GpioRaspberryPiDefaultsTests
     {
         // Arrange
         var driver = new LatchingGpioDriver();
-        var subject = CreateSubjectWithDriver(driver, isRaspberryPi: true, new Dictionary<int, GpioPin>());
-        await subject.StartAsync(CancellationToken.None);
-        try
-        {
-            await WaitUntilAllPinsRunAsync(subject);
+        var subject = GpioTestSubject.Create(driver, isRaspberryPi: true);
+        await using var running = await GpioTestSubject.StartAsync(subject);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
 
-            // Act
-            await subject.ApplyRaspberryPiDefaultsAsync(CancellationToken.None);
+        // Act
+        await subject.ApplyRaspberryPiDefaultsAsync(CancellationToken.None);
 
-            // Assert
-            Assert.Equal("I2C1 SDA", subject.Pins[2].Name);
-            Assert.Equal("SPI0 MISO", subject.Pins[9].Name);
-            Assert.Equal("PCM CLK / PWM0", subject.Pins[18].Name);
-            Assert.Null(subject.Pins[17].Name);
-            Assert.Equal(GpioPinMode.InputPullUp, subject.Pins[2].Mode);
-            Assert.Equal(GpioPinMode.InputPullDown, subject.Pins[17].Mode);
-        }
-        finally
-        {
-            await subject.StopAsync(CancellationToken.None);
-            subject.Dispose();
-        }
+        // Assert
+        Assert.Equal("I2C1 SDA", subject.Pins[2].Name);
+        Assert.Equal("SPI0 MISO", subject.Pins[9].Name);
+        Assert.Equal("PCM CLK / PWM0", subject.Pins[18].Name);
+        Assert.Null(subject.Pins[17].Name);
+        Assert.Equal(GpioPinMode.InputPullUp, subject.Pins[2].Mode);
+        Assert.Equal(GpioPinMode.InputPullDown, subject.Pins[17].Mode);
     }
 
     [Fact]
@@ -387,20 +343,6 @@ public class GpioRaspberryPiDefaultsTests
         Assert.Equal(GpioPinMode.InputPullUp, subject.Pins[10].Mode);
     }
 
-    private static GpioSubject CreateSubjectWithDriver(GpioDriver driver, bool isRaspberryPi, Dictionary<int, GpioPin> pins)
-    {
-        return new GpioSubject(driver, isRaspberryPi)
-        {
-            Pins = pins
-        };
-    }
-
-    private static Task WaitUntilAllPinsRunAsync(GpioSubject subject) =>
-        AsyncTestHelpers.WaitUntilAsync(() =>
-            subject.Status == ServiceStatus.Running &&
-            subject.Pins.Count == 28 &&
-            subject.Pins.Values.All(pin => pin.Status == ServiceStatus.Running));
-
     private static TestGpioConfigurationWriter CreateWriter(GpioSubject subject)
     {
         var context = InterceptorSubjectContext.Create().WithParents();
@@ -411,7 +353,7 @@ public class GpioRaspberryPiDefaultsTests
     {
         return new GpioSubject
         {
-            Pins = Enumerable.Range(0, pinCount).ToDictionary(pinNumber => pinNumber, pinNumber => new GpioPin { PinNumber = pinNumber })
+            Pins = Enumerable.Range(0, pinCount).ToDictionary(pinNumber => pinNumber, _ => new GpioPin())
         };
     }
 }

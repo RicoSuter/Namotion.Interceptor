@@ -77,7 +77,7 @@ chmod 600 .env
 docker compose up -d
 ```
 
-`COMPOSE_DIR` is the absolute path of this folder. The updater mounts it at the same path, read-only except for `data/`, so compose finds `./data` on the host. Update it when the folder moves. Enabling the profile without `COMPOSE_DIR` makes compose refuse to start the updater because of a missing path.
+`COMPOSE_DIR` is the absolute path of this folder. The updater mounts it at the same path, read-only except for `data/`, so compose finds `./data` on the host. Update it when the folder moves. Enabling the profile without `COMPOSE_DIR` makes compose refuse to start the updater because of a missing path. `COMPOSE_DIR` must be the folder that contains the compose file: a wrong path that exists makes the updater watch another data folder, and HomeBlaze then shows the updater as not available.
 
 `COMPOSE_PROFILES` keeps the profile on for every later `docker compose up -d`. To use Seq as well, list both profiles, `COMPOSE_PROFILES=updater,seq`, and run plain `docker compose up -d`, since `--profile` replaces the list in `.env`. Without these lines nothing changes.
 

@@ -175,7 +175,7 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
     /// While the pin is not running, only <see cref="Value"/> changes and nothing is written; the level is read from the pin when it starts.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The pin is an input.</exception>
-    [Operation(Title = "Set Value", Position = 4, Description = "Sets the logical value of an output pin. Only for an output pin that is running.")]
+    [Operation(Title = "Set Value", Position = 4, Description = "Sets the logical value of an output pin. Written to the pin while it is running.")]
     public Task SetValueAsync(bool value, CancellationToken cancellationToken)
     {
         lock (_lock)
@@ -224,15 +224,6 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
                     UnregisterInterrupt?.Invoke(PinNumber);
                 }
 
-                // Set hardware pin mode
-                var hardwareMode = newMode switch
-                {
-                    GpioPinMode.Input => PinMode.Input,
-                    GpioPinMode.InputPullUp => PinMode.InputPullUp,
-                    GpioPinMode.InputPullDown => PinMode.InputPullDown,
-                    GpioPinMode.Output => PinMode.Output,
-                    _ => PinMode.Input
-                };
                 if (!isInput)
                 {
                     // On a pin that is not an output, the controller only stores the level and passes it to the
@@ -240,7 +231,7 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
                     Controller.Write(PinNumber, ToLevel(Value));
                 }
 
-                Controller.SetPinMode(PinNumber, hardwareMode);
+                Controller.SetPinMode(PinNumber, ToHardwareMode(newMode));
 
                 if (isInput)
                 {
@@ -383,17 +374,65 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
     }
 
     /// <summary>
+    /// Opens the pin on <paramref name="controller"/> in its <see cref="Mode"/> and starts it, or sets
+    /// <see cref="Status"/> to <see cref="ServiceStatus.Unavailable"/> with the reason. An output opens at
+    /// <paramref name="outputLevel"/> when given, otherwise at the level the pin has. Called with the pin number set
+    /// and the pin closed on the controller.
+    /// </summary>
+    internal void Attach(GpioController controller, Action<int> registerInterrupt, Action<int> unregisterInterrupt, PinValue? outputLevel)
+    {
+        // Under the lock, so that a mode change waits until the pin runs and is then applied to the hardware.
+        lock (_lock)
+        {
+            CancelDebounce();
+            Controller = controller;
+            RegisterInterrupt = registerInterrupt;
+            UnregisterInterrupt = unregisterInterrupt;
+
+            try
+            {
+                if (Mode == GpioPinMode.Output)
+                {
+                    Value = ToValue(OpenOutput(controller, outputLevel));
+                }
+                else
+                {
+                    controller.OpenPin(PinNumber, ToHardwareMode(Mode));
+                    Value = ToValue(controller.Read(PinNumber));
+
+                    // Registered before the pin reports Running, so that an edge after that has a handler.
+                    registerInterrupt(PinNumber);
+                }
+
+                Status = ServiceStatus.Running;
+                StatusMessage = null;
+            }
+            catch (Exception exception)
+            {
+                Status = ServiceStatus.Unavailable;
+                StatusMessage = exception.Message;
+            }
+        }
+    }
+
+    /// <summary>
     /// Releases the controller and stops the pin. Call it before the controller is disposed, so that an interrupt or
     /// poll that is still in flight cannot open a debounce window on it.
     /// </summary>
-    internal void Detach()
+    /// <returns>The level of the pin when it was a running output, otherwise null.</returns>
+    internal PinValue? Detach()
     {
         lock (_lock)
         {
+            PinValue? outputLevel = Controller is not null && Status == ServiceStatus.Running && Mode == GpioPinMode.Output
+                ? ToLevel(Value)
+                : null;
+
             CancelDebounce();
             Controller = null;
             Status = ServiceStatus.Stopped;
             StatusMessage = null;
+            return outputLevel;
         }
     }
 
@@ -402,6 +441,53 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
     internal bool ToValue(PinValue level) => (level == PinValue.High) != IsInverted;
 
     private static bool IsInputMode(GpioPinMode mode) => mode != GpioPinMode.Output;
+
+    private static PinMode ToHardwareMode(GpioPinMode mode) => mode switch
+    {
+        GpioPinMode.InputPullUp => PinMode.InputPullUp,
+        GpioPinMode.InputPullDown => PinMode.InputPullDown,
+        GpioPinMode.Output => PinMode.Output,
+        _ => PinMode.Input
+    };
+
+    // Called under _lock. Opens the pin as an output and returns its level.
+    private PinValue OpenOutput(GpioController controller, PinValue? outputLevel)
+    {
+        if (outputLevel is { } level)
+        {
+            controller.OpenPin(PinNumber, PinMode.Output, level);
+            return level;
+        }
+
+        // The level is read before the mode is set, so an output keeps the level it has: the latch after a restart,
+        // the power-on pull after a reboot. This relies on opening without a mode not changing the pin. A driver that
+        // cannot read a pin before its mode is set (libgpiod 1.x) opens it as an output its own way, and the level is
+        // read back from it.
+        controller.OpenPin(PinNumber);
+        if (TryReadLevel(controller, PinNumber, out var levelBeforeMode))
+        {
+            controller.OpenPin(PinNumber, PinMode.Output, levelBeforeMode);
+            return levelBeforeMode;
+        }
+
+        controller.OpenPin(PinNumber, PinMode.Output);
+        return controller.Read(PinNumber);
+    }
+
+    private static bool TryReadLevel(GpioController controller, int pinNumber, out PinValue level)
+    {
+        try
+        {
+            level = controller.Read(pinNumber);
+            return true;
+        }
+        catch (IOException)
+        {
+            // The libgpiod V1 driver reads a pin only once its mode is set.
+            level = default;
+            return false;
+        }
+    }
 
     // Called under _lock.
     private void SetValueFromLevel(bool isHigh)

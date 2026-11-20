@@ -60,11 +60,6 @@ internal sealed class RecordingAdcFactory
         }
     }
 
-    /// <summary>
-    /// Gets how many events start with the given text.
-    /// </summary>
-    public int Count(string eventPrefix) => Events.Count(recordedEvent => recordedEvent.StartsWith(eventPrefix, StringComparison.Ordinal));
-
     public Mcp3008 CreateMcp3008(Mcp3008Configuration configuration)
     {
         if (FailsNextMcp3008Creation)
