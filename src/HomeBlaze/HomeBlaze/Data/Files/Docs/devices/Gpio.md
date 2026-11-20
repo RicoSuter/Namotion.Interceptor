@@ -27,7 +27,7 @@ The GPIO device provides access to GPIO pins on various Linux-based single-board
 
 | Operation | Description |
 |-----------|-------------|
-| `ApplyRaspberryPiDefaults` | Names the pins with a fixed function (I2C, SPI, UART, PWM, HAT EEPROM) and applies the power-on pull of a Raspberry Pi 3, 4 or Zero 2 W (pull-up for GPIO 0 to 8, pull-down for GPIO 9 to 27), both only to unconfigured pins: those without a name in plain `Input` mode. Other pins and the pins of a configured MCP3008 are not changed, so applying it again changes nothing. Saves the configuration when a pin changed. Check the defaults before using it on a Raspberry Pi 5. |
+| `ApplyRaspberryPiDefaults` | Names the pins with a fixed function (I2C, SPI, UART, PWM, HAT EEPROM) and applies the power-on pull of a Raspberry Pi 3, 4 or Zero 2 W (pull-up for GPIO 0 to 8, pull-down for GPIO 9 to 27), both only to unconfigured pins: those without a name in plain `Input` mode or in the mode of their power-on pull, as new pins on a Raspberry Pi start. Other pins and the pins of a configured MCP3008 are not changed, so applying it again changes nothing. Saves the configuration when a pin changed. Check the defaults before using it on a Raspberry Pi 5. |
 
 ### JSON Configuration Example
 
@@ -201,9 +201,9 @@ The pin editor shows this table and hints for the selected mode.
 
 Pin configurations are persisted and restored on restart:
 - When `GpioSubject` loads, existing pin configurations from JSON are reused
-- New pins (not in configuration) default to `Input` mode
+- New pins (not in configuration) start with the power-on pull of the board on a Raspberry Pi 3, 4 or Zero 2 W (`InputPullUp` for GPIO 0 to 8, `InputPullDown` for GPIO 9 to 27), so an unconnected pin does not float; on other boards, a Raspberry Pi 5 and in simulation mode they start as `Input`. Pins in the configuration keep their mode, also a plain `Input`
 - Changes to `Name`, `Mode`, `IsInverted` and `DebounceTime` made in the pin editor or with a control on a page are saved, and `ApplyRaspberryPiDefaults` saves the changes it makes; changes made from code are not saved by themselves
-- Changes to the GPIO JSON file apply while HomeBlaze runs: all pins are reopened with the settings of the file, a pin missing from it becomes a plain `Input`, and an output keeps its level
+- Changes to the GPIO JSON file apply while HomeBlaze runs: all pins are reopened with the settings of the file, a pin missing from it starts like a new pin, and an output keeps its level
 
 ## Analog Input (ADC)
 
@@ -329,9 +329,9 @@ This occurs when:
 
 **Solution**: Enable `UseSimulation = true` for development/testing.
 
-### Input `Value` keeps changing
+### Input switches between true and false on its own
 
-An unconnected or high-impedance input floats, so its level is random. A two-color LED module on a pin set to plain `Input` changed `Value` 200 to 240 times per minute, even with the default 50 ms debounce. Give the pin a defined level with `InputPullUp` or `InputPullDown`, or run the `ApplyRaspberryPiDefaults` operation ("Apply Raspberry Pi Defaults"), which sets the power-on pull on unconfigured pins. A pin that drives something, such as an LED, should be an `Output`.
+An unconnected or high-impedance input is floating, so its level is random. New pins on a Raspberry Pi 3, 4 or Zero 2 W start with the power-on pull, so this mainly happens for a pin set to plain `Input`. A two-color LED module on a pin set to plain `Input` changed `Value` 200 to 240 times per minute, even with the default 50 ms debounce. Give the pin a defined level with `InputPullUp` or `InputPullDown`, or run the `ApplyRaspberryPiDefaults` operation ("Apply Raspberry Pi Defaults"), which sets the power-on pull on unconfigured pins. A pin that drives something, such as an LED, should be an `Output`.
 
 ### Write verification failed
 

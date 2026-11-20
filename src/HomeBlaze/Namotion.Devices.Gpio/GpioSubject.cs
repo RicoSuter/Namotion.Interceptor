@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Device.Gpio;
+using System.Device.Gpio.Drivers;
 using System.Device.I2c;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -29,6 +30,7 @@ namespace Namotion.Devices.Gpio;
 public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider
 {
     private readonly GpioDriver? _driver;
+    private readonly bool _isDriverRaspberryPi;
     private readonly ConcurrentDictionary<int, PinChangeEventHandler> _interruptHandlers = new();
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
 
@@ -67,6 +69,10 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     // loop and an applied configuration check this to create nothing after Dispose.
     private bool _isDisposed;
     private bool _currentlyUsingSimulation;
+
+    // Guarded by _controllerLock. Whether the controller drives the pins of a Raspberry Pi 3, 4 or Zero 2 W, whose
+    // power-on pulls new pins start with.
+    private bool _isRaspberryPi;
     private Mcp3008? _mcp3008;
     private Ads1115? _ads1115;
 
@@ -146,8 +152,18 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     /// </summary>
     /// <param name="driver">Optional GPIO driver. If null, uses system default or simulation based on UseSimulation.</param>
     public GpioSubject(GpioDriver? driver = null)
+        : this(driver, driver is RaspberryPi3Driver)
+    {
+    }
+
+    /// <summary>
+    /// Creates a GpioSubject with an optional GPIO driver that drives the pins of a Raspberry Pi 3, 4 or Zero 2 W when
+    /// <paramref name="isRaspberryPi"/> is true, so that new pins start with its power-on pull.
+    /// </summary>
+    internal GpioSubject(GpioDriver? driver, bool isRaspberryPi)
     {
         _driver = driver;
+        _isDriverRaspberryPi = isRaspberryPi;
 
         PollingInterval = TimeSpan.FromSeconds(5);
         RetryInterval = TimeSpan.FromSeconds(30);
@@ -161,10 +177,10 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     /// <summary>
     /// Applies the defaults of a Raspberry Pi 3, 4 or Zero 2 W to the unconfigured pins, those without a name in plain
-    /// <see cref="GpioPinMode.Input"/> mode: the name of a pin with a fixed function, and the pull the Pi applies at
-    /// power-on, up for GPIO 0 to 8 and down for GPIO 9 to 27. Other pins and the pins of a configured
-    /// <see cref="Mcp3008"/> are not changed, so applying it again changes nothing. Saves the configuration when a pin
-    /// changed, also when a later pin failed.
+    /// <see cref="GpioPinMode.Input"/> mode or in the mode of their power-on pull: the name of a pin with a fixed
+    /// function, and the pull the Pi applies at power-on, up for GPIO 0 to 8 and down for GPIO 9 to 27. Other pins and
+    /// the pins of a configured <see cref="Mcp3008"/> are not changed, so applying it again changes nothing. Saves the
+    /// configuration when a pin changed, also when a later pin failed.
     /// </summary>
     /// <exception cref="InvalidOperationException">The mode of a pin could not be changed, or the configuration writer stored nothing.</exception>
     [Operation(Title = "Apply Raspberry Pi Defaults", Description = "Names the pins with a fixed function and applies the power-on pulls of a Raspberry Pi 3, 4 or Zero 2 W to unconfigured pins. Check the defaults before using it on a Raspberry Pi 5.")]
@@ -177,15 +193,19 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         {
             foreach (var (pinNumber, pin) in Pins)
             {
-                if (!string.IsNullOrEmpty(pin.Name) || pin.Mode != GpioPinMode.Input ||
+                // A pin discovered on a Raspberry Pi starts in the mode of its power-on pull, so that mode without a
+                // name counts as unconfigured too.
+                var powerOnMode = GetRaspberryPiPowerOnMode(pinNumber);
+                if (!string.IsNullOrEmpty(pin.Name) ||
+                    (pin.Mode != GpioPinMode.Input && pin.Mode != powerOnMode) ||
                     (mcp3008 is not null && IsMcp3008Pin(mcp3008, pinNumber)))
                 {
                     continue;
                 }
 
-                if (pinNumber <= 27)
+                if (pin.Mode != powerOnMode)
                 {
-                    pin.Mode = pinNumber <= 8 ? GpioPinMode.InputPullUp : GpioPinMode.InputPullDown;
+                    pin.Mode = powerOnMode;
                     isChanged = true;
                 }
 
@@ -238,6 +258,17 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
             throw new InvalidOperationException("The Raspberry Pi defaults were applied but the configuration could not be saved.");
         }
     }
+
+    /// <summary>
+    /// Gets the mode with the pull a Raspberry Pi 3, 4 or Zero 2 W applies at power-on: up for GPIO 0 to 8, down for
+    /// GPIO 9 to 27, and plain <see cref="GpioPinMode.Input"/> above.
+    /// </summary>
+    private static GpioPinMode GetRaspberryPiPowerOnMode(int pinNumber) => pinNumber switch
+    {
+        <= 8 => GpioPinMode.InputPullUp,
+        <= 27 => GpioPinMode.InputPullDown,
+        _ => GpioPinMode.Input
+    };
 
     private static bool IsMcp3008Pin(Mcp3008Configuration configuration, int pinNumber) =>
         pinNumber == configuration.ClockPin || pinNumber == configuration.MosiPin ||
@@ -327,18 +358,24 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
                 // Use injected driver (for testing)
                 _controller = new GpioController(PinNumberingScheme.Logical, _driver);
                 _currentlyUsingSimulation = false;
+                _isRaspberryPi = _isDriverRaspberryPi;
             }
             else if (UseSimulation)
             {
                 // Use simulation driver (28 pins like Raspberry Pi)
                 _controller = new GpioController(PinNumberingScheme.Logical, new SimulationGpioDriver());
                 _currentlyUsingSimulation = true;
+                _isRaspberryPi = false;
             }
             else
             {
                 // Use real hardware
-                _controller = new GpioController();
+                var raspberryPiDriver = TryCreateRaspberryPiDriver();
+                _controller = raspberryPiDriver is not null
+                    ? new GpioController(PinNumberingScheme.Logical, raspberryPiDriver)
+                    : new GpioController();
                 _currentlyUsingSimulation = false;
+                _isRaspberryPi = raspberryPiDriver is not null;
             }
             return InitializationResult.Success;
         }
@@ -355,6 +392,28 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         }
     }
 
+    /// <summary>
+    /// Creates the Raspberry Pi register driver on a Raspberry Pi 3, 4 or Zero 2 W, or returns null on other boards.
+    /// </summary>
+    private static RaspberryPi3Driver? TryCreateRaspberryPiDriver()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return null;
+        }
+
+        // The default controller picks this driver on exactly the boards where its constructor succeeds, so creating
+        // it here changes no driver.
+        try
+        {
+            return new RaspberryPi3Driver();
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return null;
+        }
+    }
+
     private void CreateUnavailablePins(string message)
     {
         Status = ServiceStatus.Unavailable;
@@ -364,8 +423,9 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     /// <summary>
     /// Fills <see cref="Pins"/> with a pin for every pin of the controller and attaches the pins that are not attached
-    /// yet, after detaching the instances they replaced. Without a controller, only the pin numbers are set. Called
-    /// under <see cref="_controllerLock"/>.
+    /// yet, after detaching the instances they replaced. A new pin starts in plain <see cref="GpioPinMode.Input"/>
+    /// mode, on a Raspberry Pi 3, 4 or Zero 2 W in the mode of its power-on pull. Without a controller, only the pin
+    /// numbers are set. Called under <see cref="_controllerLock"/>.
     /// </summary>
     private void DiscoverPins()
     {
@@ -391,7 +451,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
             {
                 var pin = existingPins.TryGetValue(pinNumber, out var existing)
                     ? existing
-                    : new GpioPin { Mode = GpioPinMode.Input };
+                    : new GpioPin { Mode = _isRaspberryPi ? GetRaspberryPiPowerOnMode(pinNumber) : GpioPinMode.Input };
 
                 _attachedPins.TryGetValue(pinNumber, out var attachedPin);
                 if (!ReferenceEquals(pin, attachedPin))
