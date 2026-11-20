@@ -73,6 +73,34 @@ internal sealed class LatchingGpioDriver : GpioDriver
     public Action<int>? PinClosed { get; set; }
 
     /// <summary>
+    /// Called with the pin number when a value changed callback is about to be removed, before the driver lock that the
+    /// removal takes.
+    /// </summary>
+    public Action<int>? CallbackRemoving { get; set; }
+
+    /// <summary>
+    /// Sets the input level of a pin and calls its value changed callbacks while holding the driver lock, which removing
+    /// a callback also takes, like libgpiod 2.x. <paramref name="dispatching"/> is called under the lock right before the
+    /// callbacks.
+    /// </summary>
+    public void RaiseEdge(int pinNumber, PinValue level, Action? dispatching = null)
+    {
+        lock (_lock)
+        {
+            GetState(pinNumber).InputLevel = level;
+            dispatching?.Invoke();
+            if (_eventHandlers.TryGetValue(pinNumber, out var handlers))
+            {
+                var changeType = level == PinValue.High ? PinEventTypes.Rising : PinEventTypes.Falling;
+                foreach (var handler in handlers.ToArray())
+                {
+                    handler(this, new PinValueChangedEventArgs(changeType, pinNumber));
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Sets the state a pin has before it is opened.
     /// </summary>
     public void SetUpPin(int pinNumber, PinMode mode, PinValue inputLevel, PinValue latch)
@@ -247,6 +275,7 @@ internal sealed class LatchingGpioDriver : GpioDriver
 
     protected override void RemoveCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback)
     {
+        CallbackRemoving?.Invoke(pinNumber);
         lock (_lock)
         {
             if (FailsCallbacks || FailingCallbackRemovalPinNumber == pinNumber)

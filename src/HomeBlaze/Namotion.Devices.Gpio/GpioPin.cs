@@ -30,6 +30,9 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
     private ITimer? _debounceTimer;
     private long _debounceGeneration;
 
+    // 1 while a read of the level for an edge that found the pin busy is queued, so that a burst of edges queues one.
+    private int _isBusyEdgeReadQueued;
+
     /// <summary>
     /// The GPIO pin number (BCM numbering).
     /// </summary>
@@ -327,21 +330,60 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
 
     /// <summary>
     /// Applies a level that an interrupt reported. It is ignored while a debounce window is open, and when the pin is
-    /// an output in hardware.
+    /// an output in hardware. When the pin is busy, its level is read and applied on the thread pool instead.
     /// </summary>
     internal void ApplyHardwareLevel(bool isHigh)
     {
-        lock (_lock)
+        // Never waits for the lock: drivers such as libgpiod 2.x call this while holding a lock that removing a
+        // callback also takes, and a mode change removes the callback under the lock.
+        if (!_lock.TryEnter())
+        {
+            if (Interlocked.Exchange(ref _isBusyEdgeReadQueued, 1) == 0)
+            {
+                ThreadPool.UnsafeQueueUserWorkItem(static pin => pin.ReadLevelForBusyEdge(), this, preferLocal: false);
+            }
+
+            return;
+        }
+
+        try
         {
             if (Controller == null || Status != ServiceStatus.Running || _debounceTimer is not null)
                 return;
 
-            // An edge that waited for the lock while the pin became an output would write its stale level to the output.
-            // The hardware mode also covers the window before the Mode property is stored.
+            // An edge reported before the pin became an output would write its stale level to the output. The hardware
+            // mode also covers the window before the Mode property is stored.
             if (!Controller.IsPinOpen(PinNumber) || Controller.GetPinMode(PinNumber) == PinMode.Output)
                 return;
 
             SetValueFromLevel(isHigh);
+        }
+        finally
+        {
+            _lock.Exit();
+        }
+    }
+
+    private void ReadLevelForBusyEdge()
+    {
+        // Cleared before the read, so that an edge during the read queues another one.
+        Volatile.Write(ref _isBusyEdgeReadQueued, 0);
+        try
+        {
+            PollHardwareLevel();
+        }
+        catch (Exception exception)
+        {
+            // On the thread pool, where a thrown exception would end the process.
+            try
+            {
+                StatusMessage = $"Failed to read GPIO pin {PinNumber} after an edge: {exception.Message}";
+                Status = ServiceStatus.Error;
+            }
+            catch (Exception)
+            {
+                // Nothing is left to report it to.
+            }
         }
     }
 

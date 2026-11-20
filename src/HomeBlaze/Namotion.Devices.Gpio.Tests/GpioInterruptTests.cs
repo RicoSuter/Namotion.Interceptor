@@ -1,6 +1,7 @@
 using System.Device.Gpio;
 using HomeBlaze.Abstractions;
 using Namotion.Devices.Gpio.Simulation;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace Namotion.Devices.Gpio.Tests;
@@ -76,6 +77,46 @@ public class GpioInterruptTests
 
         // Assert
         Assert.False(pin.Value);
+    }
+
+    [Fact]
+    public async Task WhenAnEdgeArrivesWhileItsInputBecomesAnOutput_ThenNeitherWaitsForTheOther()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var subject = GpioTestSubject.Create(driver, pins: new Dictionary<int, GpioPin>
+        {
+            [17] = new() { Mode = GpioPinMode.Input, DebounceTime = TimeSpan.Zero }
+        });
+        await subject.StartAsync(CancellationToken.None);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+        var pin = subject.Pins[17];
+
+        using var edgeDispatching = new ManualResetEventSlim();
+        Task? edgeTask = null;
+        driver.CallbackRemoving = pinNumber =>
+        {
+            // The mode change holds the pin lock here; the edge holds the driver lock while it calls the callback.
+            driver.CallbackRemoving = null;
+            edgeTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(
+                () => driver.RaiseEdge(pinNumber, PinValue.High, edgeDispatching.Set));
+            edgeDispatching.Wait(TestTimeouts.Default);
+        };
+
+        // Act
+        await DedicatedThreadTestHelpers
+            .RunOnDedicatedThreadAsync(() => pin.Mode = GpioPinMode.Output)
+            .WaitAsync(TestTimeouts.Default);
+        await edgeTask!.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(GpioPinMode.Output, pin.Mode);
+        Assert.Equal(ServiceStatus.Running, pin.Status);
+        Assert.Equal(PinMode.Output, driver.GetMode(17));
+
+        // Not disposed when an assertion fails: with the deadlock, the stop would wait for the driver lock forever.
+        await subject.StopAsync(CancellationToken.None);
+        subject.Dispose();
     }
 
     private static GpioSubject CreateSubjectWithInput(SimulationGpioDriver driver)

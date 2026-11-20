@@ -336,12 +336,14 @@ await gpioSubject.ApplyConfigurationAsync(CancellationToken.None);
 
 ## Troubleshooting
 
-### "No supported libgpiod library file found"
+### "GPIO not supported on this platform"
 
-Install the libgpiod library:
+A board without the [Raspberry Pi register driver](#raspberry-pi-register-driver) needs the libgpiod library. Without it, the GPIO subject shows `Unavailable` with "GPIO not supported on this platform", and a Raspberry Pi 5 shows `Error` with "Couldn't find the default GPIO chip". Install the library:
 ```bash
 sudo apt install libgpiod3
 ```
+
+Then restart HomeBlaze or change the GPIO configuration: an unsupported platform is not checked again on its own.
 
 ### Pin shows "Unavailable" status
 
