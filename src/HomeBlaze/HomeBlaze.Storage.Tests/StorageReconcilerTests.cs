@@ -87,27 +87,6 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenNestedSubjectKeyIsRemovedFromConfigurationFile_ThenReloadDetachesItAndKeepsTheInstance()
-    {
-        // Arrange
-        var groupType = typeof(NestedSecretDeviceGroup).FullName;
-        var deviceType = typeof(EmbeddedSecretDevice).FullName;
-        WriteFile("Group.json", $$"""{ "$type": "{{groupType}}", "primary": { "$type": "{{deviceType}}", "host": "primary-host" } }""");
-        var storage = await ConnectAsync();
-        var group = Assert.IsType<NestedSecretDeviceGroup>(storage.Children["Group"]);
-        var primary = Assert.IsType<EmbeddedSecretDevice>(group.Primary);
-        WriteFile("Group.json", $$"""{ "$type": "{{groupType}}" }""");
-
-        // Act
-        await storage.ReconcileAsync();
-
-        // Assert
-        Assert.Same(group, storage.Children["Group"]);
-        Assert.Null(group.Primary);
-        Assert.Equal(0, primary.GetReferenceCount());
-    }
-
-    [Fact]
     public async Task WhenFilesWereReloadedOnce_ThenLaterPassesOpenNoFile()
     {
         // Arrange

@@ -188,7 +188,7 @@ public class ConfigurableSubjectSerializer
         {
             // Cached as null, so it is logged once per type.
             _serviceProvider.GetService<ILogger<ConfigurableSubjectSerializer>>()?.LogWarning(
-                exception, "The default configuration of {Type} could not be read, so all its values are written and keys missing from a reloaded file keep their values.", type.FullName);
+                exception, "The default configuration of {Type} could not be read, so all its values are written and ReplaceConfiguration keeps the values of missing keys.", type.FullName);
             return null;
         }
         finally
@@ -331,17 +331,9 @@ public class ConfigurableSubjectSerializer
             if (root.TryGetProperty(jsonName, out var jsonValue))
             {
                 var valueJson = jsonValue.GetRawText();
-                try
+                if (TryConvert(valueJson, property.Name, property.PropertyType, options, skipped, out var value))
                 {
-                    if (TryConvert(valueJson, property.Name, property.PropertyType, options, skipped, out var value))
-                    {
-                        property.SetValue(subject, value);
-                    }
-                }
-                catch (JsonException exception)
-                {
-                    // Skip properties that can't be deserialized
-                    skipped?.Invoke(new SkippedConfigurationProperty(property.Name, property.PropertyType, valueJson, exception));
+                    property.SetValue(subject, value);
                 }
             }
         }
@@ -377,25 +369,17 @@ public class ConfigurableSubjectSerializer
                 continue;
             }
 
-            try
+            if (TryConvert(valueJson, property.Name, property.Type, options, skipped, out var value))
             {
-                if (TryConvert(valueJson, property.Name, property.Type, options, skipped, out var value))
-                {
-                    property.SetValue(value);
-                }
-            }
-            catch (JsonException exception)
-            {
-                // Skip properties that can't be deserialized
-                skipped?.Invoke(new SkippedConfigurationProperty(property.Name, property.Type, valueJson, exception));
+                property.SetValue(value);
             }
         }
     }
 
     /// <summary>
-    /// Converts the JSON value of one configuration property. A value that the JSON reader does not support
-    /// is handed to <paramref name="skipped"/> and gives false. Without the callback it throws, like every
-    /// value that does not convert.
+    /// Converts the JSON value of one configuration property. A value that does not convert is handed to
+    /// <paramref name="skipped"/> and gives false. A value that the JSON reader does not support does the same
+    /// with the callback and throws without it.
     /// </summary>
     private static bool TryConvert(
         string valueJson,
@@ -416,11 +400,18 @@ public class ConfigurableSubjectSerializer
             value = null;
             return false;
         }
+        catch (JsonException exception)
+        {
+            skipped?.Invoke(new SkippedConfigurationProperty(propertyName, propertyType, valueJson, exception));
+            value = null;
+            return false;
+        }
     }
 
     /// <summary>
     /// Describes the properties that the callback for the skipped properties of <see cref="Deserialize(string, Action{IInterceptorSubject}, Action{SkippedConfigurationProperty}, ConfigurationNaming)"/>
-    /// or <see cref="UpdateConfiguration(IInterceptorSubject, string, Action{SkippedConfigurationProperty}, ConfigurationNaming)"/>
+    /// <see cref="UpdateConfiguration(IInterceptorSubject, string, Action{SkippedConfigurationProperty}, ConfigurationNaming)"/>
+    /// or <see cref="ReplaceConfiguration(IInterceptorSubject, string, Action{SkippedConfigurationProperty}, ConfigurationNaming)"/>
     /// got, each by its key in JSON with the given naming.
     /// </summary>
     public static string DescribeSkippedProperties(
@@ -436,8 +427,10 @@ public class ConfigurableSubjectSerializer
     /// for <paramref name="naming"/>.
     /// </summary>
     /// <remarks>
-    /// Both methods skip a property whose value does not convert, and report it only to a caller that
-    /// passes a callback for the skipped properties.
+    /// <see cref="Deserialize(string, ConfigurationNaming)"/>, <see cref="UpdateConfiguration(IInterceptorSubject, string, ConfigurationNaming)"/>
+    /// and <see cref="ReplaceConfiguration(IInterceptorSubject, string, Action{SkippedConfigurationProperty}, ConfigurationNaming)"/>
+    /// skip a property whose value does not convert, and report it only to a caller that passes a callback for the
+    /// skipped properties.
     /// </remarks>
     public bool CanDeserialize(
         string json, Type propertyType, ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
@@ -488,8 +481,7 @@ public class ConfigurableSubjectSerializer
     /// see <see cref="GetDefaultConfiguration"/>, so that the subject holds what a subject created from the JSON holds.
     /// </summary>
     /// <remarks>
-    /// A property whose value does not convert keeps its value. For a type without a default configuration, a
-    /// property that the JSON does not have keeps its value as well.
+    /// For a type without a default configuration, a property that the JSON does not have keeps its value.
     /// </remarks>
     public void ReplaceConfiguration(
         IInterceptorSubject subject,
