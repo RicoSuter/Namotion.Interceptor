@@ -755,7 +755,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
             return null;
         }
 
-        // In System.Device.Gpio 4.2.0, the default controller picks this driver on exactly the boards where its
+        // In System.Device.Gpio 4.3.0-prerelease.26569.7, the default controller picks this driver on exactly the boards where its
         // constructor succeeds, so creating it here changes no driver. Check this again when upgrading the package.
         try
         {
