@@ -990,6 +990,8 @@ private IInterceptorSubject? ResolveSubject()
 
 `ResolveScopedSubject` and `ResolveScopedValue` are extension methods in `HomeBlaze.Services`. When the subject is on a markdown page, a relative path starts at the page and its first segment can be the name of a block on that page, as [Paths](../administration/paths.md) describes for page authors. When the subject is not on a page, they resolve relative to the subject, like `ResolveSubject` and `ResolveValue` with the subject as the third argument.
 
+In a `[Derived]` getter, a resolution depends on what its path passes through: the property is computed again when a subject or property on the path changes, or when a target appears where the path stopped resolving, such as a property added at run time, but not when subjects are attached, moved or detached elsewhere in the graph. A resolution in a component's render depends on `PathsVersion` instead, which changes on every such change.
+
 ### Path Properties
 
 `[SubjectPath]` on a `string` `[Configuration]` property makes the generated properties editor show a [`SubjectPathField`](#subjectpathfield-component), so that the path can be picked as well as typed. Without a type the path leads to a property, and with a type to a subject of that type, which can be an interface:
