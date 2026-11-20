@@ -68,6 +68,25 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenKeyIsRemovedFromConfigurationFile_ThenReloadSetsItsDefaultAndKeepsTheInstance()
+    {
+        // Arrange
+        var type = typeof(Samples.Motor).FullName;
+        WriteFile("Motor.json", $$"""{ "$type": "{{type}}", "name": "Pump", "simulationInterval": "00:00:05" }""");
+        var storage = await ConnectAsync();
+        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
+        WriteFile("Motor.json", $$"""{ "$type": "{{type}}", "name": "Pump" }""");
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Same(motor, storage.Children["Motor"]);
+        Assert.Equal("Pump", motor.Name);
+        Assert.Equal(TimeSpan.FromSeconds(1), motor.SimulationInterval);
+    }
+
+    [Fact]
     public async Task WhenFilesWereReloadedOnce_ThenLaterPassesOpenNoFile()
     {
         // Arrange
