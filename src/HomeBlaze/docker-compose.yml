@@ -21,28 +21,43 @@ services:
 
   updater:
     # Opt-in: lets the Installation subject install updates, see the installation guide. Holds the Docker socket,
-    # which gives it root access to the host. Needs COMPOSE_DIR and COMPOSE_PROFILES=updater in .env.
+    # which gives it root access to the host; it writes only data/. Needs COMPOSE_DIR and COMPOSE_PROFILES=updater in .env.
     # Without COMPOSE_DIR the updater does not start (compose reports the missing path); installs without the profile are unaffected.
     image: docker:29-cli@sha256:34507eb5069d8be82c95dd3b6987d4250fd5fee49b82e2509b7d7a7030740d6d
     profiles: [updater]
     restart: unless-stopped
+    depends_on: [homeblaze]  # creates ./data first; the data mount below does not create a missing folder
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /root/.docker
     working_dir: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - type: bind  # same path as on the host, so compose resolves ./data to the host folder
+      - type: bind  # same path as on the host, so compose resolves ./data to the host folder; read-only, compose only reads it
         source: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}
         target: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind  # the only folder the updater writes
+        source: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}/data
+        target: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}/data
         bind: { create_host_path: false }
     command:
       - sh
       - -c
       - |
+        # A run the updater was restarted in never finishes; report it as failed.
+        if [ -f data/.update-running ] && [ ! -f data/.update-result ]; then
+          echo "The updater restarted while an install ran." >> data/.update-log
+          echo 1 > data/.update-result.tmp && mv data/.update-result.tmp data/.update-result
+        fi
         while true; do
           touch data/.updater-heartbeat
           if [ -f data/.update-request ]; then
+            rm -f data/.update-result
             if mv data/.update-request data/.update-running 2>/dev/null; then
-              rm -f data/.update-result
-              { docker compose pull homeblaze && docker compose up -d homeblaze; } > data/.update-log 2>&1
+              { timeout 1500 docker compose pull homeblaze && docker compose up -d homeblaze; } > data/.update-log 2>&1
               echo $$? > data/.update-result.tmp && mv data/.update-result.tmp data/.update-result
             fi
           fi

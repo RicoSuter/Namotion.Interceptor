@@ -49,7 +49,7 @@ A failed check is retried after 1 hour, doubling each time up to 24 hours. A lon
 
 ## Install updates
 
-A Docker installation can install an update from the UI when the `updater` service of the compose file runs, see [Installation](installation.md#docker). `IsUpdaterAvailable` turns true within a poll after it starts. It can read false while an install runs, because the updater does not touch its heartbeat while compose runs.
+A Docker installation can install an update from the UI when the `updater` service of the compose file runs; set it up as described in [Installation](installation.md#updater). `IsUpdaterAvailable` is true while the updater touched `data/.updater-heartbeat` within the last 60 seconds (it does so every 5 seconds), and is refreshed every `PollingInterval`. It can read false while an install runs, because the updater does not touch the heartbeat while compose runs.
 
 `Install update` asks for confirmation, then asks the updater to pull the image of the tag in the compose file and recreate the `homeblaze` container with it. It is available while the updater runs, the installation runs, an update is available and no install is in progress, so after a new release with the scheduled check off, run `Check for updates` first. MCP clients and agents cannot call it.
 
@@ -62,6 +62,15 @@ A Docker installation can install an update from the UI when the `updater` servi
 | `UpToDate` | No newer image exists for the tag, for example with a pinned version or while the image of a new release or commit is not published yet |
 | `Failed` | Compose failed or the updater did not answer; `UpdateInstallStatus` shows the last line of its output |
 
-While the container is recreated, open tabs reconnect on their own. The new process reports the outcome, so the result stays visible until the next restart. The full output of the last install stays in `.update-log` in the data folder and, for a failure, in the log.
+While the container is recreated, open tabs reconnect on their own. The new process reports the outcome, so the result stays visible until the next restart. HomeBlaze and the updater talk through four files in the data folder: HomeBlaze writes `.update-request`, and the updater renames it to `.update-running`, writes the compose output to `.update-log` and the exit code to `.update-result`. HomeBlaze deletes `.update-running` and `.update-result` after it reported the outcome, while `.update-log` stays until the next install overwrites it. A failure is also written to the HomeBlaze log.
+
+If the updater restarts during an install, the install fails with "The updater restarted while an install ran." A pull that takes longer than 25 minutes fails as well.
 
 The updater only runs `docker compose pull homeblaze` and `docker compose up -d homeblaze` in the folder of the compose file. It applies changes of the `homeblaze` service in the compose file, but never updates other services or itself, and never chooses a version. It expects the service to be named `homeblaze` and the data folder to be `./data`, as in the shipped compose file, and does not support a project started with `docker compose -p`.
+
+If `Install update` stays disabled, check that:
+
+- `docker compose ps` lists `updater`.
+- `data/.updater-heartbeat` is recent.
+- `Check for updates` found an update.
+- No install is in progress.
