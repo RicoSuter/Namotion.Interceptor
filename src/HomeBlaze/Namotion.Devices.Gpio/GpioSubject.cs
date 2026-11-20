@@ -375,21 +375,40 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
         try
         {
-            var pinMode = pin.Mode switch
+            if (pin.Mode == GpioPinMode.Output)
             {
-                GpioPinMode.InputPullUp => PinMode.InputPullUp,
-                GpioPinMode.InputPullDown => PinMode.InputPullDown,
-                GpioPinMode.Output => PinMode.Output,
-                _ => PinMode.Input
-            };
+                // The level is read before the mode is set, so an output keeps the level it has: the latch after a
+                // restart, the power-on pull after a reboot. This relies on opening without a mode not changing the
+                // pin. A driver that cannot read a pin before its mode is set (libgpiod 1.x) opens it as an output its
+                // own way, and the level is read back from it.
+                _controller.OpenPin(pin.PinNumber);
+                PinValue level;
+                if (TryReadLevel(_controller, pin.PinNumber, out var levelBeforeMode))
+                {
+                    level = levelBeforeMode;
+                    _controller.OpenPin(pin.PinNumber, PinMode.Output, level);
+                }
+                else
+                {
+                    _controller.OpenPin(pin.PinNumber, PinMode.Output);
+                    level = _controller.Read(pin.PinNumber);
+                }
 
-            // An output keeps the level the driver leaves when it opens the pin.
-            _controller.OpenPin(pin.PinNumber, pinMode);
-            pin.Value = pin.ToValue(_controller.Read(pin.PinNumber));
-
-            // Registered before the pin reports Running, so that an edge after that has a handler.
-            if (pin.Mode != GpioPinMode.Output)
+                pin.Value = pin.ToValue(level);
+            }
+            else
             {
+                var pinMode = pin.Mode switch
+                {
+                    GpioPinMode.InputPullUp => PinMode.InputPullUp,
+                    GpioPinMode.InputPullDown => PinMode.InputPullDown,
+                    _ => PinMode.Input
+                };
+
+                _controller.OpenPin(pin.PinNumber, pinMode);
+                pin.Value = pin.ToValue(_controller.Read(pin.PinNumber));
+
+                // Registered before the pin reports Running, so that an edge after that has a handler.
                 RegisterInterrupt(pin.PinNumber);
             }
 
@@ -400,6 +419,21 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         {
             pin.Status = ServiceStatus.Unavailable;
             pin.StatusMessage = exception.Message;
+        }
+    }
+
+    private static bool TryReadLevel(GpioController controller, int pinNumber, out PinValue level)
+    {
+        try
+        {
+            level = controller.Read(pinNumber);
+            return true;
+        }
+        catch (IOException)
+        {
+            // The libgpiod V1 driver reads a pin only once its mode is set.
+            level = default;
+            return false;
         }
     }
 

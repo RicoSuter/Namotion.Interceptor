@@ -233,6 +233,13 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
                     GpioPinMode.Output => PinMode.Output,
                     _ => PinMode.Input
                 };
+                if (!isInput)
+                {
+                    // On a pin that is not an output, the controller only stores the level and passes it to the
+                    // driver as the initial value of the mode change, so an input becomes an output at its level.
+                    Controller.Write(PinNumber, ToLevel(Value));
+                }
+
                 Controller.SetPinMode(PinNumber, hardwareMode);
 
                 if (isInput)
@@ -243,11 +250,6 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
                     {
                         RegisterInterrupt?.Invoke(PinNumber);
                     }
-                }
-                else
-                {
-                    // Write current Value to hardware for output mode
-                    Controller.Write(PinNumber, ToLevel(Value));
                 }
             }
             catch (Exception ex)
