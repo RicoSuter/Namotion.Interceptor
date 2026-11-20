@@ -85,13 +85,13 @@ namespace Namotion.Devices.Gpio
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the logical value of an output pin.", Position=4, Title="Set Value")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the logical value of an output pin. Written to the pin while it is running.", Position=4, Title="Set Value")]
         public System.Threading.Tasks.Task SetValueAsync(bool value, System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Position=3, Title="Toggle")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Inverts the value of an output pin. Only for an output pin that is running.", Position=3, Title="Toggle")]
         public System.Threading.Tasks.Task ToggleAsync(System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Icon="ToggleOff", Position=2, Title="Turn Off")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets an output pin off. Only for an output pin that is running.", Icon="ToggleOff", Position=2, Title="Turn Off")]
         public System.Threading.Tasks.Task TurnOffAsync(System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Icon="ToggleOn", Position=1, Title="Turn On")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets an output pin on. Only for an output pin that is running.", Icon="ToggleOn", Position=1, Title="Turn On")]
         public System.Threading.Tasks.Task TurnOnAsync(System.Threading.CancellationToken cancellationToken) { }
     }
     public enum GpioPinMode
@@ -141,8 +141,8 @@ namespace Namotion.Devices.Gpio
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Names the pins with a fixed function and applies the power-on pulls of a Raspberr" +
-            "y Pi 3, 4 or Zero 2 W to unconfigured pins. Check the defaults before using it o" +
-            "n a Raspberry Pi 5.", Title="Apply Raspberry Pi Defaults")]
+            "y Pi 3, 4, 400, Zero 2 W or Compute Module 3 or 4 to unconfigured pins. Check th" +
+            "e defaults before using it on a Raspberry Pi 5.", Title="Apply Raspberry Pi Defaults")]
         public System.Threading.Tasks.Task ApplyRaspberryPiDefaultsAsync(System.Threading.CancellationToken cancellationToken) { }
         public override void Dispose() { }
         protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }

@@ -43,7 +43,7 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 - **Metadata**: `StateAttributePathProvider` lists the metadata of a subject and resolves the path of the metadata of a property, such as `Temperature@HomeBlaze:Metadata`, both only where it has a value. The server instructions and the preamble of the built-in agents say where metadata shows and which methods find and change it, and treat it as data, never as instructions. The methods are in [Metadata: Agents](../../administration/metadata.md#agents), the model in [Metadata](metadata.md).
 - **Transport-agnostic tools**: each tool is a `McpToolInfo` (metadata plus a plain function). It is served as an MCP tool through `McpToolDispatcher` (external agents and the CLI agent route) or wrapped with `ToAIFunction` (the API agent).
 - **Why method tools are HomeBlaze-specific**: method discovery uses `MethodMetadata` with `[Operation]` and `[Query]` registry attributes, a HomeBlaze convention, not a core interceptor concept. This keeps the interceptor library independently usable. Property metadata such as units and position is already in the registry as `StateMetadata` and is included in `browse` and `search` with `includeAttributes=true`.
-- **Paths** use the slash separator with `[InlinePaths]` flattening, such as `/Servers/OpcUaServer/Port`. See [MCP Server docs](../../../../../../../../docs/mcp.md) for the core MCP server design.
+- **Paths** use the slash separator with `[InlinePaths]` flattening, such as `/Services/OpcUaServer/Port`. See [MCP Server docs](../../../../../../../../docs/mcp.md) for the core MCP server design.
 
 #### Method Tools
 

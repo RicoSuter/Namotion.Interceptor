@@ -5,7 +5,7 @@ navTitle: Updates
 
 # Version and Updates
 
-The `Installation` subject shows which HomeBlaze version runs, how it was built, its environment and whether a newer release or, for an edge build, newer commits exist. A new installation has one in `Servers/Installation.json`; otherwise create it from the create dialog in the `System` group. Only one can be created.
+The `Installation` subject shows which HomeBlaze version runs, how it was built, its environment and whether a newer release or, for an edge build, newer commits exist. A new installation has one in `Services/Installation.json`; otherwise create it from the create dialog in the `System` group. Only one can be created.
 
 | Property | Description |
 |----------|-------------|
@@ -29,7 +29,7 @@ The installation widget shows the version, channel and build, an available relea
 
 ## Clients
 
-Every open browser tab is a client in `Clients` while it is open, shown as `Anonymous client`. To keep a browser, open the menu at the right end of the app bar and choose `Name this browser`, or call `Rename` on its client. A named client is saved in `Servers/Installation.json`, the browser remembers it in a cookie for a year, and all its tabs belong to it. The cookie holds a secret token of the client rather than its id, so knowing the path of a client is not enough to receive its notifications. It stays in the list while the browser is closed, with `IsConnected` false. `Forget` removes the name again.
+Every open browser tab is a client in `Clients` while it is open, shown as `Anonymous client`. To keep a browser, open the menu at the right end of the app bar and choose `Name this browser`, or call `Rename` on its client. A named client is saved in the file of the Installation subject (`Services/Installation.json` in a new installation), the browser remembers it in a cookie for a year, and all its tabs belong to it. The cookie holds a secret token of the client rather than its id, so knowing the path of a client is not enough to receive its notifications. It stays in the list while the browser is closed, with `IsConnected` false. `Forget` removes the name again.
 
 A client receives notifications like any other notification target, for example from an automation or an AI agent: it shows them as a dialog in its open tabs. A notification with the `Emergency` priority stays until its button is clicked. When none of its tabs is open, sending fails and nothing is kept for later, so name the browsers that should receive notifications, such as a wall tablet. A tab whose connection dropped still counts as open until the server gives up on it, by default after about 3 minutes, so sending to it in that time succeeds and the notification shows only if the tab reconnects before then.
 
@@ -62,7 +62,7 @@ A Docker installation can install an update from the UI when the `updater` servi
 | `UpToDate` | No newer image exists for the tag, for example with a pinned version or while the image of a new release or commit is not published yet |
 | `Failed` | Compose failed or the updater did not answer; `UpdateInstallStatus` shows the last line of its output |
 
-While the container is recreated, open tabs reconnect on their own. The new process reports the outcome, so the result stays visible until the next restart. HomeBlaze and the updater talk through four files in the data folder: HomeBlaze writes `.update-request`, and the updater renames it to `.update-running`, writes the compose output to `.update-log` and the exit code to `.update-result`. HomeBlaze deletes `.update-running` and `.update-result` after it reported the outcome, while `.update-log` stays until the next install overwrites it. A failure is also written to the HomeBlaze log.
+On a small device such as a Raspberry Pi Zero 2 W, the pull can take a few minutes and the UI is slow meanwhile, see [Raspberry Pi](installation.md#raspberry-pi). While the container is recreated, open tabs reconnect on their own. The new process reports the outcome, so the result stays visible until the next restart. HomeBlaze and the updater talk through four files in the data folder: HomeBlaze writes `.update-request`, and the updater renames it to `.update-running`, writes the compose output to `.update-log` and the exit code to `.update-result`. HomeBlaze deletes `.update-running` and `.update-result` after it reported the outcome, while `.update-log` stays until the next install overwrites it. A failure is also written to the HomeBlaze log.
 
 If the updater restarts during an install, the install fails with "The updater restarted while an install ran." A pull that takes longer than 25 minutes fails as well.
 

@@ -13,7 +13,7 @@ The running version, its build and the update check are described in [Version an
 
 ## Host system
 
-The `Host system` subject reports the machine HomeBlaze runs on and the HomeBlaze process. A new installation has one in `Servers/HostSystem.json`; otherwise create it from the create dialog in the `System` group. Only one can be created.
+The `Host system` subject reports the machine HomeBlaze runs on and the HomeBlaze process. A new installation has one in `Services/HostSystem.json`; otherwise create it from the create dialog in the `System` group. Only one can be created.
 
 | Property | Description |
 |----------|-------------|
