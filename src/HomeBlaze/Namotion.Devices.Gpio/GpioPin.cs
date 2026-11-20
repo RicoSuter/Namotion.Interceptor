@@ -33,6 +33,10 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
     // 1 while a read of the level for an edge that found the pin busy is queued, so that a burst of edges queues one.
     private int _isBusyEdgeReadQueued;
 
+    // Guarded by _lock. Whether the pin is open as an output on Controller, so that an edge checks it without calling
+    // the driver.
+    private bool _isOutputInHardware;
+
     /// <summary>
     /// The GPIO pin number (BCM numbering).
     /// </summary>
@@ -235,6 +239,7 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
                 }
 
                 Controller.SetPinMode(PinNumber, ToHardwareMode(newMode));
+                _isOutputInHardware = !isInput;
 
                 if (isInput)
                 {
@@ -265,8 +270,9 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
             if (Controller == null || Status != ServiceStatus.Running)
                 return;
 
-            // Check hardware mode instead of property Mode to handle recursion during mode change
-            if (!Controller.IsPinOpen(PinNumber) || Controller.GetPinMode(PinNumber) != PinMode.Output)
+            // The hardware mode instead of the Mode property, for the recursion during a mode change; and not asked from
+            // the driver, because an edge sets the value of an input on the driver's thread (see ApplyHardwareLevel).
+            if (!_isOutputInHardware)
                 return;
 
             try
@@ -334,8 +340,9 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
     /// </summary>
     internal void ApplyHardwareLevel(bool isHigh)
     {
-        // Never waits for the lock: drivers such as libgpiod 2.x call this while holding a lock that removing a
-        // callback also takes, and a mode change removes the callback under the lock.
+        // Never waits for the lock and never calls the driver: drivers such as libgpiod 2.x call this while holding a
+        // lock that removing a callback also takes, after their own lock, and a mode change removes the callback under
+        // the pin lock.
         if (!_lock.TryEnter())
         {
             if (Interlocked.Exchange(ref _isBusyEdgeReadQueued, 1) == 0)
@@ -353,7 +360,7 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
 
             // An edge reported before the pin became an output would write its stale level to the output. The hardware
             // mode also covers the window before the Mode property is stored.
-            if (!Controller.IsPinOpen(PinNumber) || Controller.GetPinMode(PinNumber) == PinMode.Output)
+            if (_isOutputInHardware)
                 return;
 
             SetValueFromLevel(isHigh);
@@ -377,8 +384,15 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
             // On the thread pool, where a thrown exception would end the process.
             try
             {
-                StatusMessage = $"Failed to read GPIO pin {PinNumber} after an edge: {exception.Message}";
-                Status = ServiceStatus.Error;
+                lock (_lock)
+                {
+                    // A pin detached or attached again since the read has a status of its own.
+                    if (Controller == null || Status != ServiceStatus.Running)
+                        return;
+
+                    StatusMessage = $"Failed to read GPIO pin {PinNumber} after an edge: {exception.Message}";
+                    Status = ServiceStatus.Error;
+                }
             }
             catch (Exception)
             {
@@ -454,9 +468,12 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
                     // Registered before the pin reports Running, so that an edge after that has a handler.
                     registerInterrupt(PinNumber);
                 }
+
+                _isOutputInHardware = Mode == GpioPinMode.Output;
             }
             catch (Exception exception)
             {
+                _isOutputInHardware = false;
                 StatusMessage = exception.Message;
                 Status = ServiceStatus.Unavailable;
                 return;
@@ -479,6 +496,7 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
         {
             CancelDebounce();
             Controller = null;
+            _isOutputInHardware = false;
             StatusMessage = null;
             Status = ServiceStatus.Stopped;
         }

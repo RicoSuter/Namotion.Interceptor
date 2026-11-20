@@ -179,6 +179,13 @@ public class GpioInversionTests
             Status = ServiceStatus.Running
         };
 
+        if (mode == GpioPinMode.Output)
+        {
+            // Attached, so that the pin knows it is an output in hardware.
+            pin.Attach(controller, _ => { }, _ => { });
+            return pin;
+        }
+
         pin.Controller = controller;
         pin.Value = (controller.Read(17) == PinValue.High) != isInverted;
         return pin;

@@ -82,8 +82,10 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     private bool _isDisposed;
 
     // Guarded by _controllerLock. Set when the service loop ended, so that an applied configuration connects nothing
-    // until the service starts again.
+    // until the service starts again. The run counts the loops started, so that a loop that ends after a newer one
+    // started leaves the newer one's controller alone.
     private bool _isServiceStopped;
+    private int _serviceRun;
 
     /// <summary>
     /// Optional MCP3008 ADC configuration. Its pins are not opened as GPIO pins: they show
@@ -349,8 +351,10 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        int run;
         lock (_controllerLock)
         {
+            run = ++_serviceRun;
             _isServiceStopped = false;
         }
 
@@ -386,17 +390,19 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         {
             // The service stops.
         }
-
-        lock (_controllerLock)
+        finally
         {
-            if (!_isDisposed)
+            lock (_controllerLock)
             {
-                // Released, so that no driver thread outlives the service: libgpiod 2.x observes edges on foreground
-                // threads that end only when the driver is disposed, and they would keep the process from exiting.
-                _isServiceStopped = true;
-                Stop(keepController: false, []);
-                StatusMessage = null;
-                Status = ServiceStatus.Stopped;
+                if (!_isDisposed && run == _serviceRun)
+                {
+                    // Released, so that no driver thread outlives the service: libgpiod 2.x observes edges on
+                    // foreground threads that end only when their line request or the driver is released.
+                    _isServiceStopped = true;
+                    Stop(keepController: false, []);
+                    StatusMessage = null;
+                    Status = ServiceStatus.Stopped;
+                }
             }
         }
     }

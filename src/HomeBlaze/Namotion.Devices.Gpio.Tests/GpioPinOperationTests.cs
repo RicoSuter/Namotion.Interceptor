@@ -42,7 +42,7 @@ public class GpioPinOperationTests
         using var controller = new GpioController(driver);
         controller.OpenPin(17, PinMode.Output);
         var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Output, Status = ServiceStatus.Running };
-        pin.Controller = controller;
+        pin.Attach(controller, _ => { }, _ => { });
 
         // Act
         await pin.ToggleAsync(CancellationToken.None);
@@ -60,7 +60,7 @@ public class GpioPinOperationTests
         using var controller = new GpioController(driver);
         controller.OpenPin(17, PinMode.Output);
         var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Output, IsInverted = true, Status = ServiceStatus.Running };
-        pin.Controller = controller;
+        pin.Attach(controller, _ => { }, _ => { });
         await pin.SetValueAsync(true, CancellationToken.None);
         Assert.Equal(PinValue.Low, driver.PinValues[17]);
 
@@ -99,7 +99,7 @@ public class GpioPinOperationTests
         using var controller = new GpioController(driver);
         controller.OpenPin(17, PinMode.Output);
         var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Output, Status = ServiceStatus.Running };
-        pin.Controller = controller;
+        pin.Attach(controller, _ => { }, _ => { });
 
         // Act
         await pin.SetValueAsync(true, CancellationToken.None);

@@ -22,6 +22,7 @@ public class GpioWriteTests
             Mode = GpioPinMode.Output,
             Status = ServiceStatus.Running
         };
+        pin.Attach(controller, _ => { }, _ => { });
 
         // Act
         pin.Value = true;
@@ -47,6 +48,7 @@ public class GpioWriteTests
             Status = ServiceStatus.Running,
             Value = true
         };
+        pin.Attach(controller, _ => { }, _ => { });
 
         // Act
         pin.Value = false;
@@ -139,6 +141,7 @@ public class GpioWriteTests
             Mode = GpioPinMode.Output,
             Status = ServiceStatus.Running
         };
+        pin.Attach(controller, _ => { }, _ => { });
 
         // Act - Write should fail verification
         pin.Value = true;

@@ -12,6 +12,10 @@ namespace Namotion.Devices.Gpio.Tests;
 internal sealed class LatchingGpioDriver : GpioDriver
 {
     private readonly Lock _lock = new();
+
+    // Guards _eventHandlers. Taken after _lock when a callback is added or removed, and alone while the callbacks of an
+    // edge run, like libgpiod 2.x.
+    private readonly Lock _callbackLock = new();
     private readonly Dictionary<int, PinState> _pins = new();
     private readonly Dictionary<int, List<PinChangeEventHandler>> _eventHandlers = new();
     private bool _failsReads;
@@ -73,21 +77,20 @@ internal sealed class LatchingGpioDriver : GpioDriver
     public Action<int>? PinClosed { get; set; }
 
     /// <summary>
-    /// Called with the pin number when a value changed callback is about to be removed, before the driver lock that the
-    /// removal takes.
+    /// Called with the pin number while a value changed callback is removed, holding the driver lock and before the
+    /// callback lock.
     /// </summary>
     public Action<int>? CallbackRemoving { get; set; }
 
     /// <summary>
-    /// Sets the input level of a pin and calls its value changed callbacks while holding the driver lock, which removing
-    /// a callback also takes, like libgpiod 2.x. <paramref name="dispatching"/> is called under the lock right before the
-    /// callbacks.
+    /// Calls the value changed callbacks of a pin for an edge to <paramref name="level"/> while holding the callback
+    /// lock, which removing a callback takes after the driver lock, like libgpiod 2.x. The input level is not changed.
+    /// <paramref name="dispatching"/> is called under the callback lock right before the callbacks.
     /// </summary>
     public void RaiseEdge(int pinNumber, PinValue level, Action? dispatching = null)
     {
-        lock (_lock)
+        lock (_callbackLock)
         {
-            GetState(pinNumber).InputLevel = level;
             dispatching?.Invoke();
             if (_eventHandlers.TryGetValue(pinNumber, out var handlers))
             {
@@ -262,6 +265,7 @@ internal sealed class LatchingGpioDriver : GpioDriver
         }
 
         lock (_lock)
+        lock (_callbackLock)
         {
             if (!_eventHandlers.TryGetValue(pinNumber, out var handlers))
             {
@@ -275,7 +279,6 @@ internal sealed class LatchingGpioDriver : GpioDriver
 
     protected override void RemoveCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback)
     {
-        CallbackRemoving?.Invoke(pinNumber);
         lock (_lock)
         {
             if (FailsCallbacks || FailingCallbackRemovalPinNumber == pinNumber)
@@ -284,9 +287,13 @@ internal sealed class LatchingGpioDriver : GpioDriver
                 throw new IOException($"The callback of pin {pinNumber} could not be removed.");
             }
 
-            if (_eventHandlers.TryGetValue(pinNumber, out var handlers))
+            CallbackRemoving?.Invoke(pinNumber);
+            lock (_callbackLock)
             {
-                handlers.Remove(callback);
+                if (_eventHandlers.TryGetValue(pinNumber, out var handlers))
+                {
+                    handlers.Remove(callback);
+                }
             }
         }
     }

@@ -61,6 +61,7 @@ jobs:
                 - 'src/Directory.Packages.props'
                 - 'src/Directory.Build.props'
                 - 'src/Directory.Build.targets'
+                - 'nuget.config'
                 - '.github/workflows/build.yml'
             # Everything HomeBlaze.Automation.Tests builds from.
             automation:
