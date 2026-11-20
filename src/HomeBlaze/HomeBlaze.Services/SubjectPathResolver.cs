@@ -6,11 +6,13 @@ using System.Text;
 using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Derived;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services;
@@ -39,14 +41,15 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     private readonly ConcurrentDictionary<(string Path, PathStyle Style), (long Version, IInterceptorSubject? Subject, RecordedRoute? Route)> _resolveCache = new();
 
     // In a context of its own, so that a change of the version tells only the components that read it and not the
-    // observers of the graph's changes, such as connectors and the history.
-    // Without derived property detection: a derived property that resolves a path would otherwise be computed again
-    // for every attached subject and property. Components read the version in their render instead.
+    // observers of the graph's changes, such as connectors and the history. A derived getter depends on the route of
+    // its resolutions instead, see ReadPathsVersion.
     private readonly SubjectPathsVersion _pathsVersion = new(InterceptorSubjectContext.Create()
         .WithEqualityCheck()
         .WithPropertyChangeSubscriptions()
         .WithReadPropertyRecorder());
     private long _pathsVersionValue;
+
+    private readonly DerivedRouteRecorder _derivedRouteRecorder;
 
     /// <param name="getRoot">
     /// Resolves the current graph root. A delegate rather than the RootManager itself, because
@@ -57,6 +60,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     public SubjectPathResolver(Func<IInterceptorSubject?> getRoot)
     {
         _getRoot = getRoot;
+        _derivedRouteRecorder = new DerivedRouteRecorder(_pathsVersion);
     }
 
     /// <summary>
@@ -91,10 +95,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         ISubjectPathRecorder? recorder)
     {
         var root = _getRoot();
-
-        // An absolute path is cached, the root is not a property and a parent is found in the registry, so a resolution
-        // may read no property of the graph: this read is what a caller that tracks its reads depends on.
-        _ = _pathsVersion.Value;
+        recorder = ReadPathsVersion(recorder);
 
         if (string.IsNullOrEmpty(path))
         {
@@ -126,10 +127,20 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             // Looked up first, so that a hit allocates nothing: every render asks for the same paths again. An entry computed
             // without a recorder has no route to replay.
             var key = (path, style);
+            var isCached = _resolveCache.TryGetValue(key, out var cached) && (recorder is null || cached.Route is not null);
+
+            // For a derived getter, replayed before the version is compared: a change that the comparison misses then
+            // changes what the getter recorded, which computes it again. Recorded after the comparison, the reads could
+            // already see the changed graph next to a result from before the change. On a mismatch the walk records its
+            // route as well, which only adds dependencies; another recorder is told the route of the result only.
+            var isDerived = ReferenceEquals(recorder, _derivedRouteRecorder);
+            if (isCached && isDerived)
+                cached.Route!.Replay(recorder!);
+
             var version = GetStructureVersion(root);
-            if (_resolveCache.TryGetValue(key, out var cached) && cached.Version == version && (recorder is null || cached.Route is not null))
+            if (isCached && cached.Version == version)
             {
-                if (recorder is not null)
+                if (recorder is not null && !isDerived)
                     cached.Route!.Replay(recorder);
 
                 return cached.Subject;
@@ -239,9 +250,17 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         PathStyle style,
         ISubjectPathRecorder? recorder)
     {
-        _ = _pathsVersion.Value;
+        recorder = ReadPathsVersion(recorder);
+        var isCached = _canonicalPathsCache.TryGetValue(subject, out var cached) && (recorder is null || cached.Route is not null);
+
+        // For a derived getter, replayed before the version is compared, see ResolveSubjectCore.
+        var isDerived = ReferenceEquals(recorder, _derivedRouteRecorder);
+        if (isCached && isDerived)
+            cached.Route!.Replay(recorder!);
+
         var version = GetStructureVersion(_getRoot() ?? subject);
-        if (!_canonicalPathsCache.TryGetValue(subject, out var cached) || cached.Version != version || (recorder is not null && cached.Route is null))
+        var isCurrent = isCached && cached.Version == version;
+        if (!isCurrent)
         {
             if (recorder is null)
             {
@@ -258,7 +277,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             _canonicalPathsCache[subject] = cached;
         }
 
-        if (recorder is not null)
+        if (recorder is not null && !(isCurrent && isDerived))
             cached.Route!.Replay(recorder);
 
         var canonicalPaths = cached.Paths;
@@ -320,6 +339,20 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     void IChildIndexHandler.HandleChildIndexChanges(PropertyReference property, ReadOnlySpan<SubjectChild> children)
     {
         InvalidatePaths();
+    }
+
+    // Reads the version and returns the recorder to resolve with. An absolute path is cached, the root is not a property
+    // and a parent is found in the registry, so a resolution may read no property of the graph: this read is what a
+    // caller that tracks its reads, such as a component, depends on. A derived getter, the only read observer, would
+    // then compute again on every structure change anywhere in the graph, so it records the route instead, see
+    // DerivedRouteRecorder.
+    private ISubjectPathRecorder? ReadPathsVersion(ISubjectPathRecorder? recorder)
+    {
+        if (recorder is null && PropertyAccessObservation.ReadObserver is not null)
+            return _derivedRouteRecorder;
+
+        _ = _pathsVersion.Value;
+        return recorder;
     }
 
     // The clear only lets detached subjects be collected; the registry's version keeps the entries current, see
@@ -511,7 +544,13 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         var parents = registered.Parents;
         recorder?.AddParentStep(subject, parents);
         if (parents.Length == 0)
+        {
+            // Without a root, the subject may become the root, which changes nothing in the graph.
+            if (root is null)
+                recorder?.MarkUnbounded();
+
             return Array.Empty<string>();
+        }
 
         var paths = new List<string>();
         var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
@@ -637,6 +676,26 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             if (IsUnbounded)
                 recorder.MarkUnbounded();
         }
+    }
+
+    // Records a route as the reads of the running derived getter, so that a result from the cache records what the walk
+    // that computed it records: the graph state of the subject of each property on the route, which tells a property added
+    // or a parent gained, the property itself, and the version where the route is unbounded.
+    private sealed class DerivedRouteRecorder(SubjectPathsVersion pathsVersion) : ISubjectPathRecorder
+    {
+        public void AddProperty(PropertyReference property)
+        {
+            DerivedGraphDependencies.RecordRead(property.Subject);
+
+            // A name that the path did not find is no property: its tracking data would stay with the subject for good.
+            if (property.Subject.Properties.ContainsKey(property.Name))
+                PropertyAccessObservation.ReadObserver?.OnPropertyRead(new PropertyReadObservation(property));
+        }
+
+        public void AddParentStep(IInterceptorSubject subject, ImmutableArray<SubjectPropertyParent> parents) =>
+            DerivedGraphDependencies.RecordRead(subject);
+
+        public void MarkUnbounded() => _ = pathsVersion.Value;
     }
 
     // Records the route of a cache miss, reused by the thread that takes it until it returns it, so that a route equal to

@@ -32,7 +32,7 @@ public partial class RenderExpression : ITitleProvider
 
     // No production code reads this: a render reads the text through GetText, which also reads the version of the paths,
     // so it renders again when the target of an absolute path appears. Its change notification tells other observers when
-    // the value changes, but not when a target appears. It is the value before the pipes format it.
+    // the value changes. It is the value before the pipes format it.
     [Derived]
     public object? Value
     {
