@@ -8,6 +8,8 @@ namespace Namotion.Devices.Gpio.Simulation;
 /// </summary>
 public class SimulationGpioDriver : GpioDriver
 {
+    // Handlers run outside the lock: they take the pin's lock, so invoking them under this one risks lock-order inversion.
+    private readonly Lock _lock = new();
     private readonly int _pinCount;
     private readonly Dictionary<int, PinValue> _pinValues = new();
     private readonly Dictionary<int, PinMode> _pinModes = new();
@@ -32,16 +34,19 @@ public class SimulationGpioDriver : GpioDriver
     /// <summary>
     /// Gets the current pin values for verification.
     /// </summary>
+    /// <remarks>This is a live view for inspection only. Read it when no other thread uses the driver.</remarks>
     public IReadOnlyDictionary<int, PinValue> PinValues => _pinValues;
 
     /// <summary>
     /// Gets the current pin modes for verification.
     /// </summary>
+    /// <remarks>This is a live view for inspection only. Read it when no other thread uses the driver.</remarks>
     public IReadOnlyDictionary<int, PinMode> PinModes => _pinModes;
 
     /// <summary>
     /// Gets write call history for verification.
     /// </summary>
+    /// <remarks>This is for inspection only. Read it when no other thread uses the driver.</remarks>
     public List<(int PinNumber, PinValue Value)> WriteHistory { get; } = new();
 
     /// <summary>
@@ -49,13 +54,22 @@ public class SimulationGpioDriver : GpioDriver
     /// </summary>
     public void SimulatePinValueChange(int pinNumber, PinValue newValue)
     {
-        _pinValues[pinNumber] = newValue;
+        PinChangeEventHandler[]? handlers = null;
+        lock (_lock)
+        {
+            _pinValues[pinNumber] = newValue;
 
-        if (_eventHandlers.TryGetValue(pinNumber, out var handlers))
+            if (_eventHandlers.TryGetValue(pinNumber, out var registeredHandlers))
+            {
+                handlers = registeredHandlers.ToArray();
+            }
+        }
+
+        if (handlers is not null)
         {
             var changeType = newValue == PinValue.High ? PinEventTypes.Rising : PinEventTypes.Falling;
             var args = new PinValueChangedEventArgs(changeType, pinNumber);
-            foreach (var handler in handlers.ToList())
+            foreach (var handler in handlers)
             {
                 handler(this, args);
             }
@@ -68,13 +82,10 @@ public class SimulationGpioDriver : GpioDriver
 
     protected override void OpenPin(int pinNumber)
     {
-        if (!_pinValues.ContainsKey(pinNumber))
+        lock (_lock)
         {
-            _pinValues[pinNumber] = PinValue.Low;
-        }
-        if (!_pinModes.ContainsKey(pinNumber))
-        {
-            _pinModes[pinNumber] = PinMode.Input;
+            _pinValues.TryAdd(pinNumber, PinValue.Low);
+            _pinModes.TryAdd(pinNumber, PinMode.Input);
         }
     }
 
@@ -84,41 +95,60 @@ public class SimulationGpioDriver : GpioDriver
 
     protected override void SetPinMode(int pinNumber, PinMode mode)
     {
-        _pinModes[pinNumber] = mode;
+        lock (_lock)
+        {
+            _pinModes[pinNumber] = mode;
+        }
     }
 
     protected override PinMode GetPinMode(int pinNumber)
     {
-        return _pinModes.GetValueOrDefault(pinNumber, PinMode.Input);
+        lock (_lock)
+        {
+            return _pinModes.GetValueOrDefault(pinNumber, PinMode.Input);
+        }
     }
 
     protected override bool IsPinModeSupported(int pinNumber, PinMode mode) => true;
 
     protected override PinValue Read(int pinNumber)
     {
-        return _pinValues.GetValueOrDefault(pinNumber, PinValue.Low);
+        lock (_lock)
+        {
+            return _pinValues.GetValueOrDefault(pinNumber, PinValue.Low);
+        }
     }
 
     protected override void Write(int pinNumber, PinValue value)
     {
-        WriteHistory.Add((pinNumber, value));
-        _pinValues[pinNumber] = value;
+        lock (_lock)
+        {
+            WriteHistory.Add((pinNumber, value));
+            _pinValues[pinNumber] = value;
+        }
     }
 
     protected override void AddCallbackForPinValueChangedEvent(int pinNumber, PinEventTypes eventTypes, PinChangeEventHandler callback)
     {
-        if (!_eventHandlers.ContainsKey(pinNumber))
+        lock (_lock)
         {
-            _eventHandlers[pinNumber] = new List<PinChangeEventHandler>();
+            if (!_eventHandlers.TryGetValue(pinNumber, out var handlers))
+            {
+                handlers = new List<PinChangeEventHandler>();
+                _eventHandlers[pinNumber] = handlers;
+            }
+            handlers.Add(callback);
         }
-        _eventHandlers[pinNumber].Add(callback);
     }
 
     protected override void RemoveCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback)
     {
-        if (_eventHandlers.TryGetValue(pinNumber, out var handlers))
+        lock (_lock)
         {
-            handlers.Remove(callback);
+            if (_eventHandlers.TryGetValue(pinNumber, out var handlers))
+            {
+                handlers.Remove(callback);
+            }
         }
     }
 

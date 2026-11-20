@@ -1,6 +1,7 @@
 using System.Device.Gpio;
 using HomeBlaze.Abstractions;
 using Namotion.Devices.Gpio.Simulation;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace Namotion.Devices.Gpio.Tests;
@@ -11,136 +12,91 @@ namespace Namotion.Devices.Gpio.Tests;
 public class GpioInterruptTests
 {
     [Fact]
-    public void InterruptHandler_RisingEdge_UpdatesPinValue()
+    public async Task WhenInputOfStartedSubjectGoesHighAndLow_ThenValueFollows()
     {
         // Arrange
-        var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
-        controller.OpenPin(17, PinMode.Input);
-
-        var pins = new Dictionary<int, GpioPin>();
-
-        // Create pin like GpioSubject does
-        var pin = new GpioPin
+        var driver = new SimulationGpioDriver();
+        var subject = CreateSubjectWithInput(driver);
+        await subject.StartAsync(CancellationToken.None);
+        try
         {
-            PinNumber = 17,
-            Mode = GpioPinMode.Input,
-            Status = ServiceStatus.Running,
-            Value = false
-        };
-        pins[17] = pin;
-        
-        controller.RegisterCallbackForPinValueChangedEvent(17, PinEventTypes.Rising | PinEventTypes.Falling, (_, args) =>
+            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running && subject.Pins[18].Status == ServiceStatus.Running);
+
+            // Act & Assert
+            driver.SimulatePinValueChange(18, PinValue.High);
+            Assert.True(subject.Pins[18].Value);
+            driver.SimulatePinValueChange(18, PinValue.Low);
+            Assert.False(subject.Pins[18].Value);
+        }
+        finally
         {
-            if (pins.TryGetValue(args.PinNumber, out var p) && p.Status == ServiceStatus.Running)
-            {
-                p.Value = args.ChangeType == PinEventTypes.Rising;
-            }
-        });
-
-        // Act - Simulate hardware pin going high
-        simulationDriver.SimulatePinValueChange(17, PinValue.High);
-
-        // Assert
-        Assert.True(pin.Value);
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
     }
 
     [Fact]
-    public void InterruptHandler_FallingEdge_UpdatesPinValue()
+    public async Task WhenInputChangesAfterSubjectIsDisposed_ThenValueIsKept()
     {
         // Arrange
-        var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
-        controller.OpenPin(17, PinMode.Input);
-
-        var pins = new Dictionary<int, GpioPin>();
-
-        var pin = new GpioPin
-        {
-            PinNumber = 17,
-            Mode = GpioPinMode.Input,
-            Status = ServiceStatus.Running,
-            Value = true // Start high
-        };
-        pins[17] = pin;
-
-        controller.RegisterCallbackForPinValueChangedEvent(17, PinEventTypes.Rising | PinEventTypes.Falling, (_, args) =>
-        {
-            if (pins.TryGetValue(args.PinNumber, out var p) && p.Status == ServiceStatus.Running)
-            {
-                p.Value = args.ChangeType == PinEventTypes.Rising;
-            }
-        });
-
-        // Act - Simulate hardware pin going low
-        simulationDriver.SimulatePinValueChange(17, PinValue.Low);
-
-        // Assert
-        Assert.False(pin.Value);
-    }
-
-    [Fact]
-    public void InterruptHandler_NotRunningPin_DoesNotUpdateValue()
-    {
-        // Arrange
-        var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
-        controller.OpenPin(17, PinMode.Input);
-
-        var pins = new Dictionary<int, GpioPin>();
-
-        var pin = new GpioPin
-        {
-            PinNumber = 17,
-            Mode = GpioPinMode.Input,
-            Status = ServiceStatus.Unavailable, // Not running
-            Value = false
-        };
-        pins[17] = pin;
-
-        controller.RegisterCallbackForPinValueChangedEvent(17, PinEventTypes.Rising | PinEventTypes.Falling, (_, args) =>
-        {
-            if (pins.TryGetValue(args.PinNumber, out var p) && p.Status == ServiceStatus.Running)
-            {
-                p.Value = args.ChangeType == PinEventTypes.Rising;
-            }
-        });
+        var driver = new SimulationGpioDriver();
+        var subject = CreateSubjectWithInput(driver);
+        await subject.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running && subject.Pins[18].Status == ServiceStatus.Running);
+        await subject.StopAsync(CancellationToken.None);
+        subject.Dispose();
 
         // Act
-        simulationDriver.SimulatePinValueChange(17, PinValue.High);
+        driver.SimulatePinValueChange(18, PinValue.High);
 
-        // Assert - Value should not change
+        // Assert
+        Assert.False(subject.Pins[18].Value);
+    }
+
+    [Fact]
+    public async Task WhenSubjectIsDisposed_ThenPinsAreStoppedAndIgnoreLevels()
+    {
+        // Arrange
+        var driver = new SimulationGpioDriver();
+        var subject = CreateSubjectWithInput(driver);
+        await subject.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running && subject.Pins[18].Status == ServiceStatus.Running);
+        await subject.StopAsync(CancellationToken.None);
+        var pin = subject.Pins[18];
+
+        // Act
+        subject.Dispose();
+        pin.ApplyHardwareLevel(isHigh: true);
+        pin.PollHardwareLevel();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, pin.Status);
+        Assert.Null(pin.StatusMessage);
         Assert.False(pin.Value);
     }
 
     [Fact]
-    public void PollingVerification_DetectsDrift_UpdatesPinValue()
+    public void WhenPinIsNotRunning_ThenHardwareLevelIsIgnored()
     {
         // Arrange
-        var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
-        controller.OpenPin(17, PinMode.Input);
+        var pin = new GpioPin { PinNumber = 18, DebounceTime = TimeSpan.Zero, Status = ServiceStatus.Unavailable };
 
-        var pin = new GpioPin
-        {
-            PinNumber = 17,
-            Mode = GpioPinMode.Input,
-            Status = ServiceStatus.Running,
-            Value = false
-        };
-
-        // Simulate hardware value changing without interrupt (drift scenario)
-        simulationDriver.SimulatePinValueChange(17, PinValue.High);
-
-        // Act - Polling verification like GpioSubject does
-        var actualValue = controller.Read(17) == PinValue.High;
-        if (pin.Value != actualValue)
-        {
-            pin.Value = actualValue;
-        }
+        // Act
+        pin.ApplyHardwareLevel(isHigh: true);
 
         // Assert
-        Assert.True(pin.Value);
+        Assert.False(pin.Value);
+    }
+
+    private static GpioSubject CreateSubjectWithInput(SimulationGpioDriver driver)
+    {
+        return new GpioSubject(driver)
+        {
+            Pins = new Dictionary<int, GpioPin>
+            {
+                [18] = new() { Mode = GpioPinMode.Input, DebounceTime = TimeSpan.Zero }
+            }
+        };
     }
 
     [Fact]

@@ -1,0 +1,160 @@
+@using global::HomeBlaze.Abstractions
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(GpioPin))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    @if (Pin is { Status: ServiceStatus.Unavailable or ServiceStatus.Error } pin)
+    {
+        <MudAlert Severity="Severity.Warning" Class="mb-4">@(pin.StatusMessage ?? $"The pin is {pin.Status}.")</MudAlert>
+    }
+
+    <MudTextField @bind-Value="_name" @bind-Value:after="OnFieldChanged" Label="Name" Immediate="true" />
+
+    <MudSelect T="GpioPinMode" @bind-Value="_mode" @bind-Value:after="OnFieldChanged" Label="Mode" Class="mt-4">
+        <MudSelectItem Value="GpioPinMode.Input">Input (no pull)</MudSelectItem>
+        <MudSelectItem Value="GpioPinMode.InputPullUp">Input with pull-up</MudSelectItem>
+        <MudSelectItem Value="GpioPinMode.InputPullDown">Input with pull-down</MudSelectItem>
+        <MudSelectItem Value="GpioPinMode.Output">Output</MudSelectItem>
+    </MudSelect>
+
+    <MudSwitch T="bool" @bind-Value="_isInverted" @bind-Value:after="OnFieldChanged" Label="Inverted" Color="Color.Primary" Class="mt-4" />
+
+    @if (_mode != GpioPinMode.Output)
+    {
+        <MudNumericField T="int" @bind-Value="_debounceMilliseconds" @bind-Value:after="OnFieldChanged"
+                         Label="Debounce (ms)" Min="0" Max="@((int)GpioPin.MaximumDebounceTime.TotalMilliseconds)" Class="mt-4" />
+    }
+
+    @foreach (var (severity, text) in GetHints(_mode, _isInverted, Pin?.PinNumber ?? 0))
+    {
+        <MudAlert Severity="severity" Dense="true" Class="mt-3">@text</MudAlert>
+    }
+
+    <MudExpansionPanels Class="mt-4">
+        <MudExpansionPanel Text="Common wiring">
+            <MudSimpleTable Dense="true">
+                <thead>
+                    <tr><th>Use case</th><th>Mode</th><th>Inverted</th><th>Debounce</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Button or switch to ground</td><td>Input with pull-up</td><td>Yes</td><td>50 ms</td></tr>
+                    <tr><td>Reed contact to ground</td><td>Input with pull-up</td><td>Yes</td><td>50 ms</td></tr>
+                    <tr><td>PIR or other electronic sensor</td><td>Input</td><td>No</td><td>0</td></tr>
+                    <tr><td>Pulse meter (S0)</td><td>Input with pull-up</td><td>Yes</td><td>Short or 0</td></tr>
+                    <tr><td>Active-low relay board</td><td>Output</td><td>Yes</td><td>Not used</td></tr>
+                    <tr><td>Active-high relay, MOSFET or LED</td><td>Output</td><td>No</td><td>Not used</td></tr>
+                </tbody>
+            </MudSimpleTable>
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+</MudForm>
+
+@code {
+    private string? _name;
+    private GpioPinMode _mode;
+    private bool _isInverted;
+    private int _debounceMilliseconds;
+
+    private string? _originalName;
+    private GpioPinMode _originalMode;
+    private bool _originalIsInverted;
+    private int _originalDebounceMilliseconds;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private GpioPin? Pin => Subject as GpioPin;
+
+    public bool IsValid => _debounceMilliseconds >= 0 &&
+                           _debounceMilliseconds <= (int)GpioPin.MaximumDebounceTime.TotalMilliseconds;
+
+    public bool IsDirty => NormalizeName(_name) != NormalizeName(_originalName) ||
+                           _mode != _originalMode ||
+                           _isInverted != _originalIsInverted ||
+                           _debounceMilliseconds != _originalDebounceMilliseconds;
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        var pin = Pin;
+        _name = pin?.Name;
+        _mode = pin?.Mode ?? GpioPinMode.Input;
+        _isInverted = pin?.IsInverted ?? false;
+        _debounceMilliseconds = (int)(pin?.DebounceTime.TotalMilliseconds ?? 50);
+
+        _originalName = _name;
+        _originalMode = _mode;
+        _originalIsInverted = _isInverted;
+        _originalDebounceMilliseconds = _debounceMilliseconds;
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        var pin = Pin;
+        if (pin is not null && IsValid)
+        {
+            _name = NormalizeName(_name);
+            pin.Mode = _mode;
+            pin.Name = _name;
+            pin.IsInverted = _isInverted;
+            if (_debounceMilliseconds != _originalDebounceMilliseconds)
+            {
+                pin.DebounceTime = TimeSpan.FromMilliseconds(_debounceMilliseconds);
+            }
+
+            _originalName = _name;
+            _originalMode = _mode;
+            _originalIsInverted = _isInverted;
+            _originalDebounceMilliseconds = _debounceMilliseconds;
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static string? NormalizeName(string? name) => string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+
+    private static IEnumerable<(Severity Severity, string Text)> GetHints(GpioPinMode mode, bool isInverted, int pinNumber)
+    {
+        switch (mode)
+        {
+            case GpioPinMode.Input:
+                yield return (Severity.Info, "Without a pull, an unconnected input floats. Use it only with sensors that drive the line, such as PIR sensors or optocouplers.");
+                break;
+            case GpioPinMode.InputPullUp when !isInverted:
+                yield return (Severity.Info, "A button or contact to ground reads low while pressed. Turn on Inverted so that pressed is on.");
+                break;
+            case GpioPinMode.InputPullDown:
+                yield return (Severity.Info, "A button to 3.3 V reads high while pressed.");
+                break;
+        }
+
+        if (mode == GpioPinMode.Output)
+        {
+            if (isInverted && pinNumber is >= 9 and <= 27)
+            {
+                yield return (Severity.Warning, "On a Raspberry Pi 3, 4 or Zero 2 W, this pin is pulled down while the Pi boots, so an active-low relay switches on until HomeBlaze starts. Use GPIO 4, 5 or 6 or an external pull-up.");
+            }
+
+            yield return (Severity.Info, "On a Raspberry Pi 3, 4 or Zero 2 W, the driver keeps the current level when it opens the pin; on a Raspberry Pi 5 the pin starts low. A reboot of the Pi resets it.");
+        }
+        else
+        {
+            yield return (Severity.Info, "50 ms suits buttons and contacts. Use 0 for electronic sensors, and less than the pulse width for pulse meters.");
+        }
+    }
+}

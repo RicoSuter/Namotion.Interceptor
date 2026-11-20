@@ -19,13 +19,15 @@ The GPIO device provides access to GPIO pins on various Linux-based single-board
 | `Mcp3008` | Mcp3008Configuration | null | Optional MCP3008 ADC configuration |
 | `Ads1115` | Ads1115Configuration | null | Optional ADS1115 ADC configuration |
 | `Pins` | Dictionary&lt;int, GpioPin&gt; | - | Auto-discovered GPIO pins (persisted) |
-| `AnalogChannels` | Dictionary&lt;int, AnalogChannel&gt; | - | ADC channels (0-7 MCP3008, 8-11 ADS1115) |
+| `AnalogChannels` | Dictionary&lt;int, AnalogChannel&gt; | - | ADC channels (0-7 MCP3008, 8-11 ADS1115), read-only |
+| `Status` | ServiceStatus | - | Status of the GPIO controller, read-only |
+| `StatusMessage` | string? | - | Error or info message, read-only |
 
 ### GpioSubject Operations
 
 | Operation | Description |
 |-----------|-------------|
-| `SetRaspberryPiPinNames` | Sets friendly names for Raspberry Pi GPIO pins based on their common functions (I2C, SPI, UART, PWM) |
+| `ApplyRaspberryPiDefaults` | Names the pins with a fixed function (I2C, SPI, UART, PWM, HAT EEPROM) and applies the power-on pull of a Raspberry Pi 3, 4 or Zero 2 W (pull-up for GPIO 0 to 8, pull-down for GPIO 9 to 27), both only to unconfigured pins: those without a name in plain `Input` mode. Other pins and the pins of a configured MCP3008 are not changed, so applying it again changes nothing. Saves the configuration when a pin changed. Check the defaults before using it on a Raspberry Pi 5. |
 
 ### JSON Configuration Example
 
@@ -46,8 +48,8 @@ The GPIO device provides access to GPIO pins on various Linux-based single-board
     "address": 72
   },
   "pins": {
-    "17": { "name": "LED", "mode": "Output" },
-    "18": { "name": "Button", "mode": "InputPullUp" }
+    "5": { "name": "Relay", "mode": "Output", "isInverted": true },
+    "18": { "name": "Button", "mode": "InputPullUp", "isInverted": true, "debounceTime": "00:00:00.05" }
   }
 }
 ```
@@ -77,6 +79,7 @@ On older distributions, the package may be named `libgpiod2`.
 ### Supported Platforms
 
 - **Raspberry Pi 3/4/5** - Full GPIO support (pin count detected automatically)
+- **Raspberry Pi Zero 2 W** - Supported with a 64-bit OS (`linux-arm64`). The original Raspberry Pi Zero W has an ARMv6 CPU, which .NET does not support
 - **Orange Pi** - Supported via libgpiod
 - **BeagleBone** - Supported via libgpiod
 - **ODROID** - Supported via libgpiod
@@ -99,12 +102,25 @@ Each GPIO pin supports four modes:
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `PinNumber` | int | BCM pin number |
+| `PinNumber` | int | BCM pin number (read-only) |
 | `Name` | string? | Optional friendly name (persisted) |
 | `Mode` | GpioPinMode | Pin operating mode (persisted) |
-| `Value` | bool | Current value (true=high, false=low) |
-| `Status` | ServiceStatus | Pin availability status |
-| `StatusMessage` | string? | Error or info message |
+| `IsInverted` | bool | `Value` is the inverse of the pin level (persisted, default `false`), see [Inversion](#inversion) |
+| `DebounceTime` | TimeSpan | Time an input ignores further edges after a change (persisted, default 50 ms, zero disables it), see [Debouncing](#debouncing) |
+| `Value` | bool | Current logical value: the pin level (true=high), inverted when `IsInverted` is set (read-only) |
+| `Status` | ServiceStatus | Pin availability status (read-only) |
+| `StatusMessage` | string? | Error or info message (read-only) |
+
+`PinNumber`, `Value`, `Status` and `StatusMessage` are state: only the library changes them. `Name`, `Mode`, `IsInverted` and `DebounceTime` are configuration.
+
+### GpioPin Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `TurnOn`, `TurnOff`, `Toggle` | Switch an output pin |
+| `SetValue` | Sets the logical value of an output pin, such as from an automation expression |
+
+The state of a pin is read-only; an output changes only through these operations. They are disabled while the pin is not an output or not running, and `TurnOn` and `TurnOff` also while the output already has that value. They throw on an input pin, whose value follows the hardware.
 
 ### Pin Status
 
@@ -118,25 +134,59 @@ Pins report their status via `ServiceStatus`:
 
 ### Output Pins
 
-When you set `Value = true` on an output pin:
-1. The value is written to GPIO hardware
+When the GPIO controller starts, an output pin keeps the level the driver leaves when it opens the pin, and `Value` is read back from it. The Raspberry Pi register driver (`/dev/gpiomem`, Raspberry Pi 3, 4 and Zero 2 W) keeps the level, so a restart of HomeBlaze does not switch outputs. The libgpiod driver (Raspberry Pi 5) drives the pin low when it opens it. A reboot of the Pi resets every pin to its power-on pull until HomeBlaze opens it: connect an active-low relay to GPIO 4, 5 or 6, which are pulled up at boot, or add an external pull-up, so that it stays off while the Pi boots.
+
+When `TurnOn` or `SetValue` sets an output pin to true:
+1. The level is written to GPIO hardware (low for an inverted pin)
 2. A read-back verification confirms the write succeeded
 3. If verification fails, `Status` is set to `Error` with a message indicating possible short circuit or external driver conflict
 
 ### Input Pins
 
 Input pins use interrupt-driven updates:
-- Rising/falling edge triggers update the `Value` property
+- Rising/falling edge triggers update the `Value` property, with [inversion](#inversion) and [debouncing](#debouncing) applied
+- At startup, an input reads its level with inversion applied
 - Polling verification runs every `PollingInterval` to catch missed interrupts
 - Mode changes automatically register/unregister interrupt handlers
 - Interrupts are only registered for input pins (not output)
+
+### Inversion
+
+`IsInverted` makes `Value` the inverse of the pin level, both for reading and for writing. Use it for active-low hardware:
+
+- **Active-low relay boards** switch on when the pin is low. With `IsInverted`, `TurnOn` turns the relay on, and `IsOn`, the icon and automations show the state of the relay.
+- **Buttons to ground** on an `InputPullUp` pin read low while pressed. With `IsInverted`, pressed is `true`.
+
+Changing `IsInverted` at runtime keeps the pin level and reads `Value` again, so `Value` flips and an output is never switched.
+
+### Debouncing
+
+A mechanical contact, such as a button, switch, reed contact or relay, bounces for a few milliseconds when it closes or opens, so the pin sees several edges for one press. After a change of `Value`, an input ignores further edges for `DebounceTime`, then reads the level again and corrects `Value` if the contact settled differently. A press therefore changes `Value` at once and only once.
+
+- The default of 50 ms suits buttons and switches. A pulse shorter than `DebounceTime` still shows as `true` and then `false`, but changes closer together than `DebounceTime` merge.
+- Set it to zero for inputs that change faster than that and do not bounce.
+- Outputs ignore it.
+- A negative value, or one above `GpioPin.MaximumDebounceTime` (10 seconds), is rejected with `ArgumentOutOfRangeException`, so a configuration file with one fails to load.
+
+### Common Wiring
+
+| Use case | Mode | IsInverted | DebounceTime |
+|----------|------|------------|--------------|
+| Button or switch to ground | `InputPullUp` | `true` | 50 ms |
+| Reed contact to ground | `InputPullUp` | `true` | 50 ms |
+| PIR or other electronic sensor | `Input` | `false` | 0 |
+| Pulse meter (S0) | `InputPullUp` | `true` | short or 0 |
+| Active-low relay board | `Output` | `true` | not used |
+| Active-high relay, MOSFET or LED | `Output` | `false` | not used |
+
+The pin editor shows this table and hints for the selected mode.
 
 ### Configuration Persistence
 
 Pin configurations are persisted and restored on restart:
 - When `GpioSubject` loads, existing pin configurations from JSON are reused
 - New pins (not in configuration) default to `Input` mode
-- Runtime changes to `Name` and `Mode` are persisted automatically
+- Changes to `Name`, `Mode`, `IsInverted` and `DebounceTime` made in the pin editor or with a control on a page are saved, and `ApplyRaspberryPiDefaults` saves the changes it makes; changes made from code are not saved by themselves
 
 ## Analog Input (ADC)
 
@@ -158,6 +208,9 @@ The GPIO device supports two ADC chips. Both can be configured simultaneously.
 | `Value` | double | Normalized value (0.0 to 1.0) |
 | `RawValue` | int | Raw ADC value |
 | `Status` | ServiceStatus | Channel status |
+| `StatusMessage` | string? | Error or info message |
+
+`Value`, `RawValue`, `Status` and `StatusMessage` are read-only state that the library updates while polling. `Source` and `ChannelNumber` are set when the channel is created.
 
 ### MCP3008
 
@@ -197,17 +250,24 @@ if (pin.Status == ServiceStatus.Running)
 
     // Set as output and turn on
     pin.Mode = GpioPinMode.Output;
-    pin.Value = true;
+    await pin.TurnOnAsync(CancellationToken.None);
 
-    // Read an input pin
+    // Read an input pin with a button to ground
     var buttonPin = gpioSubject.Pins[18];
     buttonPin.Name = "Power Button";
     buttonPin.Mode = GpioPinMode.InputPullUp;
-    bool isPressed = !buttonPin.Value; // Pull-up means LOW when pressed
+    buttonPin.IsInverted = true; // Pull-up reads low while pressed, so pressed is true
+    bool isPressed = buttonPin.Value;
 }
 
-// Set Raspberry Pi standard pin names
-gpioSubject.SetRaspberryPiPinNames();
+// Apply Raspberry Pi names and power-on pulls to unconfigured pins
+await gpioSubject.ApplyRaspberryPiDefaultsAsync(CancellationToken.None);
+
+// Active-low relay
+var relayPin = gpioSubject.Pins[5];
+relayPin.IsInverted = true;
+relayPin.Mode = GpioPinMode.Output;
+await relayPin.TurnOnAsync(CancellationToken.None); // Drives the pin low
 
 // Read MCP3008 analog value (channels 0-7)
 if (gpioSubject.AnalogChannels.TryGetValue(0, out var mcp3008Channel))
@@ -290,7 +350,3 @@ The following features are not yet implemented but may be added in future versio
 ### PWM (Pulse Width Modulation)
 
 Hardware PWM output for controlling LED brightness, motor speed, and servo position. Raspberry Pi has 2 hardware PWM channels (GPIO 12/13 and 18/19).
-
-### Input Debouncing
-
-Software debouncing for mechanical switches and buttons. Configurable debounce time to filter out contact bounce noise from physical switches.
