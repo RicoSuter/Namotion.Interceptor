@@ -28,7 +28,6 @@ services:
     image: docker:29-cli@sha256:34507eb5069d8be82c95dd3b6987d4250fd5fee49b82e2509b7d7a7030740d6d
     profiles: [updater]
     restart: unless-stopped
-    depends_on: [homeblaze]  # creates ./data first; the data mount below does not create a missing folder
     read_only: true
     tmpfs:
       - /tmp
@@ -41,10 +40,10 @@ services:
         target: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}
         read_only: true
         bind: { create_host_path: false }
-      - type: bind  # the only folder the updater writes
+      - type: bind  # the only folder the updater writes; created when missing, as compose creates and only then starts both containers
         source: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}/data
         target: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}/data
-        bind: { create_host_path: false }
+        bind: { create_host_path: true }
     command:
       - sh
       - -c
