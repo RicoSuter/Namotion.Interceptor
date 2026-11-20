@@ -35,6 +35,12 @@ internal sealed class SonosEventListener : IAsyncDisposable
     private int _inFlightHandlers;
     private readonly TaskCompletionSource _handlersDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    // Completed by DisposeAsync after closing the listener, and the accept loop ends on it rather than on Close: the
+    // managed HttpListener on Linux and macOS loses an accept that starts while Close runs (BeginGetContext checks the
+    // state without the lock Close holds, so it queues the accept after Close completed the pending ones) and never
+    // completes it.
+    private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     /// <param name="httpClient">The client for SUBSCRIBE and UNSUBSCRIBE requests, borrowed and not disposed.</param>
     /// <param name="logger">The logger.</param>
     /// <param name="minimumLifetime">The shortest lifetime a renewal is scheduled for, whatever the speaker grants.</param>
@@ -313,8 +319,15 @@ internal sealed class SonosEventListener : IAsyncDisposable
         {
             while (listener.IsListening)
             {
-                var context = await AcceptContextAsync(listener);
-                _ = HandleAsync(context);
+                var accept = AcceptContextAsync(listener);
+                if (await Task.WhenAny(accept, _closed.Task) != accept)
+                {
+                    // Close fails the accept later, if at all; observed so it is no unobserved task exception.
+                    _ = accept.ContinueWith(static task => _ = task.Exception, TaskContinuationOptions.OnlyOnFaulted);
+                    return;
+                }
+
+                _ = HandleAsync(await accept);
             }
         }
         catch (Exception exception)
@@ -535,6 +548,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
             // Close without Stop first: closing a stopped HttpListener on Linux and macOS binds its port again to
             // unregister it, which fails or tears down another listener when the port was taken in between.
             listener.Close();
+            _closed.TrySetResult();
             if (_acceptLoop is not null)
             {
                 await _acceptLoop;
