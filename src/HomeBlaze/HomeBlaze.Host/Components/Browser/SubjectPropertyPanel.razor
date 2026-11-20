@@ -176,7 +176,7 @@
                         @* mb-0, as MudBlazor gives an expanded panel a margin of 16px above and below. *@
                         <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="@($"{sectionGapClass} mb-0")" HeaderClass="px-4 subject-pane-section-header">
                             <TitleContent>
-                                @GetPropertyDisplayName(property)
+                                <span title="@GetPropertyDescription(property)">@GetPropertyDisplayName(property)</span>
                                 <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="my-0">@children.Length</MudChip>
                             </TitleContent>
                             <ChildContent>
@@ -805,7 +805,7 @@
 
         RenderFragment nameAndValue =
             @<text>
-                <MudText Typo="Typo.body1" HtmlTag="span" Class="@nameClass" data-testid="subject-pane-value-name">@displayName</MudText>
+                <MudText Typo="Typo.body1" HtmlTag="span" Class="@nameClass" title="@GetPropertyDescription(prop)" data-testid="subject-pane-value-name">@displayName</MudText>
                 <MudText Typo="Typo.body1" HtmlTag="span" Class="@valueClass" data-testid="subject-pane-value-text">
                     @if (displayValue.Contains('\n'))
                     {
@@ -966,6 +966,20 @@
         return property.GetDisplayName();
     }
 
+    // A null title renders no attribute.
+    private static string? GetPropertyDescription(RegisteredSubjectProperty property)
+    {
+        foreach (var attribute in property.ReflectionAttributes)
+        {
+            if (attribute is System.ComponentModel.DescriptionAttribute { Description.Length: > 0 } description)
+            {
+                return description.Description;
+            }
+        }
+
+        return null;
+    }
+
     private int GetChildCount(SubjectPropertyChild child)
     {
         var subject = child.Subject;
@@ -991,7 +1005,7 @@
     private RenderFragment RenderChildLabel(RegisteredSubjectProperty property, SubjectPropertyChild child) => __builder =>
     {
         var childCount = GetChildCount(child);
-        <span class="subject-pane-child-name" style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
+        <span class="subject-pane-child-name" style="word-break: break-word;" title="@GetPropertyDescription(property)">@property.GetChildDisplayName(child)</span>
         @if (childCount > 0)
         {
             <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
@@ -1173,7 +1187,8 @@
                 var isQuery = method.Kind == MethodKind.Query;
                 var isEnabled = _registeredSubject?.TryGetProperty(method.PropertyName)?.IsMethodEnabled() ?? true;
                 var isExecuting = _executingMethod == method;
-                <MudButton Variant="Variant.Filled"
+                RenderFragment button =
+                @<MudButton Variant="Variant.Filled"
                            Color="@(isQuery ? Color.Info : Color.Primary)"
                            Size="Size.Small"
                            Class="subject-pane-method"
@@ -1186,7 +1201,17 @@
                         <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" Style="width: 20px; height: 20px;" />
                     }
                     @method.Title
-                </MudButton>
+                </MudButton>;
+
+                @* A disabled button gets no pointer events, so the tooltip sits on the element around it. *@
+                @if (string.IsNullOrEmpty(method.Description))
+                {
+                    @button
+                }
+                else
+                {
+                    <MudTooltip Text="@method.Description">@button</MudTooltip>
+                }
             }
         </MudStack>
     };
