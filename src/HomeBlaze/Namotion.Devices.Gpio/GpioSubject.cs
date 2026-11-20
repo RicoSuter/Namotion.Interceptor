@@ -31,6 +31,8 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 {
     private readonly GpioDriver? _driver;
     private readonly bool _isDriverRaspberryPi;
+    private readonly Func<Mcp3008Configuration, Mcp3008> _createMcp3008;
+    private readonly Func<Ads1115Configuration, Ads1115> _createAds1115;
     private readonly ConcurrentDictionary<int, PinChangeEventHandler> _interruptHandlers = new();
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
 
@@ -74,10 +76,11 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     // Guarded by _controllerLock. Whether the controller drives the pins of a board that uses the Raspberry Pi register
     // driver, whose power-on pulls new pins start with.
     private bool _isRaspberryPi;
+
+    // Guarded by _controllerLock. The configuration an ADC was created with is set only together with the ADC and
+    // cleared when it is disposed, so that a configured ADC that does not exist is created by the next apply or start.
     private Mcp3008? _mcp3008;
     private Ads1115? _ads1115;
-
-    // Track applied ADC configurations to avoid unnecessary recreation
     private Mcp3008Configuration? _appliedMcp3008Config;
     private Ads1115Configuration? _appliedAds1115Config;
 
@@ -162,12 +165,19 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     /// <summary>
     /// Creates a GpioSubject with an optional GPIO driver that drives the pins of a board that uses the Raspberry Pi
     /// register driver (Raspberry Pi 3, 4, 400, Zero 2 W and Compute Module 3 and 4) when
-    /// <paramref name="isRaspberryPi"/> is true, so that new pins start with its power-on pull.
+    /// <paramref name="isRaspberryPi"/> is true, so that new pins start with its power-on pull. The ADCs are created
+    /// with <paramref name="createMcp3008"/> and <paramref name="createAds1115"/>, by default on the hardware.
     /// </summary>
-    internal GpioSubject(GpioDriver? driver, bool isRaspberryPi)
+    internal GpioSubject(
+        GpioDriver? driver,
+        bool isRaspberryPi,
+        Func<Mcp3008Configuration, Mcp3008>? createMcp3008 = null,
+        Func<Ads1115Configuration, Ads1115>? createAds1115 = null)
     {
         _driver = driver;
         _isDriverRaspberryPi = isRaspberryPi;
+        _createMcp3008 = createMcp3008 ?? CreateMcp3008;
+        _createAds1115 = createAds1115 ?? CreateAds1115;
 
         PollingInterval = TimeSpan.FromSeconds(5);
         RetryInterval = TimeSpan.FromSeconds(30);
@@ -364,9 +374,9 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
                 }
             }
 
-            DiscoverPins(Mcp3008, Ads1115);
+            var adcFailureMessage = SynchronizeAdcs(Mcp3008, Ads1115);
             Status = ServiceStatus.Running;
-            StatusMessage = null;
+            StatusMessage = adcFailureMessage;
 
             return InitializationResult.Success;
         }
@@ -531,15 +541,22 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     // Called under _controllerLock, before the ADC that uses the pin is created.
     private void ReservePin(int pinNumber, GpioPin pin, string message)
     {
-        // Closed now, so that disposing this controller later does not close a pin that the ADC uses by then.
-        if (_controller!.IsPinOpen(pinNumber))
-        {
-            _controller.ClosePin(pinNumber);
-        }
-
         pin.PinNumber = pinNumber;
         pin.Status = ServiceStatus.Unavailable;
-        pin.StatusMessage = message;
+        try
+        {
+            // Closed now, so that disposing this controller later does not close a pin that the ADC uses by then.
+            if (_controller!.IsPinOpen(pinNumber))
+            {
+                _controller.ClosePin(pinNumber);
+            }
+
+            pin.StatusMessage = message;
+        }
+        catch (Exception exception)
+        {
+            pin.StatusMessage = $"{message}, but the pin could not be closed: {exception.Message}";
+        }
     }
 
     private void InitializePin(GpioPin pin)
@@ -657,29 +674,6 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
                 return Task.CompletedTask;
             }
 
-            var mcp3008 = Mcp3008;
-            var ads1115 = Ads1115;
-
-            // Records have value equality, so an unchanged ADC configuration keeps its ADC.
-            var mcp3008Changed = mcp3008 != _appliedMcp3008Config;
-            var ads1115Changed = ads1115 != _appliedAds1115Config;
-
-            // Disposed before the pins are discovered, so that an ADC releasing its pins cannot change a pin that is
-            // opened as a GPIO pin again.
-            if (mcp3008Changed)
-            {
-                _mcp3008?.Dispose();
-                _mcp3008 = null;
-                _appliedMcp3008Config = mcp3008 is not null ? mcp3008 with { } : null;
-            }
-
-            if (ads1115Changed)
-            {
-                _ads1115?.Dispose();
-                _ads1115 = null;
-                _appliedAds1115Config = ads1115 is not null ? ads1115 with { } : null;
-            }
-
             // Handle simulation mode change (only when no injected driver)
             if (_driver == null && UseSimulation != _currentlyUsingSimulation)
             {
@@ -699,106 +693,171 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
                 }
 
                 // Recreate controller with new driver
-                var result = TryCreateController();
-                if (result == InitializationResult.Success)
+                if (TryCreateController() == InitializationResult.Success)
                 {
-                    DiscoverPins(mcp3008, ads1115);
                     Status = ServiceStatus.Running;
                     StatusMessage = null;
                 }
             }
-            else
-            {
-                // A reloaded configuration has replaced the pins with new instances that hold neither a pin number
-                // nor the controller.
-                DiscoverPins(mcp3008, ads1115);
-            }
 
-            if (mcp3008Changed || ads1115Changed)
+            // A reloaded configuration has replaced the pins with new instances that hold neither a pin number nor the
+            // controller, so the pins are discovered also when no ADC changed.
+            var adcFailureMessage = SynchronizeAdcs(Mcp3008, Ads1115);
+
+            // While running, the status message reports only an ADC that could not be created.
+            if (Status == ServiceStatus.Running)
             {
-                AnalogChannels = InitializeAdcChannels(mcp3008, ads1115);
+                StatusMessage = adcFailureMessage;
             }
         }
 
         return Task.CompletedTask;
     }
 
-    // Creates only the ADCs that were disposed, so that an unchanged one is kept.
-    private Dictionary<int, AnalogChannel> InitializeAdcChannels(Mcp3008Configuration? mcp3008, Ads1115Configuration? ads1115)
+    /// <summary>
+    /// Disposes each ADC whose configuration differs from the given one, discovers the pins with the given
+    /// configurations and then, while a controller exists, creates each configured ADC that does not exist. Rebuilds
+    /// <see cref="AnalogChannels"/> when an ADC configuration differed. Called under <see cref="_controllerLock"/>.
+    /// </summary>
+    /// <returns>The failure message of an ADC that could not be created, or null.</returns>
+    private string? SynchronizeAdcs(Mcp3008Configuration? mcp3008, Ads1115Configuration? ads1115)
+    {
+        // Records have value equality, so an unchanged ADC configuration keeps its ADC.
+        var isMcp3008Changed = mcp3008 != _appliedMcp3008Config;
+        var isAds1115Changed = ads1115 != _appliedAds1115Config;
+
+        // Disposed before the pins are discovered, so that an ADC releasing its pins cannot change a pin that is opened
+        // as a GPIO pin again.
+        if (isMcp3008Changed)
+        {
+            _mcp3008?.Dispose();
+            _mcp3008 = null;
+            _appliedMcp3008Config = null;
+        }
+
+        if (isAds1115Changed)
+        {
+            _ads1115?.Dispose();
+            _ads1115 = null;
+            _appliedAds1115Config = null;
+        }
+
+        // Detaches and closes the pins a new ADC uses, so the ADC is created after this.
+        DiscoverPins(mcp3008, ads1115);
+
+        if (!isMcp3008Changed && !isAds1115Changed)
+        {
+            return null;
+        }
+
+        string? failureMessage = null;
+        if (_controller is not null)
+        {
+            if (mcp3008 is not null)
+            {
+                failureMessage = TryCreateMcp3008(mcp3008);
+            }
+
+            if (ads1115 is not null)
+            {
+                var ads1115FailureMessage = TryCreateAds1115(ads1115);
+                failureMessage = failureMessage is null || ads1115FailureMessage is null
+                    ? failureMessage ?? ads1115FailureMessage
+                    : $"{failureMessage}; {ads1115FailureMessage}";
+            }
+        }
+
+        AnalogChannels = CreateAnalogChannels();
+        return failureMessage;
+    }
+
+    // Called under _controllerLock when the MCP3008 does not exist.
+    private string? TryCreateMcp3008(Mcp3008Configuration configuration)
+    {
+        try
+        {
+            _mcp3008 = _createMcp3008(configuration);
+            _appliedMcp3008Config = configuration with { };
+            return null;
+        }
+        catch (Exception exception)
+        {
+            return $"MCP3008 init failed: {exception.Message}";
+        }
+    }
+
+    // Called under _controllerLock when the ADS1115 does not exist.
+    private string? TryCreateAds1115(Ads1115Configuration configuration)
+    {
+        try
+        {
+            _ads1115 = _createAds1115(configuration);
+            _appliedAds1115Config = configuration with { };
+            return null;
+        }
+        catch (Exception exception)
+        {
+            return $"ADS1115 init failed: {exception.Message}";
+        }
+    }
+
+    private static Mcp3008 CreateMcp3008(Mcp3008Configuration configuration)
+    {
+        var spi = new SoftwareSpi(
+            configuration.ClockPin,
+            configuration.MisoPin,
+            configuration.MosiPin,
+            configuration.ChipSelectPin);
+        return new Mcp3008(spi);
+    }
+
+    private static Ads1115 CreateAds1115(Ads1115Configuration configuration)
+    {
+        var i2cDevice = I2cDevice.Create(new I2cConnectionSettings(configuration.I2cBus, configuration.Address));
+        try
+        {
+            return new Ads1115(i2cDevice);
+        }
+        catch
+        {
+            // The constructor writes to the device, which fails when no ADS1115 answers at the address.
+            i2cDevice.Dispose();
+            throw;
+        }
+    }
+
+    // Called under _controllerLock. Creates the channels of the ADCs that exist.
+    private Dictionary<int, AnalogChannel> CreateAnalogChannels()
     {
         var channels = new Dictionary<int, AnalogChannel>();
 
-        if (mcp3008 != null)
+        if (_mcp3008 is not null)
         {
-            InitializeMcp3008(mcp3008, channels);
+            for (var channelNumber = 0; channelNumber < 8; channelNumber++)
+            {
+                channels[channelNumber] = new AnalogChannel
+                {
+                    Source = AdcSource.Mcp3008,
+                    ChannelNumber = channelNumber,
+                    Status = ServiceStatus.Running
+                };
+            }
         }
 
-        if (ads1115 != null)
+        if (_ads1115 is not null)
         {
-            InitializeAds1115(ads1115, channels);
+            for (var channelNumber = 0; channelNumber < 4; channelNumber++)
+            {
+                channels[8 + channelNumber] = new AnalogChannel
+                {
+                    Source = AdcSource.Ads1115,
+                    ChannelNumber = channelNumber,
+                    Status = ServiceStatus.Running
+                };
+            }
         }
 
         return channels;
-    }
-
-    private void InitializeMcp3008(Mcp3008Configuration configuration, Dictionary<int, AnalogChannel> channels)
-    {
-        if (_controller == null) return;
-
-        try
-        {
-            if (_mcp3008 is null)
-            {
-                var spi = new SoftwareSpi(
-                    configuration.ClockPin,
-                    configuration.MisoPin,
-                    configuration.MosiPin,
-                    configuration.ChipSelectPin);
-                _mcp3008 = new Mcp3008(spi);
-            }
-
-            for (int i = 0; i < 8; i++)
-            {
-                channels[i] = new AnalogChannel()
-                {
-                    Source = AdcSource.Mcp3008,
-                    ChannelNumber = i,
-                    Status = ServiceStatus.Running
-                };
-            }
-        }
-        catch (Exception exception)
-        {
-            StatusMessage = $"MCP3008 init failed: {exception.Message}";
-        }
-    }
-
-    private void InitializeAds1115(Ads1115Configuration configuration, Dictionary<int, AnalogChannel> channels)
-    {
-        try
-        {
-            if (_ads1115 is null)
-            {
-                var i2CDevice = I2cDevice.Create(new I2cConnectionSettings(
-                    configuration.I2cBus,
-                    configuration.Address));
-                _ads1115 = new Ads1115(i2CDevice);
-            }
-
-            for (var i = 0; i < 4; i++)
-            {
-                channels[8 + i] = new AnalogChannel()
-                {
-                    Source = AdcSource.Ads1115,
-                    ChannelNumber = i,
-                    Status = ServiceStatus.Running
-                };
-            }
-        }
-        catch (Exception exception)
-        {
-            StatusMessage = $"ADS1115 init failed: {exception.Message}";
-        }
     }
 
     private void RegisterInterrupt(int pinNumber)
@@ -858,22 +917,25 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     private void PollAdcChannels()
     {
+        // Read once, because an applied configuration replaces them under the controller lock, which this does not take.
+        var mcp3008 = _mcp3008;
+        var ads1115 = _ads1115;
         foreach (var channel in AnalogChannels.Values)
         {
             if (channel.Status != ServiceStatus.Running) continue;
 
             try
             {
-                if (channel.Source == AdcSource.Mcp3008 && _mcp3008 != null)
+                if (channel.Source == AdcSource.Mcp3008 && mcp3008 != null)
                 {
-                    var raw = _mcp3008.Read(channel.ChannelNumber);
+                    var raw = mcp3008.Read(channel.ChannelNumber);
                     channel.RawValue = raw;
                     channel.Value = raw / 1023.0;
                 }
-                else if (channel.Source == AdcSource.Ads1115 && _ads1115 != null)
+                else if (channel.Source == AdcSource.Ads1115 && ads1115 != null)
                 {
                     var inputMultiplexer = (InputMultiplexer)channel.ChannelNumber;
-                    var raw = _ads1115.ReadRaw(inputMultiplexer);
+                    var raw = ads1115.ReadRaw(inputMultiplexer);
                     channel.RawValue = raw;
                     channel.Value = raw / 32767.0;
                 }
@@ -906,6 +968,8 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
             _mcp3008 = null;
             _ads1115 = null;
+            _appliedMcp3008Config = null;
+            _appliedAds1115Config = null;
             _controller = null;
         }
 

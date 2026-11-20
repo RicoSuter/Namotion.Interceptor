@@ -26,6 +26,26 @@ internal sealed class LatchingGpioDriver : GpioDriver
     public Action<int>? PinModeSet { get; set; }
 
     /// <summary>
+    /// Called after a pin was opened, outside the lock of the driver, with the pin number.
+    /// </summary>
+    public Action<int>? PinOpened { get; set; }
+
+    /// <summary>
+    /// Called after a pin was closed, outside the lock of the driver, with the pin number.
+    /// </summary>
+    public Action<int>? PinClosed { get; set; }
+
+    /// <summary>
+    /// The pin for which the next removal of a value changed callback throws an <see cref="IOException"/>, once.
+    /// </summary>
+    public int? FailingCallbackRemovalPinNumber { get; set; }
+
+    /// <summary>
+    /// The pin for which the next close throws an <see cref="IOException"/>, once.
+    /// </summary>
+    public int? FailingClosePinNumber { get; set; }
+
+    /// <summary>
     /// Sets the state a pin has before it is opened.
     /// </summary>
     public void SetUpPin(int pinNumber, PinMode mode, PinValue inputLevel, PinValue latch)
@@ -74,6 +94,17 @@ internal sealed class LatchingGpioDriver : GpioDriver
     }
 
     /// <summary>
+    /// Gets how often the pin was closed.
+    /// </summary>
+    public int GetCloseCount(int pinNumber)
+    {
+        lock (_lock)
+        {
+            return GetState(pinNumber).CloseCount;
+        }
+    }
+
+    /// <summary>
     /// Gets how often the mode of the pin was set.
     /// </summary>
     public int GetModeSetCount(int pinNumber)
@@ -105,10 +136,24 @@ internal sealed class LatchingGpioDriver : GpioDriver
         {
             GetState(pinNumber).OpenCount++;
         }
+
+        PinOpened?.Invoke(pinNumber);
     }
 
     protected override void ClosePin(int pinNumber)
     {
+        lock (_lock)
+        {
+            if (FailingClosePinNumber == pinNumber)
+            {
+                FailingClosePinNumber = null;
+                throw new IOException($"Pin {pinNumber} could not be closed.");
+            }
+
+            GetState(pinNumber).CloseCount++;
+        }
+
+        PinClosed?.Invoke(pinNumber);
     }
 
     protected override void SetPinMode(int pinNumber, PinMode mode)
@@ -190,6 +235,12 @@ internal sealed class LatchingGpioDriver : GpioDriver
     {
         lock (_lock)
         {
+            if (FailingCallbackRemovalPinNumber == pinNumber)
+            {
+                FailingCallbackRemovalPinNumber = null;
+                throw new IOException($"The callback of pin {pinNumber} could not be removed.");
+            }
+
             if (_eventHandlers.TryGetValue(pinNumber, out var handlers))
             {
                 handlers.Remove(callback);
@@ -224,6 +275,8 @@ internal sealed class LatchingGpioDriver : GpioDriver
         public bool IsModeSet { get; set; }
 
         public int OpenCount { get; set; }
+
+        public int CloseCount { get; set; }
 
         public int ModeSetCount { get; set; }
 

@@ -1,5 +1,6 @@
 using System.Device.Gpio;
 using HomeBlaze.Abstractions;
+using Namotion.Devices.Gpio.Configuration;
 using Namotion.Interceptor.Testing;
 using Xunit;
 
@@ -140,6 +141,141 @@ public class GpioStartupTests
             await subject.StopAsync(CancellationToken.None);
             subject.Dispose();
         }
+    }
+
+    [Fact]
+    public async Task WhenMcp3008IsConfigured_ThenStartCreatesIt()
+    {
+        // Arrange
+        var adcFactory = new RecordingAdcFactory();
+        var subject = CreateAdcSubject(new LatchingGpioDriver(), adcFactory);
+        subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
+
+        // Act
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running);
+
+            // Assert
+            Assert.Equal(["create MCP3008 21"], adcFactory.Events);
+            Assert.Equal(Enumerable.Range(0, 8), subject.AnalogChannels.Keys.Order());
+            Assert.All(subject.AnalogChannels.Values, channel =>
+            {
+                Assert.Equal(AdcSource.Mcp3008, channel.Source);
+                Assert.Equal(ServiceStatus.Running, channel.Status);
+            });
+            Assert.Equal("Used by the MCP3008", subject.Pins[21].StatusMessage);
+            Assert.Null(subject.StatusMessage);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenMcp3008IsAppliedBeforeStart_ThenStartCreatesIt()
+    {
+        // Arrange
+        var adcFactory = new RecordingAdcFactory();
+        var subject = CreateAdcSubject(new LatchingGpioDriver(), adcFactory);
+        subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
+        await subject.ApplyConfigurationAsync(CancellationToken.None);
+        Assert.Empty(adcFactory.Events);
+        Assert.Empty(subject.AnalogChannels);
+
+        // Act
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running);
+
+            // Assert
+            Assert.Equal(["create MCP3008 21"], adcFactory.Events);
+            Assert.Equal(8, subject.AnalogChannels.Count);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenBothAdcsAreConfigured_ThenStartCreatesBoth()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var adcFactory = new RecordingAdcFactory();
+        var subject = CreateAdcSubject(driver, adcFactory);
+        subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
+        subject.Ads1115 = new Ads1115Configuration { I2cBus = 1 };
+
+        // Act
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running);
+
+            // Assert
+            Assert.Equal(["create MCP3008 21", "create ADS1115 1"], adcFactory.Events);
+            Assert.Equal(Enumerable.Range(0, 12), subject.AnalogChannels.Keys.Order());
+            Assert.All(Enumerable.Range(8, 4), key => Assert.Equal(AdcSource.Ads1115, subject.AnalogChannels[key].Source));
+            foreach (var pinNumber in new[] { 2, 3, 16, 19, 20, 21 })
+            {
+                Assert.Equal(ServiceStatus.Unavailable, subject.Pins[pinNumber].Status);
+                Assert.Equal(0, driver.GetOpenCount(pinNumber));
+            }
+
+            Assert.Null(subject.StatusMessage);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenMcp3008CannotBeCreatedAtStart_ThenTheNextApplyCreatesIt()
+    {
+        // Arrange
+        var adcFactory = new RecordingAdcFactory { FailsNextMcp3008Creation = true };
+        var subject = CreateAdcSubject(new LatchingGpioDriver(), adcFactory);
+        subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => subject.Status == ServiceStatus.Running);
+            Assert.Equal("MCP3008 init failed: No MCP3008 answered.", subject.StatusMessage);
+            Assert.Empty(subject.AnalogChannels);
+
+            // Act
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal(["create MCP3008 21"], adcFactory.Events);
+            Assert.Equal(8, subject.AnalogChannels.Count);
+            Assert.Null(subject.StatusMessage);
+            Assert.Equal(ServiceStatus.Running, subject.Status);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    // ADCs that touch no hardware: a real MCP3008 or ADS1115 reaches the native GPIO and I2C drivers.
+    private static GpioSubject CreateAdcSubject(GpioDriver driver, RecordingAdcFactory adcFactory)
+    {
+        return new GpioSubject(driver, isRaspberryPi: false, adcFactory.CreateMcp3008, adcFactory.CreateAds1115)
+        {
+            // Long, so that the test reads the state the start left.
+            PollingInterval = TimeSpan.FromHours(1)
+        };
     }
 
     private static GpioSubject CreateSubject(GpioDriver driver, bool isInverted)

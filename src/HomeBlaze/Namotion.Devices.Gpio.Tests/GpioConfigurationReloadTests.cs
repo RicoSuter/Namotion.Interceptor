@@ -49,6 +49,16 @@ public class GpioConfigurationReloadTests
         }
         """;
 
+    private const string JsonWithMovedMcp3008ClockPin = """
+        {
+          "$type": "Namotion.Devices.Gpio.GpioSubject",
+          "mcp3008": { "clockPin": 26, "mosiPin": 20, "misoPin": 19, "chipSelectPin": 16 },
+          "pins": {
+            "17": { "name": "Led", "mode": "Output" }
+          }
+        }
+        """;
+
     private static readonly int[] Mcp3008PinNumbers = [16, 19, 20, 21];
 
     [Fact]
@@ -288,7 +298,8 @@ public class GpioConfigurationReloadTests
     {
         // Arrange
         var driver = new LatchingGpioDriver();
-        var (subject, serializer) = CreateSubject(driver);
+        var adcFactory = new RecordingAdcFactory();
+        var (subject, serializer) = CreateSubject(driver, adcFactory: adcFactory);
         subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
         await subject.StartAsync(CancellationToken.None);
         try
@@ -315,6 +326,7 @@ public class GpioConfigurationReloadTests
 
             Assert.Equal(ServiceStatus.Running, subject.Pins[17].Status);
             Assert.Equal(PinMode.Output, driver.GetMode(17));
+            Assert.Equal(["create MCP3008 21"], adcFactory.Events);
         }
         finally
         {
@@ -389,6 +401,121 @@ public class GpioConfigurationReloadTests
                 Assert.Equal(ServiceStatus.Unavailable, pin.Status);
                 Assert.Equal("Used by the MCP3008", pin.StatusMessage);
             }
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenMcp3008ClockPinMovesOnReload_ThenOldAdcIsDisposedBeforeTheFreedPinOpensAndTheNewPinClosesBeforeTheNewAdcIsCreated()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var adcFactory = new RecordingAdcFactory();
+        var (subject, serializer) = CreateSubject(driver, adcFactory: adcFactory);
+        subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitUntilAllPinsRunAsync(subject, Mcp3008PinNumbers);
+            var events = new List<string>();
+            driver.PinOpened = pinNumber => events.Add($"open {pinNumber}");
+            driver.PinClosed = pinNumber => events.Add($"close {pinNumber}");
+            adcFactory.EventRecorded = events.Add;
+
+            // Act
+            serializer.UpdateConfiguration(subject, JsonWithMovedMcp3008ClockPin);
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Subset(new HashSet<string> { "dispose MCP3008 21", "open 21", "close 26", "create MCP3008 26" }, events.ToHashSet());
+            Assert.True(events.IndexOf("dispose MCP3008 21") < events.IndexOf("open 21"));
+            Assert.True(events.IndexOf("close 26") < events.IndexOf("create MCP3008 26"));
+            Assert.Equal(1, driver.GetCloseCount(26));
+
+            var freedPin = subject.Pins[21];
+            Assert.Equal(ServiceStatus.Running, freedPin.Status);
+            Assert.Equal(PinMode.Input, driver.GetMode(21));
+
+            var reservedPin = subject.Pins[26];
+            Assert.Equal(26, reservedPin.PinNumber);
+            Assert.Equal(ServiceStatus.Unavailable, reservedPin.Status);
+            Assert.Equal("Used by the MCP3008", reservedPin.StatusMessage);
+            Assert.Null(reservedPin.Controller);
+
+            Assert.Equal(8, subject.AnalogChannels.Count);
+            Assert.All(subject.AnalogChannels.Values, channel => Assert.Equal(ServiceStatus.Running, channel.Status));
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenPinDiscoveryThrowsDuringAnAdcChange_ThenTheNextApplyCreatesTheAdc()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var adcFactory = new RecordingAdcFactory();
+        var (subject, serializer) = CreateSubject(driver, adcFactory: adcFactory);
+        subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitUntilAllPinsRunAsync(subject, Mcp3008PinNumbers);
+            driver.FailingCallbackRemovalPinNumber = 26;
+            serializer.UpdateConfiguration(subject, JsonWithMovedMcp3008ClockPin);
+            await Assert.ThrowsAsync<IOException>(() => subject.ApplyConfigurationAsync(CancellationToken.None));
+            Assert.Equal(1, adcFactory.Count("dispose MCP3008 21"));
+            Assert.Equal(0, adcFactory.Count("create MCP3008 26"));
+
+            // Act
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal(1, adcFactory.Count("create MCP3008 26"));
+            Assert.Equal(ServiceStatus.Unavailable, subject.Pins[26].Status);
+            Assert.Equal("Used by the MCP3008", subject.Pins[26].StatusMessage);
+            Assert.Equal(ServiceStatus.Running, subject.Pins[21].Status);
+            Assert.Equal(8, subject.AnalogChannels.Count);
+            Assert.Null(subject.StatusMessage);
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAPinOfANewAdcCannotBeClosed_ThenThePinReportsItAndTheAdcIsCreated()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var adcFactory = new RecordingAdcFactory();
+        var (subject, serializer) = CreateSubject(driver, adcFactory: adcFactory);
+        subject.Mcp3008 = new Mcp3008Configuration { ClockPin = 21, MosiPin = 20, MisoPin = 19, ChipSelectPin = 16 };
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitUntilAllPinsRunAsync(subject, Mcp3008PinNumbers);
+            driver.FailingClosePinNumber = 26;
+
+            // Act
+            serializer.UpdateConfiguration(subject, JsonWithMovedMcp3008ClockPin);
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            var pin = subject.Pins[26];
+            Assert.Equal(ServiceStatus.Unavailable, pin.Status);
+            Assert.Equal("Used by the MCP3008, but the pin could not be closed: Pin 26 could not be closed.", pin.StatusMessage);
+            Assert.Equal(1, adcFactory.Count("create MCP3008 26"));
+            Assert.Equal(8, subject.AnalogChannels.Count);
         }
         finally
         {
@@ -490,8 +617,12 @@ public class GpioConfigurationReloadTests
         }
     }
 
-    private static (GpioSubject Subject, ConfigurableSubjectSerializer Serializer) CreateSubject(GpioDriver driver, bool isRaspberryPi = false)
+    // Every subject gets ADCs that touch no hardware: a real MCP3008 or ADS1115 reaches the native GPIO and I2C drivers.
+    private static (GpioSubject Subject, ConfigurableSubjectSerializer Serializer) CreateSubject(
+        GpioDriver driver, bool isRaspberryPi = false, RecordingAdcFactory? adcFactory = null)
     {
+        adcFactory ??= new RecordingAdcFactory();
+
         var services = new ServiceCollection();
         var context = SubjectContextFactory.Create(services);
         services.AddSingleton(context);
@@ -500,7 +631,7 @@ public class GpioConfigurationReloadTests
         typeProvider.AddAssembly(typeof(GpioSubject).Assembly);
         var serializer = new ConfigurableSubjectSerializer(typeProvider, services.BuildServiceProvider());
 
-        var subject = new GpioSubject(driver, isRaspberryPi)
+        var subject = new GpioSubject(driver, isRaspberryPi, adcFactory.CreateMcp3008, adcFactory.CreateAds1115)
         {
             // Long, so that a poll does not correct what the reload did.
             PollingInterval = TimeSpan.FromHours(1),
