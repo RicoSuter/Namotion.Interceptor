@@ -421,6 +421,30 @@ public class ServiceOrderResolverTests
     }
 
     [Fact]
+    public void WhenMiddleServiceRunsBeforeFirstService_ThenThrowsCrossGroupDependencyException()
+    {
+        // Arrange
+        var services = new object[] { new MiddleServiceWithRunsBeforeFirst(), new FirstService() };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            ServiceOrderResolver.OrderByDependencies(services));
+        Assert.Equal("Service MiddleServiceWithRunsBeforeFirst cannot have [RunsBefore(FirstService)] where FirstService is [RunsFirst]", exception.Message);
+    }
+
+    [Fact]
+    public void WhenMiddleServiceRunsAfterLastService_ThenThrowsCrossGroupDependencyException()
+    {
+        // Arrange
+        var services = new object[] { new MiddleServiceWithRunsAfterLast(), new LastService() };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            ServiceOrderResolver.OrderByDependencies(services));
+        Assert.Equal("Service MiddleServiceWithRunsAfterLast cannot have [RunsAfter(LastService)] where LastService is [RunsLast]", exception.Message);
+    }
+
+    [Fact]
     public void CircularDependency_ThrowsWithTypeNames()
     {
         // Arrange: Circular1 -> Circular2 -> Circular1
@@ -696,6 +720,12 @@ public class ServiceOrderResolverTests
     [RunsLast]
     [RunsBefore(typeof(ServiceA))]
     private class LastServiceWithRunsBeforeMiddle { }
+
+    [RunsBefore(typeof(FirstService))]
+    private class MiddleServiceWithRunsBeforeFirst { }
+
+    [RunsAfter(typeof(LastService))]
+    private class MiddleServiceWithRunsAfterLast { }
 
     [RunsFirst]
     [RunsAfter(typeof(LastService))]
