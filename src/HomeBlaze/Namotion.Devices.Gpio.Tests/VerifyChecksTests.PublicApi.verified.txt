@@ -85,13 +85,13 @@ namespace Namotion.Devices.Gpio
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the logical value of an output pin. Disabled while the pin is an input.", Position=4, Title="Set Value")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the logical value of an output pin. Only for an output pin that is running.", Position=4, Title="Set Value")]
         public System.Threading.Tasks.Task SetValueAsync(bool value, System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Description="Inverts the value of an output pin. Disabled while the pin is an input.", Position=3, Title="Toggle")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Inverts the value of an output pin. Only for an output pin that is running.", Position=3, Title="Toggle")]
         public System.Threading.Tasks.Task ToggleAsync(System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets an output pin off. Disabled while the pin is an input.", Icon="ToggleOff", Position=2, Title="Turn Off")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets an output pin off. Only for an output pin that is running.", Icon="ToggleOff", Position=2, Title="Turn Off")]
         public System.Threading.Tasks.Task TurnOffAsync(System.Threading.CancellationToken cancellationToken) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets an output pin on. Disabled while the pin is an input.", Icon="ToggleOn", Position=1, Title="Turn On")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets an output pin on. Only for an output pin that is running.", Icon="ToggleOn", Position=1, Title="Turn On")]
         public System.Threading.Tasks.Task TurnOnAsync(System.Threading.CancellationToken cancellationToken) { }
     }
     public enum GpioPinMode

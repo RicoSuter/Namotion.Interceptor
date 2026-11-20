@@ -104,6 +104,99 @@ public class GpioConfigurationReloadTests
     }
 
     [Fact]
+    public async Task WhenOutputPinIsLeftOutOfReloadedConfiguration_ThenPinBecomesInput()
+    {
+        // Arrange
+        const string jsonWithoutPin5 = """
+            {
+              "$type": "Namotion.Devices.Gpio.GpioSubject",
+              "pins": {
+                "6": { "mode": "InputPullUp" },
+                "17": { "name": "Led", "mode": "Output" },
+                "27": { "name": "Relay", "mode": "Output" }
+              }
+            }
+            """;
+        var driver = new LatchingGpioDriver();
+        driver.SetUpPin(5, PinMode.Output, inputLevel: PinValue.Low, latch: PinValue.High);
+        var (subject, serializer) = CreateSubject(driver);
+        await subject.StartAsync(CancellationToken.None);
+        try
+        {
+            await WaitUntilAllPinsRunAsync(subject);
+
+            // Act
+            serializer.UpdateConfiguration(subject, jsonWithoutPin5);
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal(28, subject.Pins.Count);
+            Assert.All(subject.Pins, entry =>
+            {
+                Assert.Equal(entry.Key, entry.Value.PinNumber);
+                Assert.Equal(ServiceStatus.Running, entry.Value.Status);
+            });
+
+            var pin5 = subject.Pins[5];
+            Assert.Equal(GpioPinMode.Input, pin5.Mode);
+            Assert.Equal(PinMode.Input, driver.GetMode(5));
+
+            var led = subject.Pins[17];
+            Assert.Equal(GpioPinMode.Output, led.Mode);
+            Assert.Equal(PinMode.Output, driver.GetMode(17));
+            Assert.Equal("Led (Pin 17)", led.Title);
+            Assert.Equal("Relay", subject.Pins[27].Name);
+            Assert.Equal(PinMode.InputPullUp, driver.GetMode(6));
+        }
+        finally
+        {
+            await subject.StopAsync(CancellationToken.None);
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenConfigurationIsReloadedWithoutController_ThenPinsKeepTheirNumbers()
+    {
+        // Arrange
+        var (subject, serializer) = CreateSubject(new LatchingGpioDriver());
+        try
+        {
+            // Act
+            serializer.UpdateConfiguration(subject, ReloadedJson);
+            await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal([5, 6, 17, 18, 27], subject.Pins.Keys.Order());
+            Assert.All(subject.Pins, entry =>
+            {
+                Assert.Equal(entry.Key, entry.Value.PinNumber);
+                Assert.Equal(ServiceStatus.Stopped, entry.Value.Status);
+            });
+        }
+        finally
+        {
+            subject.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenConfigurationIsAppliedAfterDispose_ThenNoControllerIsCreated()
+    {
+        // Arrange
+        var subject = new GpioSubject();
+        subject.Dispose();
+        subject.UseSimulation = true;
+
+        // Act
+        await subject.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Empty(subject.Pins);
+        Assert.Equal(ServiceStatus.Stopped, subject.Status);
+    }
+
+    [Fact]
     public async Task WhenUnchangedConfigurationIsAppliedAgain_ThenPinsAreKept()
     {
         // Arrange

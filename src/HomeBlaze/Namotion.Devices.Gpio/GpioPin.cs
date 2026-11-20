@@ -142,21 +142,21 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
     /// Sets an output pin on.
     /// </summary>
     /// <exception cref="InvalidOperationException">The pin is an input.</exception>
-    [Operation(Title = "Turn On", Icon = "ToggleOn", Position = 1, Description = "Sets an output pin on. Disabled while the pin is an input.")]
+    [Operation(Title = "Turn On", Icon = "ToggleOn", Position = 1, Description = "Sets an output pin on. Only for an output pin that is running.")]
     public Task TurnOnAsync(CancellationToken cancellationToken) => SetValueAsync(true, cancellationToken);
 
     /// <summary>
     /// Sets an output pin off.
     /// </summary>
     /// <exception cref="InvalidOperationException">The pin is an input.</exception>
-    [Operation(Title = "Turn Off", Icon = "ToggleOff", Position = 2, Description = "Sets an output pin off. Disabled while the pin is an input.")]
+    [Operation(Title = "Turn Off", Icon = "ToggleOff", Position = 2, Description = "Sets an output pin off. Only for an output pin that is running.")]
     public Task TurnOffAsync(CancellationToken cancellationToken) => SetValueAsync(false, cancellationToken);
 
     /// <summary>
     /// Inverts the logical value of an output pin.
     /// </summary>
     /// <exception cref="InvalidOperationException">The pin is an input.</exception>
-    [Operation(Title = "Toggle", Position = 3, Description = "Inverts the value of an output pin. Disabled while the pin is an input.")]
+    [Operation(Title = "Toggle", Position = 3, Description = "Inverts the value of an output pin. Only for an output pin that is running.")]
     public Task ToggleAsync(CancellationToken cancellationToken)
     {
         lock (_lock)
@@ -175,7 +175,7 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
     /// While the pin is not running, only <see cref="Value"/> changes and nothing is written; the level is read from the pin when it starts.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The pin is an input.</exception>
-    [Operation(Title = "Set Value", Position = 4, Description = "Sets the logical value of an output pin. Disabled while the pin is an input.")]
+    [Operation(Title = "Set Value", Position = 4, Description = "Sets the logical value of an output pin. Only for an output pin that is running.")]
     public Task SetValueAsync(bool value, CancellationToken cancellationToken)
     {
         lock (_lock)

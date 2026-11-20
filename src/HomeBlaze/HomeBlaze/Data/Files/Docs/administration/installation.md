@@ -106,7 +106,7 @@ HomeBlaze has no login. Keep it on a trusted network or put it behind a reverse 
 
 ### Raspberry Pi
 
-Raspberry Pi OS based on Debian 13 (trixie), 64-bit, installs Docker and Compose from the Debian packages:
+On Raspberry Pi OS based on Debian 13 (trixie), 64-bit, install Docker and Compose from the Debian packages:
 
 ```bash
 sudo apt install docker.io docker-compose
@@ -120,7 +120,7 @@ Measured on a Raspberry Pi Zero 2 W with 416 MB usable RAM, running HomeBlaze, t
 - Pulling the 395 MB image over 2.4 GHz WLAN took about 1.5 to 2 minutes. The UI was slow meanwhile, with requests often taking more than 2 seconds, because the device was busy extracting the image.
 - While the container was recreated, HomeBlaze was unreachable for about 40 seconds.
 
-`docker stats` shows `0B` memory on Raspberry Pi OS because its kernel command line contains `cgroup_disable=memory`. To see the numbers, replace it with `cgroup_enable=memory` in `/boot/firmware/cmdline.txt` (a single line) and reboot. Nothing in HomeBlaze depends on it.
+`docker stats` shows `0B` memory on Raspberry Pi OS because its kernel command line contains `cgroup_disable=memory`. To see the numbers, add `cgroup_enable=memory` to the end of the single line in `/boot/firmware/cmdline.txt` and reboot. Nothing in HomeBlaze depends on it.
 
 Optional: WLAN power saving is on by default, which showed as an idle link rate of 1 Mbit/s, latency spikes up to about 65 ms and a few one-minute disconnects in a week. For a Pi used as a server, turn it off with a NetworkManager config file, which survives the regeneration of netplan connections on boot:
 

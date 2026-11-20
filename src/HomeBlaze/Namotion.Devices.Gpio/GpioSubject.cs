@@ -36,6 +36,8 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     // applied configuration both do. Never taken under a pin lock: attaching a pin takes the pin lock under this one.
     private readonly Lock _controllerLock = new();
 
+    private const int MaximumDiscoveryAttempts = 3;
+
     private static readonly Dictionary<int, string> RaspberryPiPinNames = new()
     {
         [0] = "ID_SD (HAT EEPROM)",
@@ -60,6 +62,10 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     // Guarded by _controllerLock. The pins that hold the controller, by pin number. A reload of the configuration
     // replaces the instances in Pins, so these are the ones to detach.
     private Dictionary<int, GpioPin> _attachedPins = new();
+
+    // Guarded by _controllerLock. The stopping token is canceled only after Dispose released the lock, so the service
+    // loop and an applied configuration check this to create nothing after Dispose.
+    private bool _isDisposed;
     private bool _currentlyUsingSimulation;
     private Mcp3008? _mcp3008;
     private Ads1115? _ads1115;
@@ -286,6 +292,11 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     {
         lock (_controllerLock)
         {
+            if (_isDisposed)
+            {
+                return InitializationResult.PermanentFailure;
+            }
+
             Status = ServiceStatus.Starting;
             StatusMessage = "Initializing GPIO controller...";
 
@@ -353,46 +364,66 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     /// <summary>
     /// Fills <see cref="Pins"/> with a pin for every pin of the controller and attaches the pins that are not attached
-    /// yet, after detaching the instances they replaced. Called under <see cref="_controllerLock"/>.
+    /// yet, after detaching the instances they replaced. Without a controller, only the pin numbers are set. Called
+    /// under <see cref="_controllerLock"/>.
     /// </summary>
     private void DiscoverPins()
     {
-        if (_controller == null) return;
-
-        var existingPins = Pins;
-        var attachedPins = _attachedPins;
-        var pinCount = _controller.PinCount;
-
-        // Build new dictionary, reusing existing pins
-        var newPins = new Dictionary<int, GpioPin>(pinCount);
-        for (var pinNumber = 0; pinNumber < pinCount; pinNumber++)
+        if (_controller == null)
         {
-            var pin = existingPins.TryGetValue(pinNumber, out var existing)
-                ? existing
-                : new GpioPin { Mode = GpioPinMode.Input };
-
-            attachedPins.TryGetValue(pinNumber, out var attachedPin);
-            if (!ReferenceEquals(pin, attachedPin))
+            foreach (var (pinNumber, pin) in Pins)
             {
-                if (attachedPin is not null)
-                {
-                    UnregisterInterrupt(pinNumber);
-                    attachedPin.Detach();
-                }
-
                 pin.PinNumber = pinNumber;
-                InitializePin(pin);
             }
 
-            newPins[pinNumber] = pin;
+            return;
         }
 
-        _attachedPins = newPins;
+        var pinCount = _controller.PinCount;
 
-        // Only reassign if structure changed
-        if (existingPins.Count != pinCount || existingPins.Keys.Any(k => !newPins.ContainsKey(k)))
+        // A reloaded configuration replaces Pins without this lock. It is followed by an apply, which waits for this
+        // lock, so the replaced dictionary is attached again rather than overwritten; the attempts only bound the loop.
+        for (var attempt = 0; attempt < MaximumDiscoveryAttempts; attempt++)
         {
-            Pins = newPins;
+            var existingPins = Pins;
+            var newPins = new Dictionary<int, GpioPin>(pinCount);
+            for (var pinNumber = 0; pinNumber < pinCount; pinNumber++)
+            {
+                var pin = existingPins.TryGetValue(pinNumber, out var existing)
+                    ? existing
+                    : new GpioPin { Mode = GpioPinMode.Input };
+
+                _attachedPins.TryGetValue(pinNumber, out var attachedPin);
+                if (!ReferenceEquals(pin, attachedPin))
+                {
+                    if (attachedPin is not null)
+                    {
+                        // Detached first, so that a mode change on the replaced instance cannot register an interrupt
+                        // handler after this pin number's handler was unregistered.
+                        attachedPin.Detach();
+                        UnregisterInterrupt(pinNumber);
+                    }
+
+                    pin.PinNumber = pinNumber;
+                    InitializePin(pin);
+                }
+
+                newPins[pinNumber] = pin;
+            }
+
+            _attachedPins = newPins;
+
+            var isStructureChanged = existingPins.Count != pinCount || existingPins.Keys.Any(key => !newPins.ContainsKey(key));
+            if (!isStructureChanged)
+            {
+                return;
+            }
+
+            if (ReferenceEquals(Pins, existingPins))
+            {
+                Pins = newPins;
+                return;
+            }
         }
     }
 
@@ -506,6 +537,11 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     {
         lock (_controllerLock)
         {
+            if (_isDisposed)
+            {
+                return Task.CompletedTask;
+            }
+
             // Handle simulation mode change (only when no injected driver)
             if (_driver == null && UseSimulation != _currentlyUsingSimulation)
             {
@@ -517,13 +553,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
                 if (_controller != null)
                 {
-                    // Unregister all interrupts
-                    foreach (var pinNumber in _interruptHandlers.Keys.ToList())
-                    {
-                        UnregisterInterrupt(pinNumber);
-                    }
-
-                    DetachPins();
+                    DetachAndUnregisterPins();
 
                     // Dispose old controller
                     _controller.Dispose();
@@ -545,30 +575,30 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
                 // nor the controller.
                 DiscoverPins();
             }
-        }
 
-        // Handle ADC changes only when configuration actually changed (records have value equality)
-        var mcp3008Changed = Mcp3008 != _appliedMcp3008Config;
-        var ads1115Changed = Ads1115 != _appliedAds1115Config;
+            // Handle ADC changes only when configuration actually changed (records have value equality)
+            var mcp3008Changed = Mcp3008 != _appliedMcp3008Config;
+            var ads1115Changed = Ads1115 != _appliedAds1115Config;
 
-        if (mcp3008Changed || ads1115Changed)
-        {
-            // Only dispose and reinitialize the ADC that changed
-            if (mcp3008Changed)
+            if (mcp3008Changed || ads1115Changed)
             {
-                _mcp3008?.Dispose();
-                _mcp3008 = null;
-                _appliedMcp3008Config = Mcp3008 is not null ? Mcp3008 with { } : null;
-            }
+                // Only dispose and reinitialize the ADC that changed
+                if (mcp3008Changed)
+                {
+                    _mcp3008?.Dispose();
+                    _mcp3008 = null;
+                    _appliedMcp3008Config = Mcp3008 is not null ? Mcp3008 with { } : null;
+                }
 
-            if (ads1115Changed)
-            {
-                _ads1115?.Dispose();
-                _ads1115 = null;
-                _appliedAds1115Config = Ads1115 is not null ? Ads1115 with { } : null;
-            }
+                if (ads1115Changed)
+                {
+                    _ads1115?.Dispose();
+                    _ads1115 = null;
+                    _appliedAds1115Config = Ads1115 is not null ? Ads1115 with { } : null;
+                }
 
-            AnalogChannels = InitializeAdcChannels();
+                AnalogChannels = InitializeAdcChannels();
+            }
         }
 
         return Task.CompletedTask;
@@ -683,8 +713,9 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         }
     }
 
-    // Called under _controllerLock.
-    private void DetachPins()
+    // Called under _controllerLock. The pins are detached before the interrupts are unregistered, so that a mode change
+    // cannot register a handler that is never unregistered.
+    private void DetachAndUnregisterPins()
     {
         foreach (var pin in _attachedPins.Values)
         {
@@ -692,6 +723,11 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         }
 
         _attachedPins = new Dictionary<int, GpioPin>();
+
+        foreach (var pinNumber in _interruptHandlers.Keys.ToList())
+        {
+            UnregisterInterrupt(pinNumber);
+        }
     }
 
     private void PollAdcChannels()
@@ -728,18 +764,13 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     {
         lock (_controllerLock)
         {
+            _isDisposed = true;
             Status = ServiceStatus.Stopped;
             StatusMessage = null;
 
-            // Unregister all interrupts
             if (_controller != null)
             {
-                foreach (var pinNumber in _interruptHandlers.Keys.ToList())
-                {
-                    UnregisterInterrupt(pinNumber);
-                }
-
-                DetachPins();
+                DetachAndUnregisterPins();
             }
 
             // Dispose hardware

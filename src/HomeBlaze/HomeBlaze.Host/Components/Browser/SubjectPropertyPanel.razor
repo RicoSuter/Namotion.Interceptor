@@ -162,7 +162,7 @@
                                             <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                                         </div>
                                     }
-                                    @RenderChildLabel(property, child)
+                                    @RenderChildLabel(property, child, GetPropertyDescription(property))
                                 </MudListItem>
                                 <MudDivider />
                             }
@@ -202,7 +202,7 @@
                                                         <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                                                     </div>
                                                 }
-                                                @RenderChildLabel(property, child)
+                                                @RenderChildLabel(property, child, title: null)
                                             </MudListItem>
                                             <MudDivider />
                                         }
@@ -412,6 +412,12 @@
     .subject-pane-method {
         max-width: 100%;
         overflow-wrap: anywhere;
+    }
+
+    /* A long description wraps instead of running past the edge of a phone. On the content, as the popover script
+       sets the max-width of the tooltip itself. */
+    .subject-pane-method-tooltip {
+        max-width: min(320px, calc(100vw - 32px));
     }
 
     /* The values of a pane start at the same place. A longer name pushes its value to the right. */
@@ -803,9 +809,14 @@
 
         var propertyMetadata = prop.IsAttribute ? null : prop.GetMetadata();
 
+        // The title of the name replaces the one of the history link around it, so it repeats the hint of the link.
+        var canShowHistory = CanShowHistory(prop);
+        var description = GetPropertyDescription(prop);
+        var nameTitle = canShowHistory && description is not null ? $"{description} (Show history)" : description;
+
         RenderFragment nameAndValue =
             @<text>
-                <MudText Typo="Typo.body1" HtmlTag="span" Class="@nameClass" title="@GetPropertyDescription(prop)" data-testid="subject-pane-value-name">@displayName</MudText>
+                <MudText Typo="Typo.body1" HtmlTag="span" Class="@nameClass" title="@nameTitle" data-testid="subject-pane-value-name">@displayName</MudText>
                 <MudText Typo="Typo.body1" HtmlTag="span" Class="@valueClass" data-testid="subject-pane-value-text">
                     @if (displayValue.Contains('\n'))
                     {
@@ -833,7 +844,7 @@
                                OnClick="@(() => TogglePropertyExpanded(prop.Name))"
                                data-testid="subject-pane-value-expand" />
             }
-            @if (CanShowHistory(prop))
+            @if (canShowHistory)
             {
                 <MudLink Color="Color.Inherit" Underline="Underline.Hover" Class="@NameAndValueClass"
                          title="Show history" OnClick="@(() => OpenPropertyHistoryDialogAsync(prop))">@nameAndValue</MudLink>
@@ -1002,10 +1013,11 @@
             });
     }
 
-    private RenderFragment RenderChildLabel(RegisteredSubjectProperty property, SubjectPropertyChild child) => __builder =>
+    // A collection passes no title, as the description of its property does not describe a single item.
+    private RenderFragment RenderChildLabel(RegisteredSubjectProperty property, SubjectPropertyChild child, string? title) => __builder =>
     {
         var childCount = GetChildCount(child);
-        <span class="subject-pane-child-name" style="word-break: break-word;" title="@GetPropertyDescription(property)">@property.GetChildDisplayName(child)</span>
+        <span class="subject-pane-child-name" style="word-break: break-word;" title="@title">@property.GetChildDisplayName(child)</span>
         @if (childCount > 0)
         {
             <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
@@ -1210,7 +1222,10 @@
                 }
                 else
                 {
-                    <MudTooltip Text="@method.Description">@button</MudTooltip>
+                    <MudTooltip>
+                        <ChildContent>@button</ChildContent>
+                        <TooltipContent><div class="subject-pane-method-tooltip">@method.Description</div></TooltipContent>
+                    </MudTooltip>
                 }
             }
         </MudStack>
@@ -1248,7 +1263,7 @@
                              Color="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
                              Class="subject-pane-reorder-icon" />
                     <MudText Typo="Typo.body1" Class="subject-pane-reorder-name">
-                        @RenderChildLabel(property, child)
+                        @RenderChildLabel(property, child, title: null)
                     </MudText>
                     <span class="subject-pane-move">
                         @if (childIndex > 0)

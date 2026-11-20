@@ -112,7 +112,7 @@ Each GPIO pin supports four modes:
 | `InputPullDown` | Digital input with internal pull-down resistor |
 | `Output` | Digital output |
 
-A pin that drives an LED or a relay is an `Output`, not an input. Turn On, Turn Off, Toggle and Set Value switch output pins only; on an input they are disabled because its value follows the hardware, so set Mode to `Output` to use them.
+A pin that drives an LED or a relay is an `Output`, not an input. Turn On, Turn Off, Toggle and Set Value switch only an output pin that is running; on an input they are disabled because its value follows the hardware, so set Mode to `Output` to use them.
 
 ### GpioPin Properties
 
@@ -203,7 +203,7 @@ Pin configurations are persisted and restored on restart:
 - When `GpioSubject` loads, existing pin configurations from JSON are reused
 - New pins (not in configuration) default to `Input` mode
 - Changes to `Name`, `Mode`, `IsInverted` and `DebounceTime` made in the pin editor or with a control on a page are saved, and `ApplyRaspberryPiDefaults` saves the changes it makes; changes made from code are not saved by themselves
-- Changes to the GPIO JSON file apply while HomeBlaze runs: the pins it lists are reopened with the new settings, and an output keeps its level
+- Changes to the GPIO JSON file apply while HomeBlaze runs: all pins are reopened with the settings of the file, a pin missing from it becomes a plain `Input`, and an output keeps its level
 
 ## Analog Input (ADC)
 
@@ -331,7 +331,7 @@ This occurs when:
 
 ### Input `Value` keeps changing
 
-An unconnected or high-impedance input floats, so its level is random. A two-color LED module on a pin set to plain `Input` changed `Value` 200 to 240 times per minute, even with the default 50 ms debounce. Give the pin a defined level with `InputPullUp` or `InputPullDown`, or run the `ApplyRaspberryPiDefaults` operation ("Apply Raspberry Pi defaults"), which sets the power-on pull on unconfigured pins. A pin that drives something, such as an LED, should be an `Output`.
+An unconnected or high-impedance input floats, so its level is random. A two-color LED module on a pin set to plain `Input` changed `Value` 200 to 240 times per minute, even with the default 50 ms debounce. Give the pin a defined level with `InputPullUp` or `InputPullDown`, or run the `ApplyRaspberryPiDefaults` operation ("Apply Raspberry Pi Defaults"), which sets the power-on pull on unconfigured pins. A pin that drives something, such as an LED, should be an `Output`.
 
 ### Write verification failed
 
