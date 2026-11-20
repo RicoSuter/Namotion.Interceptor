@@ -9,7 +9,7 @@ HomeBlaze runs as a container (recommended for a permanent installation) or from
 
 ## Docker
 
-HomeBlaze is published as a container image for amd64 and arm64 (Raspberry Pi 4 and 5) at `ghcr.io/ricosuter/homeblaze`.
+HomeBlaze is published as a container image for amd64 and arm64 at `ghcr.io/ricosuter/homeblaze`, so it runs on a Raspberry Pi 3, 4, 5 or Zero 2 W with a 64-bit OS. A 32-bit OS cannot run it, and neither can the original Raspberry Pi Zero W, because .NET does not support its ARMv6 CPU. See [Raspberry Pi](#raspberry-pi).
 
 | Tag | Content |
 |-----|---------|
@@ -26,7 +26,7 @@ Copy [docker-compose.yml](https://github.com/RicoSuter/Namotion.Interceptor/blob
 docker compose up -d
 ```
 
-HomeBlaze is then available at http://localhost:8080 and opens on its welcome page. To upgrade, run `docker compose pull` and `docker compose up -d`, or install updates from the UI with the [updater](#updater).
+HomeBlaze is then available at http://localhost:8080 and opens on its welcome page. The left side of `"8080:8080"` in the `ports` section of the compose file sets the host port, for example `"8090:8080"` serves HomeBlaze on port 8090. To upgrade, run `docker compose pull` and `docker compose up -d`, or install updates from the UI with the [updater](#updater).
 
 ### Data folder
 
@@ -103,6 +103,31 @@ MCP clients connect to `http://<host>:8080/mcp` using the MCP Streamable HTTP tr
 ### Security
 
 HomeBlaze has no login. Keep it on a trusted network or put it behind a reverse proxy that authenticates users and supports WebSockets. The container runs as root so it can write the data folder and access GPIO devices.
+
+### Raspberry Pi
+
+Raspberry Pi OS based on Debian 13 (trixie), 64-bit, installs Docker and Compose from the Debian packages:
+
+```bash
+sudo apt install docker.io docker-compose
+```
+
+This gave Docker 26.1 and Docker Compose 2.26, which runs as `docker compose`. The commands in this documentation need `sudo` in front of them, or add your user to the `docker` group with `sudo usermod -aG docker $USER` and log out and in again. Group membership is root-equivalent on the host, like the Docker socket of the [updater](#updater).
+
+Measured on a Raspberry Pi Zero 2 W with 416 MB usable RAM, running HomeBlaze, the updater and Docker:
+
+- HomeBlaze used about 160 MB resident memory, and at least 140 MB stayed available, also during an install.
+- Pulling the 395 MB image over 2.4 GHz WLAN took about 1.5 to 2 minutes. The UI was slow meanwhile, with requests often taking more than 2 seconds, because the device was busy extracting the image.
+- While the container was recreated, HomeBlaze was unreachable for about 40 seconds.
+
+`docker stats` shows `0B` memory on Raspberry Pi OS because its kernel command line contains `cgroup_disable=memory`. To see the numbers, replace it with `cgroup_enable=memory` in `/boot/firmware/cmdline.txt` (a single line) and reboot. Nothing in HomeBlaze depends on it.
+
+Optional: WLAN power saving is on by default, which showed as an idle link rate of 1 Mbit/s, latency spikes up to about 65 ms and a few one-minute disconnects in a week. For a Pi used as a server, turn it off with a NetworkManager config file, which survives the regeneration of netplan connections on boot:
+
+```bash
+printf '[connection]\nwifi.powersave = 2\n' | sudo tee /etc/NetworkManager/conf.d/wifi-powersave-off.conf
+sudo systemctl restart NetworkManager
+```
 
 ### Hardware and discovery
 
