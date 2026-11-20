@@ -146,8 +146,6 @@ internal sealed class LatchingGpioDriver : GpioDriver
         ? throw new PlatformNotSupportedException("No GPIO driver for this platform.")
         : IsUnavailable ? throw new IOException("No GPIO chip found.") : 28;
 
-    protected override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber) => pinNumber;
-
     protected override void OpenPin(int pinNumber)
     {
         lock (_lock)

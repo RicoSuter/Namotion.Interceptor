@@ -214,7 +214,7 @@ public class GpioRaspberryPiDefaultsTests
         // Arrange
         var subject = CreateSubject(28);
         var writer = CreateWriter(subject);
-        using var controller = new GpioController(PinNumberingScheme.Logical, new SimulationGpioDriver());
+        using var controller = new GpioController(new SimulationGpioDriver());
         var failingPin = subject.Pins[9];
         failingPin.Controller = controller; // pin 9 is not open, so setting its mode throws
         failingPin.Status = ServiceStatus.Running;
@@ -233,7 +233,7 @@ public class GpioRaspberryPiDefaultsTests
         var subject = CreateSubject(28);
         var writer = CreateWriter(subject);
         writer.IsWriting = false;
-        using var controller = new GpioController(PinNumberingScheme.Logical, new SimulationGpioDriver());
+        using var controller = new GpioController(new SimulationGpioDriver());
         subject.Pins[9].Controller = controller;
         subject.Pins[9].Status = ServiceStatus.Running;
 

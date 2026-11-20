@@ -341,7 +341,7 @@ public class GpioDebounceTests
     private static (SimulationGpioDriver Driver, GpioController Controller, FakeTimeProvider TimeProvider) CreateController(PinMode mode)
     {
         var driver = new SimulationGpioDriver();
-        var controller = new GpioController(PinNumberingScheme.Logical, driver);
+        var controller = new GpioController(driver);
         controller.OpenPin(17, mode);
         return (driver, controller, new FakeTimeProvider());
     }

@@ -23,7 +23,7 @@ public class GpioInversionTests
     {
         // Arrange
         var driver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, driver);
+        using var controller = new GpioController(driver);
         controller.OpenPin(17, PinMode.Output, PinValue.High);
         var pin = CreateRunningPin(controller, GpioPinMode.Output, isInverted: true);
 
@@ -41,7 +41,7 @@ public class GpioInversionTests
     {
         // Arrange
         var driver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, driver);
+        using var controller = new GpioController(driver);
         controller.OpenPin(17, PinMode.Output, PinValue.High);
         var pin = CreateRunningPin(controller, GpioPinMode.Output, isInverted: true);
         await pin.TurnOnAsync(CancellationToken.None);
@@ -60,7 +60,7 @@ public class GpioInversionTests
     {
         // Arrange
         var driver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, driver);
+        using var controller = new GpioController(driver);
         controller.OpenPin(17, PinMode.InputPullUp);
         var pin = CreateRunningPin(controller, GpioPinMode.InputPullUp, isInverted: true);
         pin.DebounceTime = TimeSpan.Zero;
@@ -77,7 +77,7 @@ public class GpioInversionTests
     {
         // Arrange
         var driver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, driver);
+        using var controller = new GpioController(driver);
         controller.OpenPin(17, PinMode.Input);
         driver.SimulatePinValueChange(17, PinValue.Low);
         var pin = CreateRunningPin(controller, GpioPinMode.Input, isInverted: false);
@@ -94,7 +94,7 @@ public class GpioInversionTests
     {
         // Arrange
         var driver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, driver);
+        using var controller = new GpioController(driver);
         controller.OpenPin(17, PinMode.Output, PinValue.Low);
         var pin = CreateRunningPin(controller, GpioPinMode.Output, isInverted: false);
 
@@ -112,7 +112,7 @@ public class GpioInversionTests
     {
         // Arrange
         var driver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, driver);
+        using var controller = new GpioController(driver);
         controller.OpenPin(17, PinMode.Output, PinValue.High);
         var pin = CreateRunningPin(controller, GpioPinMode.Output, isInverted: true);
         pin.RegisterInterrupt = _ => { };

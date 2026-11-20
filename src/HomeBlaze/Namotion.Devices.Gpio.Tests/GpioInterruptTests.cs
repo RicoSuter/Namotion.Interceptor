@@ -91,7 +91,7 @@ public class GpioInterruptTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
         var pin = new GpioPin
@@ -122,7 +122,7 @@ public class GpioInterruptTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var registeredInterrupts = new HashSet<int>();
@@ -160,7 +160,7 @@ public class GpioInterruptTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
 
         var pins = new List<GpioPin>();
         for (int i = 17; i <= 20; i++)

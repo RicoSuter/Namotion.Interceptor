@@ -185,7 +185,6 @@ namespace Namotion.Devices.Gpio.Simulation
         public System.Collections.Generic.List<System.ValueTuple<int, System.Device.Gpio.PinValue>> WriteHistory { get; }
         protected override void AddCallbackForPinValueChangedEvent(int pinNumber, System.Device.Gpio.PinEventTypes eventTypes, System.Device.Gpio.PinChangeEventHandler callback) { }
         protected override void ClosePin(int pinNumber) { }
-        protected override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber) { }
         protected override System.Device.Gpio.PinMode GetPinMode(int pinNumber) { }
         protected override bool IsPinModeSupported(int pinNumber, System.Device.Gpio.PinMode mode) { }
         protected override void OpenPin(int pinNumber) { }

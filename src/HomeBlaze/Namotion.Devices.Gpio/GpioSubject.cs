@@ -730,17 +730,17 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     {
         if (UseSimulation)
         {
-            return (new GpioController(PinNumberingScheme.Logical, new SimulationGpioDriver()), true, false);
+            return (new GpioController(new SimulationGpioDriver()), true, false);
         }
 
         if (_driver is not null)
         {
-            return (new GpioController(PinNumberingScheme.Logical, _driver), false, _isDriverRaspberryPi);
+            return (new GpioController(_driver), false, _isDriverRaspberryPi);
         }
 
         var raspberryPiDriver = TryCreateRaspberryPiDriver();
         return raspberryPiDriver is not null
-            ? (new GpioController(PinNumberingScheme.Logical, raspberryPiDriver), false, true)
+            ? (new GpioController(raspberryPiDriver), false, true)
             : (new GpioController(), false, false);
     }
 
@@ -755,7 +755,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
             return null;
         }
 
-        // In System.Device.Gpio 3.2.0, the default controller picks this driver on exactly the boards where its
+        // In System.Device.Gpio 4.2.0, the default controller picks this driver on exactly the boards where its
         // constructor succeeds, so creating it here changes no driver. Check this again when upgrading the package.
         try
         {
