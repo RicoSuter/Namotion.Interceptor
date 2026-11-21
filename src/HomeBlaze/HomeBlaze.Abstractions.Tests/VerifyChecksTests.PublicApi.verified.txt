@@ -373,13 +373,17 @@ namespace HomeBlaze.Abstractions.Devices.Energy
         " power.")]
     public interface IChargingState
     {
-        [HomeBlaze.Abstractions.Attributes.State(Position=331, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
-        decimal? ChargingPower { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=102)]
-        bool? IsCharging { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=101)]
-        bool? IsPluggedIn { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=330, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [System.ComponentModel.Category("Charging")]
+        decimal? ChargingPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=102)]
+        [System.ComponentModel.Category("Charging")]
+        bool? IsCharging { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=101)]
+        [System.ComponentModel.Category("Charging")]
+        bool? IsPluggedIn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=331, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [System.ComponentModel.Category("Charging")]
         decimal? MaximumChargingPower { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
@@ -535,7 +539,7 @@ namespace HomeBlaze.Abstractions.Devices.Vehicles
         [HomeBlaze.Abstractions.Attributes.State(Position=201, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
         [System.ComponentModel.Category("Climate")]
         decimal? InsideTemperature { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=150)]
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=153)]
         [System.ComponentModel.Category("Climate")]
         bool? IsClimateOn { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=202, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
@@ -546,13 +550,13 @@ namespace HomeBlaze.Abstractions.Devices.Vehicles
     [System.ComponentModel.Description("Reports the range, the driven distance and the location of a vehicle.")]
     public interface IVehicleState
     {
-        [HomeBlaze.Abstractions.Attributes.State(Position=222)]
+        [HomeBlaze.Abstractions.Attributes.State(Position=225)]
         [System.ComponentModel.Category("Vehicle")]
         HomeBlaze.Abstractions.Common.GeoCoordinate? Location { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=220, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        [HomeBlaze.Abstractions.Attributes.State(Position=223, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
         [System.ComponentModel.Category("Vehicle")]
         decimal? Range { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=221, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=224, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
         [System.ComponentModel.Category("Vehicle")]
         decimal? TotalDrivenDistance { get; }
     }

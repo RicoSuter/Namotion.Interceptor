@@ -14,24 +14,28 @@ public interface IChargingState
     /// <summary>
     /// Whether the charging cable is plugged in.
     /// </summary>
-    [State(Position = 101)]
+    [State(IsDiscrete = true, Position = 101)]
+    [Category("Charging")]
     bool? IsPluggedIn { get; }
 
     /// <summary>
     /// Whether charging is currently active.
     /// </summary>
-    [State(Position = 102)]
+    [State(IsDiscrete = true, Position = 102)]
+    [Category("Charging")]
     bool? IsCharging { get; }
 
     /// <summary>
     /// The current charging power in watts.
     /// </summary>
-    [State(Unit = StateUnit.Watt, Position = 331)]
+    [State(Unit = StateUnit.Watt, Position = 330)]
+    [Category("Charging")]
     decimal? ChargingPower { get; }
 
     /// <summary>
     /// The maximum charging power in watts.
     /// </summary>
-    [State(Unit = StateUnit.Watt, Position = 330)]
+    [State(Unit = StateUnit.Watt, Position = 331)]
+    [Category("Charging")]
     decimal? MaximumChargingPower { get; }
 }

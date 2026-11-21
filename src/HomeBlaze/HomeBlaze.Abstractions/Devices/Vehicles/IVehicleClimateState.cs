@@ -13,7 +13,7 @@ public interface IVehicleClimateState
     /// <summary>
     /// Whether the climate control runs.
     /// </summary>
-    [State(IsDiscrete = true, Position = 150)]
+    [State(IsDiscrete = true, Position = 153)]
     [Category("Climate")]
     bool? IsClimateOn { get; }
 
