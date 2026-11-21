@@ -1,0 +1,32 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(TeslaAccount))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.DirectionsCar" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(Account?.Title ?? "Tesla")</MudText>
+            <MudSpacer />
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                     Color="@(Account?.Status == global::HomeBlaze.Abstractions.ServiceStatus.Running ? Color.Success : Color.Error)">
+                @Account?.Status
+            </MudChip>
+        </MudStack>
+        <MudText Typo="Typo.body2">@(Account?.Vehicles.Count ?? 0) vehicle(s)</MudText>
+        @if (Account is { IsAuthenticated: false, Status: global::HomeBlaze.Abstractions.ServiceStatus.Error })
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">Re-authentication required: replace the token in the settings.</MudAlert>
+        }
+        else if (Account?.StatusMessage is { } message)
+        {
+            <MudText Typo="Typo.caption">@message</MudText>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private TeslaAccount? Account => Subject as TeslaAccount;
+}
