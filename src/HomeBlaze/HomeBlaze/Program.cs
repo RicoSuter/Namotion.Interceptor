@@ -36,6 +36,8 @@ using Namotion.Devices.SunSpec;
 using Namotion.Devices.SunSpec.HomeBlaze;
 using Namotion.Devices.Wallbox;
 using Namotion.Devices.Wallbox.HomeBlaze;
+using Namotion.Devices.Tesla;
+using Namotion.Devices.Tesla.HomeBlaze;
 using Namotion.Devices.Ecowitt;
 using Namotion.Devices.Ecowitt.HomeBlaze;
 using Namotion.Devices.Luxtronik;
@@ -140,6 +142,8 @@ typeProvider
     .AddAssembly(typeof(SunSpecDeviceWidget).Assembly)
     .AddAssembly(typeof(WallboxCharger).Assembly)
     .AddAssembly(typeof(WallboxChargerWidget).Assembly)
+    .AddAssembly(typeof(TeslaAccount).Assembly)
+    .AddAssembly(typeof(TeslaAccountWidget).Assembly)
     .AddAssembly(typeof(EcowittGateway).Assembly)
     .AddAssembly(typeof(EcowittGatewayWidget).Assembly)
     .AddAssembly(typeof(HomeBlaze.History.InMemory.InMemoryHistoryStoreSubject).Assembly)   // HomeBlaze.History.InMemory
