@@ -214,6 +214,40 @@ public class NavigationTests
         }
     }
 
+    [Fact]
+    public async Task WhenTheBrowserPathReachesSubjectsBeforeTheyExist_ThenTheirPanesOpenOnceTheyExist()
+    {
+        // Arrange
+        const string folderName = "LateBrowserFolder";
+        var folderPath = _fixture.GetPagePath(folderName);
+        var panes = (IPage page) => page.Locator("[data-testid='subject-pane']");
+
+        try
+        {
+            // Like a page that reloads after a restart, before the storage has loaded the subjects of its path.
+            var page = await SubjectBrowserPage.OpenAsync(_fixture, $"{folderName}/Late.md");
+            await Assertions.Expect(panes(page)).ToHaveCountAsync(1);
+
+            // Act
+            Directory.CreateDirectory(folderPath);
+            await File.WriteAllTextAsync(Path.Combine(folderPath, "Late.md"), "# Late\n");
+            await _fixture.ReconcileStorageAsync();
+
+            // Assert
+            await Assertions.Expect(panes(page)).ToHaveCountAsync(3, new() { Timeout = 30000 });
+            Assert.EndsWith($"/browser/{folderName}/Late.md", page.Url);
+        }
+        finally
+        {
+            if (Directory.Exists(folderPath))
+            {
+                Directory.Delete(folderPath, recursive: true);
+            }
+
+            await _fixture.ReconcileStorageAsync();
+        }
+    }
+
     private async Task<(IServiceProvider Services, FluentStorageContainer Root, VirtualFolder Folder)> GetDemoFolderAsync()
     {
         await _fixture.ReconcileStorageAsync();

@@ -117,6 +117,10 @@
     private readonly List<BreadcrumbItem> _breadcrumbs = [];
 
     private string? _lastNavigatedUrl;
+
+    // Whether Path reaches subjects that do not exist yet, such as while the storage loads after a restart. The panes it
+    // reaches are added once they exist, until the user changes the panes.
+    private bool _isPathPending;
     private bool _scrollToLastPane;
     private int _placeholderCount;
     private int _scrollVersion;
@@ -248,7 +252,8 @@
     private void RebuildFromPath()
     {
         var previousPaneCount = _panes.Count + _placeholderCount;
-        BuildPanesFromPath();
+        _panes.Clear();
+        _isPathPending = !BuildPanesFromPath(_panes);
         RebuildBreadcrumbs();
 
         // A shorter path leaves placeholders behind like closed panes do, see RemovePanesFrom.
@@ -256,17 +261,16 @@
         ScrollToLastPaneAfterRender();
     }
 
-    private void BuildPanesFromPath()
+    // Adds the panes that Path reaches to the empty list. Returns whether it reaches all of Path.
+    private bool BuildPanesFromPath(List<SubjectPane> panes)
     {
-        _panes.Clear();
-
-        if (Root == null) return;
+        if (Root == null) return false;
 
         // Get registry from root's context
         _subjectRegistry = RootContext?.GetService<ISubjectRegistry>();
 
         // Always show root as first pane
-        _panes.Add(new SubjectPane
+        panes.Add(new SubjectPane
         {
             Subject = Root,
             DisplayName = "Root",
@@ -276,7 +280,7 @@
         });
 
         if (string.IsNullOrEmpty(Path))
-            return;
+            return true;
 
         // Use RoutePathResolver to navigate the path and build panes
         var pathSegments = Path.Split('/', StringSplitOptions.RemoveEmptyEntries)
@@ -309,13 +313,13 @@
                         {
                             currentPath = $"{currentPath}{childKey}/";
                             var childDisplayName = GetChildDisplayName(property, child, childKey);
-                            _panes.Add(new SubjectPane { Subject = child, DisplayName = childDisplayName, Path = currentPath.TrimEnd('/'), PropertyName = inlinePathsPropertyName, Index = childKey });
+                            panes.Add(new SubjectPane { Subject = child, DisplayName = childDisplayName, Path = currentPath.TrimEnd('/'), PropertyName = inlinePathsPropertyName, Index = childKey });
                             currentSubject = child;
                             continue;
                         }
                     }
                 }
-                break;
+                return false;
             }
 
             // Check for collections/dictionaries BEFORE subject references
@@ -325,35 +329,37 @@
             {
                 // Collection/Dictionary - next segment is the index/key
                 if (i >= pathSegments.Length)
-                    break;
+                    return false;
 
                 var indexStr = pathSegments[i++];
                 var child = SubjectPathResolverExtensions.FindChildByIndex(property, indexStr);
                 if (child == null)
-                    break;
+                    return false;
 
                 currentPath = $"{currentPath}{propertyName}/{indexStr}/";
                 var displayName = GetChildDisplayName(property, child, indexStr);
-                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = indexStr });
+                panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = indexStr });
                 currentSubject = child;
             }
             else if (property.IsSubjectReference)
             {
                 // Direct subject property
                 if (property.GetValue() is not IInterceptorSubject child)
-                    break;
+                    return false;
 
                 currentPath = $"{currentPath}{propertyName}/";
                 var displayName = GetChildDisplayName(property, child, index: null);
-                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = null });
+                panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = null });
                 currentSubject = child;
             }
             else
             {
                 // Unknown property type with children - shouldn't happen
-                break;
+                return false;
             }
         }
+
+        return true;
     }
 
     private void OnPropertyClick(SubjectPane clickedPane, string propertyName, object? index, IInterceptorSubject subject)
@@ -470,6 +476,7 @@
 
         // Store the URL so OnLocationChanged knows to ignore this navigation
         _lastNavigatedUrl = url;
+        _isPathPending = false;
         NavigationManager.NavigateTo(url, replace: true);
     }
 
@@ -516,22 +523,47 @@
     // Renders the browser only when one of its panes changed, not on every change of the paths in the graph.
     private void OnPathsChanged()
     {
-        var paneCount = _panes.Count;
-        if (_disposed || !FollowReplacedSubjects())
+        if (_disposed)
         {
             return;
         }
 
-        // Closed like a deleted subject's pane, so that the URL and a reload show what is left.
-        if (_panes.Count < paneCount)
+        var paneCount = _panes.Count;
+        if (FollowReplacedSubjects())
         {
-            UpdateUrl();
-        }
-        else
-        {
-            RebuildBreadcrumbs();
+            // Closed like a deleted subject's pane, so that the URL and a reload show what is left.
+            if (_panes.Count < paneCount)
+            {
+                UpdateUrl();
+            }
+            else
+            {
+                RebuildBreadcrumbs();
+            }
+
+            StateHasChanged();
         }
 
+        if (_isPathPending)
+        {
+            AddPendingPanes();
+        }
+    }
+
+    // Adds the panes of Path that exist now, keeping the panes when no further one does.
+    private void AddPendingPanes()
+    {
+        var panes = new List<SubjectPane>();
+        _isPathPending = !BuildPanesFromPath(panes);
+        if (panes.Count <= _panes.Count)
+        {
+            return;
+        }
+
+        _panes.Clear();
+        _panes.AddRange(panes);
+        RebuildBreadcrumbs();
+        ScrollToLastPaneAfterRender();
         StateHasChanged();
     }
 
