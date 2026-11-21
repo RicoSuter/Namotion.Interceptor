@@ -1,0 +1,99 @@
+using HomeBlaze.Abstractions;
+using HomeBlaze.Storage.Abstractions;
+using Microsoft.Extensions.Logging;
+using Namotion.Devices.Tesla.Client;
+using Namotion.Interceptor.Tracking.Parent;
+
+namespace Namotion.Devices.Tesla;
+
+public partial class TeslaAccount
+{
+    private const string ReauthenticationRequiredMessage = "Re-authentication required";
+
+    // Guards RefreshToken together with _tokenManager and _tokenManagerRefreshToken. Without it, a rotation that
+    // completes after its caller was canceled could make GetTokenManager see the rotated token in the manager but not
+    // yet in RefreshToken, and replace the manager with one that holds the token Tesla just invalidated.
+    private readonly Lock _refreshTokenLock = new();
+
+    private TeslaTokenManager? _tokenManager;
+    private string? _tokenManagerRefreshToken;
+    private bool _isReauthenticationRequired;
+
+    /// <summary>
+    /// Returns the token manager. It is kept across polls and configuration changes, so that a restart of the loop does
+    /// not refresh again, and replaced only when the configured refresh token was replaced.
+    /// </summary>
+    private TeslaTokenManager GetTokenManager()
+    {
+        lock (_refreshTokenLock)
+        {
+            var refreshToken = RefreshToken;
+            if (_tokenManager is null || refreshToken != _tokenManagerRefreshToken)
+            {
+                TeslaTokenManager? tokenManager = null;
+                tokenManager = new TeslaTokenManager(_authClient, refreshToken, _timeProvider,
+                    rotatedRefreshToken => OnRefreshTokenRotatedAsync(tokenManager!, rotatedRefreshToken));
+
+                _tokenManager = tokenManager;
+                _tokenManagerRefreshToken = refreshToken;
+                _isReauthenticationRequired = false;
+            }
+
+            return _tokenManager;
+        }
+    }
+
+    /// <summary>
+    /// Stores the rotated refresh token in the configuration before the token manager hands out the new access token.
+    /// A failed write throws, so that the token manager keeps the token pending and retries only the write with the next
+    /// call. Without a configuration writer that stores the account, the token is kept in memory only.
+    /// </summary>
+    private async Task OnRefreshTokenRotatedAsync(TeslaTokenManager tokenManager, string refreshToken)
+    {
+        lock (_refreshTokenLock)
+        {
+            if (!ReferenceEquals(tokenManager, _tokenManager))
+            {
+                // The configured refresh token was replaced while this rotation ran; the replacement wins.
+                return;
+            }
+
+            RefreshToken = refreshToken;
+            _tokenManagerRefreshToken = refreshToken;
+        }
+
+        var writer = this.TryGetFirstParent<IConfigurationWriter>();
+        bool isWritten;
+        try
+        {
+            // Not canceled: Tesla has already invalidated the previous refresh token.
+            isWritten = writer is not null && await writer.WriteConfigurationAsync(this, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            throw new InvalidOperationException("The rotated refresh token could not be saved; saving is retried with the next poll.", exception);
+        }
+
+        if (!isWritten)
+        {
+            _logger.LogWarning("The rotated Tesla refresh token is kept in memory only, because no configuration writer stores the account.");
+        }
+    }
+
+    private void UpdateAuthenticationState(TeslaTokenManager tokenManager)
+    {
+        _isReauthenticationRequired = false;
+        IsAuthenticated = true;
+        AuthenticatedUser = tokenManager.AuthenticatedUser ?? AuthenticatedUser;
+        AuthenticatedAt = tokenManager.AuthenticatedAt ?? AuthenticatedAt;
+    }
+
+    private void SetReauthenticationRequired(TeslaReauthenticationRequiredException exception)
+    {
+        _logger.LogWarning("Tesla rejected the refresh token ({Error}); polling waits for a new refresh token.", exception.Error);
+        _isReauthenticationRequired = true;
+        IsAuthenticated = false;
+        Status = ServiceStatus.Error;
+        StatusMessage = ReauthenticationRequiredMessage;
+    }
+}
