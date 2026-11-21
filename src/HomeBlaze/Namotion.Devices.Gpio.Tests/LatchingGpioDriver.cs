@@ -12,6 +12,10 @@ namespace Namotion.Devices.Gpio.Tests;
 internal sealed class LatchingGpioDriver : GpioDriver
 {
     private readonly Lock _lock = new();
+
+    // Guards _eventHandlers. Taken after _lock when a callback is added or removed, a mode is set or a pin is closed,
+    // and alone while the callbacks of an edge run, like libgpiod 2.x.
+    private readonly Lock _callbackLock = new();
     private readonly Dictionary<int, PinState> _pins = new();
     private readonly Dictionary<int, List<PinChangeEventHandler>> _eventHandlers = new();
     private bool _failsReads;
@@ -71,6 +75,44 @@ internal sealed class LatchingGpioDriver : GpioDriver
     /// Called with the pin number when a pin is closed.
     /// </summary>
     public Action<int>? PinClosed { get; set; }
+
+    /// <summary>
+    /// Called with the pin number while a value changed callback is removed, holding the driver lock and before the
+    /// callback lock.
+    /// </summary>
+    public Action<int>? CallbackRemoving { get; set; }
+
+    /// <summary>
+    /// Calls the value changed callbacks of a pin for an edge to <paramref name="level"/> while holding the callback
+    /// lock, which removing a callback takes after the driver lock, like libgpiod 2.x. The input level is not changed.
+    /// <paramref name="dispatching"/> is called under the callback lock right before the callbacks.
+    /// </summary>
+    public void RaiseEdge(int pinNumber, PinValue level, Action? dispatching = null)
+    {
+        lock (_callbackLock)
+        {
+            dispatching?.Invoke();
+            if (_eventHandlers.TryGetValue(pinNumber, out var handlers))
+            {
+                var changeType = level == PinValue.High ? PinEventTypes.Rising : PinEventTypes.Falling;
+                foreach (var handler in handlers.ToArray())
+                {
+                    handler(this, new PinValueChangedEventArgs(changeType, pinNumber));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sets the level a pin reads as an input.
+    /// </summary>
+    public void SetInputLevel(int pinNumber, PinValue level)
+    {
+        lock (_lock)
+        {
+            GetState(pinNumber).InputLevel = level;
+        }
+    }
 
     /// <summary>
     /// Sets the state a pin has before it is opened.
@@ -146,8 +188,6 @@ internal sealed class LatchingGpioDriver : GpioDriver
         ? throw new PlatformNotSupportedException("No GPIO driver for this platform.")
         : IsUnavailable ? throw new IOException("No GPIO chip found.") : 28;
 
-    protected override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber) => pinNumber;
-
     protected override void OpenPin(int pinNumber)
     {
         lock (_lock)
@@ -159,6 +199,7 @@ internal sealed class LatchingGpioDriver : GpioDriver
     protected override void ClosePin(int pinNumber)
     {
         lock (_lock)
+        lock (_callbackLock)
         {
             if (FailsReadBeforeMode || SetsModeBeforeLevel)
             {
@@ -236,6 +277,7 @@ internal sealed class LatchingGpioDriver : GpioDriver
         }
 
         lock (_lock)
+        lock (_callbackLock)
         {
             if (!_eventHandlers.TryGetValue(pinNumber, out var handlers))
             {
@@ -257,9 +299,13 @@ internal sealed class LatchingGpioDriver : GpioDriver
                 throw new IOException($"The callback of pin {pinNumber} could not be removed.");
             }
 
-            if (_eventHandlers.TryGetValue(pinNumber, out var handlers))
+            CallbackRemoving?.Invoke(pinNumber);
+            lock (_callbackLock)
             {
-                handlers.Remove(callback);
+                if (_eventHandlers.TryGetValue(pinNumber, out var handlers))
+                {
+                    handlers.Remove(callback);
+                }
             }
         }
     }
@@ -272,6 +318,7 @@ internal sealed class LatchingGpioDriver : GpioDriver
     private void SetMode(int pinNumber, PinMode mode, PinValue? initialValue)
     {
         lock (_lock)
+        lock (_callbackLock)
         {
             var state = GetState(pinNumber);
             var isOutputRequested = mode == PinMode.Output &&

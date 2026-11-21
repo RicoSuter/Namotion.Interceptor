@@ -39,10 +39,10 @@ public class GpioPinOperationTests
     {
         // Arrange
         var driver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, driver);
+        using var controller = new GpioController(driver);
         controller.OpenPin(17, PinMode.Output);
-        var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Output, Status = ServiceStatus.Running };
-        pin.Controller = controller;
+        var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Output };
+        pin.Attach(controller, _ => { }, _ => { });
 
         // Act
         await pin.ToggleAsync(CancellationToken.None);
@@ -57,10 +57,10 @@ public class GpioPinOperationTests
     {
         // Arrange
         var driver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, driver);
+        using var controller = new GpioController(driver);
         controller.OpenPin(17, PinMode.Output);
-        var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Output, IsInverted = true, Status = ServiceStatus.Running };
-        pin.Controller = controller;
+        var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Output, IsInverted = true };
+        pin.Attach(controller, _ => { }, _ => { });
         await pin.SetValueAsync(true, CancellationToken.None);
         Assert.Equal(PinValue.Low, driver.PinValues[17]);
 
@@ -77,11 +77,12 @@ public class GpioPinOperationTests
     {
         // Arrange
         var driver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, driver);
+        using var controller = new GpioController(driver);
         controller.OpenPin(17, PinMode.Output);
         controller.Write(17, PinValue.Low);
-        var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Output, Status = ServiceStatus.Error };
-        pin.Controller = controller;
+        var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Output };
+        pin.Attach(controller, _ => { }, _ => { });
+        pin.Status = ServiceStatus.Error;
 
         // Act
         await pin.SetValueAsync(true, CancellationToken.None);
@@ -96,10 +97,10 @@ public class GpioPinOperationTests
     {
         // Arrange
         var driver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, driver);
+        using var controller = new GpioController(driver);
         controller.OpenPin(17, PinMode.Output);
-        var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Output, Status = ServiceStatus.Running };
-        pin.Controller = controller;
+        var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Output };
+        pin.Attach(controller, _ => { }, _ => { });
 
         // Act
         await pin.SetValueAsync(true, CancellationToken.None);

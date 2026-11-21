@@ -147,10 +147,9 @@ public class GpioDebounceTests
         {
             PinNumber = 17,
             Mode = GpioPinMode.Output,
-            Status = ServiceStatus.Running,
             TimeProvider = timeProvider
         };
-        pin.Controller = controller;
+        pin.Attach(controller, _ => { }, _ => { });
 
         // Act & Assert
         driver.SimulatePinValueChange(17, PinValue.High);
@@ -287,10 +286,9 @@ public class GpioDebounceTests
         {
             PinNumber = 17,
             Mode = GpioPinMode.Output,
-            Status = ServiceStatus.Running,
             TimeProvider = timeProvider
         };
-        pin.Controller = controller;
+        pin.Attach(controller, _ => { }, _ => { });
         driver.SimulatePinValueChange(17, PinValue.High);
 
         // Act
@@ -341,7 +339,7 @@ public class GpioDebounceTests
     private static (SimulationGpioDriver Driver, GpioController Controller, FakeTimeProvider TimeProvider) CreateController(PinMode mode)
     {
         var driver = new SimulationGpioDriver();
-        var controller = new GpioController(PinNumberingScheme.Logical, driver);
+        var controller = new GpioController(driver);
         controller.OpenPin(17, mode);
         return (driver, controller, new FakeTimeProvider());
     }

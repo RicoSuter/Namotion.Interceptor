@@ -78,8 +78,6 @@ public class SimulationGpioDriver : GpioDriver
 
     protected override int PinCount => _pinCount;
 
-    protected override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber) => pinNumber;
-
     protected override void OpenPin(int pinNumber)
     {
         lock (_lock)

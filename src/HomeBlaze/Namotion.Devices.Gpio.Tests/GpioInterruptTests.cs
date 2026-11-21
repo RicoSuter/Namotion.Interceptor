@@ -1,6 +1,7 @@
 using System.Device.Gpio;
 using HomeBlaze.Abstractions;
 using Namotion.Devices.Gpio.Simulation;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace Namotion.Devices.Gpio.Tests;
@@ -78,6 +79,87 @@ public class GpioInterruptTests
         Assert.False(pin.Value);
     }
 
+    [Fact]
+    public async Task WhenAnEdgeArrivesWhileItsInputBecomesAnOutput_ThenNeitherWaitsForTheOther()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var subject = GpioTestSubject.Create(driver, pins: new Dictionary<int, GpioPin>
+        {
+            [17] = new() { Mode = GpioPinMode.Input, DebounceTime = TimeSpan.Zero }
+        });
+        await subject.StartAsync(CancellationToken.None);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+        var pin = subject.Pins[17];
+
+        using var edgeDispatching = new ManualResetEventSlim();
+        Task? edgeTask = null;
+        driver.CallbackRemoving = pinNumber =>
+        {
+            // The mode change holds the pin lock here; the edge holds the callback lock while it calls the callback.
+            driver.CallbackRemoving = null;
+            edgeTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(
+                () => driver.RaiseEdge(pinNumber, PinValue.High, edgeDispatching.Set));
+            edgeDispatching.Wait(TestTimeouts.Default);
+        };
+
+        // Act
+        await DedicatedThreadTestHelpers
+            .RunOnDedicatedThreadAsync(() => pin.Mode = GpioPinMode.Output)
+            .WaitAsync(TestTimeouts.Default);
+        await edgeTask!.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(GpioPinMode.Output, pin.Mode);
+        Assert.Equal(ServiceStatus.Running, pin.Status);
+        Assert.Equal(PinMode.Output, driver.GetMode(17));
+
+        // Not disposed when an assertion fails: with the deadlock, the stop would wait for the driver lock forever.
+        await subject.StopAsync(CancellationToken.None);
+        subject.Dispose();
+    }
+
+    [Fact]
+    public async Task WhenAnEdgeArrivesWhileAnotherInputBecomesAnOutput_ThenNeitherWaitsForTheOther()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var subject = GpioTestSubject.Create(driver, pins: new Dictionary<int, GpioPin>
+        {
+            [17] = new() { Mode = GpioPinMode.Input, DebounceTime = TimeSpan.Zero },
+            [22] = new() { Mode = GpioPinMode.Input, DebounceTime = TimeSpan.Zero }
+        });
+        await subject.StartAsync(CancellationToken.None);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+
+        driver.SetInputLevel(17, PinValue.High);
+        using var edgeDispatching = new ManualResetEventSlim();
+        Task? edgeTask = null;
+        driver.CallbackRemoving = pinNumber =>
+        {
+            // The mode change of pin 22 holds the driver lock here; the edge of pin 17 holds the callback lock while it
+            // calls the callback, which must not call the driver.
+            driver.CallbackRemoving = null;
+            edgeTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(
+                () => driver.RaiseEdge(17, PinValue.High, edgeDispatching.Set));
+            edgeDispatching.Wait(TestTimeouts.Default);
+        };
+
+        // Act
+        await DedicatedThreadTestHelpers
+            .RunOnDedicatedThreadAsync(() => subject.Pins[22].Mode = GpioPinMode.Output)
+            .WaitAsync(TestTimeouts.Default);
+        await edgeTask!.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.True(subject.Pins[17].Value);
+        Assert.Equal(PinMode.Output, driver.GetMode(22));
+
+        // Not disposed when an assertion fails: with the deadlock, the stop would wait for the driver lock forever.
+        await subject.StopAsync(CancellationToken.None);
+        subject.Dispose();
+    }
+
     private static GpioSubject CreateSubjectWithInput(SimulationGpioDriver driver)
     {
         return GpioTestSubject.Create(driver, pins: new Dictionary<int, GpioPin>
@@ -91,7 +173,7 @@ public class GpioInterruptTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
         var pin = new GpioPin
@@ -99,8 +181,8 @@ public class GpioInterruptTests
             Controller = controller,
             PinNumber = 17,
             Mode = GpioPinMode.Output,
-            Status = ServiceStatus.Running
         };
+        pin.Attach(controller, _ => { }, _ => { });
 
         // Act - Write high
         pin.Value = true;
@@ -122,7 +204,7 @@ public class GpioInterruptTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var registeredInterrupts = new HashSet<int>();
@@ -160,7 +242,7 @@ public class GpioInterruptTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
 
         var pins = new List<GpioPin>();
         for (int i = 17; i <= 20; i++)
@@ -171,8 +253,8 @@ public class GpioInterruptTests
                 Controller = controller,
                 PinNumber = i,
                 Mode = GpioPinMode.Output,
-                Status = ServiceStatus.Running
             };
+            pin.Attach(controller, _ => { }, _ => { });
             pins.Add(pin);
         }
 

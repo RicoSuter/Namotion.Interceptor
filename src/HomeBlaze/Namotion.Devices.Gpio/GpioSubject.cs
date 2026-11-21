@@ -81,6 +81,12 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     // loop and an applied configuration check this to create nothing after Dispose.
     private bool _isDisposed;
 
+    // Guarded by _controllerLock. Set when the service loop ended, so that an applied configuration connects nothing
+    // until the service starts again. The run counts the loops started, so that a loop that ends after a newer one
+    // started leaves the newer one's controller alone.
+    private bool _isServiceStopped;
+    private int _serviceRun;
+
     /// <summary>
     /// Optional MCP3008 ADC configuration. Its pins are not opened as GPIO pins: they show
     /// <see cref="ServiceStatus.Unavailable"/> with the message "Used by the MCP3008".
@@ -345,6 +351,13 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        int run;
+        lock (_controllerLock)
+        {
+            run = ++_serviceRun;
+            _isServiceStopped = false;
+        }
+
         try
         {
             while (!stoppingToken.IsCancellationRequested)
@@ -377,13 +390,19 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
         {
             // The service stops.
         }
-
-        lock (_controllerLock)
+        finally
         {
-            if (!_isDisposed)
+            lock (_controllerLock)
             {
-                Status = ServiceStatus.Stopping;
-                StatusMessage = "Shutting down...";
+                if (!_isDisposed && run == _serviceRun)
+                {
+                    // Released, so that no driver thread outlives the service: libgpiod 2.x observes edges on
+                    // foreground threads that end only when their line request or the driver is released.
+                    _isServiceStopped = true;
+                    Stop(keepController: false, []);
+                    StatusMessage = null;
+                    Status = ServiceStatus.Stopped;
+                }
             }
         }
     }
@@ -450,7 +469,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     {
         lock (_controllerLock)
         {
-            if (_isDisposed)
+            if (_isDisposed || _isServiceStopped)
             {
                 return Task.CompletedTask;
             }
@@ -730,17 +749,17 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     {
         if (UseSimulation)
         {
-            return (new GpioController(PinNumberingScheme.Logical, new SimulationGpioDriver()), true, false);
+            return (new GpioController(new SimulationGpioDriver()), true, false);
         }
 
         if (_driver is not null)
         {
-            return (new GpioController(PinNumberingScheme.Logical, _driver), false, _isDriverRaspberryPi);
+            return (new GpioController(_driver), false, _isDriverRaspberryPi);
         }
 
         var raspberryPiDriver = TryCreateRaspberryPiDriver();
         return raspberryPiDriver is not null
-            ? (new GpioController(PinNumberingScheme.Logical, raspberryPiDriver), false, true)
+            ? (new GpioController(raspberryPiDriver), false, true)
             : (new GpioController(), false, false);
     }
 
@@ -755,7 +774,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
             return null;
         }
 
-        // In System.Device.Gpio 3.2.0, the default controller picks this driver on exactly the boards where its
+        // In System.Device.Gpio 4.3.0-prerelease.26569.7, the default controller picks this driver on exactly the boards where its
         // constructor succeeds, so creating it here changes no driver. Check this again when upgrading the package.
         try
         {

@@ -12,7 +12,7 @@ public class GpioModeChangeTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var unregisteredPins = new List<int>();
@@ -39,7 +39,7 @@ public class GpioModeChangeTests
         // Arrange
         var driver = new LatchingGpioDriver();
         driver.SetUpPin(17, PinMode.Input, inputLevel: PinValue.High, latch: PinValue.Low);
-        using var controller = new GpioController(PinNumberingScheme.Logical, driver);
+        using var controller = new GpioController(driver);
         controller.OpenPin(17, PinMode.Input);
         var pin = new GpioPin
         {
@@ -67,7 +67,7 @@ public class GpioModeChangeTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Output);
         var registeredPins = new List<int>();
 
@@ -97,7 +97,7 @@ public class GpioModeChangeTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var unregisteredPins = new List<int>();
@@ -127,7 +127,7 @@ public class GpioModeChangeTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var pin = new GpioPin
@@ -152,7 +152,7 @@ public class GpioModeChangeTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var pin = new GpioPin
@@ -178,7 +178,7 @@ public class GpioModeChangeTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var interruptCalled = false;
@@ -206,7 +206,7 @@ public class GpioModeChangeTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
         var interactionCount = 0;
