@@ -49,4 +49,79 @@ public class TeslaJsonTests
         Assert.Equal("required", product.CommandSigning);
         Assert.Equal("online", product.State);
     }
+
+    [Fact]
+    public void WhenValuesHaveUnexpectedShapes_ThenTheyReadAsMissingAndTheRestOfTheDocumentIsRead()
+    {
+        // Arrange
+        const string json = """
+            {
+              "response": {
+                "vin": "TESTVIN0000000001",
+                "charge_state": {
+                  "battery_level": "<invalid>",
+                  "charge_amps": 6.6,
+                  "charge_limit_soc": 3000000000,
+                  "charger_voltage": {"nested": [1, 2]},
+                  "charger_power": [1, 2],
+                  "charger_pilot_current": "",
+                  "minutes_to_full_charge": "42",
+                  "usable_battery_level": null,
+                  "battery_range": "230.45",
+                  "charge_rate": "<invalid>",
+                  "charge_energy_added": 36.64,
+                  "scheduled_charging_start_time": "1795316400",
+                  "scheduled_departure_time": 1e30,
+                  "charge_enable_request": "true",
+                  "battery_heater_on": "maybe",
+                  "fast_charger_present": {"x": 1},
+                  "trip_charging": 1,
+                  "charging_state": "Complete"
+                },
+                "drive_state": {
+                  "latitude": "47.5",
+                  "longitude": true,
+                  "heading": 261.4,
+                  "power": 1e30,
+                  "speed": []
+                },
+                "vehicle_state": { "car_version": "2026.38.6", "locked": "false" }
+              }
+            }
+            """;
+
+        // Act
+        var response = JsonSerializer.Deserialize(json, TeslaJsonContext.Default.TeslaResponseTeslaVehicleDataDto)!;
+
+        // Assert
+        var charge = response.Response!.ChargeState!;
+        Assert.Null(charge.BatteryLevel);
+        Assert.Equal(7, charge.ChargeAmps);
+        Assert.Null(charge.ChargeLimitSoc);
+        Assert.Null(charge.ChargerVoltage);
+        Assert.Null(charge.ChargerPower);
+        Assert.Null(charge.ChargerPilotCurrent);
+        Assert.Equal(42, charge.MinutesToFullCharge);
+        Assert.Null(charge.UsableBatteryLevel);
+        Assert.Equal(230.45m, charge.BatteryRange);
+        Assert.Null(charge.ChargeRate);
+        Assert.Equal(36.64m, charge.ChargeEnergyAdded);
+        Assert.Equal(1795316400L, charge.ScheduledChargingStartTime);
+        Assert.Null(charge.ScheduledDepartureTime);
+        Assert.True(charge.ChargeEnableRequest);
+        Assert.Null(charge.BatteryHeaterOn);
+        Assert.Null(charge.FastChargerPresent);
+        Assert.Null(charge.TripCharging);
+        Assert.Equal("Complete", charge.ChargingState);
+
+        var drive = response.Response.DriveState!;
+        Assert.Equal(47.5m, drive.Latitude);
+        Assert.Null(drive.Longitude);
+        Assert.Equal(261, drive.Heading);
+        Assert.Null(drive.Power);
+        Assert.Null(drive.Speed);
+
+        Assert.Equal("2026.38.6", response.Response.VehicleState!.CarVersion);
+        Assert.False(response.Response.VehicleState.Locked);
+    }
 }

@@ -10,11 +10,14 @@ internal static class TeslaValues
 {
     private const decimal KilometersPerMile = 1.609344m;
 
-    private static readonly ConcurrentDictionary<string, byte> LoggedUnknownValues = new();
+    private static readonly ConcurrentDictionary<(Type EnumType, string Value), byte> LoggedUnknownValues = new();
 
     /// <summary>Returns null for the placeholders Tesla sends instead of a missing text.</summary>
-    public static string? Text(string? value) =>
-        string.IsNullOrWhiteSpace(value) || value == "<invalid>" ? null : value.Trim();
+    public static string? Text(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrEmpty(trimmed) || trimmed == "<invalid>" ? null : trimmed;
+    }
 
     public static decimal? MilesToKilometers(decimal? miles) => miles * KilometersPerMile;
 
@@ -45,13 +48,15 @@ internal static class TeslaValues
             return null;
         }
 
-        if (System.Enum.TryParse<TEnum>(text.Replace("_", "", StringComparison.Ordinal), ignoreCase: true, out var result) &&
+        // Enum.TryParse maps a numeric text to the member with that number, which Tesla never sends on purpose.
+        if (!char.IsAsciiDigit(text[0]) && text[0] is not ('-' or '+') &&
+            System.Enum.TryParse<TEnum>(text.Replace("_", "", StringComparison.Ordinal), ignoreCase: true, out var result) &&
             System.Enum.IsDefined(result))
         {
             return result;
         }
 
-        if (LoggedUnknownValues.TryAdd(typeof(TEnum).Name + ":" + text, 0))
+        if (LoggedUnknownValues.TryAdd((typeof(TEnum), text), 0))
         {
             logger.LogInformation("Unknown Tesla value {Value} for {EnumType}.", text, typeof(TEnum).Name);
         }

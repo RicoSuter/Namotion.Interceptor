@@ -11,6 +11,7 @@ public class TeslaValuesTests
     [InlineData("", null)]
     [InlineData(" ", null)]
     [InlineData("<invalid>", null)]
+    [InlineData("  <invalid> ", null)]
     [InlineData("Spotify", "Spotify")]
     public void WhenTextIsNormalized_ThenPlaceholdersBecomeNull(string? value, string? expected)
     {
@@ -67,6 +68,19 @@ public class TeslaValuesTests
 
         // Assert
         Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("2")]
+    [InlineData("-1")]
+    [InlineData("99")]
+    public void WhenNumericTextIsParsedAsEnum_ThenItBecomesUnknown(string value)
+    {
+        // Act
+        var result = TeslaValues.Enum<TeslaChargingState>(value, NullLogger.Instance);
+
+        // Assert
+        Assert.Equal(TeslaChargingState.Unknown, result);
     }
 
     [Theory]

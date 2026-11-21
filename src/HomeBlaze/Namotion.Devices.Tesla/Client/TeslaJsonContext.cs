@@ -3,7 +3,8 @@ using Namotion.Devices.Tesla.Client.Dto;
 
 namespace Namotion.Devices.Tesla.Client;
 
-[JsonSourceGenerationOptions(NumberHandling = JsonNumberHandling.AllowReadingFromString)]
+[JsonSourceGenerationOptions(
+    Converters = [typeof(LenientInt32Converter), typeof(LenientInt64Converter), typeof(LenientDecimalConverter), typeof(LenientBooleanConverter)])]
 [JsonSerializable(typeof(TeslaResponse<TeslaProductDto[]>))]
 [JsonSerializable(typeof(TeslaResponse<TeslaVehicleDataDto>))]
 [JsonSerializable(typeof(TeslaTokenResponseDto))]
