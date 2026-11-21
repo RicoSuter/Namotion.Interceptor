@@ -13,13 +13,18 @@ internal sealed class TeslaOwnerApiClient
     private const string BaseAddress = "https://owner-api.teslamotors.com/api/1/";
     private const string VehicleDataEndpoints =
         "charge_state%3Bclimate_state%3Bclosures_state%3Bdrive_state%3Bgui_settings%3Blocation_data%3Bvehicle_config%3Bvehicle_state%3Bvehicle_data_combo";
-    private static readonly TimeSpan DefaultRetryAfter = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan ExceededLimitRetryAfter = TimeSpan.FromMinutes(15);
 
     private readonly HttpClient _httpClient;
+    private readonly TimeProvider _timeProvider;
 
     /// <param name="httpClient">A client that uses HTTP/2 and TLS 1.3, which Tesla requires.</param>
-    public TeslaOwnerApiClient(HttpClient httpClient) => _httpClient = httpClient;
+    /// <param name="timeProvider">The clock for a Retry-After date.</param>
+    public TeslaOwnerApiClient(HttpClient httpClient, TimeProvider timeProvider)
+    {
+        _httpClient = httpClient;
+        _timeProvider = timeProvider;
+    }
 
     /// <summary>Reads the vehicles of the account with their state and cached snapshot. Never wakes a vehicle.</summary>
     /// <exception cref="TeslaApiException">Tesla answered with an error.</exception>
@@ -69,7 +74,7 @@ internal sealed class TeslaOwnerApiClient
         return request;
     }
 
-    private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         if (response.IsSuccessStatusCode)
         {
@@ -79,7 +84,7 @@ internal sealed class TeslaOwnerApiClient
         var error = ReadError(await response.Content.ReadAsStringAsync(cancellationToken));
         TimeSpan? retryAfter = response.StatusCode switch
         {
-            HttpStatusCode.TooManyRequests => response.Headers.RetryAfter?.Delta ?? DefaultRetryAfter,
+            HttpStatusCode.TooManyRequests => TeslaHttp.GetRetryAfter(response, _timeProvider),
             HttpStatusCode.Forbidden when error?.Contains("EXCEEDED_LIMIT", StringComparison.Ordinal) == true => ExceededLimitRetryAfter,
             _ => null
         };

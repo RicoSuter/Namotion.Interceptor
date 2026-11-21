@@ -3,9 +3,9 @@ using System.Net;
 namespace Namotion.Devices.Tesla.Client;
 
 /// <summary>
-/// Caches the access token and refreshes it when less than an hour is left. Each refresh rotates the refresh token:
-/// the rotation callback completes before the new access token is handed out, so that a crash never loses the only
-/// valid refresh token. Thread-safe: concurrent callers share one refresh.
+/// Caches the access token and refreshes it when less than an hour or half its lifetime is left. Each refresh rotates
+/// the refresh token: the rotation callback completes before the new access token is handed out, so that a crash never
+/// loses the only valid refresh token. Thread-safe: concurrent callers share one refresh.
 /// </summary>
 internal sealed class TeslaTokenManager
 {
@@ -16,7 +16,7 @@ internal sealed class TeslaTokenManager
     private readonly Func<string, Task> _onRefreshTokenRotated;
     private readonly Lock _lock = new();
 
-    // Replaced as a whole so that readers outside the lock never see a torn state; written only by the refresh.
+    // Replaced as a whole so that readers outside the lock never see a torn state; written only while _refresh runs.
     private volatile TokenState _state;
     private Task<TokenState>? _refresh;
 
@@ -24,15 +24,15 @@ internal sealed class TeslaTokenManager
     /// <param name="refreshToken">The current refresh token.</param>
     /// <param name="timeProvider">The clock for the expiry of the access token.</param>
     /// <param name="onRefreshTokenRotated">
-    /// Persists the rotated refresh token. When it throws, the access token is not handed out and the next call
-    /// refreshes again with the rotated token.
+    /// Persists the rotated refresh token. When it throws, the access token is not handed out and the next call runs
+    /// only the callback again, without a token request, while the access token is still fresh.
     /// </param>
     public TeslaTokenManager(TeslaAuthClient authClient, string refreshToken, TimeProvider timeProvider, Func<string, Task> onRefreshTokenRotated)
     {
         _authClient = authClient;
         _timeProvider = timeProvider;
         _onRefreshTokenRotated = onRefreshTokenRotated;
-        _state = new TokenState(refreshToken, null, default, null, null);
+        _state = new TokenState(refreshToken, null, default, true, null, null);
     }
 
     /// <summary>The current refresh token; it changes with every refresh.</summary>
@@ -107,8 +107,8 @@ internal sealed class TeslaTokenManager
         if (completion is not null)
         {
             // Started outside the lock and not awaited here, so that the callback never runs under the lock and a
-            // canceled caller does not cancel the refresh.
-            _ = RefreshAsync(state, completion);
+            // canceled caller does not cancel the refresh. A fresh but unpersisted token only needs the callback.
+            _ = CompleteAsync(state, requestTokens: !IsFresh(state, rejectedAccessToken), completion);
         }
 
         var refreshed = await refresh.WaitAsync(cancellationToken);
@@ -116,20 +116,23 @@ internal sealed class TeslaTokenManager
     }
 
     /// <summary>
-    /// Refreshes without cancellation: once the request is sent, Tesla may already have rotated the refresh token,
-    /// and the rotated token must reach the callback. The HTTP client timeout bounds it.
+    /// Requests tokens when needed and persists the refresh token. Runs without cancellation: once the request is sent,
+    /// Tesla may already have rotated the refresh token, and the rotated token must reach the callback. The HTTP client
+    /// timeout bounds it.
     /// </summary>
-    private async Task RefreshAsync(TokenState previous, TaskCompletionSource<TokenState> completion)
+    private async Task CompleteAsync(TokenState state, bool requestTokens, TaskCompletionSource<TokenState> completion)
     {
         try
         {
-            var tokens = await _authClient.RefreshAsync(previous.RefreshToken, _timeProvider, CancellationToken.None);
-            _state = previous with { RefreshToken = tokens.RefreshToken, AccessToken = null };
+            if (requestTokens)
+            {
+                state = await RequestTokensAsync(state);
+                _state = state;
+            }
 
-            await _onRefreshTokenRotated(tokens.RefreshToken);
+            await _onRefreshTokenRotated(state.RefreshToken);
 
-            var state = new TokenState(tokens.RefreshToken, tokens.AccessToken, tokens.ExpiresAt,
-                tokens.Email ?? previous.AuthenticatedUser, _timeProvider.GetUtcNow());
+            state = state with { IsPersisted = true };
             lock (_lock)
             {
                 _state = state;
@@ -149,15 +152,28 @@ internal sealed class TeslaTokenManager
         }
     }
 
+    private async Task<TokenState> RequestTokensAsync(TokenState previous)
+    {
+        var tokens = await _authClient.RefreshAsync(previous.RefreshToken, _timeProvider, CancellationToken.None);
+        var now = _timeProvider.GetUtcNow();
+        var halfLifetime = (tokens.ExpiresAt - now) / 2;
+        var refreshAt = tokens.ExpiresAt - (halfLifetime < RefreshAhead ? halfLifetime : RefreshAhead);
+        return new TokenState(tokens.RefreshToken, tokens.AccessToken, refreshAt, false, tokens.Email ?? previous.AuthenticatedUser, now);
+    }
+
     private bool IsUsable(TokenState state, string? rejectedAccessToken) =>
+        state.IsPersisted && IsFresh(state, rejectedAccessToken);
+
+    private bool IsFresh(TokenState state, string? rejectedAccessToken) =>
         state.AccessToken is not null &&
         state.AccessToken != rejectedAccessToken &&
-        state.ExpiresAt - _timeProvider.GetUtcNow() > RefreshAhead;
+        _timeProvider.GetUtcNow() < state.RefreshAt;
 
     private sealed record TokenState(
         string RefreshToken,
         string? AccessToken,
-        DateTimeOffset ExpiresAt,
+        DateTimeOffset RefreshAt,
+        bool IsPersisted,
         string? AuthenticatedUser,
         DateTimeOffset? AuthenticatedAt);
 }

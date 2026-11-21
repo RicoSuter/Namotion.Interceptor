@@ -92,10 +92,16 @@ public sealed class TeslaAuthClient
     /// <summary>
     /// Extracts the code from a pasted callback URL or query string and checks its state.
     /// </summary>
-    /// <exception cref="ArgumentException">The text has no code or belongs to another login.</exception>
+    /// <exception cref="ArgumentException">The text holds an error from Tesla, has no code or belongs to another login.</exception>
     public static string ParseCallbackCode(string pasted, string expectedState)
     {
         var query = pasted.Trim();
+        var fragmentStart = query.IndexOf('#');
+        if (fragmentStart >= 0)
+        {
+            query = query[..fragmentStart];
+        }
+
         var queryStart = query.IndexOf('?');
         if (queryStart >= 0)
         {
@@ -103,15 +109,20 @@ public sealed class TeslaAuthClient
         }
 
         var parameters = query.Split('&', StringSplitOptions.RemoveEmptyEntries);
-        var code = ReadQueryParameter(parameters, "code");
-        var state = ReadQueryParameter(parameters, "state");
+        if (ReadQueryParameter(parameters, "error") is { Length: > 0 } error)
+        {
+            var description = ReadQueryParameter(parameters, "error_description");
+            throw new ArgumentException(
+                $"Tesla refused the sign in: {error}{(string.IsNullOrEmpty(description) ? "" : $" ({description})")}. Start the sign in again.", nameof(pasted));
+        }
 
+        var code = ReadQueryParameter(parameters, "code");
         if (string.IsNullOrEmpty(code))
         {
             throw new ArgumentException("The pasted text contains no code. Copy the whole tesla://auth/callback?code=... address.", nameof(pasted));
         }
 
-        if (state != expectedState)
+        if (ReadQueryParameter(parameters, "state") != expectedState)
         {
             throw new ArgumentException("The pasted address belongs to another login. Start the sign in again.", nameof(pasted));
         }
@@ -139,12 +150,17 @@ public sealed class TeslaAuthClient
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
         var dto = TryDeserialize(json) ?? new TeslaTokenResponseDto();
+        if (response.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            throw new TeslaApiException(response.StatusCode, dto.Error, TeslaHttp.GetRetryAfter(response, timeProvider));
+        }
+
         EnsureTokens(response.StatusCode, dto);
 
         return new TeslaTokens(
             dto.AccessToken!,
             dto.RefreshToken!,
-            timeProvider.GetUtcNow().AddSeconds(dto.ExpiresIn ?? DefaultExpiresInSeconds),
+            timeProvider.GetUtcNow().AddSeconds(dto.ExpiresIn is int expiresIn and > 0 ? expiresIn : DefaultExpiresInSeconds),
             ReadEmail(dto.IdToken));
     }
 

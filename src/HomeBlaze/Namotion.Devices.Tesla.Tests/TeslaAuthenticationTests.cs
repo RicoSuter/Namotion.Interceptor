@@ -48,27 +48,116 @@ public class TeslaAuthenticationTests
     }
 
     [Fact]
-    public async Task WhenPersistingTheRotatedTokenFails_ThenTheAccessTokenIsNotHandedOutAndTheRotatedTokenIsKept()
+    public async Task WhenPersistingTheRotatedTokenFails_ThenOnlyThePersistingIsRetriedBeforeTheAccessTokenIsHandedOut()
     {
         // Arrange
         var handler = new FakeHttpMessageHandler()
             .Respond(TokenPath, HttpStatusCode.OK, TokenJson("access-1", "refresh-2"))
             .Respond(TokenPath, HttpStatusCode.OK, TokenJson("access-2", "refresh-3"));
         using var httpClient = new HttpClient(handler);
+        var persisted = new List<string>();
         var shouldFail = true;
-        var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", new FakeTimeProvider(Start),
-            _ => shouldFail ? throw new IOException("disk full") : Task.CompletedTask);
+        var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", new FakeTimeProvider(Start), token =>
+        {
+            persisted.Add(token);
+            return shouldFail ? throw new IOException("disk full") : Task.CompletedTask;
+        });
 
         // Act
         await Assert.ThrowsAsync<IOException>(() => manager.GetAccessTokenAsync(CancellationToken.None));
         var rotatedAfterFailure = manager.RefreshToken;
+        await Assert.ThrowsAsync<IOException>(() => manager.GetAccessTokenAsync(CancellationToken.None));
+        shouldFail = false;
+        var accessToken = await manager.GetAccessTokenAsync(CancellationToken.None);
+        var accessTokenAfterPersist = await manager.GetAccessTokenAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("refresh-2", rotatedAfterFailure);
+        Assert.Equal("access-1", accessToken);
+        Assert.Equal("access-1", accessTokenAfterPersist);
+        Assert.Equal(["refresh-2", "refresh-2", "refresh-2"], persisted);
+        Assert.Single(handler.Requests);
+        Assert.Equal(Start, manager.AuthenticatedAt);
+    }
+
+    [Fact]
+    public async Task WhenAPendingAccessTokenIsDue_ThenTheRotatedTokenIsRefreshed()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler()
+            .Respond(TokenPath, HttpStatusCode.OK, TokenJson("access-1", "refresh-2"))
+            .Respond(TokenPath, HttpStatusCode.OK, TokenJson("access-2", "refresh-3"));
+        using var httpClient = new HttpClient(handler);
+        var time = new FakeTimeProvider(Start);
+        var shouldFail = true;
+        var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", time,
+            _ => shouldFail ? throw new IOException("disk full") : Task.CompletedTask);
+        await Assert.ThrowsAsync<IOException>(() => manager.GetAccessTokenAsync(CancellationToken.None));
+
+        // Act
+        time.Advance(TimeSpan.FromHours(7.5));
         shouldFail = false;
         var accessToken = await manager.GetAccessTokenAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal("refresh-2", rotatedAfterFailure);
         Assert.Equal("access-2", accessToken);
         Assert.Contains("refresh_token=refresh-2", handler.Requests[1].Body);
+    }
+
+    [Fact]
+    public async Task WhenTheAccessTokenLivesShort_ThenItIsRefreshedAtHalfItsLifetime()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler()
+            .Respond(TokenPath, HttpStatusCode.OK, TokenJson("access-1", "refresh-2", expiresIn: 600))
+            .Respond(TokenPath, HttpStatusCode.OK, TokenJson("access-2", "refresh-3", expiresIn: 600));
+        using var httpClient = new HttpClient(handler);
+        var time = new FakeTimeProvider(Start);
+        var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", time, _ => Task.CompletedTask);
+        await manager.GetAccessTokenAsync(CancellationToken.None);
+
+        // Act
+        time.Advance(TimeSpan.FromMinutes(4));
+        var beforeHalf = await manager.GetAccessTokenAsync(CancellationToken.None);
+        time.Advance(TimeSpan.FromMinutes(2));
+        var afterHalf = await manager.GetAccessTokenAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("access-1", beforeHalf);
+        Assert.Equal("access-2", afterHalf);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public async Task WhenExpiresInIsNotPositive_ThenEightHoursAreAssumed(int expiresIn)
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler().Respond(TokenPath, HttpStatusCode.OK, TokenJson("access-1", "refresh-2", expiresIn));
+        using var httpClient = new HttpClient(handler);
+        var client = new TeslaAuthClient(httpClient);
+
+        // Act
+        var tokens = await client.RefreshAsync("refresh-1", new FakeTimeProvider(Start), CancellationToken.None);
+
+        // Assert
+        Assert.Equal(Start.AddHours(8), tokens.ExpiresAt);
+    }
+
+    [Fact]
+    public async Task WhenAuthServerLimitsRequests_ThenRetryAfterIsReported()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler().Respond(TokenPath, HttpStatusCode.TooManyRequests, "{}", ("Retry-After", "120"));
+        using var httpClient = new HttpClient(handler);
+        var client = new TeslaAuthClient(httpClient);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<TeslaApiException>(() => client.RefreshAsync("refresh-1", new FakeTimeProvider(Start), CancellationToken.None));
+
+        // Assert
+        Assert.Equal(HttpStatusCode.TooManyRequests, exception.StatusCode);
+        Assert.Equal(TimeSpan.FromSeconds(120), exception.RetryAfter);
     }
 
     [Fact]
@@ -316,6 +405,26 @@ public class TeslaAuthenticationTests
 
         // Assert
         Assert.Equal("abc", code);
+    }
+
+    [Fact]
+    public void WhenCallbackHasAFragment_ThenItIsIgnored()
+    {
+        // Act
+        var code = TeslaAuthClient.ParseCallbackCode("tesla://auth/callback?code=abc&state=xyz#_=_", "xyz");
+
+        // Assert
+        Assert.Equal("abc", code);
+    }
+
+    [Fact]
+    public void WhenCallbackHasAnError_ThenTheErrorIsReported()
+    {
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => TeslaAuthClient.ParseCallbackCode(
+            "tesla://auth/callback?error=access_denied&error_description=User%20canceled&state=xyz", "xyz"));
+        Assert.Contains("access_denied", exception.Message);
+        Assert.Contains("User canceled", exception.Message);
     }
 
     [Fact]

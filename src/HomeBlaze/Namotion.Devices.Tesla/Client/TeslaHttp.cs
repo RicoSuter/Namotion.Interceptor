@@ -8,6 +8,8 @@ namespace Namotion.Devices.Tesla.Client;
 /// </summary>
 internal static class TeslaHttp
 {
+    private static readonly TimeSpan DefaultRetryAfter = TimeSpan.FromMinutes(5);
+
     public static HttpClient CreateClient() => new(new SocketsHttpHandler
     {
         SslOptions = { EnabledSslProtocols = SslProtocols.Tls13 },
@@ -30,4 +32,24 @@ internal static class TeslaHttp
         Version = httpClient.DefaultRequestVersion,
         VersionPolicy = httpClient.DefaultVersionPolicy
     };
+
+    /// <summary>
+    /// Reads the Retry-After header of a 429 response in its delay or date form, or returns five minutes when it is missing.
+    /// </summary>
+    public static TimeSpan GetRetryAfter(HttpResponseMessage response, TimeProvider timeProvider)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+        if (retryAfter?.Delta is { } delta)
+        {
+            return delta;
+        }
+
+        if (retryAfter?.Date is { } date)
+        {
+            var wait = date - timeProvider.GetUtcNow();
+            return wait > TimeSpan.Zero ? wait : TimeSpan.Zero;
+        }
+
+        return DefaultRetryAfter;
+    }
 }
