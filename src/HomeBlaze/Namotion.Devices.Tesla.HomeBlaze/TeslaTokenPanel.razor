@@ -4,11 +4,19 @@
 
 <MudStack Spacing="3">
     <MudText Typo="Typo.body2">
-        HomeBlaze reads your Tesla with a refresh token of your Tesla account. Create one with
-        <MudLink Href="https://github.com/adriankumpf/tesla_auth/releases" Target="_blank" rel="noopener noreferrer">tesla_auth</MudLink> (Windows, macOS, Linux)
-        or the app <MudLink Href="https://apps.apple.com/app/auth-app-for-tesla/id1552058613" Target="_blank" rel="noopener noreferrer">Auth app for Tesla</MudLink> (iOS)
-        on any device, and paste the refresh token here.
+        HomeBlaze reads your Tesla with a refresh token of your Tesla account. Create one on any device with tesla_auth
+        (Windows, macOS, Linux) or the app Auth app for Tesla (iOS), and paste the refresh token here.
     </MudText>
+
+    <MudTextField Value="@TeslaAuthAddress"
+                  Label="tesla_auth"
+                  ReadOnly="true"
+                  Variant="Variant.Outlined" />
+
+    <MudTextField Value="@AuthAppAddress"
+                  Label="Auth app for Tesla"
+                  ReadOnly="true"
+                  Variant="Variant.Outlined" />
 
     <MudAlert Severity="Severity.Info" Dense="true">
         Do not reuse a token that TeslaMate or another tool uses: each refresh replaces the token, so the tools would log each other out.
@@ -92,6 +100,10 @@
 </MudStack>
 
 @code {
+    // Shown as text to copy, not as links: a link opening a new window does not work in a kiosk browser.
+    private const string TeslaAuthAddress = "https://github.com/adriankumpf/tesla_auth/releases";
+    private const string AuthAppAddress = "https://apps.apple.com/app/auth-app-for-tesla/id1552058613";
+
     private readonly CancellationTokenSource _disposeCancellation = new();
     private TeslaLogin _login = TeslaAuthClient.CreateLogin();
     private string _refreshToken = string.Empty;

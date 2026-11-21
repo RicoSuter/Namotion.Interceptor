@@ -374,8 +374,10 @@ public class TeslaAccountTests
         Assert.Equal("refresh-2", account.RefreshToken);
     }
 
-    [Fact]
-    public async Task WhenRefreshTokenIsReplacedDuringARotation_ThenTheRotationDoesNotOverwriteIt()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenRefreshTokenIsReplacedDuringARotation_ThenTheRotationDoesNotOverwriteIt(bool useReplaceRefreshToken)
     {
         // Arrange
         var tokenResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -390,7 +392,15 @@ public class TeslaAccountTests
         await AsyncTestHelpers.WaitUntilAsync(() => CountRequests(handler, TokenPath) == 1);
 
         // Act
-        account.RefreshToken = "refresh-new";
+        if (useReplaceRefreshToken)
+        {
+            account.ReplaceRefreshToken("refresh-new");
+        }
+        else
+        {
+            account.RefreshToken = "refresh-new";
+        }
+
         tokenResponse.SetResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(TokenJson) });
         await poll;
         var refreshTokenAfterRotation = account.RefreshToken;

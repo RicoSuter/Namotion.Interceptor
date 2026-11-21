@@ -136,7 +136,7 @@
         Account.RetryInterval = retryInterval;
         if (_newRefreshToken is not null)
         {
-            Account.RefreshToken = _newRefreshToken;
+            Account.ReplaceRefreshToken(_newRefreshToken);
             _newRefreshToken = null;
         }
 

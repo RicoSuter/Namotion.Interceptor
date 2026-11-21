@@ -20,6 +20,18 @@ public partial class TeslaAccount
     private bool _isReauthenticationRequired;
 
     /// <summary>
+    /// Replaces the refresh token with one the user entered. A rotation of the previous token that completes later does
+    /// not overwrite it. Apply the configuration afterwards so that polling uses the new token.
+    /// </summary>
+    public void ReplaceRefreshToken(string refreshToken)
+    {
+        lock (_refreshTokenLock)
+        {
+            RefreshToken = refreshToken;
+        }
+    }
+
+    /// <summary>
     /// Returns the token manager. It is kept across polls and configuration changes, so that a restart of the loop does
     /// not refresh again, and replaced only when the configured refresh token was replaced.
     /// </summary>

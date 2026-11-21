@@ -35,7 +35,7 @@
         if (Account is not null && _refreshToken is not null)
         {
             // The name stays empty, so that the title shows the email of the account.
-            Account.RefreshToken = _refreshToken;
+            Account.ReplaceRefreshToken(_refreshToken);
             _refreshToken = null;
         }
 
