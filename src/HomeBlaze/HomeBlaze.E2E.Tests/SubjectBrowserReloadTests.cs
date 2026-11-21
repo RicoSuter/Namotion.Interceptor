@@ -102,6 +102,99 @@ public class SubjectBrowserReloadTests
         }
     }
 
+    [Fact]
+    public async Task WhenAPendingPathReachesAnotherItemAtItsIndex_ThenItsPanesShowThatItemLikeAReload()
+    {
+        // Arrange
+        var (name, list) = await _fixture.AddSubjectToRootAsync<ChildListSubject>();
+        try
+        {
+            var itemWithoutChild = new NestedConfigurationSubject();
+            list.Items = [CreateItem("First child"), itemWithoutChild];
+
+            var page = await SubjectBrowserPage.OpenAsync(_fixture, $"{name}/Items/1/Child");
+            var panes = page.Locator("#scrollContainer [data-testid='subject-pane']");
+            await Assertions.Expect(panes).ToHaveCountAsync(3);
+
+            // Act: the item of the path moves to index 0, and the item that takes index 1 has the child of the path.
+            list.Items = [itemWithoutChild, CreateItem("Third child")];
+
+            // Assert
+            await Assertions.Expect(panes).ToHaveCountAsync(4);
+            await Assertions.Expect(GetValueText(page, panes.Last, "ShownLabel")).ToHaveTextAsync("Third child");
+            await Assertions.Expect(page).ToHaveURLAsync($"{_fixture.ServerAddress}browser/{name}/Items/1/Child");
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, list);
+        }
+    }
+
+    [Fact]
+    public async Task WhenASubjectOfAPendingPathIsRemovedAndAddedAgain_ThenItsPanesFollowAndTheUrlStays()
+    {
+        // Arrange
+        var (name, list) = await _fixture.AddSubjectToRootAsync<ChildListSubject>();
+        try
+        {
+            var firstItem = CreateItem("First child");
+            var item = new NestedConfigurationSubject();
+            list.Items = [firstItem, item];
+
+            var page = await SubjectBrowserPage.OpenAsync(_fixture, $"{name}/Items/1/Child");
+            var panes = page.Locator("#scrollContainer [data-testid='subject-pane']");
+            await Assertions.Expect(panes).ToHaveCountAsync(3);
+
+            // Act: the item of the path is removed, and added again with the child of the path.
+            list.Items = [firstItem];
+            await Assertions.Expect(panes).ToHaveCountAsync(2);
+            item.Child = new NestedConfigurationChild { Label = "Added child" };
+            list.Items = [firstItem, item];
+
+            // Assert
+            await Assertions.Expect(panes).ToHaveCountAsync(4);
+            await Assertions.Expect(GetValueText(page, panes.Last, "ShownLabel")).ToHaveTextAsync("Added child");
+            await Assertions.Expect(page).ToHaveURLAsync($"{_fixture.ServerAddress}browser/{name}/Items/1/Child");
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, list);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAPendingPathLinksToAProperty_ThenItsRowIsHighlightedOnlyOnceThePathReachesItsSubject()
+    {
+        // Arrange
+        var (name, list) = await _fixture.AddSubjectToRootAsync<ChildListSubject>();
+        try
+        {
+            list.ShownLabel = "List label";
+
+            var page = await SubjectBrowserPage.OpenAsync(_fixture, $"{name}/Items/0/Child?property=ShownLabel");
+            var panes = page.Locator("#scrollContainer [data-testid='subject-pane']");
+            var highlighted = page.Locator("[data-testid='subject-pane-value'][data-highlighted='true']");
+            await Assertions.Expect(panes).ToHaveCountAsync(2);
+            await Assertions.Expect(highlighted).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+
+            // Act
+            list.Items = [CreateItem("Item child")];
+
+            // Assert
+            await Assertions.Expect(panes).ToHaveCountAsync(4);
+            await Assertions.Expect(highlighted).ToHaveCountAsync(1);
+            await Assertions.Expect(panes.Last.Locator("[data-testid='subject-pane-value'][data-highlighted='true']")
+                .GetByTestId("subject-pane-value-name")).ToHaveTextAsync("ShownLabel");
+        }
+        finally
+        {
+            _fixture.RemoveSubjectFromRoot(name, list);
+        }
+    }
+
+    private static NestedConfigurationSubject CreateItem(string childLabel)
+        => new() { Child = new NestedConfigurationChild { Label = childLabel } };
+
     private static ILocator GetValueText(IPage page, ILocator pane, string displayName)
         => pane.GetByTestId("subject-pane-value")
             .Filter(new() { Has = page.GetByTestId("subject-pane-value-name").GetByText(displayName, new() { Exact = true }) })
