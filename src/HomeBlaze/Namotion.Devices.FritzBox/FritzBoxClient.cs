@@ -33,6 +33,9 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
         Port = null;
         LinkSpeed = null;
         DevicePath = null;
+        HasInternetAccess = null;
+        IsInternetAccessBlocked = null;
+        AccessProfile = null;
     }
 
     [State(Position = 400)]
@@ -114,6 +117,30 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     public bool IsPrivateMacAddress => _isPrivateMacAddress;
 
     /// <summary>
+    /// Whether the router lets the device reach the internet, as decided by <see cref="IsInternetAccessBlocked"/> and
+    /// the rules of its <see cref="AccessProfile"/>; null when the router does not report it.
+    /// </summary>
+    [State(Position = 410)]
+    [Category("Internet")]
+    public partial bool? HasInternetAccess { get; internal set; }
+
+    /// <summary>
+    /// Whether the internet access of the device is blocked on its own, regardless of its access profile; null when the
+    /// router does not report it. Not blocked does not mean access: the access profile may still deny it, see
+    /// <see cref="HasInternetAccess"/>.
+    /// </summary>
+    [State(Position = 411)]
+    [Category("Internet")]
+    public partial bool? IsInternetAccessBlocked { get; internal set; }
+
+    /// <summary>
+    /// The name of the access profile (filter profile) of the device, null when the router does not report it.
+    /// </summary>
+    [State(Position = 412)]
+    [Category("Internet")]
+    public partial string? AccessProfile { get; internal set; }
+
+    /// <summary>
     /// Whether the router no longer lists the device, see <see cref="Depart"/>.
     /// </summary>
     internal bool IsDeparted { get; private set; }
@@ -127,7 +154,10 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     [Derived]
     public string? IconColor => IsPresent == true ? "Success" : null;
 
-    internal void Update(HostEntry host, ClientPosition? position)
+    /// <param name="host">The host list entry of the device.</param>
+    /// <param name="position">Where the mesh list places the device, null when it does not.</param>
+    /// <param name="filterProfiles">The names of the filter profiles by ID, null when the router did not return them.</param>
+    internal void Update(HostEntry host, ClientPosition? position, IReadOnlyDictionary<string, string>? filterProfiles = null)
     {
         var interfaceType = FritzBoxInterfaceTypes.Parse(host.InterfaceType);
 
@@ -144,6 +174,9 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
         Band = position?.Band;
         Port = GetPort(host, position);
         LinkSpeed = GetLinkSpeed(host, position);
+        HasInternetAccess = host.HasWanAccess;
+        IsInternetAccessBlocked = host.IsWanAccessDisallowed;
+        AccessProfile = GetAccessProfile(host, filterProfiles);
     }
 
     /// <summary>
@@ -160,6 +193,11 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
         Port = null;
         LinkSpeed = null;
     }
+
+    private static string? GetAccessProfile(HostEntry host, IReadOnlyDictionary<string, string>? filterProfiles) =>
+        host.FilterProfileId is { } id && filterProfiles is not null && filterProfiles.TryGetValue(id.Trim(), out var name)
+            ? name
+            : null;
 
     private static bool? GetIsWireless(FritzBoxInterfaceType interfaceType, ClientPosition? position)
     {

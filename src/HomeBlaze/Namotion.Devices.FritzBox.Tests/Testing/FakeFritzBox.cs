@@ -67,6 +67,11 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     internal string MeshListJson { get; set; } = Fixtures.Read("meshlist.json");
 
     /// <summary>
+    /// The value of <c>NewFilterProfileList</c> that <c>GetFilterProfiles</c> returns.
+    /// </summary>
+    internal string FilterProfilesXml { get; set; } = Fixtures.Read("filterprofiles.xml");
+
+    /// <summary>
     /// The values of an answer by <c>serviceType#action</c>, overriding the defaults.
     /// </summary>
     internal ConcurrentDictionary<string, string> Answers { get; } = new(StringComparer.Ordinal);
@@ -414,6 +419,8 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
             ("urn:dslforum-org:service:WLANConfiguration:2", "GetTotalAssociations") => "<NewTotalAssociations>5</NewTotalAssociations>",
             (GuestWlanServiceType, "GetTotalAssociations") => "<NewTotalAssociations>0</NewTotalAssociations>",
             (Tr64Services.Hosts, "X_AVM-DE_GetHostListPath") => $"<NewX_AVM-DE_HostListPath>{WebUtility.HtmlEncode(HostListPath)}</NewX_AVM-DE_HostListPath>",
+            (Tr64Services.HostFilter, "GetFilterProfiles") =>
+                $"<NewFilterProfileList>{WebUtility.HtmlEncode(FilterProfilesXml)}</NewFilterProfileList>",
             (Tr64Services.Hosts, "X_AVM-DE_GetMeshListPath") => $"<NewX_AVM-DE_MeshListPath>{WebUtility.HtmlEncode(MeshListPath)}</NewX_AVM-DE_MeshListPath>",
             _ => null
         };

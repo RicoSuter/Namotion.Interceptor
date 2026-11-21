@@ -14,6 +14,30 @@ namespace Namotion.Devices.FritzBox.Tests;
 public class FritzBoxMergeTests
 {
     [Fact]
+    public void WhenASnapshotWithFilterProfilesIsApplied_ThenEveryClientShowsItsInternetAccessAndAccessProfile()
+    {
+        // Arrange
+        var router = CreateRouter();
+        var filterProfiles = new Dictionary<string, string> { ["filtprof1"] = "Standard", ["filtprof2"] = "Gast" };
+
+        // Act
+        router.ApplySnapshot(Snapshots.Create() with { FilterProfiles = filterProfiles }, router.WlanCommandGeneration);
+
+        // Assert
+        var laptop = router.Clients[Snapshots.Laptop];
+        Assert.True(laptop.HasInternetAccess);
+        Assert.False(laptop.IsInternetAccessBlocked);
+        Assert.Equal("Standard", laptop.AccessProfile);
+        var desktop = router.Clients[Snapshots.Desktop];
+        Assert.False(desktop.HasInternetAccess);
+        Assert.True(desktop.IsInternetAccessBlocked);
+        var phone = router.Clients[Snapshots.Phone];
+        Assert.False(phone.HasInternetAccess);
+        Assert.False(phone.IsInternetAccessBlocked);
+        Assert.Equal("Gast", phone.AccessProfile);
+    }
+
+    [Fact]
     public void WhenASnapshotIsApplied_ThenClientsAccessPointsAndWlansAreCreated()
     {
         // Arrange

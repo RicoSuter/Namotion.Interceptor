@@ -77,7 +77,7 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 
 - **FRITZ!Box:** connection, internet state, present and total clients, current upload and download rates, external IP, a link to the router's own web UI.
 - **Access point:** model, uplink type and speed, number of connected clients.
-- **Client:** presence, IP address, access point name and band or LAN port, link speed.
+- **Client:** presence, a "No internet" chip while the router denies internet access, IP address, access point name and band or LAN port, link speed, access profile.
 - **WLAN:** band, channel and clients; the guest WLAN has an on/off switch, which acts directly without confirmation.
 
 ## Interfaces
@@ -119,6 +119,9 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 | `Band`, `Port` | | WLAN band or LAN port, empty while absent; a client the mesh list does not place has no band but can have the host list's port, see [How It Works](#how-it-works) |
 | `LinkSpeed` | Mbit/s | Current link speed; a client the mesh list does not place falls back to the host list's speed while present |
 | `DevicePath` | | Path of the subject of this device, see [Linked Devices](#linked-devices) |
+| `HasInternetAccess` | | Whether the router lets the device reach the internet, from its block and the rules of its access profile; empty when the router does not report it |
+| `IsInternetAccessBlocked` | | Whether the internet access of the device is blocked on its own (the lock button in the router's device list), regardless of its access profile |
+| `AccessProfile` | | Name of the access profile (Zugangsprofil) of the device; empty when the router does not report it or the FRITZ!OS version has no host filter service |
 
 ### FritzBoxAccessPoint
 

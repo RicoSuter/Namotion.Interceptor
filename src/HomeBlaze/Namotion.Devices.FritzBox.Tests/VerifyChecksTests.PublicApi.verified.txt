@@ -171,6 +171,9 @@ namespace Namotion.Devices.FritzBox
         [HomeBlaze.Abstractions.Attributes.State(Position=403)]
         [System.ComponentModel.Category("Network")]
         public string? AccessPointName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=412)]
+        [System.ComponentModel.Category("Internet")]
+        public string? AccessProfile { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=405)]
         [System.ComponentModel.Category("Network")]
         public string? Band { get; }
@@ -179,6 +182,9 @@ namespace Namotion.Devices.FritzBox
         [System.ComponentModel.Category("Network")]
         public string? DevicePath { get; }
         public string? Gateway { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=410)]
+        [System.ComponentModel.Category("Internet")]
+        public bool? HasInternetAccess { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=400)]
         public string? HostName { get; }
         [Namotion.Interceptor.Attributes.Derived]
@@ -192,6 +198,9 @@ namespace Namotion.Devices.FritzBox
         [HomeBlaze.Abstractions.Attributes.State(Position=402)]
         [System.ComponentModel.Category("Network")]
         public bool? IsGuest { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=411)]
+        [System.ComponentModel.Category("Internet")]
+        public bool? IsInternetAccessBlocked { get; }
         public bool? IsPresent { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=409)]
         [Namotion.Interceptor.Attributes.Derived]

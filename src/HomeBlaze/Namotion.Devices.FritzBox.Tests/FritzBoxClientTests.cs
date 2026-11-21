@@ -50,6 +50,44 @@ public class FritzBoxClientTests
         Assert.True(client.IsWireless);
     }
 
+    [Fact]
+    public void WhenAClientIsUpdated_ThenItTakesItsInternetAccessAndTheNameOfItsAccessProfile()
+    {
+        // Arrange
+        var client = new FritzBoxClient("AA:AA:AA:00:00:01");
+        var host = new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", true, "laptop", "802.11", 0, 144, false, false, true, "filtprof2");
+        var filterProfiles = new Dictionary<string, string> { ["filtprof1"] = "Standard", ["filtprof2"] = "Kinder" };
+
+        // Act
+        client.Update(host, null, filterProfiles);
+
+        // Assert
+        Assert.False(client.HasInternetAccess);
+        Assert.True(client.IsInternetAccessBlocked);
+        Assert.Equal("Kinder", client.AccessProfile);
+    }
+
+    [Theory]
+    [InlineData("filtprof9", true)]
+    [InlineData("filtprof1", false)]
+    [InlineData(null, true)]
+    public void WhenTheAccessProfileCannotBeResolved_ThenItIsNull(string? filterProfileId, bool hasProfiles)
+    {
+        // Arrange
+        var client = new FritzBoxClient("AA:AA:AA:00:00:01");
+        client.Update(
+            new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", true, "laptop", "802.11", 0, 144, false, true, false, "filtprof1"),
+            null,
+            new Dictionary<string, string> { ["filtprof1"] = "Standard" });
+        var host = new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", true, "laptop", "802.11", 0, 144, false, true, false, filterProfileId);
+
+        // Act
+        client.Update(host, null, hasProfiles ? new Dictionary<string, string> { ["filtprof1"] = "Standard" } : null);
+
+        // Assert
+        Assert.Null(client.AccessProfile);
+    }
+
     [Theory]
     [InlineData("8A:F5:83:94:1E:19", true)]
     [InlineData("00:04:4B:A9:B7:3C", false)]

@@ -34,7 +34,7 @@ public partial class FritzBox
         var hosts = IndexHosts(snapshot.Hosts);
 
         // The owning collection first: a new client gets its parent edge from it before an access point shares it.
-        ApplyClients(SelectClientHosts(hosts, snapshot.Mesh), snapshot.Mesh);
+        ApplyClients(SelectClientHosts(hosts, snapshot.Mesh), snapshot.Mesh, snapshot.FilterProfiles);
         ApplyAccessPoints(snapshot.Mesh, hosts);
         ApplyWlans(snapshot.Wlans, wlanCommandGeneration);
     }
@@ -133,7 +133,7 @@ public partial class FritzBox
     /// is removed on the next, so that its final absence is recorded: history resolves the path of a change only after
     /// the change is written, and skips a subject that is detached by then.
     /// </summary>
-    private void ApplyClients(Dictionary<string, HostEntry> hosts, MeshTopology? mesh)
+    private void ApplyClients(Dictionary<string, HostEntry> hosts, MeshTopology? mesh, IReadOnlyDictionary<string, string>? filterProfiles)
     {
         var current = Clients;
         var isChanged = HasClientKeyChange(current, hosts);
@@ -151,7 +151,7 @@ public partial class FritzBox
                 mesh?.ClientPositions.TryGetValue(macAddress, out position);
             }
 
-            client.Update(host, position);
+            client.Update(host, position, filterProfiles);
             if (isChanged)
             {
                 next[macAddress] = client;

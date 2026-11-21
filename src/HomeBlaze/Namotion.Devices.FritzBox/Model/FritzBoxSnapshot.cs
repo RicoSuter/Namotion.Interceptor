@@ -5,7 +5,8 @@ namespace Namotion.Devices.FritzBox.Model;
 /// <summary>
 /// Everything one poll read from the router. A part is null when the router did not answer it, except
 /// <see cref="Wlans"/>, which is empty rather than null when unanswered, and <see cref="Router"/> and
-/// <see cref="Hosts"/>, which are required: the poll fails without them.
+/// <see cref="Hosts"/>, which are required: the poll fails without them. <see cref="FilterProfiles"/> holds the names
+/// of the filter profiles (access profiles) by ID.
 /// </summary>
 internal sealed record FritzBoxSnapshot(
     RouterInfo Router,
@@ -14,7 +15,8 @@ internal sealed record FritzBoxSnapshot(
     TrafficInfo? Traffic,
     IReadOnlyList<WlanInfo> Wlans,
     IReadOnlyList<HostEntry> Hosts,
-    MeshTopology? Mesh);
+    MeshTopology? Mesh,
+    IReadOnlyDictionary<string, string>? FilterProfiles = null);
 
 internal sealed record RouterInfo(
     string? Model,
