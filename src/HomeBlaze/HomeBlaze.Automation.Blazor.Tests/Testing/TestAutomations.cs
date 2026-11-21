@@ -13,7 +13,7 @@ internal static class TestAutomations
     public static Automation Create(Action<Automation>? configure = null)
     {
         var automation = new Automation(
-            new SubjectPathResolver(() => null),
+            new SubjectPathResolver(InterceptorSubjectContext.Create(), () => null),
             TimeProvider.System,
             new AllowAll(),
             new ServiceCollection().BuildServiceProvider(),

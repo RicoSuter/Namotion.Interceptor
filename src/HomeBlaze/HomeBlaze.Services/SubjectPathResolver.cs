@@ -28,7 +28,9 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     /// <summary>The character between the segments of a path, in both <see cref="PathStyle"/> values.</summary>
     public const char Separator = '/';
 
+    private readonly IInterceptorSubjectContext _context;
     private readonly Func<IInterceptorSubject?> _getRoot;
+    private ISubjectRegistry? _registry;
 
     // Subject → canonical paths cache (with leading /) and the route of the first caller with a recorder, see
     // GetStructureVersion for the version.
@@ -48,16 +50,24 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         .WithReadPropertyRecorder());
     private long _pathsVersionValue;
 
+    /// <param name="context">
+    /// The context of the graph. Its registry gives the parents of subjects and the version of the caches, also for a
+    /// subject whose own context does not reach it, such as while it is attached again.
+    /// </param>
     /// <param name="getRoot">
     /// Resolves the current graph root. A delegate rather than the RootManager itself, because
     /// RootManager needs this resolver registered in the context before it loads the graph, and taking
     /// RootManager here would make that a constructor cycle. Nothing is read from it until a path is
     /// actually resolved.
     /// </param>
-    public SubjectPathResolver(Func<IInterceptorSubject?> getRoot)
+    public SubjectPathResolver(IInterceptorSubjectContext context, Func<IInterceptorSubject?> getRoot)
     {
+        _context = context;
         _getRoot = getRoot;
     }
+
+    // Looked up on first use, so that the registry may be added to the context after this resolver.
+    private ISubjectRegistry? Registry => _registry ??= _context.TryGetService<ISubjectRegistry>();
 
     /// <summary>
     /// Resolves a subject from a path.
@@ -126,7 +136,8 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             // Looked up first, so that a hit allocates nothing: every render asks for the same paths again. An entry computed
             // without a recorder has no route to replay.
             var key = (path, style);
-            var version = GetStructureVersion(root);
+            var registry = Registry;
+            var version = GetStructureVersion(registry);
             if (_resolveCache.TryGetValue(key, out var cached) && cached.Version == version && (recorder is null || cached.Route is not null))
             {
                 if (recorder is not null)
@@ -139,12 +150,12 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             RecordedRoute? route = null;
             if (recorder is null)
             {
-                resolved = ResolveInternal(root, path[1..], style, null);
+                resolved = ResolveInternal(registry, root, path[1..], style, null);
             }
             else
             {
                 var buffer = RouteBuffer.Take();
-                resolved = ResolveInternal(root, path[1..], style, buffer);
+                resolved = ResolveInternal(registry, root, path[1..], style, buffer);
                 route = buffer.ToRoute(cached.Route);
                 RouteBuffer.Return(buffer);
             }
@@ -166,7 +177,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 return null;
             }
 
-            return ResolveInternal(baseSubject, path[2..], style, recorder);
+            return ResolveInternal(Registry, baseSubject, path[2..], style, recorder);
         }
 
         // Parent navigation: ../... or ".." alone
@@ -177,12 +188,13 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             if (current == null)
                 return null;
 
+            var registry = Registry;
             var remaining = path;
             while (remaining.StartsWith("../") || remaining == "..")
             {
                 var consumed = remaining.StartsWith("../") ? 3 : 2;
                 remaining = remaining[consumed..];
-                var registered = current.TryGetRegisteredSubject();
+                var registered = registry?.TryGetRegisteredSubject(current);
                 if (registered == null)
                 {
                     recorder?.MarkUnbounded();
@@ -201,7 +213,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
             if (string.IsNullOrEmpty(remaining))
                 return current;
 
-            return ResolveInternal(current, remaining, style, recorder);
+            return ResolveInternal(registry, current, remaining, style, recorder);
         }
 
         // No prefix = relative implicit
@@ -213,7 +225,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
                 return null;
             }
 
-            return ResolveInternal(baseSubject, path, style, recorder);
+            return ResolveInternal(Registry, baseSubject, path, style, recorder);
         }
     }
 
@@ -240,17 +252,19 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         ISubjectPathRecorder? recorder)
     {
         _ = _pathsVersion.Value;
-        var version = GetStructureVersion(_getRoot() ?? subject);
+        var root = _getRoot();
+        var registry = Registry;
+        var version = GetStructureVersion(registry);
         if (!_canonicalPathsCache.TryGetValue(subject, out var cached) || cached.Version != version || (recorder is not null && cached.Route is null))
         {
             if (recorder is null)
             {
-                cached = (version, ComputeCanonicalPaths(subject, null), null);
+                cached = (version, ComputeCanonicalPaths(subject, root, registry, null), null);
             }
             else
             {
                 var buffer = RouteBuffer.Take();
-                var paths = ComputeCanonicalPaths(subject, buffer);
+                var paths = ComputeCanonicalPaths(subject, root, registry, buffer);
                 cached = (version, paths, buffer.ToRoute(cached.Route));
                 RouteBuffer.Return(buffer);
             }
@@ -336,8 +350,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     // A cache entry carries the registry's version read before it was computed and is served only while that version is
     // current, so an entry computed before or during a change carries a version from before the change ended and is
     // never served after it, whenever it was added, also when this resolver is not registered as a lifecycle handler.
-    private static long GetStructureVersion(IInterceptorSubject subject)
-        => subject.Context.TryGetService<ISubjectRegistry>()?.StructureVersion ?? 0;
+    private static long GetStructureVersion(ISubjectRegistry? registry) => registry?.StructureVersion ?? 0;
 
     /// <summary>
     /// Gets a number that changes whenever the paths of subjects may have changed. Reading it in a render makes the
@@ -365,12 +378,12 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         return sb.ToString();
     }
 
-    private IInterceptorSubject? ResolveInternal(IInterceptorSubject baseSubject, string path, PathStyle style, ISubjectPathRecorder? recorder)
+    private static IInterceptorSubject? ResolveInternal(
+        ISubjectRegistry? registry, IInterceptorSubject baseSubject, string path, PathStyle style, ISubjectPathRecorder? recorder)
     {
         if (string.IsNullOrEmpty(path))
             return baseSubject;
 
-        var registry = baseSubject.Context.TryGetService<ISubjectRegistry>();
         if (registry == null)
         {
             recorder?.MarkUnbounded();
@@ -485,15 +498,13 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         return current;
     }
 
-    private IReadOnlyList<string> ComputeCanonicalPaths(IInterceptorSubject subject, ISubjectPathRecorder? recorder)
+    private static IReadOnlyList<string> ComputeCanonicalPaths(
+        IInterceptorSubject subject, IInterceptorSubject? root, ISubjectRegistry? registry, ISubjectPathRecorder? recorder)
     {
-        var root = _getRoot();
-
         // Root subject's canonical path is "/"
         if (subject == root)
             return ["/"];
 
-        var registry = subject.Context.TryGetService<ISubjectRegistry>();
         if (registry == null)
         {
             recorder?.MarkUnbounded();
@@ -547,7 +558,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         return paths.Count > 0 ? paths : Array.Empty<string>();
     }
 
-    private bool BuildPathRecursive(
+    private static bool BuildPathRecursive(
         IInterceptorSubject currentSubject,
         SubjectPropertyParent parent,
         List<string> pathSegments,

@@ -47,7 +47,7 @@ public class SubjectTableRowsTests
             Children = new Dictionary<string, IInterceptorSubject> { ["devices"] = devices, ["table"] = table }
         };
 
-        return new Graph(new SubjectPathResolver(() => root), table, pump, fan, note);
+        return new Graph(new SubjectPathResolver(_context, () => root), table, pump, fan, note);
     }
 
     private static string[] GetNames(IEnumerable<SubjectPropertyChild> rows) =>

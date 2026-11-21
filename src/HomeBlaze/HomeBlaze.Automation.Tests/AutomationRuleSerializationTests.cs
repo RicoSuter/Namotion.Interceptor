@@ -4,6 +4,7 @@ using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Automation.Tests;
 
@@ -16,7 +17,7 @@ public sealed class AutomationRuleSerializationTests : IDisposable
     private static ServiceProvider CreateServices()
     {
         var services = new ServiceCollection();
-        services.AddSingleton(new SubjectPathResolver(() => null));
+        services.AddSingleton(new SubjectPathResolver(InterceptorSubjectContext.Create(), () => null));
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         services.AddHomeBlazeAutomation();
         return services.BuildServiceProvider();

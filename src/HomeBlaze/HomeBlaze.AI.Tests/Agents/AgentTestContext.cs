@@ -173,7 +173,7 @@ internal sealed class AgentTestContext<TAgent> : IAsyncDisposable
                 handler => handler is PropertyAttributeInitializer);
 
         var root = new AgentTestRoot(context);
-        context.AddService(new SubjectPathResolver(() => root));
+        context.AddService(new SubjectPathResolver(context, () => root));
         if (hasDataDirectory)
         {
             context.AddService<IDataDirectoryProvider>(new TestDataDirectory(dataDirectory));

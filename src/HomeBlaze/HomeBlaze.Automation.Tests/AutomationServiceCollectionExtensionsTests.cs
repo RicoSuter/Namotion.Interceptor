@@ -4,6 +4,7 @@ using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Automation.Tests;
 
@@ -12,7 +13,7 @@ public class AutomationServiceCollectionExtensionsTests
     private static ServiceCollection CreateServices()
     {
         var services = new ServiceCollection();
-        services.AddSingleton(new SubjectPathResolver(() => null));
+        services.AddSingleton(new SubjectPathResolver(InterceptorSubjectContext.Create(), () => null));
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         return services;
     }
@@ -59,7 +60,7 @@ public class AutomationServiceCollectionExtensionsTests
 
         // Act
         using var automation = new Automation(
-            new SubjectPathResolver(() => null), TimeProvider.System, new AllowAllAutomationAuthorizer(), provider, NullLogger<Automation>.Instance);
+            new SubjectPathResolver(InterceptorSubjectContext.Create(), () => null), TimeProvider.System, new AllowAllAutomationAuthorizer(), provider, NullLogger<Automation>.Instance);
 
         // Assert
         Assert.Same(AutomationChangeDispatcher.From(provider), automation.ChangeDispatcher);

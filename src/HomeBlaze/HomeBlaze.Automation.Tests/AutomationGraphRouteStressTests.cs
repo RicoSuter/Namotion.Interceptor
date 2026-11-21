@@ -200,7 +200,7 @@ public class AutomationGraphRouteStressTests(ITestOutputHelper output)
         /// </summary>
         public List<string> FindStale()
         {
-            var fresh = new SubjectPathResolver(() => Graph.Root);
+            var fresh = new SubjectPathResolver(Graph.Context, () => Graph.Root);
             var stale = new List<string>();
             foreach (var automation in _automations)
             {

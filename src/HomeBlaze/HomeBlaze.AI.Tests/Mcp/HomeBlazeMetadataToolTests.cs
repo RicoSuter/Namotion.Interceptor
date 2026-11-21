@@ -357,7 +357,7 @@ public sealed class HomeBlazeMetadataToolTests : IDisposable
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         AgentTestRoot? root = null;
-        var pathResolver = new SubjectPathResolver(() => root);
+        var pathResolver = new SubjectPathResolver(context, () => root);
         context.AddService<ISubjectPathResolver>(pathResolver);
         services.AddSingleton(pathResolver);
         services.AddSingleton<MarkdownContentParser>();

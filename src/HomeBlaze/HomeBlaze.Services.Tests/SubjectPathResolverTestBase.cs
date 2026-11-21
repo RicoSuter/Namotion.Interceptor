@@ -31,7 +31,7 @@ public abstract class SubjectPathResolverTestBase
 
         // The resolver reads the root lazily, so it can be built before the manager that owns it.
         RootManager? rootManager = null;
-        Resolver = new SubjectPathResolver(() => rootManager!.Root);
+        Resolver = new SubjectPathResolver(Context, () => rootManager!.Root);
         RootManager = rootManager = new RootManager(typeRegistry, serializer, Context, Resolver, null);
 
         Context.WithService(() => RootManager);

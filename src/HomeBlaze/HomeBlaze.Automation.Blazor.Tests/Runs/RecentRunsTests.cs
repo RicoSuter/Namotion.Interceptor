@@ -35,7 +35,7 @@ public class RecentRunsTests
         var (automation, _) = CreateAutomation();
 
         // Act
-        var result = await RecentRuns.LoadAsync(automation, new SubjectPathResolver(() => null), Now, CancellationToken.None);
+        var result = await RecentRuns.LoadAsync(automation, new SubjectPathResolver(InterceptorSubjectContext.Create(), () => null), Now, CancellationToken.None);
 
         // Assert
         Assert.False(result.HasHistory);
@@ -57,7 +57,7 @@ public class RecentRunsTests
         SetRunProperty(finished, nameof(AutomationRule.LastRunOutcome), AutomationRunOutcome.Succeeded);
         SetRunProperty(finished, nameof(AutomationRule.LastRunMessage), "Ran ChangeState(Idle)");
         var keyAfter = RecentRuns.GetKey(automation);
-        var result = await RecentRuns.LoadAsync(automation, new SubjectPathResolver(() => null), Now, CancellationToken.None);
+        var result = await RecentRuns.LoadAsync(automation, new SubjectPathResolver(InterceptorSubjectContext.Create(), () => null), Now, CancellationToken.None);
 
         // Assert
         Assert.NotEqual(keyBefore, keyAfter);

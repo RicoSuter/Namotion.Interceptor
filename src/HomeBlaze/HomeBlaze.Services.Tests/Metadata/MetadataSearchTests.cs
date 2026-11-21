@@ -148,7 +148,7 @@ public class MetadataSearchTests
         };
         if (withResolver)
         {
-            var resolver = new SubjectPathResolver(() => applicationRoot);
+            var resolver = new SubjectPathResolver(context, () => applicationRoot);
             context.WithService<ISubjectPathResolver>(() => resolver);
         }
 

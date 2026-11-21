@@ -230,7 +230,7 @@ public class StorageReconcilerTests : StorageTestBase
         var storage = await ConnectAsync();
         var house = Assert.IsType<VirtualFolder>(storage.Children["House"]);
         var device = Assert.IsType<InjectedDevice>(((VirtualFolder)house.Children["Kitchen"]).Children["Dishwasher"]);
-        var resolver = new SubjectPathResolver(() => storage);
+        var resolver = new SubjectPathResolver(Context!, () => storage);
 
         // Act
         File.Move(GetFullPath("House/Kitchen/Dishwasher.json"), GetFullPath("House/Dishwasher.json"));

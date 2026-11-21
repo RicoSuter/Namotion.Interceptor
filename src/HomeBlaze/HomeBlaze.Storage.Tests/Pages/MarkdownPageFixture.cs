@@ -47,7 +47,7 @@ public sealed class MarkdownPageFixture
         services.AddSingleton(context);
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
-        services.AddSingleton(_ => new SubjectPathResolver(() => storage));
+        services.AddSingleton(_ => new SubjectPathResolver(context, () => storage));
         services.AddSingleton<RootManager>();
         services.AddSingleton<MarkdownContentParser>();
         configureServices?.Invoke(services);

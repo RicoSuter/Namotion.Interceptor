@@ -38,7 +38,7 @@ public class ConfigurableSubjectStartupTests
         RootManager? manager = null;
         using var rootManager = manager = new RootManager(new SubjectTypeRegistry(types),
             new ConfigurableSubjectSerializer(types, provider), context,
-            new SubjectPathResolver(() => manager?.Root), configuration.Object);
+            new SubjectPathResolver(context, () => manager?.Root), configuration.Object);
         var published = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         probe.Starting = subject => published.TrySetResult(ReferenceEquals(rootManager.Root, subject) &&
             ReferenceEquals(context.TryGetService<ConfigurableStartupSubject>(), subject) &&
