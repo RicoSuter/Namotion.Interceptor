@@ -614,7 +614,7 @@
             var property = _panes[i - 1].Subject.TryGetRegisteredSubject()?.TryGetProperty(pane.PropertyName!);
             if (property is not { CanContainSubjects: true })
             {
-                ClosePanesFrom(i);
+                RemovePanesFrom(i);
                 return true;
             }
 
@@ -628,7 +628,7 @@
 
             if (subject is null)
             {
-                ClosePanesFrom(i);
+                RemovePanesFrom(i);
                 return true;
             }
 
@@ -639,14 +639,6 @@
         }
 
         return hasChanged;
-    }
-
-    private void ClosePanesFrom(int index)
-    {
-        RemovePanesFrom(index);
-
-        // The highlighted property is one of the last pane, which is closed now.
-        _highlightedProperty = null;
     }
 
     private static bool ContainsChild(RegisteredSubjectProperty property, IInterceptorSubject subject)
