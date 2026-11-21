@@ -3,6 +3,7 @@ using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.FritzBox.Client;
 using Namotion.Devices.FritzBox.Parsing;
+using Namotion.Devices.Upnp;
 using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Devices.FritzBox;
@@ -10,6 +11,7 @@ namespace Namotion.Devices.FritzBox;
 public partial class FritzBox
 {
     private const int MaximumConsecutivePollFailures = 3;
+    private const int NoSuchEntryErrorCode = 714;
     private const string NoPasswordMessage = "No password configured.";
     private const string UnsavedCertificateWarning = "The trusted certificate could not be saved and is trusted anew after a restart.";
 
@@ -30,7 +32,8 @@ public partial class FritzBox
 
     /// <summary>
     /// Raised by every successful command, so a poll that read the state a command changed before it does not write it
-    /// back.
+    /// back. It is shared by all commands: after any command, the next poll leaves every switch state and internet access
+    /// as it is, and the poll after that writes them.
     /// </summary>
     internal long CommandGeneration => Interlocked.Read(ref _commandGeneration);
 
@@ -69,18 +72,20 @@ public partial class FritzBox
     }
 
     /// <summary>
-    /// Blocks or allows the internet access of a client by its IP address. Throws <see cref="InvalidOperationException"/>
-    /// while the router is not connected or reports no IP address for the client.
+    /// Blocks or allows the internet access of a client by the IP address the router currently lists for its MAC
+    /// address. Throws <see cref="InvalidOperationException"/> while the router is not connected, no longer lists the
+    /// client or lists it without an IP address.
     /// </summary>
     internal async Task SetInternetAccessBlockedAsync(FritzBoxClient client, bool isBlocked, CancellationToken cancellationToken)
     {
-        var ipAddress = client.IpAddress
-            ?? throw new InvalidOperationException("The FRITZ!Box reports no IP address for this device.");
         await _connectionGate.WaitAsync(cancellationToken);
         try
         {
             var connection = _connection
                 ?? throw new InvalidOperationException("The FRITZ!Box is not connected. Try again when its status is Running.");
+
+            // The polled IP address may be stale and by now belong to another device, which the command would hit.
+            var ipAddress = await GetCurrentIpAddressAsync(connection, client.MacAddress, cancellationToken);
             (string Name, string Value)[] address = [("NewIPv4Address", ipAddress)];
             await connection.InvokeAsync(
                 Tr64Services.HostFilter, "DisallowWANAccessByIP", [.. address, ("NewDisallow", isBlocked ? "1" : "0")], cancellationToken);
@@ -99,6 +104,23 @@ public partial class FritzBox
         {
             _connectionGate.Release();
         }
+    }
+
+    private static async Task<string> GetCurrentIpAddressAsync(
+        FritzBoxConnection connection, string macAddress, CancellationToken cancellationToken)
+    {
+        UpnpSoapResponse answer;
+        try
+        {
+            answer = await connection.QueryAsync(Tr64Services.Hosts, "GetSpecificHostEntry", [("NewMACAddress", macAddress)], cancellationToken);
+        }
+        catch (UpnpFaultException exception) when (exception.ErrorCode == NoSuchEntryErrorCode)
+        {
+            throw new InvalidOperationException("The FRITZ!Box no longer lists this device.", exception);
+        }
+
+        return StringValues.NullIfBlank(answer.GetString("NewIPAddress"))?.Trim()
+            ?? throw new InvalidOperationException("The FRITZ!Box lists no IP address for this device.");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

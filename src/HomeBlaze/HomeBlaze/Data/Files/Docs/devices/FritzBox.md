@@ -120,7 +120,7 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 | `LinkSpeed` | Mbit/s | Current link speed; a client the mesh list does not place falls back to the host list's speed while present |
 | `DevicePath` | | Path of the subject of this device, see [Linked Devices](#linked-devices) |
 | `HasInternetAccess` | | Whether the router lets the device reach the internet, from its block and the rules of its access profile; empty when the router does not report it |
-| `IsInternetAccessBlocked` | | Whether the internet access of the device is blocked on its own (the lock button in the router's device list), regardless of its access profile |
+| `IsInternetAccessBlocked` | | Whether the internet access of the device is blocked on its own (the lock button in the router's device list), regardless of its access profile; empty when the router does not report it |
 | `AccessProfile` | | Name of the access profile (Zugangsprofil) of the device; empty when the router does not report it or the FRITZ!OS version has no host filter service |
 
 ### FritzBoxAccessPoint
@@ -145,7 +145,7 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 
 | Subject | Operation | Description |
 |---|---|---|
-| `FritzBoxClient` | `BlockInternetAccess`, `AllowInternetAccess` | Blocks or allows the internet access of the device by its IP address, like the lock button in the router's device list. Both require confirmation in the operations panel and cannot be called by AI agents or over MCP: blocking can cut off a device, also the host HomeBlaze runs on, and allowing lifts a deliberate block. Allowing lifts only the block; the access profile may still deny access. The router applies the change asynchronously, so `HasInternetAccess` may follow only with the next poll. The router refuses it for FRITZ! devices. |
+| `FritzBoxClient` | `BlockInternetAccess`, `AllowInternetAccess` | Blocks or allows the internet access of the device by the IP address the router currently lists for its MAC address, like the lock button in the router's device list. Both require confirmation in the operations panel and cannot be called by AI agents or over MCP: blocking can cut off a device, also the host HomeBlaze runs on, and allowing lifts a deliberate block. Allowing lifts only the block; the access profile may still deny access. The router applies the change asynchronously, so `HasInternetAccess` may follow only with the next poll. The router refuses it for FRITZ! devices. |
 | `FritzBoxGuestWlan` | `TurnOn`, `TurnOff`, `Toggle` | Switches the guest WLAN. `TurnOn` and `Toggle` require confirmation in the operations panel and cannot be called by AI agents or over MCP, `TurnOff` does not; the switch on the dashboard widget acts directly. The main bands cannot be switched, because switching one off can cut off the connection HomeBlaze itself uses. |
 
 Operations that require confirmation cannot be called through MCP, neither by [AI agents](../administration/ai-agents.md#tools-and-permissions) nor by external clients; turning the guest WLAN off stays available to them.
@@ -185,7 +185,8 @@ HomeBlaze connects to the router on TCP port 49000 (description, unauthenticated
 | "Data may be stale (n of 3)" | A poll failed; after three in a row the connection is reset and retried after `RetryInterval`. |
 | Internet values, rates and line speed stay empty | The subject is a FRITZ!Repeater, which offers no internet services, or the user cannot read those services on the router. |
 | "The FRITZ!Box is not connected. Try again when its status is Running." when switching the guest WLAN | The router is not connected right now; the switch works again once `Status` is Running. |
-| "The FRITZ!Box reports no IP address for this device." when blocking or allowing internet access | The router lists the device without an IPv4 address; the host filter addresses devices by it. |
+| "The FRITZ!Box lists no IP address for this device." when blocking or allowing internet access | The router lists the device without an IPv4 address; the host filter addresses devices by it. |
+| "The FRITZ!Box no longer lists this device." when blocking or allowing internet access | The router removed the device from its host list. |
 | "The device refused DisallowWANAccessByIP..." | The router refused the command with the UPnP error shown; error 880 means the device is a FRITZ! or powerline device, whose internet access cannot be blocked, and 501 that the router runs in IP client mode. |
 | "The device refused SetEnable..." when switching the guest WLAN | The router refused the command with the UPnP error shown; "action not authorized (UPnP error 606)" means the user lacks the FRITZ!Box settings permission. |
 

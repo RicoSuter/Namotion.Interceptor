@@ -38,6 +38,20 @@ public class FritzBoxMergeTests
     }
 
     [Fact]
+    public void WhenAPollCouldNotReadTheFilterProfiles_ThenTheClientsKeepTheirAccessProfile()
+    {
+        // Arrange
+        var router = CreateRouter();
+        router.ApplySnapshot(Snapshots.Create() with { FilterProfiles = new Dictionary<string, string> { ["filtprof1"] = "Standard" } }, router.CommandGeneration);
+
+        // Act
+        router.ApplySnapshot(Snapshots.Create() with { FilterProfiles = null }, router.CommandGeneration);
+
+        // Assert
+        Assert.Equal("Standard", router.Clients[Snapshots.Laptop].AccessProfile);
+    }
+
+    [Fact]
     public void WhenASnapshotIsApplied_ThenClientsAccessPointsAndWlansAreCreated()
     {
         // Arrange

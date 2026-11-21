@@ -7,6 +7,7 @@ public partial class FritzBox
 {
     // Read and written by the polling loop only.
     private string? _stateSerialNumber;
+    private IReadOnlyDictionary<string, string>? _filterProfiles;
 
     /// <summary>
     /// Writes one poll onto the subjects. Existing subjects are patched in place, and a collection is replaced only
@@ -34,7 +35,9 @@ public partial class FritzBox
         var hosts = IndexHosts(snapshot.Hosts);
 
         // The owning collection first: a new client gets its parent edge from it before an access point shares it.
-        ApplyClients(SelectClientHosts(hosts, snapshot.Mesh), snapshot.Mesh, snapshot.FilterProfiles, commandGeneration);
+        // A poll that could not read the profiles keeps the last names, so a transient fault does not clear them.
+        _filterProfiles = snapshot.FilterProfiles ?? _filterProfiles;
+        ApplyClients(SelectClientHosts(hosts, snapshot.Mesh), snapshot.Mesh, _filterProfiles, commandGeneration);
         ApplyAccessPoints(snapshot.Mesh, hosts);
         ApplyWlans(snapshot.Wlans, commandGeneration);
     }
@@ -42,6 +45,7 @@ public partial class FritzBox
     private void ClearRouterState()
     {
         _stateSerialNumber = null;
+        _filterProfiles = null;
         Clients = new Dictionary<string, FritzBoxClient>(StringComparer.Ordinal);
         AccessPoints = new Dictionary<string, FritzBoxAccessPoint>(StringComparer.Ordinal);
         Wlans = new Dictionary<string, FritzBoxWlan>(StringComparer.Ordinal);

@@ -16,7 +16,7 @@ internal sealed record FritzBoxSnapshot(
     IReadOnlyList<WlanInfo> Wlans,
     IReadOnlyList<HostEntry> Hosts,
     MeshTopology? Mesh,
-    IReadOnlyDictionary<string, string>? FilterProfiles = null);
+    IReadOnlyDictionary<string, string>? FilterProfiles);
 
 internal sealed record RouterInfo(
     string? Model,

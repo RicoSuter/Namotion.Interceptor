@@ -66,6 +66,19 @@ public class FilterProfileListParserTests
         Assert.Equal("Standard", profiles["filtprof1"]);
     }
 
+    [Fact]
+    public void WhenTheListStartsWithWhitespaceAndAnXmlDeclaration_ThenItIsRead()
+    {
+        // Arrange
+        const string xml = "\n <?xml version=\"1.0\"?><List><FilterProfile><FilterProfileID>filtprof1</FilterProfileID><Name>Standard</Name></FilterProfile></List>";
+
+        // Act
+        var profiles = FilterProfileListParser.Parse(xml);
+
+        // Assert
+        Assert.Equal("Standard", profiles["filtprof1"]);
+    }
+
     [Theory]
     [InlineData("<!DOCTYPE List [<!ENTITY e \"x\">]><List><FilterProfile><Name>&e;</Name></FilterProfile></List>")]
     [InlineData("<List><FilterProfile><Name>Standard</Name>")]

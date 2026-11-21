@@ -24,7 +24,9 @@ internal static class FilterProfileListParser
     internal static Dictionary<string, string> Parse(string xml)
     {
         var profiles = new Dictionary<string, string>(StringComparer.Ordinal);
-        using var stringReader = new StringReader(xml);
+
+        // An XML declaration after leading whitespace is malformed even in a fragment.
+        using var stringReader = new StringReader(xml.TrimStart());
         using var reader = XmlReader.Create(stringReader, ReaderSettings);
         reader.Read();
         while (!reader.EOF)
