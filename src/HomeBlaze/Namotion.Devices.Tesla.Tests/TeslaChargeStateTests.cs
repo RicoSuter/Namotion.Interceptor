@@ -180,7 +180,7 @@ public class TeslaChargeStateTests
         Assert.Equal(TeslaScheduledChargingMode.DepartBy, charge.ScheduledChargingMode);
         Assert.Equal("FlashingGreen", charge.ChargePortColor);
         Assert.Equal(TimeSpan.FromMinutes(450), charge.ScheduledDepartureTime);
-        Assert.Equal(TeslaScheduleDays.Weekdays, charge.OffPeakChargingDays);
+        Assert.Equal(TeslaScheduleDays.AllWeek, charge.OffPeakChargingDays); // only the JSON decides
         Assert.Equal(TimeSpan.FromHours(6), charge.OffPeakChargingEndTime);
         Assert.Equal(TeslaScheduleDays.AllWeek, charge.PreconditioningDays);
     }
@@ -248,5 +248,39 @@ public class TeslaChargeStateTests
 
         // Assert
         Assert.Null(charge.Range);
+    }
+
+    [Fact]
+    public void WhenJsonAndSnapshotDescribeTheSameRanges_ThenKilometersAreEqual()
+    {
+        // Arrange
+        var jsonCharge = new TeslaChargeState(NullLogger.Instance);
+        jsonCharge.Update(new Client.Dto.TeslaChargeStateDto
+        {
+            BatteryRange = 230.45m,
+            IdealBatteryRange = 288.07m,
+            EstBatteryRange = 201.33m,
+            ChargeMilesAddedRated = 12.35m,
+            ChargeMilesAddedIdeal = 15.44m,
+            Timestamp = 1795293677353
+        });
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353));
+        snapshot.ChargeState.BatteryRange = 230.4537f;
+        snapshot.ChargeState.IdealBatteryRange = 288.0749f;
+        snapshot.ChargeState.EstBatteryRange = 201.3349f;
+        snapshot.ChargeState.ChargeMilesAddedRated = 12.3512f;
+        snapshot.ChargeState.ChargeMilesAddedIdeal = 15.4388f;
+        var protobufCharge = new TeslaChargeState(NullLogger.Instance);
+
+        // Act
+        protobufCharge.Update(snapshot.ChargeState);
+
+        // Assert
+        Assert.NotNull(jsonCharge.Range);
+        Assert.Equal(jsonCharge.Range, protobufCharge.Range);
+        Assert.Equal(jsonCharge.IdealRange, protobufCharge.IdealRange);
+        Assert.Equal(jsonCharge.EstimatedRange, protobufCharge.EstimatedRange);
+        Assert.Equal(jsonCharge.AddedRange, protobufCharge.AddedRange);
+        Assert.Equal(jsonCharge.AddedIdealRange, protobufCharge.AddedIdealRange);
     }
 }

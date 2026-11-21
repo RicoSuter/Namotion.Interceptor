@@ -67,13 +67,6 @@ internal static class TeslaProtoValues
     public static string? ChargePortColor(ChargeState.Types.ChargePortColor_E color) =>
         Enum.IsDefined(color) ? color.ToString()[ChargePortColorPrefix.Length..] : null;
 
-    public static TeslaScheduleDays? Days(OffPeakChargingTimes times) => times.TimesCase switch
-    {
-        OffPeakChargingTimes.TimesOneofCase.AllWeek => TeslaScheduleDays.AllWeek,
-        OffPeakChargingTimes.TimesOneofCase.Weekdays => TeslaScheduleDays.Weekdays,
-        _ => null
-    };
-
     public static TeslaScheduleDays? Days(PreconditioningTimes times) => times.TimesCase switch
     {
         PreconditioningTimes.TimesOneofCase.AllWeek => TeslaScheduleDays.AllWeek,

@@ -30,6 +30,9 @@ internal static class TeslaValues
     /// <summary>Rounds a JSON value to the precision of a protobuf float, so that both sources produce the same value.</summary>
     public static decimal? ToFloatPrecision(decimal? value) => value is null ? null : Decimal((float)value.Value);
 
+    /// <summary>Converts protobuf miles to the two decimals of the JSON miles.</summary>
+    public static decimal? Miles(float value) => Decimal(value) is { } miles ? Math.Round(miles, 2, MidpointRounding.AwayFromZero) : null;
+
     public static decimal? WholeNumber(decimal? value) => value is null ? null : Math.Round(value.Value, MidpointRounding.AwayFromZero);
 
     public static decimal? MilesToKilometers(decimal? miles) => miles * KilometersPerMile;

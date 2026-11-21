@@ -300,12 +300,12 @@ public partial class TeslaChargeState : ITitleProvider, IIconProvider
 
     private void UpdateRangeFromProtobuf(ChargeState proto)
     {
-        if (proto.OptionalBatteryRangeCase != ChargeState.OptionalBatteryRangeOneofCase.None) Range = TeslaValues.MilesToKilometers(TeslaValues.Decimal(proto.BatteryRange));
-        if (proto.OptionalIdealBatteryRangeCase != ChargeState.OptionalIdealBatteryRangeOneofCase.None) IdealRange = TeslaValues.MilesToKilometers(TeslaValues.Decimal(proto.IdealBatteryRange));
-        if (proto.OptionalEstBatteryRangeCase != ChargeState.OptionalEstBatteryRangeOneofCase.None) EstimatedRange = TeslaValues.MilesToKilometers(TeslaValues.Decimal(proto.EstBatteryRange));
+        if (proto.OptionalBatteryRangeCase != ChargeState.OptionalBatteryRangeOneofCase.None) Range = TeslaValues.MilesToKilometers(TeslaValues.Miles(proto.BatteryRange));
+        if (proto.OptionalIdealBatteryRangeCase != ChargeState.OptionalIdealBatteryRangeOneofCase.None) IdealRange = TeslaValues.MilesToKilometers(TeslaValues.Miles(proto.IdealBatteryRange));
+        if (proto.OptionalEstBatteryRangeCase != ChargeState.OptionalEstBatteryRangeOneofCase.None) EstimatedRange = TeslaValues.MilesToKilometers(TeslaValues.Miles(proto.EstBatteryRange));
         if (proto.OptionalChargeEnergyAddedCase != ChargeState.OptionalChargeEnergyAddedOneofCase.None) AddedEnergy = TeslaValues.KilowattHoursToWattHours(TeslaValues.Decimal(proto.ChargeEnergyAdded));
-        if (proto.OptionalChargeMilesAddedRatedCase != ChargeState.OptionalChargeMilesAddedRatedOneofCase.None) AddedRange = TeslaValues.MilesToKilometers(TeslaValues.Decimal(proto.ChargeMilesAddedRated));
-        if (proto.OptionalChargeMilesAddedIdealCase != ChargeState.OptionalChargeMilesAddedIdealOneofCase.None) AddedIdealRange = TeslaValues.MilesToKilometers(TeslaValues.Decimal(proto.ChargeMilesAddedIdeal));
+        if (proto.OptionalChargeMilesAddedRatedCase != ChargeState.OptionalChargeMilesAddedRatedOneofCase.None) AddedRange = TeslaValues.MilesToKilometers(TeslaValues.Miles(proto.ChargeMilesAddedRated));
+        if (proto.OptionalChargeMilesAddedIdealCase != ChargeState.OptionalChargeMilesAddedIdealOneofCase.None) AddedIdealRange = TeslaValues.MilesToKilometers(TeslaValues.Miles(proto.ChargeMilesAddedIdeal));
     }
 
     private void UpdatePowerFromProtobuf(ChargeState proto)
@@ -377,9 +377,9 @@ public partial class TeslaChargeState : ITitleProvider, IIconProvider
         if (proto.OptionalScheduledDepartureTimeMinutesCase != ChargeState.OptionalScheduledDepartureTimeMinutesOneofCase.None) ScheduledDepartureTime = proto.ScheduledDepartureTime is null ? null : TeslaValues.MinutesAfterMidnight((int)proto.ScheduledDepartureTimeMinutes);
     }
 
+    // The off-peak days of the snapshot disagree with the JSON (all week versus weekdays while off-peak charging is disabled), so only the JSON sets OffPeakChargingDays.
     private void UpdateScheduleDaysFromProtobuf(ChargeState proto)
     {
-        if (proto.OffPeakChargingTimes is { } offPeakTimes && TeslaProtoValues.Days(offPeakTimes) is { } offPeakDays) OffPeakChargingDays = offPeakDays;
         if (proto.OptionalOffPeakHoursEndTimeCase != ChargeState.OptionalOffPeakHoursEndTimeOneofCase.None) OffPeakChargingEndTime = TeslaValues.MinutesAfterMidnight((int)proto.OffPeakHoursEndTime);
         if (proto.PreconditioningTimes is { } preconditioningTimes && TeslaProtoValues.Days(preconditioningTimes) is { } preconditioningDays) PreconditioningDays = preconditioningDays;
     }
