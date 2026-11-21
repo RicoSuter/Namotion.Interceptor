@@ -71,7 +71,7 @@ public partial class TeslaAccount : BackgroundService,
 
     // Configuration
 
-    /// <summary>The display name of the account; empty to show the email of the account.</summary>
+    /// <summary>The display name of the account; empty to show "Tesla: " with the email of the account.</summary>
     [Configuration]
     public partial string Name { get; set; }
 
@@ -135,7 +135,18 @@ public partial class TeslaAccount : BackgroundService,
     public partial Dictionary<string, TeslaVehicle> Vehicles { get; internal set; }
 
     [Derived]
-    public string? Title => !string.IsNullOrEmpty(Name) ? Name : AuthenticatedUser ?? "Tesla";
+    public string? Title
+    {
+        get
+        {
+            if (!string.IsNullOrEmpty(Name))
+            {
+                return Name;
+            }
+
+            return AuthenticatedUser is { } user ? $"Tesla: {user}" : "Tesla";
+        }
+    }
 
     [Derived]
     public string IconName => "DirectionsCar";

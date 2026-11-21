@@ -28,7 +28,7 @@ Refresh tokens last about three months and rotate on every refresh, so a running
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `Name` | string | "" | Display name. Empty shows the email of the account. |
+| `Name` | string | "" | Display name. Empty shows "Tesla: " with the email of the account. |
 | `Provider` | enum | `OwnerApi` | Where the data comes from. Only `OwnerApi` exists in this version. |
 | `RefreshToken` | string | "" | Refresh token of the account (stored as a secret). Tesla rotates it with every refresh and HomeBlaze stores the new one. |
 | `StatePollingInterval` | TimeSpan | 1 minute | How often the vehicle list with state and cached data is read. |

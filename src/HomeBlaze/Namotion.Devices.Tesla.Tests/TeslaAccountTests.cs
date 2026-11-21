@@ -63,6 +63,33 @@ public class TeslaAccountTests
     }
 
     [Fact]
+    public void WhenNameIsEmpty_ThenTitleShowsTheAccountEmail()
+    {
+        // Arrange
+        var (account, _, _) = Create();
+
+        // Act
+        account.AuthenticatedUser = "owner@example.com";
+
+        // Assert
+        Assert.Equal("Tesla: owner@example.com", account.Title);
+    }
+
+    [Fact]
+    public void WhenNameIsSet_ThenTitleShowsTheName()
+    {
+        // Arrange
+        var (account, _, _) = Create();
+        account.AuthenticatedUser = "owner@example.com";
+
+        // Act
+        account.Name = "Family car";
+
+        // Assert
+        Assert.Equal("Family car", account.Title);
+    }
+
+    [Fact]
     public async Task WhenPolledOnce_ThenVehiclesAreDiscoveredAndRead()
     {
         // Arrange
