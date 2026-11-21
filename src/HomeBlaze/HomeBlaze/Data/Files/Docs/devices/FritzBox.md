@@ -187,7 +187,7 @@ HomeBlaze connects to the router on TCP port 49000 (description, unauthenticated
 | "The FRITZ!Box is not connected. Try again when its status is Running." when switching the guest WLAN | The router is not connected right now; the switch works again once `Status` is Running. |
 | "The FRITZ!Box lists no IP address for this device." when blocking or allowing internet access | The router lists the device without an IPv4 address; the host filter addresses devices by it. |
 | "The FRITZ!Box no longer lists this device." when blocking or allowing internet access | The router removed the device from its host list. |
-| "The FRITZ!Box lists the last IP address of this device for another device." | The device is absent and the router has given its last address to another device. The host filter addresses devices by IP address, so the command is refused instead of hitting that device; try again when the device is connected. |
+| "The FRITZ!Box lists the last IP address of this device for another device." when blocking or allowing internet access | The device is absent and the router has given its last address to another device. The host filter addresses devices by IP address, so the command is refused instead of hitting that device; try again when the device is connected. |
 | "The device refused DisallowWANAccessByIP..." | The router refused the command with the UPnP error shown; error 880 means the device is a FRITZ! or powerline device, whose internet access cannot be blocked, and 501 that the router runs in IP client mode. |
 | "The device refused SetEnable..." when switching the guest WLAN | The router refused the command with the UPnP error shown; "action not authorized (UPnP error 606)" means the user lacks the FRITZ!Box settings permission. |
 
