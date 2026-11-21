@@ -375,6 +375,65 @@ public class TeslaAccountTests
     }
 
     [Fact]
+    public async Task WhenRefreshTokenIsReplacedDuringARotation_ThenTheRotationDoesNotOverwriteIt()
+    {
+        // Arrange
+        var tokenResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new FakeHttpMessageHandler()
+            .Respond(TokenPath, () => tokenResponse.Task)
+            .Respond(TokenPath, HttpStatusCode.OK, """{"access_token":"access-3","refresh_token":"refresh-4","expires_in":28800}""")
+            .Respond(ProductsPath, HttpStatusCode.OK, FixtureLoader.Load("products.json"))
+            .Respond(VehicleDataPath, HttpStatusCode.OK, FixtureLoader.Load("vehicle-data.json"));
+        var (account, _, _) = Create(handler);
+        var writer = new TestConfigurationWriter(InterceptorSubjectContext.Create().WithParents()) { Handler = handler, Account = account };
+        var poll = account.PollOnceAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => CountRequests(handler, TokenPath) == 1);
+
+        // Act
+        account.RefreshToken = "refresh-new";
+        tokenResponse.SetResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(TokenJson) });
+        await poll;
+        var refreshTokenAfterRotation = account.RefreshToken;
+        var writesAfterRotation = writer.Writes.Count;
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("refresh-new", refreshTokenAfterRotation);
+        Assert.Equal(0, writesAfterRotation);
+        var tokenRequests = handler.Requests.Where(request => request.PathAndQuery == TokenPath).ToArray();
+        Assert.Equal(2, tokenRequests.Length);
+        Assert.Contains("refresh_token=refresh-new", tokenRequests[1].Body);
+        Assert.Equal(["refresh-4"], writer.Writes.Select(write => write.RefreshToken));
+        Assert.Equal("refresh-4", account.RefreshToken);
+    }
+
+    [Fact]
+    public async Task WhenPollRunsDuringWakeUp_ThenItWaitsUntilTheWakeUpCompletes()
+    {
+        // Arrange
+        var (account, handler, _) = Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        var wakeUpResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.Respond(WakeUpPath, () => wakeUpResponse.Task);
+        var wakeUp = account.Vehicles.Single().Value.WakeUpAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => CountRequests(handler, WakeUpPath) == 1);
+
+        // Act
+        var poll = account.PollOnceAsync(CancellationToken.None);
+        var isPollCompletedDuringWakeUp = poll.IsCompleted;
+        var productRequestsDuringWakeUp = CountRequests(handler, ProductsPath);
+        wakeUpResponse.SetResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"response":{"state":"online"}}""") });
+        await wakeUp;
+        await poll;
+
+        // Assert
+        Assert.False(isPollCompletedDuringWakeUp);
+        Assert.Equal(1, productRequestsDuringWakeUp);
+        Assert.Equal(2, CountRequests(handler, ProductsPath));
+        Assert.Equal(ServiceStatus.Running, account.Status);
+    }
+
+    [Fact]
     public async Task WhenWakeUpIsInvoked_ThenWakeUpIsCalledOnlyThen()
     {
         // Arrange

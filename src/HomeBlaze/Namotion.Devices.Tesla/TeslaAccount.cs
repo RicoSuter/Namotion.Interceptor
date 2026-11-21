@@ -147,8 +147,9 @@ public partial class TeslaAccount : BackgroundService,
     public override void Dispose()
     {
         // Cancels the stopping token first, so that the loop does not start another poll on the disposed client.
+        // _pollLock is not disposed: it never creates a wait handle, and a poll still running when Dispose is called
+        // without StopAsync releases it afterwards.
         base.Dispose();
         _httpClient.Dispose();
-        _pollLock.Dispose();
     }
 }

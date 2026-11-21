@@ -52,9 +52,10 @@ public partial class TeslaAccount
     {
         lock (_refreshTokenLock)
         {
-            if (!ReferenceEquals(tokenManager, _tokenManager))
+            // The configured refresh token was replaced while this rotation ran, also before the next poll replaces the
+            // manager; the replacement wins. A retried write passes, because both then hold the rotated token.
+            if (!ReferenceEquals(tokenManager, _tokenManager) || RefreshToken != _tokenManagerRefreshToken)
             {
-                // The configured refresh token was replaced while this rotation ran; the replacement wins.
                 return;
             }
 

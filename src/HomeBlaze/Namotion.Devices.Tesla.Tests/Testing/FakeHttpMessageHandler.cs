@@ -9,7 +9,7 @@ namespace Namotion.Devices.Tesla.Tests.Testing;
 internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 {
     private readonly Lock _lock = new();
-    private readonly Dictionary<string, Queue<Func<HttpResponseMessage>>> _responses = new();
+    private readonly Dictionary<string, Queue<Func<Task<HttpResponseMessage>>>> _responses = new();
     private readonly List<(HttpMethod Method, string PathAndQuery, string? Body, string? Authorization)> _requests = [];
 
     /// <summary>A snapshot of the requests received so far.</summary>
@@ -40,11 +40,17 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
             return response;
         };
 
+        return Respond(path, () => Task.FromResult(factory()));
+    }
+
+    /// <summary>Queues a response that the test completes later, for example to hold a request back.</summary>
+    public FakeHttpMessageHandler Respond(string path, Func<Task<HttpResponseMessage>> factory)
+    {
         lock (_lock)
         {
             if (!_responses.TryGetValue(path, out var queue))
             {
-                _responses[path] = queue = new Queue<Func<HttpResponseMessage>>();
+                _responses[path] = queue = new Queue<Func<Task<HttpResponseMessage>>>();
             }
 
             queue.Enqueue(factory);
@@ -58,7 +64,7 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
         var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
         var path = request.RequestUri!.AbsolutePath;
 
-        Func<HttpResponseMessage>? factory = null;
+        Func<Task<HttpResponseMessage>>? factory = null;
         lock (_lock)
         {
             _requests.Add((request.Method, request.RequestUri.PathAndQuery, body, request.Headers.Authorization?.ToString()));
@@ -70,7 +76,7 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 
         if (factory is not null)
         {
-            return factory();
+            return await factory();
         }
 
         return new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("{\"error\":\"not_found\"}") };
