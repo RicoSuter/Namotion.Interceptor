@@ -529,42 +529,39 @@
         }
 
         var paneCount = _panes.Count;
-        if (FollowReplacedSubjects())
+        var hasChanged = FollowReplacedSubjects();
+        if (_panes.Count < paneCount)
         {
             // Closed like a deleted subject's pane, so that the URL and a reload show what is left.
-            if (_panes.Count < paneCount)
-            {
-                UpdateUrl();
-            }
-            else
-            {
-                RebuildBreadcrumbs();
-            }
-
-            StateHasChanged();
+            UpdateUrl();
         }
-
-        if (_isPathPending)
+        else
         {
-            AddPendingPanes();
+            var hasAddedPanes = _isPathPending && AddPendingPanes();
+            if (!hasChanged && !hasAddedPanes)
+            {
+                return;
+            }
+
+            RebuildBreadcrumbs();
         }
+
+        StateHasChanged();
     }
 
-    // Adds the panes of Path that exist now, keeping the panes when no further one does.
-    private void AddPendingPanes()
+    // Adds the panes of Path that exist now after the open panes. Returns whether it added one.
+    private bool AddPendingPanes()
     {
         var panes = new List<SubjectPane>();
         _isPathPending = !BuildPanesFromPath(panes);
         if (panes.Count <= _panes.Count)
         {
-            return;
+            return false;
         }
 
-        _panes.Clear();
-        _panes.AddRange(panes);
-        RebuildBreadcrumbs();
+        _panes.AddRange(panes.GetRange(_panes.Count, panes.Count - _panes.Count));
         ScrollToLastPaneAfterRender();
-        StateHasChanged();
+        return true;
     }
 
     // Replaces the subject of each pane that its property and index no longer reach, and closes the panes from the first
