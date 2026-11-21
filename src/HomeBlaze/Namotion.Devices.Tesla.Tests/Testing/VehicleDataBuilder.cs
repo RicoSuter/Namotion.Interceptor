@@ -25,6 +25,20 @@ internal static class VehicleDataBuilder
                 MinutesToChargeLimit = 90,
                 Timestamp = protoTimestamp
             },
+            ClimateState = new ClimateState
+            {
+                InsideTempCelsius = 20.5f,
+                OutsideTempCelsius = 10f,
+                IsClimateOn = true,
+                Timestamp = protoTimestamp
+            },
+            DriveState = new DriveState
+            {
+                ShiftState = new ShiftState { D = new CarServer.Void() },
+                SpeedFloat = 50f,
+                Power = 20,
+                Timestamp = protoTimestamp
+            },
             ClosuresState = new ClosuresState { Locked = false, IsUserPresent = false, Timestamp = protoTimestamp },
             LocationState = new LocationState { Latitude = 47.5f, Longitude = 8.5f, Heading = 90, Timestamp = protoTimestamp },
             TirePressureState = new TirePressureState { TpmsPressureFl = 2.8f, Timestamp = protoTimestamp }

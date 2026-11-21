@@ -80,4 +80,71 @@ internal static class TeslaProtoValues
         PreconditioningTimes.TimesOneofCase.Weekdays => TeslaScheduleDays.Weekdays,
         _ => null
     };
+
+    public static TeslaCabinOverheatProtection? CabinOverheatProtection(ClimateState.Types.CabinOverheatProtection_E protection) => protection switch
+    {
+        ClimateState.Types.CabinOverheatProtection_E.CabinOverheatProtectionOff => TeslaCabinOverheatProtection.Off,
+        ClimateState.Types.CabinOverheatProtection_E.CabinOverheatProtectionOn => TeslaCabinOverheatProtection.On,
+        ClimateState.Types.CabinOverheatProtection_E.CabinOverheatProtectionFanOnly => TeslaCabinOverheatProtection.FanOnly,
+        _ => null
+    };
+
+    public static TeslaCabinOverheatProtectionTemperature? CabinOverheatProtectionTemperature(ClimateState.Types.CopActivationTemp temperature) => temperature switch
+    {
+        ClimateState.Types.CopActivationTemp.Low => TeslaCabinOverheatProtectionTemperature.Low,
+        ClimateState.Types.CopActivationTemp.Medium => TeslaCabinOverheatProtectionTemperature.Medium,
+        ClimateState.Types.CopActivationTemp.High => TeslaCabinOverheatProtectionTemperature.High,
+        _ => null
+    };
+
+    /// <summary>Tesla calls the camp mode "party" in the snapshot and "camp" in the JSON.</summary>
+    public static TeslaClimateKeeperMode? ClimateKeeperMode(ClimateState.Types.ClimateKeeperMode mode) => mode.TypeCase switch
+    {
+        ClimateState.Types.ClimateKeeperMode.TypeOneofCase.Off => TeslaClimateKeeperMode.Off,
+        ClimateState.Types.ClimateKeeperMode.TypeOneofCase.On => TeslaClimateKeeperMode.On,
+        ClimateState.Types.ClimateKeeperMode.TypeOneofCase.Dog => TeslaClimateKeeperMode.Dog,
+        ClimateState.Types.ClimateKeeperMode.TypeOneofCase.Party => TeslaClimateKeeperMode.Camp,
+        _ => null
+    };
+
+    public static TeslaHvacAutoRequest? HvacAutoRequest(ClimateState.Types.HvacAutoRequest request) => request switch
+    {
+        ClimateState.Types.HvacAutoRequest.On => TeslaHvacAutoRequest.On,
+        ClimateState.Types.HvacAutoRequest.Override => TeslaHvacAutoRequest.Override,
+        _ => null
+    };
+
+    /// <summary>Returns the JSON number: 0 off, 1 normal, 2 max.</summary>
+    public static int? DefrostMode(ClimateState.Types.DefrostMode mode) => mode.TypeCase switch
+    {
+        ClimateState.Types.DefrostMode.TypeOneofCase.Off => 0,
+        ClimateState.Types.DefrostMode.TypeOneofCase.Normal => 1,
+        ClimateState.Types.DefrostMode.TypeOneofCase.Max => 2,
+        _ => null
+    };
+
+    /// <summary>Returns the JSON number: 0 off, 1 low, 2 high.</summary>
+    public static int? SteeringWheelHeatLevel(StwHeatLevel level) => level switch
+    {
+        StwHeatLevel.Off => 0,
+        StwHeatLevel.Low => 1,
+        StwHeatLevel.High => 2,
+        _ => null
+    };
+
+    public static TeslaShiftState? ShiftState(CarServer.ShiftState state) => state.TypeCase switch
+    {
+        CarServer.ShiftState.TypeOneofCase.P => TeslaShiftState.Park,
+        CarServer.ShiftState.TypeOneofCase.R => TeslaShiftState.Reverse,
+        CarServer.ShiftState.TypeOneofCase.N => TeslaShiftState.Neutral,
+        CarServer.ShiftState.TypeOneofCase.D => TeslaShiftState.Drive,
+        _ => null
+    };
+
+    public static TeslaGpsCoordinateType? CoordinateType(LocationState.Types.GPSCoordinateType type) => type.TypeCase switch
+    {
+        LocationState.Types.GPSCoordinateType.TypeOneofCase.WGS => TeslaGpsCoordinateType.Wgs,
+        LocationState.Types.GPSCoordinateType.TypeOneofCase.GCJ => TeslaGpsCoordinateType.Gcj,
+        _ => null
+    };
 }

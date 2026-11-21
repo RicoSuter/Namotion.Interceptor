@@ -156,4 +156,27 @@ public class TeslaValuesTests
         Assert.True(parsed.ClosuresState.HasLocked);
         Assert.Equal(timestamp, parsed.ClosuresState.Timestamp.ToDateTimeOffset());
     }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData(-1.0, null)]
+    [InlineData(0.0, 0.0)]
+    [InlineData(12.5, 12.5)]
+    public void WhenMinutesAreConverted_ThenNegativeAndMissingBecomeNull(double? minutes, double? expectedMinutes)
+    {
+        // Act
+        var result = TeslaValues.Minutes((decimal?)minutes);
+
+        // Assert
+        Assert.Equal(expectedMinutes is null ? null : TimeSpan.FromMinutes(expectedMinutes.Value), result);
+    }
+
+    [Fact]
+    public void WhenCoordinateIsMissingAPart_ThenNullIsReturned()
+    {
+        // Act & Assert
+        Assert.Null(TeslaValues.Coordinate(47m, null));
+        Assert.Null(TeslaValues.Coordinate(null, 8m));
+        Assert.Equal(new HomeBlaze.Abstractions.Common.GeoCoordinate(47.0, 8.0), TeslaValues.Coordinate(47m, 8m));
+    }
 }

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using HomeBlaze.Abstractions.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Namotion.Devices.Tesla.Mapping;
@@ -41,6 +42,12 @@ internal static class TeslaValues
 
     public static DateTimeOffset? FromUnixMilliseconds(long? milliseconds) =>
         milliseconds is > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(milliseconds.Value) : null;
+
+    public static TimeSpan? Minutes(decimal? minutes) => minutes is >= 0 ? TimeSpan.FromMinutes((double)minutes.Value) : null;
+
+    /// <returns>The coordinate, or null when the latitude or the longitude is missing.</returns>
+    public static GeoCoordinate? Coordinate(decimal? latitude, decimal? longitude) =>
+        latitude is { } latitudeValue && longitude is { } longitudeValue ? new GeoCoordinate((double)latitudeValue, (double)longitudeValue) : null;
 
     public static TimeSpan? MinutesAfterMidnight(int? minutes) => minutes is >= 0 ? TimeSpan.FromMinutes(minutes.Value) : null;
 

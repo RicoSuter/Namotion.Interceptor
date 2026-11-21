@@ -30,6 +30,12 @@ public enum TeslaCabinOverheatProtectionTemperature { Unknown, Low, Medium, High
 /// <summary>The climate keeper mode.</summary>
 public enum TeslaClimateKeeperMode { Unknown, Off, On, Dog, Camp }
 
+/// <summary>Whether the automatic climate control follows its setting or was overridden.</summary>
+public enum TeslaHvacAutoRequest { Unknown, On, Override }
+
+/// <summary>The coordinate system of the native location.</summary>
+public enum TeslaGpsCoordinateType { Unknown, Wgs, Gcj }
+
 /// <summary>The playback status of the media player.</summary>
 public enum TeslaMediaPlaybackStatus { Unknown, Stopped, Playing, Paused }
 
