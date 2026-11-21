@@ -218,7 +218,7 @@ public class NavigationTests
     public async Task WhenTheBrowserPathReachesSubjectsBeforeTheyExist_ThenTheirPanesOpenOnceTheyExist()
     {
         // Arrange
-        const string folderName = "LateBrowserFolder";
+        var folderName = $"LateBrowser{Guid.NewGuid():N}";
         var folderPath = _fixture.GetPagePath(folderName);
         var panes = (IPage page) => page.Locator("[data-testid='subject-pane']");
 

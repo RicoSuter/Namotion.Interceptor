@@ -560,6 +560,17 @@
             return false;
         }
 
+        // A pane that FollowReplacedSubjects keeps on a moved item is not the subject that Path now reaches, and the
+        // panes after it would belong to another subject.
+        for (var i = 0; i < _panes.Count; i++)
+        {
+            if (!ReferenceEquals(panes[i].Subject, _panes[i].Subject))
+            {
+                _isPathPending = false;
+                return false;
+            }
+        }
+
         // The new panes take the places of the first placeholders, like a pane that OnPropertyClick adds.
         var addedCount = panes.Count - _panes.Count;
         _panes.AddRange(panes.GetRange(_panes.Count, addedCount));
