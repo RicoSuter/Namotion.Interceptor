@@ -953,8 +953,9 @@ public class SubjectSourceBaseTests
             },
         };
 
-        // Claim ownership of the property
+        // Claim ownership of the properties
         new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(subject, nameof(Person.LastName)).SetSource(source);
 
         // Act
         await source.StartAsync(CancellationToken.None);
@@ -963,8 +964,9 @@ public class SubjectSourceBaseTests
         subject.FirstName = "FailedValue";
         await firstCallTcs.Task.WaitAsync(TestTimeout);
 
-        // Second change - triggers retry queue flush (retrying first), then writes second
-        subject.FirstName = "SecondValue";
+        // Second change - triggers retry queue flush (retrying first), then writes second. On another property,
+        // because a later write to the same one supersedes the parked write and the flush skips it.
+        subject.LastName = "SecondValue";
 
         // Wait for retry flush + new write (3 total calls)
         await thirdCallTcs.Task.WaitAsync(TestTimeout);

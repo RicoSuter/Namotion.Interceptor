@@ -4,9 +4,10 @@ namespace Namotion.Interceptor.ConnectorTester.Engine.Verification;
 
 /// <summary>
 /// Writes non-failure observations during passing cycles to findings.log.
-/// Two finding types: slow-convergence (>10s with no chaos active) and null-timestamp
+/// Three finding types: slow-convergence (>10s with no chaos active), null-timestamp
 /// (one participant has a write timestamp the other doesn't, forgiven by the
-/// null-timestamp rule).
+/// null-timestamp rule) and durability-inconclusive (lost writes from a participant whose
+/// source dropped writes in the cycle, see <see cref="WriteDurabilityResult.IsInconclusive"/>).
 /// </summary>
 public sealed class FindingsLog
 {
@@ -23,7 +24,10 @@ public sealed class FindingsLog
         _logger = logger;
     }
 
-    public void AppendIfAny(IReadOnlyList<(string Name, string Snapshot)> snapshots, TimeSpan convergeTime)
+    public void AppendIfAny(
+        IReadOnlyList<(string Name, string Snapshot)> snapshots,
+        TimeSpan convergeTime,
+        IEnumerable<WriteDurabilityResult> durabilityResults)
     {
         try
         {
@@ -45,6 +49,11 @@ public sealed class FindingsLog
                     findings.AddRange(timestampFindings.Select(finding => $"null-timestamp: {finding}"));
                 }
             }
+
+            findings.AddRange(durabilityResults
+                .Where(result => result.IsInconclusive)
+                .Select(result =>
+                    $"durability-inconclusive: {result.Participant}: {result.Violations.Count} write(s) lost, dropped-write count changed by {result.DroppedWriteCount}"));
 
             if (findings.Count == 0)
             {

@@ -1,4 +1,5 @@
 using Xunit;
+using Microsoft.Extensions.Configuration;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Connectors;
 
@@ -35,4 +36,89 @@ public class ConnectorTesterConfigurationTests
         // Act & Assert
         Assert.Throws<InvalidOperationException>(() => _ = configuration.ConnectorKind);
     }
+
+    [Theory]
+    [InlineData(0)] // random mutation
+    [InlineData(10)] // batch mutation
+    public void WhenVerifyWriteDurabilityHasMoreParticipantsThanValueProperties_ThenValidateThrows(int numberOfBatches)
+    {
+        // Arrange
+        var configuration = CreateConfiguration(verifyWriteDurability: true, clientCount: 4, numberOfBatches);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(configuration.ValidateVerifyWriteDurability);
+    }
+
+    [Theory]
+    [InlineData(false, 4, 0, 0)] // disabled, so five participants are fine
+    [InlineData(false, 4, 10, 0)]
+    [InlineData(false, 1, 0, 1)] // disabled, so structural mutations are fine
+    [InlineData(true, 3, 0, 0)] // four participants for four value properties
+    [InlineData(true, 3, 10, 0)]
+    public void WhenVerifyWriteDurabilityIsDisabledOrWithinLimits_ThenValidateDoesNotThrow(
+        bool verifyWriteDurability, int clientCount, int numberOfBatches, int structuralMutationRate)
+    {
+        // Arrange
+        var configuration = CreateConfiguration(verifyWriteDurability, clientCount, numberOfBatches);
+        configuration.Clients[0].StructuralMutationRate = structuralMutationRate;
+
+        // Act
+        var exception = Record.Exception(configuration.ValidateVerifyWriteDurability);
+
+        // Assert
+        Assert.Null(exception);
+    }
+
+    [Theory]
+    [InlineData(-1)] // server
+    [InlineData(0)] // first client
+    public void WhenVerifyWriteDurabilityHasStructuralMutations_ThenValidateThrowsNamingTheParticipant(int clientIndex)
+    {
+        // Arrange
+        var configuration = CreateConfiguration(verifyWriteDurability: true, clientCount: 2, numberOfBatches: 0);
+        var participant = clientIndex < 0 ? configuration.Server : configuration.Clients[clientIndex];
+        participant.StructuralMutationRate = 1;
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(configuration.ValidateVerifyWriteDurability);
+        Assert.Contains($"'{participant.Name}'", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("opcua-chaos", "opcua-durability")]
+    [InlineData("websocket-chaos", "websocket-durability")]
+    public void WhenDurabilityProfileIsLoaded_ThenItMatchesItsChaosProfileWithTheCheckOn(
+        string chaosProfile, string durabilityProfile)
+    {
+        // Arrange
+        var chaosSettings = LoadProfile(chaosProfile);
+        var durabilitySettings = LoadProfile(durabilityProfile);
+
+        // Act
+        var addedSettings = durabilitySettings.Except(chaosSettings).ToDictionary();
+        var removedSettings = chaosSettings.Except(durabilitySettings).ToDictionary();
+
+        // Assert
+        Assert.Equal(new Dictionary<string, string?> { ["ConnectorTester:VerifyWriteDurability"] = "True" }, addedSettings);
+        Assert.Empty(removedSettings);
+    }
+
+    private static Dictionary<string, string?> LoadProfile(string environmentName)
+        => new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: false)
+            .AddJsonFile($"appsettings.{environmentName}.json", optional: false)
+            .Build()
+            .AsEnumerable()
+            .ToDictionary();
+
+    private static ConnectorTesterConfiguration CreateConfiguration(
+        bool verifyWriteDurability, int clientCount, int numberOfBatches) => new()
+    {
+        VerifyWriteDurability = verifyWriteDurability,
+        NumberOfBatches = numberOfBatches,
+        Clients = Enumerable.Range(0, clientCount)
+            .Select(index => new ParticipantConfiguration { Name = $"client-{index}" })
+            .ToList()
+    };
 }

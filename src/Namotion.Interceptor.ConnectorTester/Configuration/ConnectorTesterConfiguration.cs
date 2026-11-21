@@ -1,4 +1,5 @@
 using Namotion.Interceptor.ConnectorTester.Connectors;
+using Namotion.Interceptor.ConnectorTester.Model;
 
 namespace Namotion.Interceptor.ConnectorTester.Configuration;
 
@@ -34,6 +35,13 @@ public class ConnectorTesterConfiguration
     public TimeSpan MutatePhaseDuration { get; set; } = TimeSpan.FromMinutes(1);
     public TimeSpan ConvergenceTimeout { get; set; } = TimeSpan.FromMinutes(1);
 
+    /// <summary>
+    /// Whether each participant writes only the <c>TestNode</c> value property at its own index and, after each
+    /// converged cycle, the write-durability oracle checks that every participant's model still holds its own last
+    /// write. Requires at most <see cref="TestNode.ValuePropertyCount"/> participants and no structural mutations.
+    /// </summary>
+    public bool VerifyWriteDurability { get; set; }
+
     public ParticipantConfiguration Server { get; set; } = new()
     {
         Name = "server",
@@ -46,4 +54,30 @@ public class ConnectorTesterConfiguration
 
     /// <summary>OPC UA specific settings, ignored by the other connectors.</summary>
     public OpcUaConfiguration OpcUa { get; set; } = new();
+
+    /// <summary>
+    /// Throws when <see cref="VerifyWriteDurability"/> is set with more participants than value properties or with
+    /// structural mutations.
+    /// </summary>
+    public void ValidateVerifyWriteDurability()
+    {
+        if (!VerifyWriteDurability)
+        {
+            return;
+        }
+
+        var participantCount = Clients.Count + 1;
+        if (participantCount > TestNode.ValuePropertyCount)
+        {
+            throw new InvalidOperationException(
+                $"VerifyWriteDurability allows at most {TestNode.ValuePropertyCount} participants, one per TestNode value property, but {participantCount} are configured.");
+        }
+
+        var structuralParticipant = Clients.Prepend(Server).FirstOrDefault(participant => participant.StructuralMutationRate > 0);
+        if (structuralParticipant is not null)
+        {
+            throw new InvalidOperationException(
+                $"VerifyWriteDurability does not support structural mutations, but participant '{structuralParticipant.Name}' sets StructuralMutationRate {structuralParticipant.StructuralMutationRate}.");
+        }
+    }
 }

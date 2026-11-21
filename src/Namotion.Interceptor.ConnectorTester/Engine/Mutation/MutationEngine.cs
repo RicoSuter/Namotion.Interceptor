@@ -1,4 +1,6 @@
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine.Mutation;
@@ -19,6 +21,7 @@ public sealed class MutationEngine : BackgroundService
     private readonly IValueMutationStrategy _valueStrategy;
     private readonly TestCycleCoordinator _coordinator;
     private readonly MutationCounters _counters;
+    private readonly WriteDurabilityLedger? _ledger;
     private readonly ILogger _logger;
     private readonly int _structuralMutationRate;
 
@@ -34,6 +37,42 @@ public sealed class MutationEngine : BackgroundService
 
     public void ResetCounters() => _counters.Reset();
 
+    /// <summary>Clears the write-durability ledger, if any.</summary>
+    public void ResetDurabilityLedger() => _ledger?.Reset();
+
+    /// <summary>
+    /// Gets whether the participant's source is synchronized (see <see cref="WriteDurabilityLedger.IsSourceSynchronized"/>),
+    /// and <c>true</c> when the engine has no write-durability ledger.
+    /// </summary>
+    public bool IsSourceSynchronized => _ledger?.IsSourceSynchronized ?? true;
+
+    /// <summary>
+    /// Checks the writes the ledger recorded against this participant's model. The result lists one line per write
+    /// the model no longer holds, prefixed with the participant name, and is empty when the engine has no ledger.
+    /// </summary>
+    public WriteDurabilityResult VerifyWriteDurability()
+    {
+        if (_ledger is null)
+        {
+            return new WriteDurabilityResult(Name, [], DroppedWriteCount: 0);
+        }
+
+        // The known nodes lag structural changes, local and remote, until the next rebuild.
+        _graph.Rebuild(_root);
+        List<TestNode> knownNodes;
+        lock (_graph.NodeLock)
+        {
+            knownNodes = _graph.KnownNodes;
+        }
+
+        var violations = _ledger.Verify(knownNodes)
+            .Select(violation => $"{Name}: {violation}")
+            .ToList();
+
+        // Read after the model, so a drop that changed what the model holds is counted.
+        return new WriteDurabilityResult(Name, violations, _ledger.DroppedWriteCount);
+    }
+
     public MutationEngine(
         TestNode root,
         ParticipantConfiguration participantConfiguration,
@@ -41,7 +80,8 @@ public sealed class MutationEngine : BackgroundService
         IValueMutationStrategy valueStrategy,
         KnownNodeGraph graph,
         MutationCounters counters,
-        ILogger logger)
+        ILogger logger,
+        WriteDurabilityLedger? ledger = null)
     {
         _root = root;
         _graph = graph;
@@ -49,6 +89,7 @@ public sealed class MutationEngine : BackgroundService
         _valueStrategy = valueStrategy;
         _coordinator = coordinator;
         _counters = counters;
+        _ledger = ledger;
         _logger = logger;
         Name = participantConfiguration.Name;
         ValueMutationRate = participantConfiguration.ValueMutationRate;
@@ -59,13 +100,16 @@ public sealed class MutationEngine : BackgroundService
         TestNode root,
         ParticipantConfiguration participantConfiguration,
         TestCycleCoordinator coordinator,
-        ILogger logger)
+        ILogger logger,
+        bool verifyWriteDurability = false,
+        ISubjectSource? source = null)
     {
         var graph = new KnownNodeGraph();
         var counters = new MutationCounters();
+        var ledger = verifyWriteDurability ? new WriteDurabilityLedger(source) : null;
         var context = ((IInterceptorSubject)root).Context;
-        var strategy = new RandomValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, logger);
-        return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger);
+        var strategy = new RandomValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, logger, ledger);
+        return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger, ledger);
     }
 
     public static MutationEngine CreateBatch(
@@ -74,13 +118,16 @@ public sealed class MutationEngine : BackgroundService
         TestCycleCoordinator coordinator,
         ILogger logger,
         int numberOfBatches,
-        int participantIndex)
+        int participantIndex,
+        bool verifyWriteDurability = false,
+        ISubjectSource? source = null)
     {
         var graph = new KnownNodeGraph();
         var counters = new MutationCounters();
+        var ledger = verifyWriteDurability ? new WriteDurabilityLedger(source) : null;
         var context = ((IInterceptorSubject)root).Context;
-        var strategy = new BatchValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, numberOfBatches, participantIndex, logger);
-        return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger);
+        var strategy = new BatchValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, numberOfBatches, participantIndex, logger, ledger);
+        return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger, ledger);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

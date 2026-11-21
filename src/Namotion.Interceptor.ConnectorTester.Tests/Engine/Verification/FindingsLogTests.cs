@@ -17,7 +17,7 @@ public class FindingsLogTests
             const string snapshot = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1}}}}""";
 
             // Act
-            log.AppendIfAny([("server", snapshot), ("client", snapshot)], TimeSpan.FromSeconds(1));
+            log.AppendIfAny([("server", snapshot), ("client", snapshot)], TimeSpan.FromSeconds(1), []);
 
             // Assert
             Assert.False(File.Exists(path));
@@ -39,7 +39,7 @@ public class FindingsLogTests
             const string snapshot = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1}}}}""";
 
             // Act
-            log.AppendIfAny([("server", snapshot), ("client", snapshot)], TimeSpan.FromSeconds(15));
+            log.AppendIfAny([("server", snapshot), ("client", snapshot)], TimeSpan.FromSeconds(15), []);
 
             // Assert
             var contents = File.ReadAllText(path);
@@ -64,12 +64,41 @@ public class FindingsLogTests
             const string clientSnap = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1}}}}""";
 
             // Act
-            log.AppendIfAny([("server", serverSnap), ("client", clientSnap)], TimeSpan.FromSeconds(2));
+            log.AppendIfAny([("server", serverSnap), ("client", clientSnap)], TimeSpan.FromSeconds(2), []);
 
             // Assert
             var contents = File.ReadAllText(path);
             Assert.Contains("Cycle 3:", contents);
             Assert.Contains("null-timestamp", contents);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void WhenADurabilityResultIsInconclusive_ThenDurabilityInconclusiveFindingWritten()
+    {
+        // Arrange
+        var path = Path.Combine(Path.GetTempPath(), $"findings-{Guid.NewGuid():N}.log");
+        try
+        {
+            var log = new FindingsLog(path, cycleNumber: () => 3, chaosActive: () => false, NullLogger.Instance);
+            const string snapshot = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1}}}}""";
+            WriteDurabilityResult[] durabilityResults =
+            [
+                new("server", [], DroppedWriteCount: 0),
+                new("client-a", ["client-a: StringValue: wrote 'a', model holds 'b'"], DroppedWriteCount: 5)
+            ];
+
+            // Act
+            log.AppendIfAny([("server", snapshot), ("client-a", snapshot)], TimeSpan.FromSeconds(1), durabilityResults);
+
+            // Assert
+            var contents = File.ReadAllText(path);
+            Assert.Contains("durability-inconclusive: client-a: 1 write(s) lost, dropped-write count changed by 5", contents);
+            Assert.DoesNotContain("server", contents);
         }
         finally
         {
