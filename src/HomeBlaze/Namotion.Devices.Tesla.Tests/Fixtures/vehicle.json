@@ -1,0 +1,21 @@
+{
+  "response": {
+    "id": 1000000000000001,
+    "vehicle_id": 2000000000000002,
+    "vin": "TESTVIN0000000001",
+    "color": null,
+    "access_type": "OWNER",
+    "display_name": "",
+    "option_codes": null,
+    "granular_access": {
+      "hide_private": false
+    },
+    "state": "online",
+    "in_service": false,
+    "id_s": "1000000000000001",
+    "calendar_enabled": true,
+    "api_version": 95,
+    "backseat_token_updated_at": null,
+    "ble_autopair_enrolled": false
+  }
+}
