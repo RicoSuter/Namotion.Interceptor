@@ -51,6 +51,10 @@ internal static class TeslaValues
     public static DateTimeOffset? FromUnixMilliseconds(long? milliseconds) =>
         milliseconds is > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(milliseconds.Value) : null;
 
+    public static TimeSpan? FromMilliseconds(long? milliseconds) => milliseconds is >= 0 ? TimeSpan.FromMilliseconds(milliseconds.Value) : null;
+
+    public static TimeSpan? FromSeconds(long? seconds) => seconds is >= 0 ? TimeSpan.FromSeconds(seconds.Value) : null;
+
     public static TimeSpan? Minutes(decimal? minutes) => minutes is >= 0 ? TimeSpan.FromMinutes((double)minutes.Value) : null;
 
     /// <returns>The coordinate, or null when the latitude or the longitude is missing.</returns>

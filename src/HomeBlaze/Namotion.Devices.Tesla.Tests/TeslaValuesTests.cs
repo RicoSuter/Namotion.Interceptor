@@ -179,4 +179,14 @@ public class TeslaValuesTests
         Assert.Null(TeslaValues.Coordinate(null, 8m));
         Assert.Equal(new HomeBlaze.Abstractions.Common.GeoCoordinate(47.0, 8.0), TeslaValues.Coordinate(47m, 8m));
     }
+
+    [Fact]
+    public void WhenDurationsAreConverted_ThenNegativeAndMissingBecomeNull()
+    {
+        // Act & Assert
+        Assert.Equal(TimeSpan.FromSeconds(2700), TeslaValues.FromSeconds(2700));
+        Assert.Equal(TimeSpan.FromMilliseconds(1500), TeslaValues.FromMilliseconds(1500));
+        Assert.Null(TeslaValues.FromSeconds(-1));
+        Assert.Null(TeslaValues.FromMilliseconds(null));
+    }
 }

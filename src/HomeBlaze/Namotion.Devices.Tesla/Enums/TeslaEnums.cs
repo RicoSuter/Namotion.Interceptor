@@ -41,3 +41,6 @@ public enum TeslaMediaPlaybackStatus { Unknown, Stopped, Playing, Paused }
 
 /// <summary>The days on which a schedule applies.</summary>
 public enum TeslaScheduleDays { Unknown, AllWeek, Weekdays }
+
+/// <summary>The progress of a software update.</summary>
+public enum TeslaSoftwareUpdateStatus { Unknown, Available, Scheduled, Installing, Downloading, DownloadingWifiWait }

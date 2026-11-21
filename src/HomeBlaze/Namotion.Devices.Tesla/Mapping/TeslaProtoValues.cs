@@ -140,4 +140,22 @@ internal static class TeslaProtoValues
         LocationState.Types.GPSCoordinateType.TypeOneofCase.GCJ => TeslaGpsCoordinateType.Gcj,
         _ => null
     };
+
+    public static TeslaMediaPlaybackStatus? MediaPlaybackStatus(CarServer.MediaPlaybackStatus status) => status switch
+    {
+        CarServer.MediaPlaybackStatus.Stopped => TeslaMediaPlaybackStatus.Stopped,
+        CarServer.MediaPlaybackStatus.Playing => TeslaMediaPlaybackStatus.Playing,
+        CarServer.MediaPlaybackStatus.Paused => TeslaMediaPlaybackStatus.Paused,
+        _ => null
+    };
+
+    public static TeslaSoftwareUpdateStatus? SoftwareUpdateStatus(SoftwareUpdateState.Types.SoftwareUpdateStatus status) => status.TypeCase switch
+    {
+        SoftwareUpdateState.Types.SoftwareUpdateStatus.TypeOneofCase.Available => TeslaSoftwareUpdateStatus.Available,
+        SoftwareUpdateState.Types.SoftwareUpdateStatus.TypeOneofCase.Scheduled => TeslaSoftwareUpdateStatus.Scheduled,
+        SoftwareUpdateState.Types.SoftwareUpdateStatus.TypeOneofCase.Installing => TeslaSoftwareUpdateStatus.Installing,
+        SoftwareUpdateState.Types.SoftwareUpdateStatus.TypeOneofCase.Downloading => TeslaSoftwareUpdateStatus.Downloading,
+        SoftwareUpdateState.Types.SoftwareUpdateStatus.TypeOneofCase.DownloadingWifiWait => TeslaSoftwareUpdateStatus.DownloadingWifiWait,
+        _ => null
+    };
 }
