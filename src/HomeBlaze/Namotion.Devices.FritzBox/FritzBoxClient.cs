@@ -163,7 +163,7 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
 
     /// <param name="host">The host list entry of the device.</param>
     /// <param name="position">Where the mesh list places the device, null when it does not.</param>
-    /// <param name="filterProfiles">The names of the filter profiles by ID, null when the router did not return them.</param>
+    /// <param name="filterProfiles">The names of the filter profiles by ID as last read, null when the router never returned them.</param>
     internal void Update(HostEntry host, ClientPosition? position, IReadOnlyDictionary<string, string>? filterProfiles)
     {
         var interfaceType = FritzBoxInterfaceTypes.Parse(host.InterfaceType);
@@ -199,7 +199,7 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     /// currently lists for <see cref="MacAddress"/>. The router applies it asynchronously, so
     /// <see cref="HasInternetAccess"/> may follow only with the next poll.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The router is not connected, no longer lists the device or lists it without an IP address.</exception>
+    /// <exception cref="InvalidOperationException">The router is not connected, no longer lists the device, lists it without an IP address, or lists its last IP address for another device.</exception>
     /// <exception cref="FritzBoxServiceUnavailableException">The router does not offer the host filter service.</exception>
     /// <exception cref="HttpRequestException">The request to the router failed.</exception>
     /// <exception cref="TimeoutException">The router did not answer in time.</exception>
@@ -213,7 +213,7 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     /// Lifts the block of <see cref="BlockInternetAccessAsync"/>. The access profile may still deny internet access, see
     /// <see cref="HasInternetAccess"/>.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The router is not connected, no longer lists the device or lists it without an IP address.</exception>
+    /// <exception cref="InvalidOperationException">The router is not connected, no longer lists the device, lists it without an IP address, or lists its last IP address for another device.</exception>
     /// <exception cref="FritzBoxServiceUnavailableException">The router does not offer the host filter service.</exception>
     /// <exception cref="HttpRequestException">The request to the router failed.</exception>
     /// <exception cref="TimeoutException">The router did not answer in time.</exception>

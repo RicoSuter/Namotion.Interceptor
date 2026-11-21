@@ -515,11 +515,32 @@ public class FritzBoxLoopTests
         var router = CreateRouter(fake);
         await using var running = await RunAsync(router);
         var laptop = await WaitForClientAsync(router, Snapshots.Laptop);
-        fake.Faults["GetSpecificHostEntry"] = 714;
+        fake.HostListXml = fake.HostListXml.Replace("AA:AA:AA:00:00:01", "AA:AA:AA:00:00:99", StringComparison.Ordinal);
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => laptop.BlockInternetAccessAsync(CancellationToken.None));
         Assert.Contains("no longer lists", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("DisallowWANAccessByIP", fake.Actions);
+    }
+
+    [Fact]
+    public async Task WhenTheLastIpAddressOfAnAbsentClientNowBelongsToAnotherDevice_ThenBlockingItThrows()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        var router = CreateRouter(fake);
+        await using var running = await RunAsync(router);
+        var laptop = await WaitForClientAsync(router, Snapshots.Laptop);
+        fake.HostListXml = fake.HostListXml
+            .Replace("<MACAddress>AA:AA:AA:00:00:01</MACAddress><Active>1</Active>", "<MACAddress>AA:AA:AA:00:00:01</MACAddress><Active>0</Active>", StringComparison.Ordinal)
+            .Replace(
+                "<Item><Index>1</Index>",
+                "<Item><Index>9</Index><IPAddress>192.168.178.20</IPAddress><MACAddress>CC:CC:CC:00:00:01</MACAddress><Active>1</Active></Item><Item><Index>1</Index>",
+                StringComparison.Ordinal);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => laptop.BlockInternetAccessAsync(CancellationToken.None));
+        Assert.Contains("another device", exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("DisallowWANAccessByIP", fake.Actions);
     }
 

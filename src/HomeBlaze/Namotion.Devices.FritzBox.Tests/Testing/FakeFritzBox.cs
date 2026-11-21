@@ -27,6 +27,10 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
 
     private const string Nonce = "4A3B2C1D0E0F1A2B";
 
+    // Returned by an answer to have the request answered with the "no such entry" fault, as the router does for an
+    // unknown host.
+    private const string NoSuchEntry = "\u0000714";
+
     private readonly WebApplication _application;
     private readonly ConcurrentDictionary<string, Hold> _holds = new(StringComparer.Ordinal);
     private int _failedLogins;
@@ -280,6 +284,12 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
         }
 
         var values = await AnswerAsync(serviceType, action, request);
+        if (values == NoSuchEntry)
+        {
+            await WriteAsync(context, StatusCodes.Status500InternalServerError, "text/xml", CreateFault(714));
+            return;
+        }
+
         if (values is null)
         {
             await WriteAsync(context, StatusCodes.Status500InternalServerError, "text/xml", CreateFault(401));
@@ -383,14 +393,10 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
             return string.Empty;
         }
 
-        if (serviceType == Tr64Services.Hosts && action == "GetSpecificHostEntry")
+        if (serviceType is Tr64Services.Hosts or Tr64Services.HostFilter &&
+            await AnswerHostAsync(action, request) is { } hostAnswer)
         {
-            return await AnswerSpecificHostEntryAsync(request);
-        }
-
-        if (serviceType == Tr64Services.HostFilter && action is "DisallowWANAccessByIP" or "GetWANAccessByIP")
-        {
-            return await AnswerInternetAccessAsync(action, request);
+            return hostAnswer;
         }
 
         if (serviceType == GuestWlanServiceType && action == "GetInfo")
@@ -442,6 +448,16 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
         };
     }
 
+    /// <returns>The answer to a host or host filter action that reads or changes the host list state, or null for any
+    /// other action.</returns>
+    private async Task<string?> AnswerHostAsync(string action, HttpRequest request) => action switch
+    {
+        "GetSpecificHostEntry" => await AnswerSpecificHostEntryAsync(request),
+        "X_AVM-DE_GetSpecificHostEntryByIP" => await AnswerSpecificHostEntryByIpAsync(request),
+        "DisallowWANAccessByIP" or "GetWANAccessByIP" => await AnswerInternetAccessAsync(action, request),
+        _ => null
+    };
+
     private async Task<string?> AnswerInternetAccessAsync(string action, HttpRequest request)
     {
         using var reader = new StreamReader(request.Body);
@@ -466,8 +482,8 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
             disallow.Replace("X_AVM-DE_Disallow", "NewDisallow", StringComparison.Ordinal);
     }
 
-    /// <returns>The IP address and activity of the host list item of the MAC address in the request, or null for an
-    /// unknown one, which is answered with a fault.</returns>
+    /// <returns>The IP address and activity of the host list item of the MAC address in the request, or
+    /// <see cref="NoSuchEntry"/> for an unknown one.</returns>
     private async Task<string?> AnswerSpecificHostEntryAsync(HttpRequest request)
     {
         using var reader = new StreamReader(request.Body);
@@ -476,10 +492,22 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
             string.Equals(MacAddressRegex().Match(entry).Groups[1].Value, macAddress, StringComparison.OrdinalIgnoreCase));
         if (item is null)
         {
-            return null;
+            return NoSuchEntry;
         }
 
         return $"<NewIPAddress>{IpAddressRegex().Match(item).Groups[1].Value}</NewIPAddress><NewActive>{ActiveRegex().Match(item).Groups[1].Value}</NewActive>";
+    }
+
+    /// <returns>The MAC address of the first host list item with the IP address in the request, or
+    /// <see cref="NoSuchEntry"/> for an unknown one.</returns>
+    private async Task<string> AnswerSpecificHostEntryByIpAsync(HttpRequest request)
+    {
+        using var reader = new StreamReader(request.Body);
+        var ipAddress = NewIpAddressRegex().Match(await reader.ReadToEndAsync()).Groups[1].Value;
+        var item = HostListXml.Split("</Item>").FirstOrDefault(entry => IpAddressRegex().Match(entry).Groups[1].Value == ipAddress);
+        return item is null
+            ? NoSuchEntry
+            : $"<NewMACAddress>{MacAddressRegex().Match(item).Groups[1].Value}</NewMACAddress><NewActive>{ActiveRegex().Match(item).Groups[1].Value}</NewActive>";
     }
 
     private string ApplyInternetAccessBlocks(string hostListXml)
@@ -568,6 +596,9 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
 
     [GeneratedRegex("<NewIPv4Address>([^<]*)</NewIPv4Address>")]
     private static partial Regex NewIpv4AddressRegex();
+
+    [GeneratedRegex("<NewIPAddress>([^<]*)</NewIPAddress>")]
+    private static partial Regex NewIpAddressRegex();
 
     [GeneratedRegex("<NewMACAddress>([^<]*)</NewMACAddress>")]
     private static partial Regex NewMacAddressRegex();

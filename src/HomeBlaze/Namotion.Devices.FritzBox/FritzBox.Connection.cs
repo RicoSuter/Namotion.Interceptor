@@ -106,21 +106,32 @@ public partial class FritzBox
         }
     }
 
+    /// <returns>The IP address the router lists for the MAC address, once it confirmed that the address maps back to
+    /// that MAC address: an absent device may still be listed with an address the router has since given to another
+    /// one.</returns>
     private static async Task<string> GetCurrentIpAddressAsync(
         FritzBoxConnection connection, string macAddress, CancellationToken cancellationToken)
     {
-        UpnpSoapResponse answer;
+        UpnpSoapResponse host;
         try
         {
-            answer = await connection.QueryAsync(Tr64Services.Hosts, "GetSpecificHostEntry", [("NewMACAddress", macAddress)], cancellationToken);
+            host = await connection.QueryAsync(Tr64Services.Hosts, "GetSpecificHostEntry", [("NewMACAddress", macAddress)], cancellationToken);
         }
         catch (UpnpFaultException exception) when (exception.ErrorCode == NoSuchEntryErrorCode)
         {
             throw new InvalidOperationException("The FRITZ!Box no longer lists this device.", exception);
         }
 
-        return StringValues.NullIfBlank(answer.GetString("NewIPAddress"))?.Trim()
+        var ipAddress = StringValues.NullIfBlank(host.GetString("NewIPAddress"))
             ?? throw new InvalidOperationException("The FRITZ!Box lists no IP address for this device.");
+        var holder = await connection.QueryAsync(Tr64Services.Hosts, "X_AVM-DE_GetSpecificHostEntryByIP", [("NewIPAddress", ipAddress)], cancellationToken);
+        if (MacAddresses.Normalize(holder.GetString("NewMACAddress")) != MacAddresses.Normalize(macAddress))
+        {
+            throw new InvalidOperationException(
+                "The FRITZ!Box lists the last IP address of this device for another device. Try again when this device is connected.");
+        }
+
+        return ipAddress;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
