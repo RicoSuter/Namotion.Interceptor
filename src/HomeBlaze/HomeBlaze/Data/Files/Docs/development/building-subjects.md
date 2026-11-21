@@ -148,7 +148,9 @@ public enum StateUnit
     VoltAmpereReactiveHour, // 2.5 kvarh (reactive energy)
     AmpereHour,             // 50 Ah (charge, battery capacity)
     WattPerSquareMeter,     // 850 W/m² (irradiance)
-    DecibelMilliwatt        // -75 dBm (received signal strength)
+    DecibelMilliwatt,       // -75 dBm (received signal strength)
+    KilometerPerHour,       // 87 km/h (vehicle speed)
+    Bar                     // 2.9 bar (tire pressure)
 }
 ```
 

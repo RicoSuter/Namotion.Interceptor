@@ -51,5 +51,15 @@ public enum StateUnit
     /// <summary>
     /// A power level in decibels relative to one milliwatt, such as the received signal strength of a radio.
     /// </summary>
-    DecibelMilliwatt
+    DecibelMilliwatt,
+
+    /// <summary>
+    /// A speed in kilometers per hour, such as the speed of a vehicle.
+    /// </summary>
+    KilometerPerHour,
+
+    /// <summary>
+    /// A pressure in bar, such as the pressure of a tire.
+    /// </summary>
+    Bar
 }
