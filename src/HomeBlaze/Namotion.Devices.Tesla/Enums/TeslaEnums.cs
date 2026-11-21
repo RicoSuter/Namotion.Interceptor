@@ -32,3 +32,6 @@ public enum TeslaClimateKeeperMode { Unknown, Off, On, Dog, Camp }
 
 /// <summary>The playback status of the media player.</summary>
 public enum TeslaMediaPlaybackStatus { Unknown, Stopped, Playing, Paused }
+
+/// <summary>The days on which a schedule applies.</summary>
+public enum TeslaScheduleDays { Unknown, AllWeek, Weekdays }

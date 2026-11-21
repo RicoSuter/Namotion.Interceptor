@@ -32,6 +32,30 @@ public class TeslaValuesTests
         Assert.Equal(58691.17m, Math.Round(result!.Value, 2));
     }
 
+    [Theory]
+    [InlineData(float.NaN)]
+    [InlineData(float.PositiveInfinity)]
+    [InlineData(float.NegativeInfinity)]
+    [InlineData(float.MaxValue)]
+    [InlineData(float.MinValue)]
+    public void WhenFloatIsNotRepresentableAsDecimal_ThenNullIsReturned(float value)
+    {
+        // Act
+        var result = TeslaValues.Decimal(value);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenFloatIsConverted_ThenDecimalWithoutFloatNoiseIsReturned()
+    {
+        // Act & Assert
+        Assert.Equal(230.45m, TeslaValues.Decimal(230.45f));
+        Assert.Equal(-1.5m, TeslaValues.Decimal(-1.5f));
+        Assert.Equal(0m, TeslaValues.Decimal(0f));
+    }
+
     [Fact]
     public void WhenPercentIsConverted_ThenFractionIsReturned()
     {

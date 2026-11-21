@@ -71,6 +71,9 @@ public class TeslaChargeStateTests
         Assert.Equal(11000m, charge.ChargingPower);
         Assert.Equal(TimeSpan.FromMinutes(90), charge.RemainingChargingTime);
         Assert.Equal("IEC", charge.ChargeCable); // not in the snapshot, unchanged
+        Assert.Equal(0.5m, charge.MinimumChargeLimit); // not in the snapshot, unchanged
+        Assert.Equal(6m, charge.RequestedChargingCurrent); // not in the snapshot, unchanged
+        Assert.Equal(TeslaChargePortLatch.Engaged, charge.ChargePortLatch); // not in the snapshot, unchanged
     }
 
     [Fact]
@@ -85,5 +88,165 @@ public class TeslaChargeStateTests
 
         // Assert
         Assert.Equal(0.7m, charge.BatteryLevel);
+    }
+
+    [Fact]
+    public void WhenSnapshotHasEqualTimestamp_ThenItApplies()
+    {
+        // Arrange
+        var charge = CreateFromFixture();
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353));
+
+        // Act
+        charge.Update(snapshot.ChargeState);
+
+        // Assert
+        Assert.Equal(0.65m, charge.BatteryLevel);
+    }
+
+    [Fact]
+    public void WhenJsonIsOlderThanAppliedSnapshot_ThenItIsIgnored()
+    {
+        // Arrange
+        var charge = new TeslaChargeState(NullLogger.Instance);
+        charge.Update(VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353 + 60_000)).ChargeState);
+        var data = JsonSerializer.Deserialize(FixtureLoader.Load("vehicle-data.json"), TeslaJsonContext.Default.TeslaResponseTeslaVehicleDataDto)!.Response!;
+
+        // Act
+        charge.Update(data.ChargeState!);
+
+        // Assert
+        Assert.Equal(0.65m, charge.BatteryLevel);
+        Assert.Equal(TeslaChargingState.Charging, charge.ChargingState);
+    }
+
+    [Fact]
+    public void WhenFixtureIsApplied_ThenEstimatedBatteryCapacityUsesIdealRanges()
+    {
+        // Act
+        var charge = CreateFromFixture();
+
+        // Assert
+        var expected = 230.45m / 0.69m / 166.5m * 36640m;
+        Assert.Equal(expected, charge.EstimatedBatteryCapacity!.Value, 0);
+    }
+
+    [Fact]
+    public void WhenFixtureIsApplied_ThenRemainingJsonFieldsAreConverted()
+    {
+        // Act
+        var charge = CreateFromFixture();
+
+        // Assert
+        Assert.Equal(Math.Round(166.5m * 1.609344m, 3), Math.Round(charge.AddedIdealRange!.Value, 3));
+        Assert.Equal(0m, charge.ChargeRate);
+        Assert.Equal(6m, charge.ChargingCurrentSetting);
+        Assert.False(charge.IsChargeEnabled);
+        Assert.Null(charge.IsChargeEnabledByUser);
+        Assert.Null(charge.IsNotEnoughPowerToHeat);
+        Assert.False(charge.IsSuperchargerSessionFromTripPlanner);
+        Assert.Equal(TeslaScheduleDays.AllWeek, charge.OffPeakChargingDays);
+        Assert.Equal(TeslaScheduleDays.Weekdays, charge.PreconditioningDays);
+        Assert.Null(charge.OffPeakChargingEndTime);
+        Assert.Null(charge.ScheduledDepartureTime);
+    }
+
+    [Fact]
+    public void WhenSnapshotHasEnumFields_ThenTheyMatchTheJsonValues()
+    {
+        // Arrange
+        var charge = CreateFromFixture();
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353 + 60_000));
+        snapshot.ChargeState.ConnChargeCable = new ChargeState.Types.CableType { IEC = new CarServer.Void() };
+        snapshot.ChargeState.ChargePortLatch = new ChargePortLatchState { Disengaged = new CarServer.Void() };
+        snapshot.ChargeState.FastChargerType = new ChargeState.Types.ChargerType { Combo = new CarServer.Void() };
+        snapshot.ChargeState.FastChargerBrand = new ChargeState.Types.ChargerBrand { Tesla = new CarServer.Void() };
+        snapshot.ChargeState.ScheduledChargingMode = ChargeState.Types.ScheduledChargingMode.DepartBy;
+        snapshot.ChargeState.ChargePortColor = ChargeState.Types.ChargePortColor_E.ChargePortColorFlashingGreen;
+        snapshot.ChargeState.ScheduledDepartureTime = snapshot.ChargeState.Timestamp;
+        snapshot.ChargeState.ScheduledDepartureTimeMinutes = 450;
+        snapshot.ChargeState.OffPeakChargingTimes = new OffPeakChargingTimes { Weekdays = new CarServer.Void() };
+        snapshot.ChargeState.OffPeakHoursEndTime = 360;
+        snapshot.ChargeState.PreconditioningTimes = new PreconditioningTimes { AllWeek = new CarServer.Void() };
+
+        // Act
+        charge.Update(snapshot.ChargeState);
+
+        // Assert
+        Assert.Equal("IEC", charge.ChargeCable);
+        Assert.Equal(TeslaChargePortLatch.Disengaged, charge.ChargePortLatch);
+        Assert.Equal("Combo", charge.FastChargerType);
+        Assert.Equal("Tesla", charge.FastChargerBrand);
+        Assert.Equal(TeslaScheduledChargingMode.DepartBy, charge.ScheduledChargingMode);
+        Assert.Equal("FlashingGreen", charge.ChargePortColor);
+        Assert.Equal(TimeSpan.FromMinutes(450), charge.ScheduledDepartureTime);
+        Assert.Equal(TeslaScheduleDays.Weekdays, charge.OffPeakChargingDays);
+        Assert.Equal(TimeSpan.FromHours(6), charge.OffPeakChargingEndTime);
+        Assert.Equal(TeslaScheduleDays.AllWeek, charge.PreconditioningDays);
+    }
+
+    [Fact]
+    public void WhenSnapshotReportsSna_ThenValuesBecomeNull()
+    {
+        // Arrange
+        var charge = CreateFromFixture();
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353 + 60_000));
+        snapshot.ChargeState.ConnChargeCable = new ChargeState.Types.CableType { SNA = new CarServer.Void() };
+        snapshot.ChargeState.ChargePortLatch = new ChargePortLatchState { SNA = new CarServer.Void() };
+        snapshot.ChargeState.FastChargerBrand = new ChargeState.Types.ChargerBrand { SNA = new CarServer.Void() };
+
+        // Act
+        charge.Update(snapshot.ChargeState);
+
+        // Assert
+        Assert.Null(charge.ChargeCable);
+        Assert.Null(charge.ChargePortLatch);
+        Assert.Null(charge.FastChargerBrand);
+    }
+
+    [Fact]
+    public void WhenSnapshotHasBothRemainingTimes_ThenChargeLimitTimeWins()
+    {
+        // Arrange
+        var charge = CreateFromFixture();
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353 + 60_000));
+        snapshot.ChargeState.MinutesToFullCharge = 120;
+
+        // Act
+        charge.Update(snapshot.ChargeState);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMinutes(90), charge.RemainingChargingTime);
+    }
+
+    [Fact]
+    public void WhenSnapshotHasOnlyMinutesToFullCharge_ThenItIsUsed()
+    {
+        // Arrange
+        var charge = CreateFromFixture();
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353 + 60_000));
+        snapshot.ChargeState.ClearMinutesToChargeLimit();
+        snapshot.ChargeState.MinutesToFullCharge = 120;
+
+        // Act
+        charge.Update(snapshot.ChargeState);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMinutes(120), charge.RemainingChargingTime);
+    }
+
+    [Fact]
+    public void WhenSnapshotHasNonFiniteFloat_ThenValueBecomesNullWithoutThrowing()
+    {
+        // Arrange
+        var charge = CreateFromFixture();
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353 + 60_000));
+        snapshot.ChargeState.BatteryRange = float.NaN;
+
+        // Act
+        charge.Update(snapshot.ChargeState);
+
+        // Assert
+        Assert.Null(charge.Range);
     }
 }

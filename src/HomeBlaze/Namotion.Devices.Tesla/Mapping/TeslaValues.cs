@@ -10,6 +10,9 @@ internal static class TeslaValues
 {
     private const decimal KilometersPerMile = 1.609344m;
 
+    // Smaller than decimal.MaxValue (about 7.9E28), so the cast from float never overflows.
+    private const float MaximumDecimalFloat = 7.9E28f;
+
     private static readonly ConcurrentDictionary<(Type EnumType, string Value), byte> LoggedUnknownValues = new();
 
     /// <summary>Returns null for the placeholders Tesla sends instead of a missing text.</summary>
@@ -18,6 +21,10 @@ internal static class TeslaValues
         var trimmed = value?.Trim();
         return string.IsNullOrEmpty(trimmed) || trimmed == "<invalid>" ? null : trimmed;
     }
+
+    /// <summary>Converts a protobuf float, or returns null for NaN, infinity and values outside the range of decimal.</summary>
+    public static decimal? Decimal(float value) =>
+        float.IsFinite(value) && Math.Abs(value) < MaximumDecimalFloat ? (decimal)value : null;
 
     public static decimal? MilesToKilometers(decimal? miles) => miles * KilometersPerMile;
 
