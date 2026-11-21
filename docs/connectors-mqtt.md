@@ -312,7 +312,7 @@ public class CustomMqttValueConverter : IMqttValueConverter
 
 ### Write Retry Queue
 
-Write retry queue behavior (ring buffer, reconcile by commit order when the connection loop restarts; the client's internal reconnect does not reconcile, see [Connectors: Known Limitations](connectors.md#known-limitations)) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
+The write retry queue is provided by `SubjectSourceBase`, see [Connectors: Write Retry Queue](connectors.md#write-retry-queue). How parked writes meet retained messages after a reconnect is described under [Connectors: Known Limitations](connectors.md#known-limitations). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 new MqttClientConfiguration

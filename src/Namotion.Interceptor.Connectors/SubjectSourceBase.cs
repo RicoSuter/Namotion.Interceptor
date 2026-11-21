@@ -21,15 +21,26 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     private readonly TimeSpan _bufferTime;
 
     // A source we talk to over a wire: what it hands us was produced before it saw our write, so it
-    // cannot rank against our commits. Named once because the processor and the reconcile
-    // must agree; if only one ranked against the last commit, the other would still deliver an older one.
-    private const ChangeDeliveryRule DeliveryRule = ChangeDeliveryRule.SourceValuesMayBeStale;
+    // cannot rank against our commits. Named once because the processor, the retry queue's flush and the
+    // reconcile must agree; if only one ranked against the last commit, another would still deliver an older one.
+    internal const ChangeDeliveryRule DeliveryRule = ChangeDeliveryRule.SourceValuesMayBeStale;
     private readonly TimeSpan _retryTime;
     private readonly SubjectPropertyWriter _propertyWriter;
 
     private static readonly TimeSpan ConnectWindowDrainInterval = TimeSpan.FromSeconds(1);
 
     private readonly Lock _stateLock = new();
+
+    // Signals the idle flush: released by its interval timer, by the transition to Synchronized and by its stop.
+    // Never disposed: it holds no handle unless AvailableWaitHandle is read, and a late timer callback or the
+    // idle flush can still touch it after Dispose. Released only while its count is 0, so signals coalesce.
+    private readonly SemaphoreSlim _idleFlushSignal = new(0);
+
+    // Makes the count check and the release one step. Taken inside _stateLock, never around it.
+    private readonly Lock _idleFlushSignalLock = new();
+
+    // While idle flushes keep failing, the interval doubles up to this many times, so to 8x the retry time.
+    private const int MaximumIdleFlushDoublings = 3;
 
     // The state and its two timestamps are swapped as one value: in separate fields a reader can see
     // the new state beside the previous timestamp, and LastSynchronizedAt has to be visible before
@@ -38,6 +49,13 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         SourceState State, DateTimeOffset ChangeTime, DateTimeOffset? LastSynchronizedAt);
 
     private SourceStateSnapshot _stateSnapshot = new(SourceState.Synchronizing, DateTimeOffset.UtcNow, null);
+
+    // The state the write retry queue was last reconciled in. Compared by reference, since each transition
+    // publishes a new snapshot and two of them can be equal by value. Accessed only under the queue's flush gate.
+    private SourceStateSnapshot? _reconciledSnapshot;
+
+    // Set once when RunAsync starts, before any flush can read it.
+    private CancellationToken _stoppingToken;
     private int _started;
 
     private ImmutableArray<SourceMonitor> _registeredMonitors = [];
@@ -48,6 +66,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// The clock the connected processor measures its <see cref="ChangeQueueProcessor.TeardownFlushBound"/> on.
     /// </summary>
     internal TimeProvider TeardownTimeProvider { get; init; } = TimeProvider.System;
+
+    /// <summary>
+    /// The clock the idle flush measures its interval on.
+    /// </summary>
+    internal TimeProvider IdleFlushTimeProvider { get; init; } = TimeProvider.System;
 
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
@@ -218,6 +241,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         // the DI path tears the host down, but on the graph-attach path the faulted task is swallowed and
         // every WaitForSynchronizationAsync on that branch blocks until its caller's token fires. A silent
         // hang in place of the loud failure the guard exists to give.
+        _stoppingToken = stoppingToken;
         try
         {
             // A missing PropertyChangeInterceptor means the source can capture no writes: a configuration
@@ -276,9 +300,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     // Park connect-window writes captured during listen/load.
                     DrainOwnedWritesToRetryQueue(subscription);
 
-                    // Single reconcile point: send (model already holds it), restore (the load moved the
-                    // model off it), drop (a later local write supersedes it).
-                    await ReconcileRetryQueueAsync(stoppingToken).ConfigureAwait(false);
+                    // Send (model already holds it), restore (the load moved the model off it), drop (a later
+                    // local write supersedes it). Marks this synchronized period reconciled, so the flushes that
+                    // follow do not repeat it.
+                    await ReconcileRetryQueueAsync(onlyWhenDue: false, stoppingToken).ConfigureAwait(false);
 
                     // Connected phase reuses the source-lifetime subscription and does not own it.
                     using var processor = new ChangeQueueProcessor(
@@ -301,6 +326,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         },
                         completionHandler: async teardownToken =>
                         {
+                            // Not reconciled even when due: at a stop, sending a parked write beats restoring it
+                            // into a model that nothing flushes afterwards (see IsReconcileDue).
                             await WriteRetryQueue.FlushAsync(this, teardownToken).ConfigureAwait(false);
                         })
                     {
@@ -314,7 +341,16 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     using var outboundRegistration = Metrics.OutboundChanges.Register(
                         () => processor.QueueDepth, capacity: null);
 
-                    await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+                    using var idleFlush = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    var idleFlushTask = RunIdleFlushAsync(idleFlush.Token);
+                    try
+                    {
+                        await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        await StopIdleFlushAsync(idleFlush, idleFlushTask).ConfigureAwait(false);
+                    }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -450,14 +486,160 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         return collapsed;
     }
 
-    internal async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs the idle flush until cancelled. While the source is <see cref="SourceState.Synchronized"/> it
+    /// reconciles the write retry queue right after each transition to Synchronized unless that period is
+    /// reconciled already (see <see cref="IsReconcileDue"/>), and flushes it every retry interval in between,
+    /// backing the interval off while flushes keep failing. An exception from one run is logged and does not
+    /// stop the next.
+    /// </summary>
+    private async Task RunIdleFlushAsync(CancellationToken cancellationToken)
     {
-        var retryChanges = WriteRetryQueue.DrainForLocalReapply();
-        if (retryChanges.Length == 0)
-        {
-            return;
-        }
+        // Outside 1 ms to int.MaxValue ms the interval is off: a shorter one would keep this loop flushing
+        // without pause, and the timer rejects a larger one.
+        var interval = _retryTime.TotalMilliseconds is >= 1 and <= int.MaxValue ? _retryTime : Timeout.InfiniteTimeSpan;
 
+        // One timer for the loop's lifetime, re-armed before each wait, so a tick allocates nothing.
+        using var timer = IdleFlushTimeProvider.CreateTimer(
+            static state => ((SubjectSourceBase)state!).SignalIdleFlush(),
+            this, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+
+        var consecutiveFailures = 0;
+        SourceStateSnapshot? seenSnapshot = null;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                timer.Change(GetIdleFlushInterval(interval, consecutiveFailures), Timeout.InfiniteTimeSpan);
+
+                // No token: StopIdleFlushAsync signals after cancelling, which keeps the wait to one TaskNode.
+                await _idleFlushSignal.WaitAsync().ConfigureAwait(false);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                // Skipped during a reconnect inside the connector, which would fail every interval's flush;
+                // the transition back to Synchronized signals again.
+                var snapshot = Volatile.Read(ref _stateSnapshot);
+                if (snapshot.State != SourceState.Synchronized)
+                {
+                    continue;
+                }
+
+                if (!ReferenceEquals(snapshot, seenSnapshot))
+                {
+                    // A new synchronized period, which restarts the backoff. When connect or the write path has
+                    // reconciled it already, that reconcile has just tried the parked writes, so no flush follows
+                    // and the next one comes at the next interval.
+                    seenSnapshot = snapshot;
+                    consecutiveFailures = 0;
+                    await ReconcileRetryQueueAsync(onlyWhenDue: true, cancellationToken).ConfigureAwait(false);
+                }
+                else if (await WriteRetryQueue.FlushOrReconcileAsync(this, cancellationToken).ConfigureAwait(false))
+                {
+                    consecutiveFailures = 0;
+                }
+                else
+                {
+                    consecutiveFailures = Math.Min(consecutiveFailures + 1, MaximumIdleFlushDoublings);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "The idle flush of the write retry queue failed.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Signals the idle flush unless a signal is already pending. A signal left pending after the idle flush
+    /// ended only makes the next connection attempt's idle flush take its first pass at once.
+    /// </summary>
+    private void SignalIdleFlush()
+    {
+        lock (_idleFlushSignalLock)
+        {
+            if (_idleFlushSignal.CurrentCount == 0)
+            {
+                _idleFlushSignal.Release();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Doubles the retry interval per consecutive failed flush, capped at int.MaxValue milliseconds. An interval
+    /// that is off stays off.
+    /// </summary>
+    private static TimeSpan GetIdleFlushInterval(TimeSpan interval, int consecutiveFailures) =>
+        consecutiveFailures == 0 || interval == Timeout.InfiniteTimeSpan
+            ? interval
+            : TimeSpan.FromMilliseconds(Math.Min(interval.TotalMilliseconds * (1 << consecutiveFailures), int.MaxValue));
+
+    /// <summary>
+    /// Cancels the idle flush and waits up to the processor's teardown bound for it to stop, so that a
+    /// <see cref="WriteChangesAsync"/> ignoring its token cannot keep <see cref="RunAsync"/> from returning.
+    /// </summary>
+    private async Task StopIdleFlushAsync(CancellationTokenSource idleFlush, Task idleFlushTask)
+    {
+        await idleFlush.CancelAsync().ConfigureAwait(false);
+        SignalIdleFlush();
+        try
+        {
+            await idleFlushTask.WaitAsync(ChangeQueueProcessor.TeardownFlushBound, TeardownTimeProvider).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning(
+                "Gave up waiting after {Timeout} for the idle flush of the write retry queue to stop. A write " +
+                "handler that ignores cancellation may still complete it.",
+                ChangeQueueProcessor.TeardownFlushBound);
+        }
+    }
+
+    /// <summary>
+    /// Reconciles the write retry queue against the state just loaded: restores, sends or drops each parked
+    /// write by commit order. Runs at connect, and from the idle flush when <see cref="IsReconcileDue"/>.
+    /// </summary>
+    /// <param name="onlyWhenDue">Whether to do nothing unless <see cref="IsReconcileDue"/>.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    internal ValueTask ReconcileRetryQueueAsync(bool onlyWhenDue, CancellationToken cancellationToken) =>
+        WriteRetryQueue.ReconcileAsync(this, onlyWhenDue, cancellationToken);
+
+    /// <summary>
+    /// Whether the source is <see cref="SourceState.Synchronized"/> in a period the write retry queue has not
+    /// been reconciled in yet. The load that began the period may have moved the model off parked writes, so
+    /// the first flush of each period reconciles instead, whether it is the idle flush or the one ahead of an
+    /// outbound batch. Never due once the source is stopping: a value restored then would not be sent, since
+    /// nothing flushes the queue after the stop. Read under the queue's flush gate.
+    /// </summary>
+    internal bool IsReconcileDue
+    {
+        get
+        {
+            var snapshot = Volatile.Read(ref _stateSnapshot);
+            return snapshot.State == SourceState.Synchronized &&
+                !ReferenceEquals(snapshot, _reconciledSnapshot) &&
+                !_stoppingToken.IsCancellationRequested;
+        }
+    }
+
+    /// <summary>
+    /// Records the current state as the one the write retry queue is reconciled in. Called under the queue's
+    /// flush gate before it drains.
+    /// </summary>
+    internal void MarkReconciled() => _reconciledSnapshot = Volatile.Read(ref _stateSnapshot);
+
+    /// <summary>
+    /// Decides each parked write and returns those to send. Runs under the retry queue's flush gate, which
+    /// keeps the write handler from settling a failed batch back into the queue meanwhile, while the
+    /// processor may still be running and may itself be the caller, ahead of its batch.
+    /// </summary>
+    internal SubjectPropertyChange[]? ReconcileParkedChanges(SubjectPropertyChange[] retryChanges)
+    {
         var restored = 0;
         var sent = 0;
         // Counted apart from dropped and failed, because only those two are added to
@@ -489,19 +671,25 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                 if (Equals(currentValue, change.GetNewValue<object?>()))
                 {
                     // Already the current model value: the source has not received it, so send it.
-                    // Marked here because this path flushes the retry queue directly rather than going
-                    // through the processor, and without the mark a later transaction confirmation on
+                    // Marked published, because this path flushes the retry queue directly rather than
+                    // going through the processor, and without the mark a later transaction confirmation on
                     // this property is not written back, which is the divergence that repair exists for.
-                    // Set without the subject lock, which is safe only because the reconcile runs before
-                    // the processor starts, so no confirmation for this connector is judged concurrently.
-                    property.MarkAsPublishedToSource();
+                    // Checked and marked under the subject lock on first publish, since a confirmation can
+                    // commit concurrently once the processor runs.
+                    if (!ChangeDeliveryFilter.TryAcceptForDelivery(in change, DeliveryRule))
+                    {
+                        superseded++;
+                        continue;
+                    }
+
                     (toSend ??= []).Add(change);
                     sent++;
                 }
                 else if (property.Metadata.SetValue is { } setValue)
                 {
-                    // The load moved the model off it: restore locally so the connected phase captures
-                    // and sends the re-applied write.
+                    // The load moved the model off it: restore locally so the processor captures and sends
+                    // the re-applied write. A local write landing between the check above and this restore
+                    // is overwritten by it (#442).
                     setValue(property.Subject, change.GetNewValue<object?>());
                     restored++;
                 }
@@ -527,12 +715,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             }
         }
 
-        if (toSend is not null)
-        {
-            WriteRetryQueue.Enqueue(toSend.ToArray());
-            await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
-        }
-
         if (superseded > 0 || dropped > 0 || failed > 0)
         {
             _logger.LogWarning(
@@ -544,6 +726,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             _logger.LogInformation(
                 "Retry queue reconcile: {Restored} restored, {Sent} sent.", restored, sent);
         }
+
+        return toSend?.ToArray();
     }
 
     // ---- Source monitoring surface ----
@@ -614,6 +798,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             var lastSynchronizedAt = newState == SourceState.Synchronized ? now : current.LastSynchronizedAt;
 
             Volatile.Write(ref _stateSnapshot, new SourceStateSnapshot(newState, now, lastSynchronizedAt));
+
+            if (newState == SourceState.Synchronized)
+            {
+                SignalIdleFlush();
+            }
 
             var handlers = StateChanged;
             if (handlers is not null)

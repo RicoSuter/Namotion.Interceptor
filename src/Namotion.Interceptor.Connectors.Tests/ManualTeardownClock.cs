@@ -57,6 +57,20 @@ internal sealed class ManualTeardownClock : TimeProvider
     }
 
     /// <summary>
+    /// Gets how long until the earliest armed timer fires, or <c>null</c> when no timer is armed.
+    /// </summary>
+    public TimeSpan? NextDueIn
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _timers.Count == 0 ? null : _timers.Min(timer => timer.DueAt) - _elapsed;
+            }
+        }
+    }
+
+    /// <summary>
     /// Moves the clock forward by <paramref name="delay"/> and fires every timer that has come due.
     /// </summary>
     public void Advance(TimeSpan delay)

@@ -49,6 +49,14 @@ public interface ISubjectSource : ISubjectConnector
     /// subject state the write needs before <see cref="Tracking.Transactions.SubjectTransaction.CommitAsync"/>,
     /// and see <see cref="Tracking.Transactions.Writers.ITransactionWriter"/> for the full committing access boundary.
     /// </para>
+    /// <para>
+    /// Convergence assumes that after the peer accepts a written value, the source brings the peer's value
+    /// for that property back to the model without waiting for another local write, for example through a
+    /// subscription, a broadcast that includes the writer, polling, or a read after the write. A write
+    /// reported as failed in the <see cref="WriteResult"/> needs no read-back. A read-back applied outside
+    /// the property writer must not be overwritten by an initial-state load in progress; updates applied
+    /// through the writer get this from its buffering.
+    /// </para>
     /// </remarks>
     /// <param name="changes">The collection of subject property changes.</param>
     /// <param name="cancellationToken">The cancellation token.</param>

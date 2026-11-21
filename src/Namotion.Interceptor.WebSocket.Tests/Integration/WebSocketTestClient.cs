@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -7,6 +8,7 @@ using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.WebSocket.Client;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.WebSocket.Tests.Integration;
@@ -21,6 +23,10 @@ public class WebSocketTestClient<TRoot> : IAsyncDisposable
 
     public IInterceptorSubjectContext? Context { get; private set; }
 
+    /// <summary>The client source under test, resolved from the host's hosted services.</summary>
+    public WebSocketSubjectClientSource? Source =>
+        _host?.Services.GetServices<IHostedService>().OfType<WebSocketSubjectClientSource>().FirstOrDefault();
+
     public WebSocketTestClient(ITestOutputHelper output)
     {
         _output = output;
@@ -30,7 +36,8 @@ public class WebSocketTestClient<TRoot> : IAsyncDisposable
         Func<IInterceptorSubjectContext, TRoot> createRoot,
         Func<TRoot, bool>? isConnected = null,
         int port = 18080,
-        Action<IInterceptorSubjectContext>? configureContext = null)
+        Action<IInterceptorSubjectContext>? configureContext = null,
+        Action<WebSocketClientConfiguration>? configureClient = null)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddLogging(logging =>
@@ -55,6 +62,7 @@ public class WebSocketTestClient<TRoot> : IAsyncDisposable
         builder.Services.AddWebSocketSubjectClientSource<TRoot>(configuration =>
         {
             configuration.ServerUri = new Uri($"ws://localhost:{port}/ws");
+            configureClient?.Invoke(configuration);
         });
 
         _host = builder.Build();
