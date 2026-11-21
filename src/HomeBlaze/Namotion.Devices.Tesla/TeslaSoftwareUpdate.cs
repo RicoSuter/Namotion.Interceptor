@@ -45,7 +45,7 @@ public partial class TeslaSoftwareUpdate : ITitleProvider, IIconProvider
 
     /// <param name="dto">The software update of the JSON vehicle state.</param>
     /// <param name="timestamp">The timestamp of that vehicle state, because the software update has none.</param>
-    internal void Update(TeslaSoftwareUpdateDto dto, DateTimeOffset? timestamp = null)
+    internal void Update(TeslaSoftwareUpdateDto dto, DateTimeOffset? timestamp)
     {
         if (!_clock.TryAdvance(timestamp))
         {
@@ -67,10 +67,28 @@ public partial class TeslaSoftwareUpdate : ITitleProvider, IIconProvider
             return;
         }
 
-        if (proto.Status is { } status && TeslaProtoValues.SoftwareUpdateStatus(status) is { } mappedStatus) Status = mappedStatus;
+        UpdateStatusFromProtobuf(proto);
         if (proto.OptionalVersionCase != SoftwareUpdateState.OptionalVersionOneofCase.None) Version = TeslaValues.Text(proto.Version);
         if (proto.OptionalDownloadPercCase != SoftwareUpdateState.OptionalDownloadPercOneofCase.None) DownloadProgress = TeslaValues.Percent(proto.DownloadPerc);
         if (proto.OptionalInstallPercCase != SoftwareUpdateState.OptionalInstallPercOneofCase.None) InstallProgress = TeslaValues.Percent(proto.InstallPerc);
         if (proto.OptionalExpectedDurationSecCase != SoftwareUpdateState.OptionalExpectedDurationSecOneofCase.None) ExpectedDuration = TeslaValues.FromSeconds(proto.ExpectedDurationSec);
+    }
+
+    private void UpdateStatusFromProtobuf(SoftwareUpdateState proto)
+    {
+        if (proto.Status is not { } status)
+        {
+            return;
+        }
+
+        // An explicit Unknown is how the snapshot reports no pending update, so it clears the status instead of keeping it.
+        if (status.TypeCase == SoftwareUpdateState.Types.SoftwareUpdateStatus.TypeOneofCase.Unknown)
+        {
+            Status = null;
+        }
+        else if (TeslaProtoValues.SoftwareUpdateStatus(status) is { } mappedStatus)
+        {
+            Status = mappedStatus;
+        }
     }
 }

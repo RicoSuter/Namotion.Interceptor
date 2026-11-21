@@ -40,7 +40,7 @@ public partial class TeslaSpeedLimitMode : ITitleProvider, IIconProvider
 
     /// <param name="dto">The speed limit mode of the JSON vehicle state.</param>
     /// <param name="timestamp">The timestamp of that vehicle state, because the speed limit mode has none.</param>
-    internal void Update(TeslaSpeedLimitModeDto dto, DateTimeOffset? timestamp = null)
+    internal void Update(TeslaSpeedLimitModeDto dto, DateTimeOffset? timestamp)
     {
         if (!_clock.TryAdvance(timestamp))
         {

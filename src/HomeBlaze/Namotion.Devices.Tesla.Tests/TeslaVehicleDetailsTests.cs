@@ -18,6 +18,8 @@ public class TeslaVehicleDetailsTests
     private static Timestamp Timestamp(long offsetMilliseconds) =>
         Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(DateTimeOffset.FromUnixTimeMilliseconds(FixtureTimestamp + offsetMilliseconds));
 
+    private static DateTimeOffset FixtureTime => DateTimeOffset.FromUnixTimeMilliseconds(FixtureTimestamp);
+
     private static TeslaMedia CreateMediaFromFixture()
     {
         var media = new TeslaMedia(NullLogger.Instance);
@@ -28,7 +30,7 @@ public class TeslaVehicleDetailsTests
     private static TeslaSoftwareUpdate CreateSoftwareUpdateFromFixture()
     {
         var update = new TeslaSoftwareUpdate(NullLogger.Instance);
-        update.Update(LoadFixture().VehicleState!.SoftwareUpdate!);
+        update.Update(LoadFixture().VehicleState!.SoftwareUpdate!, FixtureTime);
         return update;
     }
 
@@ -241,7 +243,7 @@ public class TeslaVehicleDetailsTests
         var update = new TeslaSoftwareUpdate(NullLogger.Instance);
 
         // Act
-        update.Update(new TeslaSoftwareUpdateDto { Status = status, Version = "2026.40.1 abc" });
+        update.Update(new TeslaSoftwareUpdateDto { Status = status, Version = "2026.40.1 abc" }, FixtureTime);
 
         // Assert
         Assert.Equal(expected, update.Status);
@@ -279,12 +281,26 @@ public class TeslaVehicleDetailsTests
         update.Update(new TeslaSoftwareUpdateDto { Status = "available", Version = "2026.40.1 abc" }, DateTimeOffset.FromUnixTimeMilliseconds(FixtureTimestamp));
 
         // Act
-        update.Update(new SoftwareUpdateState { Version = "other", Timestamp = Timestamp(-60_000) });
-        update.Update(new SoftwareUpdateState { Status = new SoftwareUpdateState.Types.SoftwareUpdateStatus { Unknown = new CarServer.Void() }, Timestamp = Timestamp(60_000) });
+        update.Update(new SoftwareUpdateState { Version = "other", Status = new SoftwareUpdateState.Types.SoftwareUpdateStatus { Installing = new CarServer.Void() }, Timestamp = Timestamp(-60_000) });
+        update.Update(new SoftwareUpdateState { Status = new SoftwareUpdateState.Types.SoftwareUpdateStatus(), Timestamp = Timestamp(60_000) });
 
         // Assert
         Assert.Equal("2026.40.1 abc", update.Version);
         Assert.Equal(TeslaSoftwareUpdateStatus.Available, update.Status);
+    }
+
+    [Fact]
+    public void WhenASoftwareUpdateSnapshotReportsUnknownStatus_ThenTheStatusIsCleared()
+    {
+        // Arrange
+        var update = new TeslaSoftwareUpdate(NullLogger.Instance);
+        update.Update(new TeslaSoftwareUpdateDto { Status = "installing" }, FixtureTime);
+
+        // Act
+        update.Update(new SoftwareUpdateState { Status = new SoftwareUpdateState.Types.SoftwareUpdateStatus { Unknown = new CarServer.Void() }, Timestamp = Timestamp(60_000) });
+
+        // Assert
+        Assert.Null(update.Status);
     }
 
     [Fact]
@@ -321,7 +337,7 @@ public class TeslaVehicleDetailsTests
         var speedLimit = new TeslaSpeedLimitMode();
 
         // Act
-        speedLimit.Update(LoadFixture().VehicleState!.SpeedLimitMode!);
+        speedLimit.Update(LoadFixture().VehicleState!.SpeedLimitMode!, FixtureTime);
 
         // Assert
         Assert.False(speedLimit.IsActive);
