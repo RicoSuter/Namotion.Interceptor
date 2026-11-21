@@ -245,10 +245,8 @@
             Path = string.Join("/", decodedSegments);
 
             // A link to the subject of the last pane, such as to one of its properties, still scrolls to it.
-            if (!RebuildFromPath())
-            {
-                ScrollToLastPaneAfterRender();
-            }
+            RebuildFromPath();
+            ScrollToLastPaneAfterRender();
 
             InvokeAsync(StateHasChanged);
         }
@@ -270,9 +268,25 @@
             keptCount++;
         }
 
+        // A title can change without a change of the paths.
+        var hasRenamedPane = false;
+        for (var i = 0; i < keptCount; i++)
+        {
+            if (_panes[i].DisplayName != panes[i].DisplayName)
+            {
+                _panes[i].DisplayName = panes[i].DisplayName;
+                hasRenamedPane = true;
+            }
+        }
+
         if (keptCount == panes.Count && keptCount == _panes.Count)
         {
-            return false;
+            if (hasRenamedPane)
+            {
+                RebuildBreadcrumbs();
+            }
+
+            return hasRenamedPane;
         }
 
         // A shorter path leaves placeholders behind like closed panes do, see RemovePanesFrom, and new panes take them.
@@ -470,6 +484,7 @@
             return;
 
         // A delete is a change of the panes by the user, also when the pane closes on the change of the paths it causes.
+        var wasPathPending = _isPathPending;
         _isPathPending = false;
 
         try
@@ -487,6 +502,8 @@
         }
         catch (Exception ex)
         {
+            // A failed delete leaves the panes as they were.
+            _isPathPending = wasPathPending;
             await DialogService.ShowMessageBoxAsync(
                 "Delete Failed",
                 $"Failed to delete: {ex.Message}",
@@ -504,6 +521,9 @@
         // Store the URL so OnLocationChanged knows to ignore this navigation
         _lastNavigatedUrl = url;
         _isPathPending = false;
+
+        // The URL has no property to highlight, and the last pane changed before OnLocationChanged learns of it.
+        _highlightedProperty = null;
         NavigationManager.NavigateTo(url, replace: true);
     }
 
