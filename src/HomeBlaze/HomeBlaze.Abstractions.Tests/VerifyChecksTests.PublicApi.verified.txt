@@ -510,6 +510,53 @@ namespace HomeBlaze.Abstractions.Devices.Locks
         HomeBlaze.Abstractions.Devices.Locks.DoorLockState? LockState { get; }
     }
 }
+namespace HomeBlaze.Abstractions.Devices.Vehicles
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Electric vehicle with battery level, range, location and charging state.")]
+    public interface IElectricVehicle : HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Devices.Energy.IChargingState, HomeBlaze.Abstractions.Devices.Vehicles.IVehicleChargingState, HomeBlaze.Abstractions.Devices.Vehicles.IVehicleState { }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports the charging state of a vehicle: plug, charging, power, charge limit and " +
+        "remaining time.")]
+    public interface IVehicleChargingState : HomeBlaze.Abstractions.Devices.Energy.IChargingState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=341, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        [System.ComponentModel.Category("Charging")]
+        decimal? ChargeLimit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=342)]
+        [System.ComponentModel.Category("Charging")]
+        System.TimeSpan? RemainingChargingTime { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether the climate of a vehicle runs and its inside and outside temperat" +
+        "ure.")]
+    public interface IVehicleClimateState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=201, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [System.ComponentModel.Category("Climate")]
+        decimal? InsideTemperature { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=150)]
+        [System.ComponentModel.Category("Climate")]
+        bool? IsClimateOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=202, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [System.ComponentModel.Category("Climate")]
+        decimal? OutsideTemperature { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports the range, the driven distance and the location of a vehicle.")]
+    public interface IVehicleState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=222)]
+        [System.ComponentModel.Category("Vehicle")]
+        HomeBlaze.Abstractions.Common.GeoCoordinate? Location { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=220, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        [System.ComponentModel.Category("Vehicle")]
+        decimal? Range { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=221, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        [System.ComponentModel.Category("Vehicle")]
+        decimal? TotalDrivenDistance { get; }
+    }
+}
 namespace HomeBlaze.Abstractions
 {
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]

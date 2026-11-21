@@ -363,6 +363,7 @@ A type belongs to exactly one group, the one that its `[Category]` names. The si
 | Samples | Examples and simulated devices |
 | Switches | Switches, relays and smart plugs |
 | System | Parts of HomeBlaze itself, such as storage and plugins |
+| Vehicles | Cars and other vehicles, and the accounts that hold them |
 
 When none of them fits, name a new group in `[Category]`. Using the name is all it takes to create the group, and group names are compared ignoring case. A type in such a group that sets no `[SubjectIcon]` gets a generic icon.
 
