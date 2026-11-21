@@ -53,8 +53,9 @@
             var isFirst = i == 0;
             var selectedChild = i < _panes.Count - 1 ? _panes[i + 1].Subject : null;
 
-            // A local and not i: the panel reads its parameters when MudPaper renders its content, after the loop.
-            var highlightedProperty = i == _panes.Count - 1 ? _highlightedProperty : null;
+            // A local and not i: the panel reads its parameters when MudPaper renders its content, after the loop. A
+            // pending path has not reached the subject of the highlighted property yet.
+            var highlightedProperty = i == _panes.Count - 1 && !_isPathPending ? _highlightedProperty : null;
 
             @* Keyed by path: a subject that is reachable from itself can be in the row twice. *@
             <div @key="pane.Path" data-testid="subject-pane" class="pb-4"
@@ -559,7 +560,10 @@
             return false;
         }
 
-        _panes.AddRange(panes.GetRange(_panes.Count, panes.Count - _panes.Count));
+        // The new panes take the places of the first placeholders, like a pane that OnPropertyClick adds.
+        var addedCount = panes.Count - _panes.Count;
+        _panes.AddRange(panes.GetRange(_panes.Count, addedCount));
+        _placeholderCount = Math.Max(0, _placeholderCount - addedCount);
         ScrollToLastPaneAfterRender();
         return true;
     }

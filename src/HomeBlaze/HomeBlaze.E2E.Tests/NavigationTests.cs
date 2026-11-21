@@ -234,7 +234,7 @@ public class NavigationTests
             await _fixture.ReconcileStorageAsync();
 
             // Assert
-            await Assertions.Expect(panes(page)).ToHaveCountAsync(3, new() { Timeout = 30000 });
+            await Assertions.Expect(panes(page)).ToHaveCountAsync(3);
             Assert.EndsWith($"/browser/{folderName}/Late.md", page.Url);
         }
         finally
