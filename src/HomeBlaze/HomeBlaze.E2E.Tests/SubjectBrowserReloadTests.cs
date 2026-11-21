@@ -138,16 +138,18 @@ public class SubjectBrowserReloadTests
         try
         {
             var firstItem = CreateItem("First child");
-            list.Items = [firstItem, new NestedConfigurationSubject()];
+            var item = new NestedConfigurationSubject();
+            list.Items = [firstItem, item];
 
             var page = await SubjectBrowserPage.OpenAsync(_fixture, $"{name}/Items/1/Child");
             var panes = page.Locator("#scrollContainer [data-testid='subject-pane']");
             await Assertions.Expect(panes).ToHaveCountAsync(3);
 
-            // Act: the item of the path is removed, and an item with the child of the path takes its index.
+            // Act: the item of the path is removed, and added again with the child of the path.
             list.Items = [firstItem];
             await Assertions.Expect(panes).ToHaveCountAsync(2);
-            list.Items = [firstItem, CreateItem("Added child")];
+            item.Child = new NestedConfigurationChild { Label = "Added child" };
+            list.Items = [firstItem, item];
 
             // Assert
             await Assertions.Expect(panes).ToHaveCountAsync(4);

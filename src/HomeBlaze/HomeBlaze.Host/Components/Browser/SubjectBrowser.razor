@@ -483,15 +483,12 @@
         if (confirmed != true)
             return;
 
-        // A delete is a change of the panes by the user, also when the pane closes on the change of the paths it causes.
-        var wasPathPending = _isPathPending;
-        _isPathPending = false;
-
         try
         {
             await deleteOperation.InvokeAsync(null, ServiceProvider, CancellationToken.None);
 
-            // Close this pane and any after it
+            // Close this pane and any after it. A pending path can have dropped the pane on the change of the paths
+            // that the delete caused, and a delete is a change of the panes by the user that ends it.
             var paneIndex = _panes.IndexOf(pane);
             if (paneIndex > 0)
             {
@@ -499,11 +496,14 @@
                 UpdateUrl();
                 StateHasChanged();
             }
+            else if (_isPathPending)
+            {
+                UpdateUrl();
+                StateHasChanged();
+            }
         }
         catch (Exception ex)
         {
-            // A failed delete leaves the panes as they were.
-            _isPathPending = wasPathPending;
             await DialogService.ShowMessageBoxAsync(
                 "Delete Failed",
                 $"Failed to delete: {ex.Message}",
