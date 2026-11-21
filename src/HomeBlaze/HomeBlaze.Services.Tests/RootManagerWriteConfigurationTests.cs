@@ -33,7 +33,7 @@ public class RootManagerWriteConfigurationTests : IDisposable
             new SubjectTypeRegistry(typeProvider),
             new ConfigurableSubjectSerializer(typeProvider, _serviceProvider),
             _context,
-            new SubjectPathResolver(() => rootManager!.Root),
+            new SubjectPathResolver(_context, () => rootManager!.Root),
             configuration.Object);
     }
 

@@ -408,8 +408,8 @@ public class SubjectPathRecorderTests : SubjectPathResolverTestBase
         var child = new TestContainer(Context) { Name = "Child" };
         var root = new TestContainer(Context) { Name = "Root", Child = child };
         RootManager.Root = root;
-        var recorded = new SubjectPathResolver(() => root);
-        var unrecorded = new SubjectPathResolver(() => root);
+        var recorded = new SubjectPathResolver(Context, () => root);
+        var unrecorded = new SubjectPathResolver(Context, () => root);
         var recorder = new DiscardingRecorder();
         long withRecorder = 0;
         long withoutRecorder = 0;
@@ -443,7 +443,7 @@ public class SubjectPathRecorderTests : SubjectPathResolverTestBase
         var child = new TestContainer(Context) { Name = "Child" };
         var root = new TestContainer(Context) { Name = "Root" };
         RootManager.Root = root;
-        var resolver = new SubjectPathResolver(() => root);
+        var resolver = new SubjectPathResolver(Context, () => root);
         var routeBefore = new RecordedRoute();
         resolver.ResolveSubject("/Child/Garden", PathStyle.Canonical, null, routeBefore);
         var route = new RecordedRoute();
@@ -548,7 +548,7 @@ public class SubjectPathRecorderTests : SubjectPathResolverTestBase
         var first = new TestContainer(Context) { Name = "First" };
         var second = new TestContainer(Context) { Name = "Second" };
         var root = new TestContainerWithItemList(Context) { Items = [first, second] };
-        var resolver = new SubjectPathResolver(() => root);
+        var resolver = new SubjectPathResolver(Context, () => root);
         var pathBefore = resolver.GetPath(second, PathStyle.Canonical, new RecordedRoute());
         var route = new RecordedRoute();
 
@@ -572,7 +572,7 @@ public class SubjectPathRecorderTests : SubjectPathResolverTestBase
         var detached = new TestContainer(Context) { Name = "Detached", Child = child };
         var root = new TestContainer(Context) { Name = "Root" };
         var currentRoot = root;
-        var resolver = new SubjectPathResolver(() => currentRoot);
+        var resolver = new SubjectPathResolver(Context, () => currentRoot);
         var routeBefore = new RecordedRoute();
         resolver.GetPath(child, PathStyle.Canonical, routeBefore);
         var route = new RecordedRoute();

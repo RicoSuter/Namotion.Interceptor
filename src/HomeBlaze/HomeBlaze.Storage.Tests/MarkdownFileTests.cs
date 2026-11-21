@@ -577,7 +577,7 @@ public class MarkdownFileTests
             $":: HomeBlaze.Components.ValueTile#tile Path=\"../..{path}\"\n::\n\n" +
             $":: HomeBlaze.Components.Indicator#indicator Path=\"../..{path}\"\n::\n";
         var markdown = await CreatePageInGraphAsync(content, new EmbeddedSecretDevice { Password = "s3cr3t", Host = "visible" });
-        var resolver = new SubjectPathResolver(() => null);
+        var resolver = new SubjectPathResolver(((IInterceptorSubject)markdown).Context, () => null);
         var scope = (IPathScope)markdown;
 
         // Act
@@ -858,7 +858,7 @@ public class MarkdownFileTests
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
-        services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
+        services.AddSingleton(sp => new SubjectPathResolver(context, () => sp.GetRequiredService<RootManager>().Root));
         services.AddSingleton<MarkdownContentParser>();
 
         var serviceProvider = services.BuildServiceProvider();
@@ -882,7 +882,7 @@ public class MarkdownFileTests
         await WriteFileAsync(storage, "Docs/page.md", content);
 
         VirtualFolder? root = null;
-        var pathResolver = new SubjectPathResolver(() => root);
+        var pathResolver = new SubjectPathResolver(context, () => root);
         var parser = new MarkdownContentParser(
             serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>(), pathResolver, serviceProvider.GetRequiredService<TypeProvider>());
         var markdown = new MarkdownFile(storage, "Docs/page.md", parser, serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>());

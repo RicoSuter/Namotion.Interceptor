@@ -74,7 +74,7 @@ public class LlmAgentBaseTests
             await release.Task.WaitAsync(cancellationToken);
             return new AgentTurnResult("The answer so far", null, null);
         });
-        var resolver = new SubjectPathResolver(() => test.Root);
+        var resolver = new SubjectPathResolver(((IInterceptorSubject)test.Root).Context, () => test.Root);
         var send = test.Agent.SendMessageAsync("Hello", CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.StreamingText.Length > 0, message: "The agent should stream text.");
 

@@ -40,7 +40,7 @@ public class SqliteHistoryStoreRecordingTests
         // The resolver reads the root lazily, so it can be built before the manager that owns it,
         // and RootManager registers it into the context.
         RootManager? rootManager = null;
-        var pathResolver = new SubjectPathResolver(() => rootManager!.Root);
+        var pathResolver = new SubjectPathResolver(context, () => rootManager!.Root);
         rootManager = new RootManager(typeRegistry, serializer, context, pathResolver, null);
         context.WithService(() => rootManager);
 
@@ -367,7 +367,7 @@ public class SqliteHistoryStoreRecordingTests
         // Arrange - a resolver but no property tracking, so subscribing to the change queue throws once the
         // engine already exists.
         var context = InterceptorSubjectContext.Create();
-        context.WithService<ISubjectPathResolver>(() => new SubjectPathResolver(() => null));
+        context.WithService<ISubjectPathResolver>(() => new SubjectPathResolver(context, () => null));
         var (store, databasePath) = CreateStore(context);
         var hostedService = (IHostedService)store;
         try

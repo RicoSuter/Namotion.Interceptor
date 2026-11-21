@@ -64,7 +64,7 @@ public class MarkdownLinkCacheTests
         // Arrange
         FluentStorageContainer? parent = null;
         var fixture = await MarkdownPageFixture.CreateAsync(services =>
-            services.AddSingleton(_ => new SubjectPathResolver(() => parent)));
+            services.AddSingleton(provider => new SubjectPathResolver(provider.GetRequiredService<IInterceptorSubjectContext>(), () => parent)));
         parent = new FluentStorageContainer(
             fixture.Services.GetRequiredService<SubjectTypeRegistry>(),
             fixture.Services.GetRequiredService<ConfigurableSubjectSerializer>(),
