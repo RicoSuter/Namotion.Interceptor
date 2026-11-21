@@ -478,24 +478,26 @@
         if (confirmed != true)
             return;
 
+        // A delete is a change of the panes by the user. It ends a pending path before the paths change, so that the
+        // delete's own change and the panes it closes are handled as for any other path.
+        if (_isPathPending)
+        {
+            UpdateUrl();
+            StateHasChanged();
+        }
+
         try
         {
             await deleteOperation.InvokeAsync(null, ServiceProvider, CancellationToken.None);
 
-            // Close this pane and any after it. A pending path can have dropped the pane on the change of the paths
-            // that the delete caused, and a delete is a change of the panes by the user that ends it.
+            // Close this pane and any after it
             var paneIndex = _panes.IndexOf(pane);
             if (paneIndex > 0)
             {
                 RemovePanesFrom(paneIndex);
+                UpdateUrl();
+                StateHasChanged();
             }
-            else if (!_isPathPending)
-            {
-                return;
-            }
-
-            UpdateUrl();
-            StateHasChanged();
         }
         catch (Exception ex)
         {
