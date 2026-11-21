@@ -5,6 +5,7 @@ using Google.Protobuf.WellKnownTypes;
 using HomeBlaze.Abstractions.Common;
 using HomeBlaze.Abstractions.Devices.Locks;
 using HomeBlaze.Abstractions.Devices.Vehicles;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Namotion.Devices.Tesla.Client;
@@ -22,6 +23,7 @@ public class TeslaVehicleTests
     private const string Vin = "TESTVIN0000000001";
 
     private static readonly DateTimeOffset Now = DateTimeOffset.FromUnixTimeMilliseconds(1795293700000);
+    private static readonly DateTimeOffset FixtureTime = DateTimeOffset.FromUnixTimeMilliseconds(FixtureTimestamp);
 
     private static TeslaVehicle Create()
     {
@@ -34,6 +36,22 @@ public class TeslaVehicleTests
 
     private static TeslaVehicleDataDto LoadVehicleData() =>
         JsonSerializer.Deserialize(FixtureLoader.Load("vehicle-data.json"), TeslaJsonContext.Default.TeslaResponseTeslaVehicleDataDto)!.Response!;
+
+    private static TeslaVehicleDataDto ChargeData(string chargingState, int power, int current, int voltage, int phases, int pilotCurrent, int maximumCurrent) => new()
+    {
+        State = "online",
+        ChargeState = new TeslaChargeStateDto
+        {
+            Timestamp = FixtureTimestamp,
+            ChargingState = chargingState,
+            ChargerPower = power,
+            ChargerActualCurrent = current,
+            ChargerVoltage = voltage,
+            ChargerPhases = phases,
+            ChargerPilotCurrent = pilotCurrent,
+            ChargeCurrentRequestMax = maximumCurrent
+        }
+    };
 
     private static TeslaProductDto CachedProduct(TeslaVehicle vehicle, VehicleData snapshot) => new()
     {
@@ -121,7 +139,7 @@ public class TeslaVehicleTests
         Assert.Equal("74d", vehicle.ProductCode);
         Assert.Null(vehicle.VehicleName); // empty in the fixture
         Assert.Equal("Model 3 000001", vehicle.Title); // no vehicle name and no display name
-        Assert.Equal(Now, vehicle.LastUpdated);
+        Assert.Equal(FixtureTime, vehicle.LastUpdated); // the newest section timestamp, not the read time
     }
 
     [Fact]
@@ -251,7 +269,7 @@ public class TeslaVehicleTests
 
         // Assert
         Assert.Equal(36469.00m * 1.609344m, vehicle.TotalDrivenDistance);
-        Assert.Equal(Now, vehicle.LastUpdated);
+        Assert.Equal(FixtureTime, vehicle.LastUpdated);
     }
 
     [Fact]
@@ -366,5 +384,210 @@ public class TeslaVehicleTests
         // Assert
         Assert.False(vehicle.IsActive);
         Assert.True(vehicle.CanSleep);
+    }
+    [Fact]
+    public void WhenThreePhaseChargingIsReportedAsTwoPhases_ThenMaximumPowerUsesThreePhases()
+    {
+        // Arrange
+        var vehicle = Create();
+
+        // Act
+        vehicle.ApplyVehicleData(ChargeData("Charging", power: 11, current: 16, voltage: 230, phases: 2, pilotCurrent: 16, maximumCurrent: 16));
+
+        // Assert
+        Assert.Equal(230m * 16m * 3m, vehicle.MaximumChargingPower);
+    }
+
+    [Fact]
+    public void WhenChargingOnOnePhase_ThenMaximumPowerUsesOnePhase()
+    {
+        // Arrange
+        var vehicle = Create();
+
+        // Act
+        vehicle.ApplyVehicleData(ChargeData("Charging", power: 7, current: 32, voltage: 230, phases: 1, pilotCurrent: 32, maximumCurrent: 32));
+
+        // Assert
+        Assert.Equal(230m * 32m, vehicle.MaximumChargingPower);
+    }
+
+    [Fact]
+    public void WhenPilotCurrentIsBelowTheVehicleLimit_ThenMaximumPowerUsesThePilotCurrent()
+    {
+        // Arrange
+        var vehicle = Create();
+
+        // Act
+        vehicle.ApplyVehicleData(ChargeData("Charging", power: 7, current: 10, voltage: 230, phases: 2, pilotCurrent: 10, maximumCurrent: 16));
+
+        // Assert
+        Assert.Equal(230m * 10m * 3m, vehicle.MaximumChargingPower);
+    }
+
+    [Fact]
+    public void WhenNoPowerIsMeasured_ThenMaximumPowerFallsBackToTheReportedPhases()
+    {
+        // Arrange
+        var vehicle = Create();
+
+        // Act
+        vehicle.ApplyVehicleData(ChargeData("Starting", power: 0, current: 0, voltage: 230, phases: 2, pilotCurrent: 16, maximumCurrent: 16));
+
+        // Assert
+        Assert.Equal(230m * 16m * 2m, vehicle.MaximumChargingPower);
+    }
+
+    [Fact]
+    public void WhenOnlyClimateIsOn_ThenVehicleIsNotActiveButCannotSleep()
+    {
+        // Arrange
+        var vehicle = Create();
+
+        // Act
+        vehicle.ApplyVehicleData(new TeslaVehicleDataDto { State = "online", ClimateState = new TeslaClimateStateDto { Timestamp = FixtureTimestamp, IsClimateOn = true } });
+
+        // Assert
+        Assert.False(vehicle.IsActive);
+        Assert.False(vehicle.CanSleep);
+    }
+
+    [Fact]
+    public void WhenOnlySentryModeIsOn_ThenVehicleIsNotActiveButCannotSleep()
+    {
+        // Arrange
+        var vehicle = Create();
+
+        // Act
+        vehicle.ApplyVehicleData(new TeslaVehicleDataDto { State = "online", VehicleState = new TeslaVehicleStateDto { Timestamp = FixtureTimestamp, SentryMode = true } });
+
+        // Assert
+        Assert.False(vehicle.IsActive);
+        Assert.False(vehicle.CanSleep);
+    }
+
+    [Fact]
+    public void WhenVehicleDrives_ThenItIsActive()
+    {
+        // Arrange
+        var vehicle = Create();
+        var snapshot = new VehicleData
+        {
+            DriveState = new DriveState { ShiftState = new ShiftState { D = new CarServer.Void() }, SpeedFloat = 30f, Timestamp = Timestamp.FromDateTimeOffset(Now) }
+        };
+
+        // Act
+        vehicle.ApplyProduct(CachedProduct(vehicle, snapshot));
+
+        // Assert
+        Assert.True(vehicle.IsActive);
+        Assert.False(vehicle.CanSleep);
+    }
+
+    [Fact]
+    public void WhenUserIsPresent_ThenItIsActive()
+    {
+        // Arrange
+        var vehicle = Create();
+        var snapshot = new VehicleData { ClosuresState = new ClosuresState { IsUserPresent = true, Timestamp = Timestamp.FromDateTimeOffset(Now) } };
+
+        // Act
+        vehicle.ApplyProduct(CachedProduct(vehicle, snapshot));
+
+        // Assert
+        Assert.True(vehicle.IsActive);
+        Assert.False(vehicle.CanSleep);
+    }
+
+    [Fact]
+    public void WhenSnapshotsArriveInReverseOrder_ThenLastUpdatedKeepsTheNewest()
+    {
+        // Arrange
+        var vehicle = Create();
+        vehicle.ApplyProduct(CachedProduct(vehicle, VehicleDataBuilder.Create(Now)));
+
+        // Act
+        vehicle.ApplyProduct(CachedProduct(vehicle, VehicleDataBuilder.Create(Now.AddMinutes(-5))));
+
+        // Assert
+        Assert.Equal(Now, vehicle.LastUpdated);
+    }
+
+    [Fact]
+    public void WhenVehicleDataHasNoSectionTimestamp_ThenLastUpdatedIsTheReadTime()
+    {
+        // Arrange
+        var vehicle = Create();
+
+        // Act
+        vehicle.ApplyVehicleData(new TeslaVehicleDataDto { State = "online", ClimateState = new TeslaClimateStateDto { IsClimateOn = false } });
+
+        // Assert
+        Assert.Equal(Now, vehicle.LastUpdated);
+    }
+
+    [Fact]
+    public void WhenJsonVehicleStateIsOlderThanTheSnapshotLocation_ThenHomelinkKeepsTheSnapshotValue()
+    {
+        // Arrange
+        var vehicle = Create();
+        var snapshot = new VehicleData { LocationState = new LocationState { HomelinkNearby = true, Timestamp = Timestamp.FromDateTimeOffset(Now) } };
+        vehicle.ApplyProduct(CachedProduct(vehicle, snapshot));
+
+        // Act
+        vehicle.ApplyVehicleData(new TeslaVehicleDataDto
+        {
+            State = "online",
+            VehicleState = new TeslaVehicleStateDto { Timestamp = FixtureTimestamp, HomelinkNearby = false }
+        });
+
+        // Assert
+        Assert.True(vehicle.Drive.IsHomelinkNearby);
+    }
+
+    [Fact]
+    public void WhenCachedDataStaysInvalid_ThenOnlyTheFirstFailureIsAWarning()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var vehicle = new TeslaVehicle(1, Vin, new FakeTimeProvider(Now), logger);
+        var invalid = new TeslaProductDto { Id = 1, State = "asleep", CachedData = "not base64!" };
+
+        // Act
+        vehicle.ApplyProduct(invalid);
+        vehicle.ApplyProduct(invalid);
+        vehicle.ApplyProduct(CachedProduct(vehicle, VehicleDataBuilder.Create(Now)));
+        vehicle.ApplyProduct(invalid);
+
+        // Assert
+        Assert.Equal([LogLevel.Warning, LogLevel.Debug, LogLevel.Warning], logger.Levels);
+    }
+
+    [Fact]
+    public void WhenVehicleFallsAsleep_ThenAwakeChangeIsPublished()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var vehicle = Create();
+        ((IInterceptorSubject)vehicle).Context.AddFallbackContext(context);
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+
+        // Act
+        vehicle.ApplyProduct(new TeslaProductDto { Id = vehicle.Id, VehicleId = 2, State = "asleep" });
+
+        // Assert
+        var change = Assert.Single(changes, change => change.Property.Subject == vehicle && change.Property.Name == nameof(TeslaVehicle.IsAwake));
+        Assert.False(change.GetNewValue<bool?>());
+    }
+
+    private sealed class RecordingLogger : ILogger
+    {
+        public List<LogLevel> Levels { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) => Levels.Add(logLevel);
     }
 }

@@ -35,6 +35,7 @@ public partial class TeslaVehicle :
     private readonly TeslaSectionClock _odometerClock = new();
 
     private Func<TeslaVehicle, CancellationToken, Task>? _wakeUp;
+    private bool _hasWarnedAboutCachedData;
 
     public TeslaVehicle(long id, string vin, TimeProvider timeProvider, ILogger logger)
     {
@@ -130,8 +131,8 @@ public partial class TeslaVehicle :
 
     [Derived] public decimal? ChargingPower => Charge.ChargingPower;
 
-    /// <summary>The power at the highest current that the vehicle can request, or null when the vehicle does not charge.</summary>
-    [Derived] public decimal? MaximumChargingPower => Charge.ChargerVoltage * Charge.MaximumRequestedChargingCurrent * (Charge.ChargerPhases ?? 1);
+    /// <summary>The power at the highest current that the charger offers and the vehicle can request, or null when the vehicle does not charge.</summary>
+    [Derived] public decimal? MaximumChargingPower => Charge.ChargerVoltage * GetMaximumChargingCurrent() * GetChargingPhases();
 
     [Derived] public decimal? ChargeLimit => Charge.ChargeLimit;
 
@@ -189,6 +190,27 @@ public partial class TeslaVehicle :
         (_, true) => "Info",
         _ => null
     };
+
+    private decimal? GetMaximumChargingCurrent()
+    {
+        var pilotCurrent = Charge.PilotCurrent;
+        var maximumRequestedCurrent = Charge.MaximumRequestedChargingCurrent;
+        return pilotCurrent is { } pilot && maximumRequestedCurrent is { } maximum ? Math.Min(pilot, maximum) : pilotCurrent ?? maximumRequestedCurrent;
+    }
+
+    // Tesla is reported to send 2 phases while charging on 3-phase AC, so the measured power decides when it is known.
+    private decimal GetChargingPhases()
+    {
+        var power = Charge.ChargingPower;
+        var voltage = Charge.ChargerVoltage;
+        var current = Charge.ChargingCurrent;
+        if (power is > 0 && voltage is > 0 && current is > 0)
+        {
+            return Math.Clamp(Math.Round(power.Value / (voltage.Value * current.Value), MidpointRounding.AwayFromZero), 1m, 3m);
+        }
+
+        return Charge.ChargerPhases ?? 1;
+    }
 
     // Activity, read by the polling of the account
 

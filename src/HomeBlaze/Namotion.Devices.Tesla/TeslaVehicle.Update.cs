@@ -9,6 +9,16 @@ namespace Namotion.Devices.Tesla;
 
 public partial class TeslaVehicle
 {
+    private static readonly Func<TeslaVehicleDataDto, long?>[] VehicleDataTimestamps =
+    [
+        data => data.ChargeState?.Timestamp,
+        data => data.ClimateState?.Timestamp,
+        data => data.DriveState?.Timestamp,
+        data => data.GuiSettings?.Timestamp,
+        data => data.VehicleConfig?.Timestamp,
+        data => data.VehicleState?.Timestamp
+    ];
+
     private static readonly Func<VehicleData, Timestamp?>[] SnapshotTimestamps =
     [
         snapshot => snapshot.ChargeState?.Timestamp,
@@ -52,7 +62,21 @@ public partial class TeslaVehicle
         if (data.VehicleConfig is { } config) Specification.Update(config);
         if (data.VehicleState is { } state) ApplyVehicleState(state);
 
-        LastUpdated = _timeProvider.GetUtcNow();
+        UpdateLastUpdatedFromVehicleData(data);
+    }
+
+    private void UpdateLastUpdatedFromVehicleData(TeslaVehicleDataDto data)
+    {
+        long? newest = null;
+        foreach (var getTimestamp in VehicleDataTimestamps)
+        {
+            if (getTimestamp(data) is { } timestamp && (newest is null || timestamp > newest))
+            {
+                newest = timestamp;
+            }
+        }
+
+        UpdateLastUpdated(TeslaValues.FromUnixMilliseconds(newest) ?? _timeProvider.GetUtcNow());
     }
 
     private void ApplyVehicleState(TeslaVehicleStateDto state)
@@ -64,7 +88,7 @@ public partial class TeslaVehicle
         if (state.SoftwareUpdate is { } update) SoftwareUpdate.Update(update, timestamp);
         if (state.SpeedLimitMode is { } speedLimit) SpeedLimit.Update(speedLimit, timestamp);
 
-        Drive.IsHomelinkNearby = state.HomelinkNearby;
+        Drive.UpdateHomelinkNearby(state.HomelinkNearby, timestamp);
         VehicleName = TeslaValues.Text(state.VehicleName);
         SoftwareVersion = TeslaValues.Text(state.CarVersion);
 
@@ -84,10 +108,21 @@ public partial class TeslaVehicle
         }
         catch (Exception exception) when (exception is FormatException or InvalidProtocolBufferException)
         {
-            _logger.LogWarning(exception, "The cached data of Tesla vehicle {Vin} could not be read.", Vin);
+            // Every poll returns the same cached data, so only the first failure in a row is a warning.
+            if (_hasWarnedAboutCachedData)
+            {
+                _logger.LogDebug(exception, "The cached data of Tesla vehicle {Vin} could not be read.", Vin);
+            }
+            else
+            {
+                _logger.LogWarning(exception, "The cached data of Tesla vehicle {Vin} could not be read.", Vin);
+                _hasWarnedAboutCachedData = true;
+            }
+
             return;
         }
 
+        _hasWarnedAboutCachedData = false;
         ApplySnapshot(snapshot);
     }
 
@@ -139,9 +174,17 @@ public partial class TeslaVehicle
             }
         }
 
-        if (newest is { } value && (LastUpdated is null || value > LastUpdated))
+        if (newest is { } value)
         {
-            LastUpdated = value;
+            UpdateLastUpdated(value);
+        }
+    }
+
+    private void UpdateLastUpdated(DateTimeOffset timestamp)
+    {
+        if (LastUpdated is null || timestamp > LastUpdated)
+        {
+            LastUpdated = timestamp;
         }
     }
 }
