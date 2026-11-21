@@ -104,17 +104,6 @@ internal sealed class LatchingGpioDriver : GpioDriver
     }
 
     /// <summary>
-    /// Sets the level a pin reads as an input.
-    /// </summary>
-    public void SetInputLevel(int pinNumber, PinValue level)
-    {
-        lock (_lock)
-        {
-            GetState(pinNumber).InputLevel = level;
-        }
-    }
-
-    /// <summary>
     /// Sets the state a pin has before it is opened.
     /// </summary>
     public void SetUpPin(int pinNumber, PinMode mode, PinValue inputLevel, PinValue latch)

@@ -69,9 +69,9 @@ public class GpioWriteTests
         // Act
         pin.Value = true;
 
-        // Assert - No writes should have happened for input pin; a write to an input fails its verification
-        Assert.DoesNotContain(simulationDriver.WriteHistory, w => w.PinNumber == 17);
+        // Assert - The controller only stores a level written to an input, so a write would fail its verification
         Assert.Equal(ServiceStatus.Running, pin.Status);
+        Assert.Null(pin.StatusMessage);
     }
 
     [Fact]
