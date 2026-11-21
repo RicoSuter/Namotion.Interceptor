@@ -1,0 +1,147 @@
+@using System.Globalization
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(TeslaAccount))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_name" @bind-Value:after="OnFieldChanged"
+                  Label="Name"
+                  HelperText="Empty to show the email of the account"
+                  Immediate="true" />
+
+    <MudText Typo="Typo.subtitle2" Class="mt-4">Polling (hh:mm:ss)</MudText>
+    <MudTextField @bind-Value="_statePollingInterval" @bind-Value:after="OnFieldChanged"
+                  Label="Vehicle list interval" Immediate="true" Validation="@(new Func<string, string?>(ValidateInterval))" />
+    <MudTextField @bind-Value="_activePollingInterval" @bind-Value:after="OnFieldChanged"
+                  Label="Data interval while charging, driving or in use" Immediate="true" Validation="@(new Func<string, string?>(ValidateInterval))" />
+    <MudTextField @bind-Value="_idlePollingInterval" @bind-Value:after="OnFieldChanged"
+                  Label="Data interval while idle" Immediate="true" Validation="@(new Func<string, string?>(ValidateInterval))" />
+    <MudTextField @bind-Value="_idleTimeout" @bind-Value:after="OnFieldChanged"
+                  Label="Idle time before reading pauses" Immediate="true" Validation="@(new Func<string, string?>(ValidateInterval))" />
+    <MudTextField @bind-Value="_sleepWindow" @bind-Value:after="OnFieldChanged"
+                  Label="Pause that lets the vehicle fall asleep" Immediate="true" Validation="@(new Func<string, string?>(ValidateInterval))" />
+    <MudTextField @bind-Value="_retryInterval" @bind-Value:after="OnFieldChanged"
+                  Label="Retry interval after a failure" Immediate="true" Validation="@(new Func<string, string?>(ValidateInterval))" />
+
+    <MudExpansionPanels Elevation="0" Class="mt-4">
+        <MudExpansionPanel Text="@(IsReauthenticationRequired ? "Replace token (re-authentication required)" : "Replace token")"
+                           Expanded="IsReauthenticationRequired">
+            <TeslaTokenPanel OnConnected="OnConnected" />
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+
+    @if (_newRefreshToken is not null)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">The new token is stored when you save.</MudAlert>
+    }
+</MudForm>
+
+@code {
+    private string _name = string.Empty;
+    private string _statePollingInterval = string.Empty;
+    private string _activePollingInterval = string.Empty;
+    private string _idlePollingInterval = string.Empty;
+    private string _idleTimeout = string.Empty;
+    private string _sleepWindow = string.Empty;
+    private string _retryInterval = string.Empty;
+    private string _original = string.Empty;
+
+    // The rotated refresh token of a replacement between the connect and the save; cleared once saved.
+    private string? _newRefreshToken;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private TeslaAccount? Account => Subject as TeslaAccount;
+
+    private bool IsReauthenticationRequired =>
+        Account is { IsAuthenticated: false, Status: global::HomeBlaze.Abstractions.ServiceStatus.Error };
+
+    public bool IsValid =>
+        TryParseInterval(_statePollingInterval, out _) &&
+        TryParseInterval(_activePollingInterval, out _) &&
+        TryParseInterval(_idlePollingInterval, out _) &&
+        TryParseInterval(_idleTimeout, out _) &&
+        TryParseInterval(_sleepWindow, out _) &&
+        TryParseInterval(_retryInterval, out _);
+
+    public bool IsDirty => Snapshot() != _original || _newRefreshToken is not null;
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (Account is not null)
+        {
+            _name = Account.Name;
+            _statePollingInterval = FormatInterval(Account.StatePollingInterval);
+            _activePollingInterval = FormatInterval(Account.ActivePollingInterval);
+            _idlePollingInterval = FormatInterval(Account.IdlePollingInterval);
+            _idleTimeout = FormatInterval(Account.IdleTimeout);
+            _sleepWindow = FormatInterval(Account.SleepWindow);
+            _retryInterval = FormatInterval(Account.RetryInterval);
+        }
+
+        _original = Snapshot();
+    }
+
+    private static string FormatInterval(TimeSpan interval) => interval.ToString("c", CultureInfo.InvariantCulture);
+
+    private static bool TryParseInterval(string text, out TimeSpan interval) =>
+        TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out interval) && interval > TimeSpan.Zero;
+
+    private static string? ValidateInterval(string text) =>
+        TryParseInterval(text, out _) ? null : "Enter a positive duration such as 00:05:00";
+
+    private string Snapshot() => string.Join("|",
+        _name, _statePollingInterval, _activePollingInterval, _idlePollingInterval, _idleTimeout, _sleepWindow, _retryInterval);
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    private void OnConnected(TeslaConnection connection)
+    {
+        _newRefreshToken = connection.RefreshToken;
+        OnFieldChanged();
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Account is null || !IsValid)
+        {
+            return Task.CompletedTask;
+        }
+
+        TryParseInterval(_statePollingInterval, out var statePollingInterval);
+        TryParseInterval(_activePollingInterval, out var activePollingInterval);
+        TryParseInterval(_idlePollingInterval, out var idlePollingInterval);
+        TryParseInterval(_idleTimeout, out var idleTimeout);
+        TryParseInterval(_sleepWindow, out var sleepWindow);
+        TryParseInterval(_retryInterval, out var retryInterval);
+
+        Account.Name = _name;
+        Account.StatePollingInterval = statePollingInterval;
+        Account.ActivePollingInterval = activePollingInterval;
+        Account.IdlePollingInterval = idlePollingInterval;
+        Account.IdleTimeout = idleTimeout;
+        Account.SleepWindow = sleepWindow;
+        Account.RetryInterval = retryInterval;
+        if (_newRefreshToken is not null)
+        {
+            Account.RefreshToken = _newRefreshToken;
+            _newRefreshToken = null;
+        }
+
+        _original = Snapshot();
+        IsDirtyChanged?.Invoke(false);
+        return Task.CompletedTask;
+    }
+}

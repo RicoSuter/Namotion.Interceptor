@@ -97,6 +97,11 @@ namespace Namotion.Devices.Tesla
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
+    public static class TeslaAccountConnector
+    {
+        public static System.Threading.Tasks.Task<Namotion.Devices.Tesla.TeslaConnection> ConnectWithLoginAsync(Namotion.Devices.Tesla.Client.TeslaLogin login, string pastedCallback, System.TimeProvider timeProvider, System.Threading.CancellationToken cancellationToken) { }
+        public static System.Threading.Tasks.Task<Namotion.Devices.Tesla.TeslaConnection> ConnectWithRefreshTokenAsync(string refreshToken, System.TimeProvider timeProvider, System.Threading.CancellationToken cancellationToken) { }
+    }
     public enum TeslaCabinOverheatProtection
     {
         Unknown = 0,
@@ -332,6 +337,14 @@ namespace Namotion.Devices.Tesla
         Off = 1,
         Allowed = 2,
         Required = 3,
+    }
+    public sealed class TeslaConnection : System.IEquatable<Namotion.Devices.Tesla.TeslaConnection>
+    {
+        public TeslaConnection(string RefreshToken, string? Email, System.Collections.Generic.IReadOnlyList<Namotion.Devices.Tesla.TeslaVehicleSummary> Vehicles, string? VehicleListError = null) { }
+        public string? Email { get; init; }
+        public string RefreshToken { get; init; }
+        public string? VehicleListError { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Namotion.Devices.Tesla.TeslaVehicleSummary> Vehicles { get; init; }
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -945,5 +958,12 @@ namespace Namotion.Devices.Tesla
         Online = 1,
         Asleep = 2,
         Offline = 3,
+    }
+    public sealed class TeslaVehicleSummary : System.IEquatable<Namotion.Devices.Tesla.TeslaVehicleSummary>
+    {
+        public TeslaVehicleSummary(string Vin, string? DisplayName, string? State) { }
+        public string? DisplayName { get; init; }
+        public string? State { get; init; }
+        public string Vin { get; init; }
     }
 }

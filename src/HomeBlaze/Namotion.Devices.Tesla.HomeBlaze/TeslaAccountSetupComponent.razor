@@ -1,0 +1,44 @@
+@attribute [SubjectComponent(SubjectComponentType.Setup, typeof(TeslaAccount))]
+@implements ISubjectEditComponent
+
+<TeslaTokenPanel OnConnected="OnConnected" />
+
+@code {
+    // The rotated refresh token between the connect and the save; cleared once saved.
+    private string? _refreshToken;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private TeslaAccount? Account => Subject as TeslaAccount;
+
+    public bool IsValid => _refreshToken is not null;
+
+    public bool IsDirty => _refreshToken is not null;
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    private void OnConnected(TeslaConnection connection)
+    {
+        _refreshToken = connection.RefreshToken;
+        IsValidChanged?.Invoke(true);
+        IsDirtyChanged?.Invoke(true);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Account is not null && _refreshToken is not null)
+        {
+            // The name stays empty, so that the title shows the email of the account.
+            Account.RefreshToken = _refreshToken;
+            _refreshToken = null;
+        }
+
+        return Task.CompletedTask;
+    }
+}

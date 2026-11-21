@@ -1,0 +1,184 @@
+@implements IDisposable
+
+@inject TimeProvider TimeProvider
+
+<MudStack Spacing="3">
+    <MudText Typo="Typo.body2">
+        HomeBlaze reads your Tesla with a refresh token of your Tesla account. Create one with
+        <MudLink Href="https://github.com/adriankumpf/tesla_auth/releases" Target="_blank" rel="noopener noreferrer">tesla_auth</MudLink> (Windows, macOS, Linux)
+        or the app <MudLink Href="https://apps.apple.com/app/auth-app-for-tesla/id1552058613" Target="_blank" rel="noopener noreferrer">Auth app for Tesla</MudLink> (iOS)
+        on any device, and paste the refresh token here.
+    </MudText>
+
+    <MudAlert Severity="Severity.Info" Dense="true">
+        Do not reuse a token that TeslaMate or another tool uses: each refresh replaces the token, so the tools would log each other out.
+    </MudAlert>
+
+    <MudTextField @bind-Value="_refreshToken"
+                  Label="Refresh token"
+                  InputType="InputType.Password"
+                  Immediate="true"
+                  Disabled="_connecting" />
+
+    <MudButton OnClick="ConnectWithTokenAsync"
+               Variant="Variant.Filled"
+               Color="Color.Primary"
+               Disabled="@(_connecting || string.IsNullOrWhiteSpace(_refreshToken))">
+        @if (_connecting)
+        {
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+        }
+        Connect
+    </MudButton>
+
+    <MudExpansionPanels Elevation="0">
+        <MudExpansionPanel Text="Advanced: sign in with Tesla">
+            <MudStack Spacing="2">
+                <MudText Typo="Typo.body2">
+                    Open this address in a browser on any device and sign in. Tesla then redirects to an address that starts with
+                    <code>tesla://auth/callback</code>, which the browser cannot open. In a desktop browser, open the developer tools before
+                    signing in, enable "Preserve log" in the network tab, and copy the address of the failed request. Paste it below.
+                </MudText>
+                <MudTextField Value="@_login.Url"
+                              Label="Tesla sign in address"
+                              ReadOnly="true"
+                              Variant="Variant.Outlined"
+                              Lines="3" />
+                <MudTextField @bind-Value="_callback"
+                              Label="Pasted tesla://auth/callback address"
+                              InputType="InputType.Password"
+                              Immediate="true"
+                              Disabled="_connecting" />
+                <MudButton OnClick="ConnectWithLoginAsync"
+                           Variant="Variant.Outlined"
+                           Disabled="@(_connecting || string.IsNullOrWhiteSpace(_callback))">
+                    Connect with the pasted address
+                </MudButton>
+            </MudStack>
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+
+    @if (_errorMessage is not null)
+    {
+        <MudAlert Severity="Severity.Error">@_errorMessage</MudAlert>
+    }
+
+    @if (_isConnected)
+    {
+        <MudAlert Severity="Severity.Success">
+            Connected@(_email is null ? "" : " as " + _email). Save to store the new token: Tesla has replaced the one you entered.
+        </MudAlert>
+        @if (_vehicleListError is not null)
+        {
+            <MudAlert Severity="Severity.Warning">The vehicles could not be listed: @_vehicleListError</MudAlert>
+        }
+        else if (_vehicles.Count == 0)
+        {
+            <MudAlert Severity="Severity.Warning">This account has no vehicles.</MudAlert>
+        }
+        else
+        {
+            <MudList T="string" ReadOnly="true" Dense="true">
+                @foreach (var vehicle in _vehicles)
+                {
+                    <MudListItem T="string" Icon="@Icons.Material.Filled.DirectionsCar">
+                        @(vehicle.DisplayName ?? vehicle.Vin)
+                        <MudText Typo="Typo.caption" Inline="true">(@vehicle.Vin, @(vehicle.State ?? "unknown"))</MudText>
+                    </MudListItem>
+                }
+            </MudList>
+        }
+    }
+</MudStack>
+
+@code {
+    private readonly CancellationTokenSource _disposeCancellation = new();
+    private TeslaLogin _login = TeslaAuthClient.CreateLogin();
+    private string _refreshToken = string.Empty;
+    private string _callback = string.Empty;
+    private bool _connecting;
+    private string? _errorMessage;
+
+    // Only what is shown is kept: the new refresh token goes to OnConnected and is not held here.
+    private bool _isConnected;
+    private string? _email;
+    private string? _vehicleListError;
+    private IReadOnlyList<TeslaVehicleSummary> _vehicles = [];
+
+    /// <summary>Raised with the connection after a successful connect; store its refresh token.</summary>
+    [Parameter]
+    public EventCallback<TeslaConnection> OnConnected { get; set; }
+
+    private Task ConnectWithTokenAsync()
+    {
+        var refreshToken = _refreshToken;
+        _refreshToken = string.Empty;
+        return ConnectAsync(
+            cancellationToken => TeslaAccountConnector.ConnectWithRefreshTokenAsync(refreshToken, TimeProvider, cancellationToken),
+            "Tesla rejected the refresh token. Create a new refresh token and paste it.",
+            isLogin: false);
+    }
+
+    private Task ConnectWithLoginAsync()
+    {
+        var callback = _callback;
+        var login = _login;
+        _callback = string.Empty;
+        return ConnectAsync(
+            cancellationToken => TeslaAccountConnector.ConnectWithLoginAsync(login, callback, TimeProvider, cancellationToken),
+            "Tesla rejected the sign in. Open the new sign in address and sign in again.",
+            isLogin: true);
+    }
+
+    private async Task ConnectAsync(Func<CancellationToken, Task<TeslaConnection>> connect, string rejectedMessage, bool isLogin)
+    {
+        _connecting = true;
+        _errorMessage = null;
+        _isConnected = false;
+        // A pasted address that cannot be read sends nothing, so its sign in stays valid. Otherwise the code has been
+        // used and a further attempt needs a new sign in.
+        var renewLogin = isLogin;
+        try
+        {
+            var connection = await connect(_disposeCancellation.Token);
+            _isConnected = true;
+            _email = connection.Email;
+            _vehicles = connection.Vehicles;
+            _vehicleListError = connection.VehicleListError;
+            await OnConnected.InvokeAsync(connection);
+        }
+        catch (OperationCanceledException) when (_disposeCancellation.IsCancellationRequested)
+        {
+            // The panel was closed.
+        }
+        catch (TeslaReauthenticationRequiredException)
+        {
+            _errorMessage = rejectedMessage;
+        }
+        catch (ArgumentException exception)
+        {
+            renewLogin = false;
+            _errorMessage = exception.ParamName is { } parameterName
+                ? exception.Message.Replace($" (Parameter '{parameterName}')", "", StringComparison.Ordinal)
+                : exception.Message;
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = $"Connecting failed: {exception.Message}";
+        }
+        finally
+        {
+            _connecting = false;
+            if (renewLogin)
+            {
+                _login = TeslaAuthClient.CreateLogin();
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposeCancellation.Cancel();
+        _disposeCancellation.Dispose();
+    }
+}
