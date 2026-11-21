@@ -191,8 +191,19 @@ public partial class FluentStorageContainer :
         return base.StartAsync(cancellationToken);
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
-        => ConnectAsync(stoppingToken);
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            await ConnectAsync(stoppingToken);
+        }
+        catch (Exception) when (!stoppingToken.IsCancellationRequested)
+        {
+            // Not rethrown: the hosting stops a subject whose run faulted.
+            // The connect has already reported this through Status and the log, a published connection
+            // retries its pass, and a configuration edit connects again.
+        }
+    }
 
     /// <summary>
     /// Stops following the storage: neither a file event nor the periodic timer starts a pass any more, so
@@ -279,7 +290,21 @@ public partial class FluentStorageContainer :
         // Read once, so the connection is created with exactly the settings it is later compared by.
         var settings = Settings;
         if (!settings.IsInMemory && string.IsNullOrWhiteSpace(settings.ConnectionString))
-            throw new InvalidOperationException("ConnectionString is not configured");
+        {
+            lock (_connectionLock)
+            {
+                // Only without a connection: a live one still follows its storage, and its next pass
+                // would report Connected over this anyway.
+                if (!_isDisposed && _connection is null)
+                {
+                    Status = StorageStatus.Error;
+                }
+            }
+
+            var exception = new InvalidOperationException("ConnectionString is not configured");
+            _logger?.LogError(exception, "Failed to connect to storage");
+            throw exception;
+        }
 
         // One connect at a time: two of them would each end the same connection and both start a new one.
         await _connectGate.WaitAsync(cancellationToken);
@@ -383,8 +408,8 @@ public partial class FluentStorageContainer :
                 }
             }
 
-            // The worker does not run an item whose caller has cancelled, so a first pass that was cancelled
-            // before it started has not asked for its retry, as one that is cancelled while it runs does.
+            // The worker does not run an item whose caller has canceled, so a first pass that was canceled
+            // before it started has not asked for its retry, as one that is canceled while it runs does.
             if (isCancelledByCaller && wasStillInitializing)
             {
                 connection?.NotifyPassFailed();
@@ -417,7 +442,7 @@ public partial class FluentStorageContainer :
             }
             catch (Exception exception)
             {
-                // Cancelled by the caller of the connect, or with the connection, whose status nobody reads.
+                // Canceled by the caller of the connect, or with the connection, whose status nobody reads.
                 SetStatus(connection, token.IsCancellationRequested ? StorageStatus.Disconnected : StorageStatus.Error);
 
                 // Also after a cancellation by the caller: unless the storage was stopped, the connection goes
@@ -922,7 +947,7 @@ public partial class FluentStorageContainer :
                 isPassNeeded = true;
                 await WriteAndRecordAsync(connection, entry, bytes, token);
 
-                // Not cancelled from here on: the file is written, and a cancel must not report that it was not.
+                // Not canceled from here on: the file is written, and a cancel must not report that it was not.
                 var hasVersion = entry.Version != default;
                 file.FileSize = hasVersion ? entry.Version.Size : bytes.Length;
                 file.LastModified = (hasVersion ? entry.Version.Modified?.UtcDateTime : null) ?? DateTime.UtcNow;
@@ -1145,7 +1170,7 @@ public partial class FluentStorageContainer :
             connection = _connection;
         }
 
-        // Ended outside the lock, because cancelling it runs code of the work it cancels.
+        // Ended outside the lock, because canceling it runs code of the work it cancels.
         connection?.Dispose();
         base.Dispose();
     }

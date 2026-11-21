@@ -10,19 +10,18 @@ namespace Namotion.Devices.Gpio;
 public static class GpioServiceCollectionExtensions
 {
     /// <summary>
-    /// Adds GPIO support as a hosted service.
+    /// Registers the GPIO subject and runs it, as <see cref="SubjectServiceCollectionExtensions.AddSubject{T}"/> does.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Optional callback to configure the GPIO subject.</param>
     /// <param name="contextResolver">
-    /// Optional resolver for the <see cref="IInterceptorSubjectContext"/>.
-    /// If null, attempts to resolve from DI; if not registered in DI, no context is used.
-    /// If provided, uses the resolver's return value (which may be null for explicitly no context).
+    /// Optional resolver for a shared context the subject joins, which must have hosting. Without it,
+    /// the subject runs in a private context.
     /// </param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddGpio(
         this IServiceCollection services,
         Action<GpioSubject>? configure = null,
-        Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
-        => services.AddHostedSubject(configure, contextResolver);
+        Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
+        => services.AddSubject(configure, contextResolver);
 }

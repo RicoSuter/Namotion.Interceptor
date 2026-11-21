@@ -10,12 +10,12 @@ namespace Namotion.Devices.Nuki;
 public static class NukiServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers a <see cref="NukiBridge"/> as a singleton and hosted service, as
-    /// <see cref="HostedSubjectServiceCollectionExtensions.AddHostedSubject{T}"/> does.
+    /// Registers a <see cref="NukiBridge"/> as a singleton and runs it, as
+    /// <see cref="SubjectServiceCollectionExtensions.AddSubject{T}"/> does.
     /// </summary>
     public static IServiceCollection AddNukiBridge(
         this IServiceCollection services,
         Action<NukiBridge>? configure = null,
-        Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
-        => services.AddHostedSubject(configure, contextResolver);
+        Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
+        => services.AddSubject(configure, contextResolver);
 }

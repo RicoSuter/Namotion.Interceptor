@@ -144,7 +144,7 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
             Assert.Equal(1, _recorder.CountAttachesOf(device));
             Assert.Equal(1, _recorder.CountDetachesOf(device));
             Assert.False(IsAttached(device));
-            Assert.True(device.IsStopped);
+            Assert.False(device.IsRunning);
         }
     }
 
@@ -393,13 +393,13 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
             var devices = RecordingDevice.Created;
             await WaitUntilHostHasHandledEveryChangeAsync();
             Assert.Empty(parent.Children);
-            Assert.True(old.IsStopped);
+            Assert.False(old.IsRunning);
             Assert.Equal(2, devices.Count);
             var late = devices[1];
             Assert.Equal(1, _recorder.CountAttachesOf(late));
             Assert.Equal(1, _recorder.CountDetachesOf(late));
             Assert.False(IsAttached(late));
-            Assert.True(late.IsStopped);
+            Assert.False(late.IsRunning);
         }
         finally
         {
@@ -431,7 +431,7 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
             Assert.Equal(1, _recorder.CountAttachesOf(device));
             Assert.Equal(1, _recorder.CountDetachesOf(device));
             Assert.False(IsAttached(device));
-            Assert.True(device.IsStopped);
+            Assert.False(device.IsRunning);
         }
     }
 
@@ -457,7 +457,7 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
             Assert.Equal(1, _recorder.CountAttachesOf(device));
             Assert.Equal(1, _recorder.CountDetachesOf(device));
             Assert.False(IsAttached(device));
-            Assert.True(device.IsStopped);
+            Assert.False(device.IsRunning);
         }
     }
 
@@ -487,7 +487,7 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
             Assert.Equal(1, _recorder.CountAttachesOf(device));
             Assert.Equal(1, _recorder.CountDetachesOf(device));
             Assert.False(IsAttached(device));
-            Assert.True(device.IsStopped);
+            Assert.False(device.IsRunning);
         }
     }
 
@@ -652,7 +652,7 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
         await readReached;
         await AsyncTestHelpers.WaitUntilAsync(() => _timeProvider.ArmedTimerCount == idleTimerCount + 1);
         _timeProvider.Advance(StorageCallTimeout.Limit);
-        await Assert.ThrowsAsync<StorageUnresponsiveException>(() => storage.ExecuteTask!);
+        await storage.ExecuteTask!;
         Assert.Equal(StorageStatus.Error, storage.Status);
         return storage;
     }
@@ -675,14 +675,17 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
     }
 
     /// <summary>
-    /// The host starts and stops its services one after another, in the order in which they entered and left
-    /// the context. Once it has started a device created now, it has handled everything before it.
+    /// Waits until every device the graph attached runs while attached and no longer runs once detached. Each
+    /// subject has its own start and stop queue, so no later start can serve as a barrier for earlier ones.
     /// </summary>
-    private async Task WaitUntilHostHasHandledEveryChangeAsync()
-    {
-        var last = new RecordingDevice(Context!);
-        await last.WhenStartedAsync();
-    }
+    private Task WaitUntilHostHasHandledEveryChangeAsync()
+        => AsyncTestHelpers.WaitUntilAsync(
+            () => RecordingDevice.Created.All(IsSettled),
+            () => "Not settled: " + string.Join(", ", RecordingDevice.Created.Where(device => !IsSettled(device)).Select(device =>
+                $"{device.Name} (attached {IsAttached(device)}, started {device.IsStarted}, stopped {device.IsStopped})")));
+
+    private bool IsSettled(RecordingDevice device)
+        => _recorder.CountAttachesOf(device) == 0 || (IsAttached(device) ? device.IsStarted : !device.IsRunning);
 
     private bool IsAttached(IInterceptorSubject subject)
         => Context!.TryGetLifecycleInterceptor()!.TryRunWhileAttached(subject, static () => { });

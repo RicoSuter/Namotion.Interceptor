@@ -244,10 +244,15 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletion
     public void CompleteSourceRegistration() => _initialHold.Dispose();
 
     /// <summary>
-    /// Takes a further hold for the duration of a later batch of source creation. Counted, so
-    /// concurrent holders compose. Taking a hold blocks pending waits but never un-completes an
-    /// already-completed one.
+    /// Takes a further registration hold, such as for the duration of a later batch of source
+    /// creation. Counted, so concurrent holders compose. Taking a hold blocks pending waits but never
+    /// un-completes an already-completed one.
     /// </summary>
+    /// <remarks>
+    /// Satisfies the locking constraint of <see cref="IStartupCompletion"/>: taking a hold acquires
+    /// nothing, and releasing it takes _lock in the order this type already establishes through
+    /// <see cref="HandleLifecycleChange"/>.
+    /// </remarks>
     public IDisposable DeferWaitCompletion()
     {
         // Deliberately does not re-evaluate. The increment happens first, so IsBranchSynchronized

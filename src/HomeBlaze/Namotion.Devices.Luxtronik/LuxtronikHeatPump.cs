@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
@@ -9,9 +10,11 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Luxtronik.Gating;
 using Namotion.Devices.Luxtronik.Model;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Modbus.Client;
+using Namotion.Interceptor.Registry;
 
 namespace Namotion.Devices.Luxtronik;
 
@@ -26,6 +29,7 @@ namespace Namotion.Devices.Luxtronik;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "A device root aggregates its function subjects and the capability interfaces it implements; splitting it would only spread the same dependencies across files.")]
 public partial class LuxtronikHeatPump :
     BackgroundService,
+    IPrivateContextConfigurator,
     IModbusDiscovery,
     IConfigurable,
     IPowerSensor,
@@ -58,6 +62,16 @@ public partial class LuxtronikHeatPump :
 
     // Written by the discovery on the source's thread, read by the status loop.
     private int _discoveredFunctionMask = UnknownFunctionMask;
+
+    /// <summary>
+    /// The running source, or null. This subject owns it for the duration of its own run: the start or the run loop
+    /// starts it, and whichever of the run loop's restart and <see cref="StopAsync"/> takes it first stops and
+    /// disposes it, so a loop that never ran or outlives a timed out stop still leaves nothing running.
+    /// </summary>
+    private ModbusSubjectClientSource? _source;
+
+    /// <summary>Why the source the start tried to start failed, for the run loop to report and retry.</summary>
+    private Exception? _startFailure;
 
     // Protects the controller from a hand-edited configuration that would poll it continuously; only tests lower it.
     internal TimeSpan MinimumPollingInterval { get; init; } = TimeSpan.FromSeconds(MinimumPollingIntervalSeconds);
@@ -287,6 +301,31 @@ public partial class LuxtronikHeatPump :
         return Task.CompletedTask;
     }
 
+    public override async Task StartAsync(CancellationToken cancellationToken)
+    {
+        _startFailure = null;
+        // Started here rather than from the run loop, which the base start only schedules: the source registers in its
+        // own start, and inside this one that registration counts towards startup completion.
+        if (!string.IsNullOrWhiteSpace(HostAddress) && TryValidateConfiguration(out _))
+        {
+            _startFailure = await TryStartSourceAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await base.StartAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await base.StopAsync(cancellationToken).ConfigureAwait(false);
+
+        // After the run loop has exited, and also for a loop that never ran because this stop landed first.
+        await StopSourceAsync(cancellationToken).ConfigureAwait(false);
+
+        IsConnected = false;
+        Status = ServiceStatus.Stopped;
+        StatusMessage = null;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
@@ -302,10 +341,6 @@ public partial class LuxtronikHeatPump :
 
             await RunSourceAsync(hostAddress, stoppingToken).ConfigureAwait(false);
         }
-
-        IsConnected = false;
-        Status = ServiceStatus.Stopped;
-        StatusMessage = null;
     }
 
     /// <summary>
@@ -343,68 +378,161 @@ public partial class LuxtronikHeatPump :
         return TimeSpan.FromTicks(Math.Clamp(PollingInterval.Ticks, MinimumPollingInterval.Ticks, maximum.Ticks));
     }
 
+    /// <summary>
+    /// Runs the source until a configuration edit, a function change or a failure asks for a new one, then stops it so
+    /// that the next one never polls beside it. Returns without stopping it when the subject stops, whose own stop does.
+    /// </summary>
     private async Task RunSourceAsync(string hostAddress, CancellationToken stoppingToken)
     {
-        // Captured once, so a configuration edit applies only through the restart it signals.
-        var pollingInterval = GetEffectivePollingInterval();
 
-        ModbusSubjectClientSource source;
-        try
+        var failure = Interlocked.Exchange(ref _startFailure, null);
+        if (failure is null && Volatile.Read(ref _source) is null)
         {
-            source = this.CreateModbusClientSource(
-                new ModbusClientConfiguration { Host = hostAddress, Port = Port, PollingInterval = pollingInterval },
-                _logger);
+            if (!TryValidateConfiguration(out var configurationError))
+            {
+                _logger.LogError(configurationError, "Luxtronik heat pump {HostAddress} has an invalid configuration.", hostAddress);
+                Status = ServiceStatus.Error;
+                StatusMessage = configurationError.Message;
+                await WaitForConfigurationChangeAsync(Timeout.InfiniteTimeSpan, stoppingToken).ConfigureAwait(false);
+                return;
+            }
+
+            IsConnected = false;
+            Status = ServiceStatus.Starting;
+            StatusMessage = "Connecting...";
+            failure = await TryStartSourceAsync(stoppingToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+
+        if (failure is null && Volatile.Read(ref _source) is { } source)
         {
-            _logger.LogError(exception, "Luxtronik heat pump {HostAddress} has an invalid configuration.", hostAddress);
-            Status = ServiceStatus.Error;
-            StatusMessage = exception.Message;
-            await WaitForConfigurationChangeAsync(Timeout.InfiniteTimeSpan, stoppingToken).ConfigureAwait(false);
+            await MirrorSourceAsync(source, hostAddress, stoppingToken).ConfigureAwait(false);
+        }
+
+        if (stoppingToken.IsCancellationRequested)
+        {
             return;
         }
 
+        await StopSourceAsync(stoppingToken).ConfigureAwait(false);
+
+        if (failure is not null)
+        {
+            _logger.LogError(failure, "Luxtronik heat pump {HostAddress} failed.", hostAddress);
+            Status = ServiceStatus.Error;
+            StatusMessage = failure.Message;
+            await WaitForConfigurationChangeAsync(GetEffectivePollingInterval(), stoppingToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Mirrors the source diagnostics, which are not tracked properties, into this device's state until the subject
+    /// stops, a function change or a configuration edit asks for a new source.
+    /// </summary>
+    private async Task MirrorSourceAsync(ModbusSubjectClientSource source, string hostAddress, CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            UpdateStatus(source.Diagnostics);
+            if (HaveFunctionsChanged(hostAddress) ||
+                await WaitForConfigurationChangeAsync(StatusRefreshInterval, stoppingToken).ConfigureAwait(false))
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>Creates and starts a source, and returns why it failed, having stopped and disposed it, or null.</summary>
+    private async Task<Exception?> TryStartSourceAsync(CancellationToken cancellationToken)
+    {
         // Discards the previous source's discovery, whose mismatch with the polled flags would restart this source again.
         Volatile.Write(ref _discoveredFunctionMask, UnknownFunctionMask);
 
-        var hasFailed = false;
         try
         {
-            Status = ServiceStatus.Starting;
-            StatusMessage = "Connecting...";
-
-            await this.AttachHostedServiceAsync(source, stoppingToken).ConfigureAwait(false);
-
-            // Source diagnostics are not tracked properties, so they are mirrored into this device's state.
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                UpdateStatus(source.Diagnostics);
-                if (HaveFunctionsChanged(hostAddress) ||
-                    await WaitForConfigurationChangeAsync(StatusRefreshInterval, stoppingToken).ConfigureAwait(false))
-                {
-                    break;
-                }
-            }
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            // Stopping: the source is released below.
+            var source = this.CreateModbusClientSource(CreateConfiguration(), _logger);
+            Volatile.Write(ref _source, source);
+            await source.StartAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "Luxtronik heat pump {HostAddress} failed.", hostAddress);
-            Status = ServiceStatus.Error;
-            StatusMessage = exception.Message;
-            hasFailed = true;
-        }
-        finally
-        {
-            await ReleaseSourceAsync(source, hostAddress, stoppingToken).ConfigureAwait(false);
+            await StopSourceAsync(CancellationToken.None).ConfigureAwait(false);
+            return exception;
         }
 
-        if (hasFailed)
+        if (cancellationToken.IsCancellationRequested)
         {
-            await WaitForConfigurationChangeAsync(pollingInterval, stoppingToken).ConfigureAwait(false);
+            // Published after a stop that already took the previous source, which only a timed out stop leaves running.
+            await StopSourceAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Stops and disposes the source, if this caller takes it. A canceled token cuts the source's own stop short; the
+    /// dispose still runs.
+    /// </summary>
+    private async Task StopSourceAsync(CancellationToken cancellationToken)
+    {
+        if (Interlocked.Exchange(ref _source, null) is not { } source)
+        {
+            return;
+        }
+
+        try
+        {
+            await source.StopAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller's deadline, not a failure of the source.
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to stop the Modbus source of {HeatPump}.", Title);
+        }
+
+        try
+        {
+            await source.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to dispose the Modbus source of {HeatPump}.", Title);
+        }
+
+        IsConnected = false;
+    }
+
+    /// <summary>The running source. Test only.</summary>
+    internal ModbusSubjectClientSource? Source => Volatile.Read(ref _source);
+
+    private ModbusClientConfiguration CreateConfiguration()
+    {
+        return new ModbusClientConfiguration
+        {
+            Host = HostAddress ?? string.Empty,
+            Port = Port,
+            PollingInterval = GetEffectivePollingInterval()
+        };
+    }
+
+    /// <summary>
+    /// Validates the configuration before a source is created, so that one only an edit can fix is reported as such
+    /// rather than as a failure that is retried.
+    /// </summary>
+    private bool TryValidateConfiguration([NotNullWhen(false)] out ArgumentException? error)
+    {
+        try
+        {
+            CreateConfiguration().Validate();
+            error = null;
+            return true;
+        }
+        catch (ArgumentException exception)
+        {
+            error = exception;
+            return false;
         }
     }
 
@@ -435,33 +563,6 @@ public partial class LuxtronikHeatPump :
         return true;
     }
 
-    private async Task ReleaseSourceAsync(ModbusSubjectClientSource source, string hostAddress, CancellationToken stoppingToken)
-    {
-        try
-        {
-            await this.DetachHostedServiceAsync(source, CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            // The hosting refuses detaching while the host stops, and then stops the source itself.
-        }
-        catch (Exception exception)
-        {
-            _logger.LogWarning(exception, "Failed to detach the Modbus source of {HostAddress}.", hostAddress);
-        }
-
-        try
-        {
-            await source.DisposeAsync().ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            _logger.LogWarning(exception, "Failed to dispose the Modbus source of {HostAddress}.", hostAddress);
-        }
-
-        IsConnected = false;
-    }
-
     private async Task<bool> WaitForConfigurationChangeAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
         try
@@ -476,6 +577,12 @@ public partial class LuxtronikHeatPump :
         {
             return false;
         }
+    }
+
+    void IPrivateContextConfigurator.ConfigureContext(IInterceptorSubjectContext context)
+    {
+        // The discovery and the register resolver read the registry, so running alone needs one too.
+        context.WithRegistry();
     }
 
     public override void Dispose()
