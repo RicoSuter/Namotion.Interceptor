@@ -516,9 +516,13 @@
     {
         if (!_unreportedNavigations.Contains(url))
         {
+            // A navigation of the user can overtake one of this component that is still on its way, which the browser
+            // then applies after it. Its report is read as the user's, so that the panes show the URL the browser ends on.
+            _unreportedNavigations.Clear();
             return false;
         }
 
+        // Earlier navigations that are never reported, such as one a navigation lock canceled, leave with this one.
         while (_unreportedNavigations.Dequeue() != url)
         {
         }
