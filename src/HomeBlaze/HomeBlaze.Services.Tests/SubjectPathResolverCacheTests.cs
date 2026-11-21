@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Tests.Models;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -297,6 +298,24 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
     }
 
     [Fact]
+    public void WhenPathsAreReadWhileASubjectIsAttachedAgainBeforeItInheritsTheContext_ThenTheyAreCurrentOnceItIsAttached()
+    {
+        // Arrange: the detach removes the context that holds the registry from the fallback contexts of the child.
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+        root.Child = null;
+        Context.AddService(new BeforeContextInheritanceAttachHook(child, () => Resolver.GetPaths(child, PathStyle.Canonical)));
+
+        // Act
+        root.Child = child;
+        var paths = Resolver.GetPaths(child, PathStyle.Canonical);
+
+        // Assert
+        Assert.Equal(["/Child"], paths);
+    }
+
+    [Fact]
     public void WhenResolverIsAddedBeforeTheRegistry_ThenItsLifecycleHandlersRunAfterTheRegistry()
     {
         // Arrange
@@ -322,6 +341,25 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
     /// Runs an action once, when the subject is attached, after the lifecycle handlers that were added before it.
     /// </summary>
     private sealed class AttachHook(IInterceptorSubject subject, Action action) : ILifecycleHandler
+    {
+        private Action? _action = action;
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (_action is { } pending && change.IsPropertyReferenceAdded && change.Subject == subject)
+            {
+                _action = null;
+                pending();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Runs an action once, when the subject is attached, after the registry and before the subject inherits the context.
+    /// </summary>
+    [RunsAfter(typeof(SubjectRegistry))]
+    [RunsBefore(typeof(ContextInheritanceHandler))]
+    private sealed class BeforeContextInheritanceAttachHook(IInterceptorSubject subject, Action action) : ILifecycleHandler
     {
         private Action? _action = action;
 

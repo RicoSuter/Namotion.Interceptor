@@ -240,17 +240,22 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         ISubjectPathRecorder? recorder)
     {
         _ = _pathsVersion.Value;
-        var version = GetStructureVersion(_getRoot() ?? subject);
+
+        // The paths are computed from the registry whose version stamps them, not from the one the subject's own context
+        // reaches: a subject regains that context's fallback only after the registry's change of its attach has ended.
+        var root = _getRoot();
+        var registry = (root ?? subject).Context.TryGetService<ISubjectRegistry>();
+        var version = registry?.StructureVersion ?? 0;
         if (!_canonicalPathsCache.TryGetValue(subject, out var cached) || cached.Version != version || (recorder is not null && cached.Route is null))
         {
             if (recorder is null)
             {
-                cached = (version, ComputeCanonicalPaths(subject, null), null);
+                cached = (version, ComputeCanonicalPaths(subject, root, registry, null), null);
             }
             else
             {
                 var buffer = RouteBuffer.Take();
-                var paths = ComputeCanonicalPaths(subject, buffer);
+                var paths = ComputeCanonicalPaths(subject, root, registry, buffer);
                 cached = (version, paths, buffer.ToRoute(cached.Route));
                 RouteBuffer.Return(buffer);
             }
@@ -485,15 +490,13 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         return current;
     }
 
-    private IReadOnlyList<string> ComputeCanonicalPaths(IInterceptorSubject subject, ISubjectPathRecorder? recorder)
+    private static IReadOnlyList<string> ComputeCanonicalPaths(
+        IInterceptorSubject subject, IInterceptorSubject? root, ISubjectRegistry? registry, ISubjectPathRecorder? recorder)
     {
-        var root = _getRoot();
-
         // Root subject's canonical path is "/"
         if (subject == root)
             return ["/"];
 
-        var registry = subject.Context.TryGetService<ISubjectRegistry>();
         if (registry == null)
         {
             recorder?.MarkUnbounded();
@@ -547,7 +550,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
         return paths.Count > 0 ? paths : Array.Empty<string>();
     }
 
-    private bool BuildPathRecursive(
+    private static bool BuildPathRecursive(
         IInterceptorSubject currentSubject,
         SubjectPropertyParent parent,
         List<string> pathSegments,
