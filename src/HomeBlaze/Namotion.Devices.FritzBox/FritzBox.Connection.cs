@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.FritzBox.Client;
+using Namotion.Devices.FritzBox.Parsing;
 using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Devices.FritzBox;
@@ -18,9 +19,9 @@ public partial class FritzBox
     // Only the loop writes _connection. A command holds the gate while it uses the connection, so the loop clears
     // and disposes a connection only after the command completes.
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
-    private readonly Lock _wlanSwitchStateLock = new();
+    private readonly Lock _commandStateLock = new();
     private FritzBoxConnection? _connection;
-    private long _wlanCommandGeneration;
+    private long _commandGeneration;
 
     // Read and written by the polling loop only.
     private string? _stateHostAddress;
@@ -28,18 +29,19 @@ public partial class FritzBox
     private TimeSpan _loginRetryDelay = InitialLoginRetryDelay;
 
     /// <summary>
-    /// Raised by every successful WLAN command, so a poll that read the switch state before it does not write it back.
+    /// Raised by every successful command, so a poll that read the state a command changed before it does not write it
+    /// back.
     /// </summary>
-    internal long WlanCommandGeneration => Interlocked.Read(ref _wlanCommandGeneration);
+    internal long CommandGeneration => Interlocked.Read(ref _commandGeneration);
 
     private string? CertificateWarning =>
         _unsavedPublicKeyPin is not null && PublicKeyPin == _unsavedPublicKeyPin ? UnsavedCertificateWarning : null;
 
-    internal void AdvanceWlanCommandGeneration()
+    internal void AdvanceCommandGeneration()
     {
-        lock (_wlanSwitchStateLock)
+        lock (_commandStateLock)
         {
-            Interlocked.Increment(ref _wlanCommandGeneration);
+            Interlocked.Increment(ref _commandGeneration);
         }
     }
 
@@ -56,9 +58,42 @@ public partial class FritzBox
                 ?? throw new InvalidOperationException("The FRITZ!Box is not connected. Try again when its status is Running.");
             var serviceType = wlan.ServiceType;
             await connection.InvokeAsync(serviceType, "SetEnable", [("NewEnable", isEnabled ? "1" : "0")], cancellationToken);
-            AdvanceWlanCommandGeneration();
+            AdvanceCommandGeneration();
             var info = await connection.ReadOrDefaultAsync(serviceType, "GetInfo", null, cancellationToken);
             wlan.IsOn = info?.GetBoolean("NewEnable") ?? isEnabled;
+        }
+        finally
+        {
+            _connectionGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Blocks or allows the internet access of a client by its IP address. Throws <see cref="InvalidOperationException"/>
+    /// while the router is not connected or reports no IP address for the client.
+    /// </summary>
+    internal async Task SetInternetAccessBlockedAsync(FritzBoxClient client, bool isBlocked, CancellationToken cancellationToken)
+    {
+        var ipAddress = client.IpAddress
+            ?? throw new InvalidOperationException("The FRITZ!Box reports no IP address for this device.");
+        await _connectionGate.WaitAsync(cancellationToken);
+        try
+        {
+            var connection = _connection
+                ?? throw new InvalidOperationException("The FRITZ!Box is not connected. Try again when its status is Running.");
+            (string Name, string Value)[] address = [("NewIPv4Address", ipAddress)];
+            await connection.InvokeAsync(
+                Tr64Services.HostFilter, "DisallowWANAccessByIP", [.. address, ("NewDisallow", isBlocked ? "1" : "0")], cancellationToken);
+            AdvanceCommandGeneration();
+
+            // The router applies the block asynchronously, so the access read here may still be the old one; the next
+            // poll corrects it.
+            var answer = await connection.ReadOrDefaultAsync(Tr64Services.HostFilter, "GetWANAccessByIP", address, cancellationToken);
+            client.IsInternetAccessBlocked = answer?.GetBoolean("NewDisallow") ?? isBlocked;
+            if (answer is not null)
+            {
+                client.HasInternetAccess = HostListParser.ParseWanAccess(answer.GetString("NewWANAccess"));
+            }
         }
         finally
         {
@@ -216,7 +251,7 @@ public partial class FritzBox
         {
             try
             {
-                var generation = WlanCommandGeneration;
+                var generation = CommandGeneration;
                 var snapshot = await FritzBoxPoller.PollAsync(connection, stoppingToken);
                 ApplySnapshot(snapshot, generation);
                 failures = 0;

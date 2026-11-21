@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.FritzBox.Parsing;
 using Namotion.Devices.FritzBox.Tests.Testing;
 using Namotion.Interceptor;
@@ -7,6 +8,8 @@ namespace Namotion.Devices.FritzBox.Tests;
 
 public class FritzBoxDeviceMatcherTests
 {
+    private static readonly FritzBox Router = new(NullLogger<FritzBox>.Instance);
+
     [Theory]
     [InlineData("AA:AA:AA:00:00:01")]
     [InlineData("aa-aa-aa-00-00-01")]
@@ -225,7 +228,7 @@ public class FritzBoxDeviceMatcherTests
 
     private static FritzBoxClient CreateClient(string macAddress, string? ipAddress, string hostName, bool isPresent = true)
     {
-        var client = new FritzBoxClient(macAddress);
+        var client = new FritzBoxClient(Router, macAddress);
         client.Update(new HostEntry(macAddress, ipAddress, isPresent, hostName, "Ethernet", null, null, false), null);
         return client;
     }

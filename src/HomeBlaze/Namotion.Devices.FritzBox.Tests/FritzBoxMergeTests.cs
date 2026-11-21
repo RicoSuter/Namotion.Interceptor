@@ -21,7 +21,7 @@ public class FritzBoxMergeTests
         var filterProfiles = new Dictionary<string, string> { ["filtprof1"] = "Standard", ["filtprof2"] = "Gast" };
 
         // Act
-        router.ApplySnapshot(Snapshots.Create() with { FilterProfiles = filterProfiles }, router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create() with { FilterProfiles = filterProfiles }, router.CommandGeneration);
 
         // Assert
         var laptop = router.Clients[Snapshots.Laptop];
@@ -44,7 +44,7 @@ public class FritzBoxMergeTests
         var router = CreateRouter();
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
 
         // Assert
         Assert.Equal([Snapshots.Laptop, Snapshots.Desktop, Snapshots.Phone], router.Clients.Keys.Order());
@@ -70,7 +70,7 @@ public class FritzBoxMergeTests
     {
         // Arrange
         var router = CreateRouter();
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
         var clients = router.Clients;
         var accessPoints = router.AccessPoints;
         var wlans = router.Wlans;
@@ -78,7 +78,7 @@ public class FritzBoxMergeTests
         var routerClients = accessPoints[Snapshots.RouterAccessPoint].Clients;
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
 
         // Assert
         Assert.Same(clients, router.Clients);
@@ -94,7 +94,7 @@ public class FritzBoxMergeTests
         // Arrange
         var router = CreateRouter();
         var mesh = Snapshots.Mesh();
-        router.ApplySnapshot(Snapshots.Create(mesh: mesh), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(mesh: mesh), router.CommandGeneration);
         var clients = router.Clients;
         var laptop = router.Clients[Snapshots.Laptop];
         var positions = new Dictionary<string, ClientPosition>(mesh.ClientPositions)
@@ -103,7 +103,7 @@ public class FritzBoxMergeTests
         };
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(mesh: mesh with { ClientPositions = positions }), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(mesh: mesh with { ClientPositions = positions }), router.CommandGeneration);
 
         // Assert
         Assert.Same(clients, router.Clients);
@@ -121,7 +121,7 @@ public class FritzBoxMergeTests
         var router = CreateRouter();
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
 
         // Assert
         var laptop = router.Clients[Snapshots.Laptop];
@@ -136,13 +136,13 @@ public class FritzBoxMergeTests
     {
         // Arrange
         var router = CreateRouter();
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
         var clients = router.Clients;
         var laptop = router.Clients[Snapshots.Laptop];
         var hosts = Snapshots.Hosts().Where(host => host.MacAddress != Snapshots.Laptop).ToList();
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.CommandGeneration);
 
         // Assert
         Assert.Same(clients, router.Clients);
@@ -160,7 +160,7 @@ public class FritzBoxMergeTests
     {
         // Arrange
         var router = CreateRouter();
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
         var laptop = router.Clients[Snapshots.Laptop];
         var hosts = Snapshots.Hosts().Where(host => host.MacAddress != Snapshots.Laptop).ToList();
         var changes = new List<(bool? IsPresent, bool IsAttached)>();
@@ -175,8 +175,8 @@ public class FritzBoxMergeTests
             });
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
-        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.CommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.CommandGeneration);
 
         // Assert
         Assert.Equal([(false, true)], changes);
@@ -188,13 +188,13 @@ public class FritzBoxMergeTests
     {
         // Arrange
         var router = CreateRouter();
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
         var phone = router.Clients[Snapshots.Phone];
         var hosts = Snapshots.Hosts().Where(host => host.MacAddress != Snapshots.Phone).ToList();
-        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.CommandGeneration);
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.CommandGeneration);
 
         // Assert
         Assert.False(router.Clients.ContainsKey(Snapshots.Phone));
@@ -207,14 +207,14 @@ public class FritzBoxMergeTests
     {
         // Arrange
         var router = CreateRouter();
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
         var laptop = router.Clients[Snapshots.Laptop];
         var hosts = Snapshots.Hosts().Where(host => host.MacAddress != Snapshots.Laptop).ToList();
-        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.CommandGeneration);
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
 
         // Assert
         Assert.Same(laptop, router.Clients[Snapshots.Laptop]);
@@ -237,7 +237,7 @@ public class FritzBoxMergeTests
         ];
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(hosts: hosts) with { Mesh = null }, router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts) with { Mesh = null }, router.CommandGeneration);
 
         // Assert
         var client = Assert.Single(router.Clients);
@@ -253,7 +253,7 @@ public class FritzBoxMergeTests
         var hosts = Snapshots.Hosts().Select(host => host.MacAddress == Snapshots.Laptop ? host with { IsActive = false } : host).ToList();
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.CommandGeneration);
 
         // Assert
         var laptop = router.Clients[Snapshots.Laptop];
@@ -269,7 +269,7 @@ public class FritzBoxMergeTests
         var router = CreateRouter();
 
         // Act
-        router.ApplySnapshot(Snapshots.Create() with { Mesh = null }, router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create() with { Mesh = null }, router.CommandGeneration);
 
         // Assert
         Assert.Empty(router.AccessPoints);
@@ -282,10 +282,10 @@ public class FritzBoxMergeTests
     {
         // Arrange
         var router = CreateRouter();
-        router.ApplySnapshot(Snapshots.Create(wlans: Snapshots.Wlans(isGuestEnabled: false)), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(wlans: Snapshots.Wlans(isGuestEnabled: false)), router.CommandGeneration);
         var guest = router.Wlans[FritzBoxWlanRoles.Guest];
-        var generationAtPollStart = router.WlanCommandGeneration;
-        router.AdvanceWlanCommandGeneration();
+        var generationAtPollStart = router.CommandGeneration;
+        router.AdvanceCommandGeneration();
         guest.IsOn = false;
 
         // Act
@@ -297,14 +297,53 @@ public class FritzBoxMergeTests
     }
 
     [Fact]
+    public void WhenAnInternetAccessCommandRanDuringThePoll_ThenThePolledInternetAccessIsIgnored()
+    {
+        // Arrange
+        var router = CreateRouter();
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
+        var laptop = router.Clients[Snapshots.Laptop];
+        var generationAtPollStart = router.CommandGeneration;
+        router.AdvanceCommandGeneration();
+        laptop.IsInternetAccessBlocked = true;
+        laptop.HasInternetAccess = false;
+
+        // Act
+        router.ApplySnapshot(Snapshots.Create(), generationAtPollStart);
+
+        // Assert
+        Assert.True(laptop.IsInternetAccessBlocked);
+        Assert.False(laptop.HasInternetAccess);
+        Assert.True(laptop.IsPresent);
+    }
+
+    [Fact]
+    public void WhenAPollStartsAfterAnInternetAccessCommand_ThenItsInternetAccessIsWritten()
+    {
+        // Arrange
+        var router = CreateRouter();
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
+        var laptop = router.Clients[Snapshots.Laptop];
+        router.AdvanceCommandGeneration();
+        laptop.IsInternetAccessBlocked = true;
+
+        // Act
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
+
+        // Assert
+        Assert.False(laptop.IsInternetAccessBlocked);
+        Assert.True(laptop.HasInternetAccess);
+    }
+
+    [Fact]
     public void WhenAPartOfThePollHasNoAnswer_ThenOnlyItsValuesAreNull()
     {
         // Arrange
         var router = CreateRouter();
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
 
         // Act
-        router.ApplySnapshot(Snapshots.Create() with { Traffic = null }, router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create() with { Traffic = null }, router.CommandGeneration);
 
         // Assert
         Assert.Null(router.UploadRate);
@@ -319,8 +358,8 @@ public class FritzBoxMergeTests
     {
         // Arrange
         var router = CreateRouter();
-        var generationAtPollStart = router.WlanCommandGeneration;
-        router.AdvanceWlanCommandGeneration();
+        var generationAtPollStart = router.CommandGeneration;
+        router.AdvanceCommandGeneration();
 
         // Act
         router.ApplySnapshot(Snapshots.Create(wlans: Snapshots.Wlans(isGuestEnabled: true)), generationAtPollStart);
@@ -335,7 +374,7 @@ public class FritzBoxMergeTests
     {
         // Arrange
         var router = CreateRouter();
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
         var clients = router.Clients;
         var hosts = Snapshots.Hosts().Select(host => host.MacAddress == Snapshots.Phone ? host with { IsActive = true } : host).ToList();
         var changes = new List<SubjectPropertyChange>();
@@ -344,7 +383,7 @@ public class FritzBoxMergeTests
             .Subscribe(changes.Add);
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.CommandGeneration);
 
         // Assert
         Assert.Same(clients, router.Clients);
@@ -365,7 +404,7 @@ public class FritzBoxMergeTests
             .ToList();
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(hosts: hosts), router.CommandGeneration);
 
         // Assert
         Assert.Equal("192.168.178.31", router.AccessPoints[Snapshots.RepeaterAccessPoint].IpAddress);
@@ -378,7 +417,7 @@ public class FritzBoxMergeTests
         // Arrange
         var router = CreateRouter();
         var mesh = Snapshots.Mesh();
-        router.ApplySnapshot(Snapshots.Create(mesh: mesh), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(mesh: mesh), router.CommandGeneration);
         var repeater = router.AccessPoints[Snapshots.RepeaterAccessPoint];
         var laptop = router.Clients[Snapshots.Laptop];
         var reducedMesh = mesh with
@@ -388,7 +427,7 @@ public class FritzBoxMergeTests
         };
 
         // Act
-        router.ApplySnapshot(Snapshots.Create(mesh: reducedMesh), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(mesh: reducedMesh), router.CommandGeneration);
 
         // Assert
         Assert.False(router.AccessPoints.ContainsKey(Snapshots.RepeaterAccessPoint));
@@ -402,14 +441,14 @@ public class FritzBoxMergeTests
     {
         // Arrange
         var router = CreateRouter();
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
         router.PresentedPublicKeyPin = "presented";
         var laptop = router.Clients[Snapshots.Laptop];
         var repeater = router.AccessPoints[Snapshots.RepeaterAccessPoint];
         var guest = router.Wlans[FritzBoxWlanRoles.Guest];
 
         // Act
-        router.ApplySnapshot(Snapshots.Create() with { Router = Snapshots.Router("SERIAL0002") }, router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create() with { Router = Snapshots.Router("SERIAL0002") }, router.CommandGeneration);
 
         // Assert
         Assert.Equal("SERIAL0002", router.SerialNumber);

@@ -164,7 +164,7 @@ namespace Namotion.Devices.FritzBox
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class FritzBoxClient : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.INetworkAdapter, HomeBlaze.Abstractions.Sensors.IPresenceSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
-        public FritzBoxClient(string macAddress) { }
+        public FritzBoxClient(Namotion.Devices.FritzBox.FritzBox router, string macAddress) { }
         [HomeBlaze.Abstractions.Attributes.State(Position=404)]
         [System.ComponentModel.Category("Network")]
         public string? AccessPointMacAddress { get; }
@@ -220,6 +220,10 @@ namespace Namotion.Devices.FritzBox
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        public System.Threading.Tasks.Task AllowInternetAccessAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        public System.Threading.Tasks.Task BlockInternetAccessAsync(System.Threading.CancellationToken cancellationToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }

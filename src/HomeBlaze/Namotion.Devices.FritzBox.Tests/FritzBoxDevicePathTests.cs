@@ -19,7 +19,7 @@ public class FritzBoxDevicePathTests
         var router = new FritzBox(NullLogger<FritzBox>.Instance);
         context.AddService<ISubjectPathResolver>(new FakePathResolver(device, "/Devices/Laptop.json"));
         Attach(context, router, device);
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
 
         // Act
         router.ApplyDevicePaths();
@@ -38,7 +38,7 @@ public class FritzBoxDevicePathTests
         var router = new FritzBox(NullLogger<FritzBox>.Instance);
         context.AddService<ISubjectPathResolver>(new FakePathResolver(device, "/Devices/Laptop.json"));
         Attach(context, router, device);
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
         router.ApplyDevicePaths();
 
         // Act
@@ -57,7 +57,7 @@ public class FritzBoxDevicePathTests
         var device = new TestNetworkDevice(Snapshots.Laptop);
         var router = new FritzBox(NullLogger<FritzBox>.Instance);
         Attach(context, router, device);
-        router.ApplySnapshot(Snapshots.Create(), router.WlanCommandGeneration);
+        router.ApplySnapshot(Snapshots.Create(), router.CommandGeneration);
 
         // Act
         router.ApplyDevicePaths();

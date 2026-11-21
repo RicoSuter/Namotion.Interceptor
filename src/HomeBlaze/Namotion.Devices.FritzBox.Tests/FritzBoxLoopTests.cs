@@ -6,6 +6,7 @@ using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.FritzBox.Client;
+using Namotion.Devices.FritzBox.Parsing;
 using Namotion.Devices.FritzBox.Tests.Testing;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -424,6 +425,82 @@ public class FritzBoxLoopTests
     }
 
     [Fact]
+    public async Task WhenTheInternetAccessOfAClientIsBlocked_ThenTheRouterIsToldAndTheStateFollows()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        var router = CreateRouter(fake);
+        await using var running = await RunAsync(router);
+        var laptop = await WaitForClientAsync(router, Snapshots.Laptop);
+
+        // Act
+        await laptop.BlockInternetAccessAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(fake.InternetAccessBlocks["192.168.178.20"]);
+        Assert.True(laptop.IsInternetAccessBlocked);
+        Assert.False(laptop.HasInternetAccess);
+        Assert.Contains("DisallowWANAccessByIP", fake.Actions);
+    }
+
+    [Fact]
+    public async Task WhenTheInternetAccessOfABlockedClientIsAllowed_ThenTheBlockIsLifted()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.InternetAccessBlocks["192.168.178.20"] = true;
+        var router = CreateRouter(fake);
+        await using var running = await RunAsync(router);
+        var laptop = await WaitForClientAsync(router, Snapshots.Laptop);
+        await AsyncTestHelpers.WaitUntilAsync(() => laptop.IsInternetAccessBlocked == true, message: "The router should report the block.");
+
+        // Act
+        await laptop.AllowInternetAccessAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(fake.InternetAccessBlocks["192.168.178.20"]);
+        Assert.False(laptop.IsInternetAccessBlocked);
+        Assert.True(laptop.HasInternetAccess);
+    }
+
+    [Theory]
+    [InlineData(nameof(FritzBoxClient.BlockInternetAccessAsync))]
+    [InlineData(nameof(FritzBoxClient.AllowInternetAccessAsync))]
+    public void WhenTheInternetAccessOfAClientIsChanged_ThenItRequiresConfirmation(string methodName)
+    {
+        // Act
+        var attribute = typeof(FritzBoxClient).GetMethod(methodName)!.GetCustomAttribute<OperationAttribute>();
+
+        // Assert
+        Assert.True(attribute?.RequiresConfirmation);
+    }
+
+    [Fact]
+    public async Task WhenTheInternetAccessIsBlockedWithoutAConnection_ThenItThrows()
+    {
+        // Arrange
+        using var router = new FritzBox(NullLogger<FritzBox>.Instance);
+        var client = new FritzBoxClient(router, Snapshots.Laptop);
+        client.Update(new HostEntry(Snapshots.Laptop, "192.168.178.20", true, "laptop", "802.11", 0, 144, false), null);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => client.BlockInternetAccessAsync(CancellationToken.None));
+        Assert.Contains("not connected", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WhenTheInternetAccessOfAClientWithoutIpAddressIsBlocked_ThenItThrows()
+    {
+        // Arrange
+        using var router = new FritzBox(NullLogger<FritzBox>.Instance);
+        var client = new FritzBoxClient(router, Snapshots.Laptop);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => client.BlockInternetAccessAsync(CancellationToken.None));
+        Assert.Contains("IP address", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task WhenLinkingTheClientsToTheirDevicesFails_ThenThePollsStillSucceedAndTheFailureIsLoggedOnce()
     {
         // Arrange
@@ -484,6 +561,12 @@ public class FritzBoxLoopTests
     {
         await AsyncTestHelpers.WaitUntilAsync(() => router.Wlans.ContainsKey(FritzBoxWlanRoles.Guest), message: "The router should list its guest WLAN.");
         return (FritzBoxGuestWlan)router.Wlans[FritzBoxWlanRoles.Guest];
+    }
+
+    private static async Task<FritzBoxClient> WaitForClientAsync(FritzBox router, string macAddress)
+    {
+        await AsyncTestHelpers.WaitUntilAsync(() => router.Clients.ContainsKey(macAddress), message: "The router should list the client.");
+        return router.Clients[macAddress];
     }
 
     private static int CountActions(FakeFritzBox fake, string action) =>

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.FritzBox.Parsing;
 using Xunit;
 
@@ -5,11 +6,13 @@ namespace Namotion.Devices.FritzBox.Tests;
 
 public class FritzBoxClientTests
 {
+    private static readonly FritzBox Router = new(NullLogger<FritzBox>.Instance);
+
     [Fact]
     public void WhenAPresentClientIsUpdated_ThenItTakesItsHostValuesAndPosition()
     {
         // Arrange
-        var client = new FritzBoxClient("AA:AA:AA:00:00:01");
+        var client = new FritzBoxClient(Router, "AA:AA:AA:00:00:01");
         var host = new HostEntry("AA:AA:AA:00:00:01", " 192.168.178.20 ", true, "laptop", "802.11", 0, 144, false);
         var position = new ClientPosition("BB:BB:BB:00:00:02", "FRITZ!Repeater", "2.4GHz", null, 144m, true);
 
@@ -32,7 +35,7 @@ public class FritzBoxClientTests
     public void WhenAClientBecomesAbsent_ThenItsPositionIsCleared()
     {
         // Arrange
-        var client = new FritzBoxClient("AA:AA:AA:00:00:01");
+        var client = new FritzBoxClient(Router, "AA:AA:AA:00:00:01");
         client.Update(
             new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", true, "laptop", "802.11", 0, 144, false),
             new ClientPosition("BB:BB:BB:00:00:02", "FRITZ!Repeater", "2.4GHz", null, 144m, true));
@@ -54,12 +57,13 @@ public class FritzBoxClientTests
     public void WhenAClientIsUpdated_ThenItTakesItsInternetAccessAndTheNameOfItsAccessProfile()
     {
         // Arrange
-        var client = new FritzBoxClient("AA:AA:AA:00:00:01");
+        var client = new FritzBoxClient(Router, "AA:AA:AA:00:00:01");
         var host = new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", true, "laptop", "802.11", 0, 144, false, false, true, "filtprof2");
         var filterProfiles = new Dictionary<string, string> { ["filtprof1"] = "Standard", ["filtprof2"] = "Kinder" };
 
         // Act
         client.Update(host, null, filterProfiles);
+        client.UpdateInternetAccess(host);
 
         // Assert
         Assert.False(client.HasInternetAccess);
@@ -74,7 +78,7 @@ public class FritzBoxClientTests
     public void WhenTheAccessProfileCannotBeResolved_ThenItIsNull(string? filterProfileId, bool hasProfiles)
     {
         // Arrange
-        var client = new FritzBoxClient("AA:AA:AA:00:00:01");
+        var client = new FritzBoxClient(Router, "AA:AA:AA:00:00:01");
         client.Update(
             new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", true, "laptop", "802.11", 0, 144, false, true, false, "filtprof1"),
             null,
@@ -94,7 +98,7 @@ public class FritzBoxClientTests
     public void WhenAClientIsCreated_ThenItTellsWhetherItsMacAddressIsPrivate(string macAddress, bool expected)
     {
         // Act
-        var client = new FritzBoxClient(macAddress);
+        var client = new FritzBoxClient(Router, macAddress);
 
         // Assert
         Assert.Equal(expected, client.IsPrivateMacAddress);
@@ -104,7 +108,7 @@ public class FritzBoxClientTests
     public void WhenAClientDeparts_ThenItIsAbsentWithoutPositionAndKeepsItsHostNameAndAddress()
     {
         // Arrange
-        var client = new FritzBoxClient("AA:AA:AA:00:00:01");
+        var client = new FritzBoxClient(Router, "AA:AA:AA:00:00:01");
         client.Update(
             new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", true, "laptop", "Ethernet", 2, 1000, false),
             new ClientPosition("BB:BB:BB:00:00:01", "fritz.box", null, 2, 1000m, false));
@@ -127,7 +131,7 @@ public class FritzBoxClientTests
     public void WhenADepartedClientIsUpdated_ThenItIsNoLongerDeparted()
     {
         // Arrange
-        var client = new FritzBoxClient("AA:AA:AA:00:00:01");
+        var client = new FritzBoxClient(Router, "AA:AA:AA:00:00:01");
         client.Depart();
 
         // Act
@@ -161,7 +165,7 @@ public class FritzBoxClientTests
     public void WhenAClientHasNoMeshPosition_ThenIsWirelessComesFromTheInterfaceType(string interfaceTypeValue, bool? expected)
     {
         // Arrange
-        var client = new FritzBoxClient("AA:AA:AA:00:00:01");
+        var client = new FritzBoxClient(Router, "AA:AA:AA:00:00:01");
         var host = new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", true, "laptop", interfaceTypeValue, 1, 100, false);
 
         // Act
@@ -175,7 +179,7 @@ public class FritzBoxClientTests
     public void WhenAnActiveClientHasNoMeshPosition_ThenLinkSpeedAndPortComeFromTheHost()
     {
         // Arrange
-        var client = new FritzBoxClient("AA:AA:AA:00:00:01");
+        var client = new FritzBoxClient(Router, "AA:AA:AA:00:00:01");
         var host = new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", true, "laptop", "Ethernet", 3, 1000, false);
 
         // Act
@@ -190,7 +194,7 @@ public class FritzBoxClientTests
     public void WhenAnInactiveClientHasAPositiveHostSpeed_ThenLinkSpeedAndPortAreNull()
     {
         // Arrange
-        var client = new FritzBoxClient("AA:AA:AA:00:00:01");
+        var client = new FritzBoxClient(Router, "AA:AA:AA:00:00:01");
         var host = new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", false, "laptop", "Ethernet", 3, 1000, false);
 
         // Act

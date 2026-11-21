@@ -3,22 +3,29 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Networking;
 using HomeBlaze.Abstractions.Sensors;
+using Namotion.Devices.FritzBox.Client;
 using Namotion.Devices.FritzBox.Parsing;
+using Namotion.Devices.Upnp;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Devices.FritzBox;
 
 /// <summary>
-/// A device in the FRITZ!Box host list, such as a computer or a phone, keyed by its MAC address.
+/// A device in the FRITZ!Box host list, such as a computer or a phone, keyed by its MAC address. Its internet access
+/// can be blocked and allowed; both require confirmation in the operations panel and cannot be called by agents or
+/// over MCP: blocking can cut off a device, also the one this host runs on, and allowing lifts a deliberate block.
 /// </summary>
 [InterceptorSubject]
 public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitleProvider, IIconProvider
 {
+    // A field, not a property: a subject reference in a property would attach the router under its own client.
+    private readonly FritzBox _router;
     private readonly bool _isPrivateMacAddress;
 
-    public FritzBoxClient(string macAddress)
+    public FritzBoxClient(FritzBox router, string macAddress)
     {
+        _router = router;
         MacAddress = macAddress;
         _isPrivateMacAddress = MacAddresses.IsLocallyAdministered(macAddress);
         HostName = null;
@@ -174,10 +181,46 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
         Band = position?.Band;
         Port = GetPort(host, position);
         LinkSpeed = GetLinkSpeed(host, position);
-        HasInternetAccess = host.HasWanAccess;
-        IsInternetAccessBlocked = host.IsWanAccessDisallowed;
         AccessProfile = GetAccessProfile(host, filterProfiles);
     }
+
+    /// <summary>
+    /// Takes the internet access from the host list entry. Separate from <see cref="Update"/>, because a block or allow
+    /// command that completed during the poll keeps its result instead.
+    /// </summary>
+    internal void UpdateInternetAccess(HostEntry host)
+    {
+        HasInternetAccess = host.HasWanAccess;
+        IsInternetAccessBlocked = host.IsWanAccessDisallowed;
+    }
+
+    /// <summary>
+    /// Blocks the internet access of the device, regardless of its access profile. The router applies it
+    /// asynchronously, so <see cref="HasInternetAccess"/> may follow only with the next poll.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The router is not connected or reports no IP address for the device.</exception>
+    /// <exception cref="FritzBoxServiceUnavailableException">The router does not offer the host filter service.</exception>
+    /// <exception cref="HttpRequestException">The request to the router failed.</exception>
+    /// <exception cref="TimeoutException">The router did not answer in time.</exception>
+    /// <exception cref="UpnpFaultException">The router refused the command, for example for a FRITZ! device.</exception>
+    /// <exception cref="FritzBoxCertificateException">The router presented a key other than the trusted one.</exception>
+    [Operation(RequiresConfirmation = true)]
+    public Task BlockInternetAccessAsync(CancellationToken cancellationToken) =>
+        _router.SetInternetAccessBlockedAsync(this, true, cancellationToken);
+
+    /// <summary>
+    /// Lifts the block of <see cref="BlockInternetAccessAsync"/>. The access profile may still deny internet access, see
+    /// <see cref="HasInternetAccess"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The router is not connected or reports no IP address for the device.</exception>
+    /// <exception cref="FritzBoxServiceUnavailableException">The router does not offer the host filter service.</exception>
+    /// <exception cref="HttpRequestException">The request to the router failed.</exception>
+    /// <exception cref="TimeoutException">The router did not answer in time.</exception>
+    /// <exception cref="UpnpFaultException">The router refused the command, for example for a FRITZ! device.</exception>
+    /// <exception cref="FritzBoxCertificateException">The router presented a key other than the trusted one.</exception>
+    [Operation(RequiresConfirmation = true)]
+    public Task AllowInternetAccessAsync(CancellationToken cancellationToken) =>
+        _router.SetInternetAccessBlockedAsync(this, false, cancellationToken);
 
     /// <summary>
     /// Marks the device as no longer listed by the router. It becomes absent like a listed absent device and keeps its

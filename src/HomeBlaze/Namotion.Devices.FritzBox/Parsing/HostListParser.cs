@@ -107,7 +107,7 @@ internal static class HostListParser
     }
 
     /// <returns>True for <c>granted</c>, false for <c>denied</c>, null for <c>error</c>, <c>unknown</c> or any other value.</returns>
-    private static bool? ParseWanAccess(string value) => value.Trim() switch
+    internal static bool? ParseWanAccess(string? value) => value?.Trim() switch
     {
         "granted" => true,
         "denied" => false,

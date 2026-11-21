@@ -95,6 +95,12 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     internal ConcurrentDictionary<string, bool> AbortedPaths { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// The IPv4 addresses whose internet access <c>DisallowWANAccessByIP</c> blocked (true) or allowed (false). The host
+    /// list and <c>GetWANAccessByIP</c> report it for the item of that address.
+    /// </summary>
+    internal ConcurrentDictionary<string, bool> InternetAccessBlocks { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// The authenticated actions received, in order.
     /// </summary>
     internal ConcurrentQueue<string> Actions { get; } = new();
@@ -295,7 +301,7 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
 
         (string Body, string ContentType)? list = pathAndQuery switch
         {
-            HostListPath => (HostListXml, "text/xml"),
+            HostListPath => (ApplyInternetAccessBlocks(HostListXml), "text/xml"),
             MeshListPath => (MeshListJson, "application/json"),
             _ => null
         };
@@ -377,6 +383,11 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
             return string.Empty;
         }
 
+        if (serviceType == Tr64Services.HostFilter && action is "DisallowWANAccessByIP" or "GetWANAccessByIP")
+        {
+            return await AnswerInternetAccessAsync(action, request);
+        }
+
         if (serviceType == GuestWlanServiceType && action == "GetInfo")
         {
             var isEnabled = _isGuestWlanEnabled;
@@ -424,6 +435,41 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
             (Tr64Services.Hosts, "X_AVM-DE_GetMeshListPath") => $"<NewX_AVM-DE_MeshListPath>{WebUtility.HtmlEncode(MeshListPath)}</NewX_AVM-DE_MeshListPath>",
             _ => null
         };
+    }
+
+    private async Task<string> AnswerInternetAccessAsync(string action, HttpRequest request)
+    {
+        using var reader = new StreamReader(request.Body);
+        var body = await reader.ReadToEndAsync();
+        var ipAddress = NewIpv4AddressRegex().Match(body).Groups[1].Value;
+        if (action == "DisallowWANAccessByIP")
+        {
+            InternetAccessBlocks[ipAddress] = NewDisallowRegex().Match(body).Groups[1].Value == "1";
+            return string.Empty;
+        }
+
+        var isBlocked = InternetAccessBlocks.TryGetValue(ipAddress, out var blocked) && blocked;
+        return $"<NewWANAccess>{(isBlocked ? "denied" : "granted")}</NewWANAccess><NewDisallow>{(isBlocked ? 1 : 0)}</NewDisallow>";
+    }
+
+    private string ApplyInternetAccessBlocks(string hostListXml)
+    {
+        if (InternetAccessBlocks.IsEmpty)
+        {
+            return hostListXml;
+        }
+
+        return HostListItemRegex().Replace(hostListXml, item =>
+        {
+            var ipAddress = IpAddressRegex().Match(item.Value).Groups[1].Value;
+            if (!InternetAccessBlocks.TryGetValue(ipAddress, out var isBlocked))
+            {
+                return item.Value;
+            }
+
+            var value = WanAccessRegex().Replace(item.Value, $"<X_AVM-DE_WANAccess>{(isBlocked ? "denied" : "granted")}</X_AVM-DE_WANAccess>");
+            return DisallowRegex().Replace(value, $"<X_AVM-DE_Disallow>{(isBlocked ? 1 : 0)}</X_AVM-DE_Disallow>");
+        });
     }
 
     private bool IsAuthorized(HttpRequest request)
@@ -489,6 +535,24 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
 
     [GeneratedRegex("<NewEnable>(\\d)</NewEnable>")]
     private static partial Regex NewEnableRegex();
+
+    [GeneratedRegex("<NewIPv4Address>([^<]*)</NewIPv4Address>")]
+    private static partial Regex NewIpv4AddressRegex();
+
+    [GeneratedRegex("<NewDisallow>(\\d)</NewDisallow>")]
+    private static partial Regex NewDisallowRegex();
+
+    [GeneratedRegex("<Item>.*?</Item>", RegexOptions.Singleline)]
+    private static partial Regex HostListItemRegex();
+
+    [GeneratedRegex("<IPAddress>([^<]*)</IPAddress>")]
+    private static partial Regex IpAddressRegex();
+
+    [GeneratedRegex("<X_AVM-DE_WANAccess>[^<]*</X_AVM-DE_WANAccess>")]
+    private static partial Regex WanAccessRegex();
+
+    [GeneratedRegex("<X_AVM-DE_Disallow>[^<]*</X_AVM-DE_Disallow>")]
+    private static partial Regex DisallowRegex();
 
     /// <summary>
     /// A request held by the fake: <see cref="Taken"/> completes when it arrives, and it is answered once the test
