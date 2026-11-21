@@ -99,7 +99,7 @@ TeslaAccount                                   hub: provider, tokens, polling
 `BackgroundService`, `IConfigurable`, `IMonitoredService`, `IAuthenticatedSubject`, `ITitleProvider`, `IIconProvider`. Category "Vehicles" (a new group).
 
 - Configuration: `Name`, `Provider` (enum `TeslaProvider` with `OwnerApi` only), `RefreshToken` (secret), `StatePollingInterval` (1 min), `ActivePollingInterval` (1 min), `IdlePollingInterval` (5 min), `IdleTimeout` (15 min), `SleepWindow` (21 min), `RetryInterval` (1 min).
-- State: `Status`, `StatusMessage`, `IsAuthenticated`, `AuthenticatedUser`, `AuthenticatedAt`, `Vehicles` (`Dictionary<string, TeslaVehicle>` keyed by VIN).
+- State: `Status`, `StatusMessage`, `IsAuthenticated`, `IsReauthenticationRequired`, `AuthenticatedUser`, `AuthenticatedAt`, `Vehicles` (`Dictionary<string, TeslaVehicle>` keyed by VIN).
 - Vehicles are discovered, not configured. Existing instances are updated in place; a new or removed vehicle replaces the dictionary.
 
 ### TeslaVehicle and its children
@@ -153,7 +153,7 @@ Both sources fill the same subjects through one mapping per field, and both are 
 - The access token lives in memory. It is refreshed when less than one hour or half of its lifetime is left and after a 401 (once; a second 401 requires re-authentication).
 - Refresh: `POST https://auth.tesla.com/oauth2/v3/token`, form-encoded, `grant_type=refresh_token`, `client_id=ownerapi`, `scope=openid email offline_access`. The China region is not supported: a refresh token does not tell its region before the first refresh, and no installation needs it.
 - The rotated refresh token is written to the configuration through `TryGetFirstParent<IConfigurationWriter>()` before the new access token is used, as `FritzBox` persists its pinned key. The writer is only found through `TryGetFirstParent<IConfigurationWriter>()`, so the account has to live in a storage file; an account in the root configuration keeps rotated tokens in memory only and logs a warning. When writing fails, the token stays pending in the token manager, the access token is not handed out, and the next call retries only the write, without another refresh. A token that the user replaced in the configuration while a rotation ran wins over the rotated one.
-- A rejected refresh (`login_required`, `invalid_grant`) sets `IsAuthenticated` false and the status message "Re-authentication required", and the loop waits for a configuration change.
+- A rejected refresh (`login_required`, `invalid_grant`) sets `IsAuthenticated` false, `IsReauthenticationRequired` true and the status message "Re-authentication required", and the loop waits for a configuration change.
 - `AuthenticatedUser` is the email claim of the ID token, `AuthenticatedAt` the time of the last successful refresh.
 - The client owns one long-lived `HttpClient` on a `SocketsHttpHandler` with TLS 1.3 and HTTP/2 (`RequestVersionExact`), disposed with the account.
 - The advanced login builds `https://auth.tesla.com/oauth2/v3/authorize` with PKCE (S256), `redirect_uri=tesla://auth/callback` and a random state, and exchanges the code from a pasted `tesla://auth/callback?code=…` URL or query string (`grant_type=authorization_code`, `code_verifier`).
@@ -162,7 +162,7 @@ Both sources fill the same subjects through one mapping per field, and both are 
 
 In `Namotion.Devices.Tesla.HomeBlaze`, following the Wallbox and Hue components:
 
-- `TeslaAccountSetupComponent`: refresh token field with instructions and links to `tesla_auth` and Auth app for Tesla, and a warning not to share the token with TeslaMate; a Connect button that refreshes the token and lists the vehicles from `/products` (name or VIN, VIN and state; no model, because `/products` does not return one). Connecting rotates the token at Tesla, so cancelling the dialog or closing it while it connects discards the new token and the user has to create another one. The links are shown as text to copy, because a link that opens a new window does not work in a kiosk browser; a collapsed "Sign in with Tesla" section with the login address and a field for the pasted callback URL, which is cleared after use.
+- `TeslaAccountSetupComponent`: refresh token field with instructions and links to `tesla_auth` and Auth app for Tesla, and a warning not to share the token with TeslaMate; a Connect button that refreshes the token and lists the vehicles from `/products` (name or VIN, VIN and state; no model, because `/products` does not return one). Connecting rotates the token at Tesla, so canceling the dialog or closing it while it connects discards the new token and the user has to create another one. The links are shown as text to copy, because a link that opens a new window does not work in a kiosk browser; a collapsed "Sign in with Tesla" section with the login address and a field for the pasted callback URL, which is cleared after use.
 - `TeslaAccountEditComponent`: name and polling intervals, and a "Replace token" section with the setup flow. Uses `OnInitialized`.
 - `TeslaAccountWidget`: status, number of vehicles, a warning when re-authentication is required.
 - `TeslaVehicleWidget`: model and name, battery bar with the charge limit marked, range, charging indicator with power and remaining time, lock state, inside and outside temperature, online or asleep with the time of the last update.
@@ -180,7 +180,7 @@ In `Namotion.Devices.Tesla.HomeBlaze`, following the Wallbox and Hue components:
 - The location is state like any other, readable by automations and AI agents.
 - One refresh token per application: sharing it with TeslaMate makes both log out each other.
 - The China region is not supported.
-- Connecting rotates the pasted refresh token, so cancelling the dialog afterwards discards the new token, and the account has to live in a storage file so that rotated tokens persist.
+- Connecting rotates the pasted refresh token, so canceling the dialog afterwards discards the new token, and the account has to live in a storage file so that rotated tokens persist.
 
 ## Tests
 

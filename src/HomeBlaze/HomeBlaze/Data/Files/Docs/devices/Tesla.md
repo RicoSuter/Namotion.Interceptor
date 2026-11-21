@@ -12,7 +12,7 @@ The Tesla integration reads all Tesla vehicles of an account through the unoffic
 1. Create a refresh token of your Tesla account with a token tool, on any device: [tesla_auth](https://github.com/adriankumpf/tesla_auth/releases) (Windows, macOS, Linux) or the app Auth app for Tesla (iOS). Use a token of its own: Tesla replaces a refresh token with every refresh, so sharing one with TeslaMate or another tool makes the tools log each other out.
 2. In HomeBlaze, create a **Tesla account** (group **Vehicles**).
 3. Paste the refresh token and select **Connect**. HomeBlaze refreshes the token, which makes Tesla issue a new one, and lists the vehicles of the account with their VIN and state (online or asleep). The list shows no model, because Tesla's vehicle list does not return one.
-4. Select **Save**. The new token is the only valid one from now on and is stored with the account. Cancelling the dialog after **Connect**, or closing it while it connects, discards the new token and invalidates the one you pasted, so create a new token with your token tool and start again.
+4. Select **Save**. The new token is the only valid one from now on and is stored with the account. Canceling the dialog after **Connect**, or closing it while it connects, discards the new token and invalidates the one you pasted, so create a new token with your token tool and start again.
 
 The account has to live in a storage file, such as `Devices/Tesla.json`, and not in the root configuration. HomeBlaze writes the rotated refresh token back through the storage file that holds the account; an account in the root configuration keeps rotated tokens in memory only, logs a warning, and needs a new token after every restart.
 
@@ -22,7 +22,7 @@ When no token tool is at hand, open **Advanced: sign in with Tesla** in the setu
 
 ### Re-authentication
 
-Refresh tokens last about three months and rotate on every refresh, so a running account keeps its token valid. When Tesla rejects the token (`login_required` or `invalid_grant`, for example after a password change or when another tool used the token), `IsAuthenticated` becomes `false`, the status is `Error` with the message "Re-authentication required", and polling stops until the configuration changes. Open the edit dialog of the account, expand **Replace token**, connect with a new token and save.
+Refresh tokens last about three months and rotate on every refresh, so a running account keeps its token valid. When Tesla rejects the token (`login_required` or `invalid_grant`, for example after a password change or when another tool used the token), `IsAuthenticated` becomes `false`, `IsReauthenticationRequired` becomes `true`, the status is `Error` with the message "Re-authentication required", and polling stops until the configuration changes. Other failures, such as a network outage or a server error, do not require re-authentication and retry after `RetryInterval`. Open the edit dialog of the account, expand **Replace token**, connect with a new token and save.
 
 ## Configuration
 
@@ -38,7 +38,7 @@ Refresh tokens last about three months and rotate on every refresh, so a running
 | `SleepWindow` | TimeSpan | 21 minutes | How long reading pauses so that an idle vehicle can fall asleep. |
 | `RetryInterval` | TimeSpan | 1 minute | Wait after a failed poll. |
 
-Every interval is at least 10 seconds. The account restarts its loop when the configuration is applied; the access token is kept, so a restart does not refresh again.
+`StatePollingInterval` and `RetryInterval` are at least 10 seconds. The account restarts its loop when the configuration is applied; the access token is kept, so a restart does not refresh again.
 
 ```json
 {
@@ -64,7 +64,7 @@ The sample file `Devices/Tesla.json` has no token and shows the status "Missing 
 | Stopped | No refresh token configured | "Missing refresh token" |
 | Starting | First poll | |
 | Running | Polling | Empty, or the failure of the last vehicle that could not be read or applied; the other vehicles are not affected |
-| Error | A poll failed, Tesla limits the requests, or re-authentication is required | The cause, or "Re-authentication required" |
+| Error | A poll failed, Tesla limits the requests, or re-authentication is required | The cause, or "Re-authentication required" when `IsReauthenticationRequired` is `true` |
 
 ## Subjects
 
@@ -101,6 +101,7 @@ All readings are `null` until the vehicle reported them. Percentages are fractio
 |----------|-------------|
 | `Status`, `StatusMessage` | See [Status](#status) |
 | `IsAuthenticated` | Whether Tesla accepted the refresh token |
+| `IsReauthenticationRequired` | Whether Tesla rejected the refresh token; polling waits until the token is replaced |
 | `AuthenticatedUser` | Email of the account |
 | `AuthenticatedAt` | Time of the last successful refresh |
 | `Vehicles` | The vehicles, keyed by VIN |
@@ -259,7 +260,7 @@ A failure of one vehicle does not stop the others. Tesla's request limit (429) p
 - **Cached data is not verified.** While a vehicle sleeps, its values come from the snapshot of `cached_data`. Whether Tesla keeps that snapshot filled and current while the vehicle sleeps is not verified; a value may be old, which `LastUpdated` and the section timestamps show. When the snapshot is empty, values appear after the vehicle wakes.
 - **The location is state like any other.** It is readable by automations, pages, history and AI agents with access to the vehicle. Restrict access accordingly.
 - **One refresh token per application.** Tesla replaces the refresh token on every refresh. Using the same token in HomeBlaze and TeslaMate, or in two HomeBlaze instances, makes the tools log each other out.
-- **Connecting rotates the token.** Connecting validates the pasted refresh token by refreshing it, which makes Tesla issue a new token and invalidate the pasted one. Cancelling the dialog after **Connect**, or closing it while it connects, discards the new token, so you have to create a new one with your token tool.
+- **Connecting rotates the token.** Connecting validates the pasted refresh token by refreshing it, which makes Tesla issue a new token and invalidate the pasted one. Canceling the dialog after **Connect**, or closing it while it connects, discards the new token, so you have to create a new one with your token tool.
 - **The account has to live in a storage file.** Rotated tokens are written back through the storage file that holds the account. In the root configuration they stay in memory only and are lost with a restart. If saving a rotated token fails, HomeBlaze keeps it in memory and retries saving with the next poll.
 - **The vehicle list shows no model.** The model appears on the vehicle once its vehicle data was read.
 
