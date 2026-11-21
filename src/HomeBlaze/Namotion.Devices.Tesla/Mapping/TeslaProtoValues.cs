@@ -33,7 +33,8 @@ internal static class TeslaProtoValues
 
     public static string? FastChargerType(ChargeState.Types.ChargerType type) => type.TypeCase switch
     {
-        ChargeState.Types.ChargerType.TypeOneofCase.Supercharger or ChargeState.Types.ChargerType.TypeOneofCase.Tesla => "Tesla",
+        ChargeState.Types.ChargerType.TypeOneofCase.Supercharger => "Supercharger",
+        ChargeState.Types.ChargerType.TypeOneofCase.Tesla => "Tesla",
         ChargeState.Types.ChargerType.TypeOneofCase.Chademo => "CHAdeMO",
         ChargeState.Types.ChargerType.TypeOneofCase.Gb => "GB",
         ChargeState.Types.ChargerType.TypeOneofCase.ACSingleWireCAN => "ACSingleWireCAN",
