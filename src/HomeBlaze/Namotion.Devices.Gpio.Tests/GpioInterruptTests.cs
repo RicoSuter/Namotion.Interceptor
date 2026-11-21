@@ -120,6 +120,43 @@ public class GpioInterruptTests
     }
 
     [Fact]
+    public async Task WhenAnEdgeFindsItsPinBusyAndTheLaterReadFails_ThenThePinReportsTheError()
+    {
+        // Arrange
+        var driver = new LatchingGpioDriver();
+        var subject = GpioTestSubject.Create(driver, pins: new Dictionary<int, GpioPin>
+        {
+            [17] = new() { Mode = GpioPinMode.Input, DebounceTime = TimeSpan.Zero }
+        });
+        await subject.StartAsync(CancellationToken.None);
+        await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
+        var pin = subject.Pins[17];
+
+        Task? edgeTask = null;
+        driver.CallbackRemoving = pinNumber =>
+        {
+            // The mode change holds the pin lock here, so the edge queues a read, which runs once the change is done.
+            driver.CallbackRemoving = null;
+            driver.FailsReads = true;
+            edgeTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => driver.RaiseEdge(pinNumber, PinValue.High));
+            edgeTask.Wait(TestTimeouts.Default);
+        };
+
+        // Act
+        await DedicatedThreadTestHelpers
+            .RunOnDedicatedThreadAsync(() => pin.Mode = GpioPinMode.Output)
+            .WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => pin.Status == ServiceStatus.Error);
+        Assert.Contains("after an edge", pin.StatusMessage);
+
+        driver.FailsReads = false;
+        await subject.StopAsync(CancellationToken.None);
+        subject.Dispose();
+    }
+
+    [Fact]
     public async Task WhenAnEdgeArrivesWhileAnotherInputBecomesAnOutput_ThenNeitherWaitsForTheOther()
     {
         // Arrange
@@ -132,7 +169,6 @@ public class GpioInterruptTests
         await subject.StartAsync(CancellationToken.None);
         await GpioTestSubject.WaitUntilAllPinsRunAsync(subject);
 
-        driver.SetInputLevel(17, PinValue.High);
         using var edgeDispatching = new ManualResetEventSlim();
         Task? edgeTask = null;
         driver.CallbackRemoving = pinNumber =>
@@ -152,7 +188,7 @@ public class GpioInterruptTests
         await edgeTask!.WaitAsync(TestTimeouts.Default);
 
         // Assert
-        Assert.True(subject.Pins[17].Value);
+        Assert.Equal(ServiceStatus.Running, subject.Pins[17].Status);
         Assert.Equal(PinMode.Output, driver.GetMode(22));
 
         // Not disposed when an assertion fails: with the deadlock, the stop would wait for the driver lock forever.

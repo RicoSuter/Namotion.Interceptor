@@ -385,15 +385,20 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
                 if (Controller == null || Status != ServiceStatus.Running || _debounceTimer is not null)
                     return;
 
+                PinValue level;
                 try
                 {
-                    SetValueFromLevel(Controller.Read(PinNumber) == PinValue.High);
+                    level = Controller.Read(PinNumber);
                 }
                 catch (Exception exception)
                 {
                     StatusMessage = $"Failed to read GPIO pin {PinNumber} after an edge: {exception.Message}";
                     Status = ServiceStatus.Error;
+                    return;
                 }
+
+                // A failed write-back of an output reports itself and throws to the catch below.
+                SetValueFromLevel(level == PinValue.High);
             }
         }
         catch (Exception)
