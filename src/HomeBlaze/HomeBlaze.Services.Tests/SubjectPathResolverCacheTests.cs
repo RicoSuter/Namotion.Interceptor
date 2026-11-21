@@ -355,9 +355,11 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
     }
 
     /// <summary>
-    /// Runs an action once, when the subject is attached, after the registry and before the subject inherits the context.
+    /// Runs an action once, when the subject is attached, after the registry and the resolver and before the subject inherits the context.
     /// </summary>
+    // After the resolver, so that its invalidation on attach does not clear what the action caches.
     [RunsAfter(typeof(SubjectRegistry))]
+    [RunsAfter(typeof(SubjectPathResolver))]
     [RunsBefore(typeof(ContextInheritanceHandler))]
     private sealed class BeforeContextInheritanceAttachHook(IInterceptorSubject subject, Action action) : ILifecycleHandler
     {

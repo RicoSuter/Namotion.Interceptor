@@ -51,8 +51,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyLifecycleHandler,
     private long _pathsVersionValue;
 
     /// <param name="context">
-    /// The context of the graph. Its registry gives the parents of subjects and the version of the caches, also for a
-    /// subject whose own context does not reach it, such as while it is attached again.
+    /// The context of the graph, whose registry gives the parents of subjects and the version of the caches.
     /// </param>
     /// <param name="getRoot">
     /// Resolves the current graph root. A delegate rather than the RootManager itself, because
