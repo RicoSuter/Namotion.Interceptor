@@ -39,7 +39,7 @@ public partial class TeslaSeatHeaters : ITitleProvider, IIconProvider
 
     [State(IsDiscrete = true, Position = 10)] public partial bool? IsAutoSteeringWheelHeatOn { get; internal set; }
 
-    public TeslaSeatHeaters()
+    internal TeslaSeatHeaters()
     {
         FrontLeftLevel = null;
         FrontRightLevel = null;

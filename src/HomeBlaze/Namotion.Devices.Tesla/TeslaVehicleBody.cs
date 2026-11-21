@@ -82,7 +82,7 @@ public partial class TeslaVehicleBody : ITitleProvider, IIconProvider
     [State(Position = 34)] public partial TeslaTire RearLeftTire { get; internal set; }
     [State(Position = 35)] public partial TeslaTire RearRightTire { get; internal set; }
 
-    public TeslaVehicleBody()
+    internal TeslaVehicleBody()
     {
         LockState = null;
         IsDriverFrontDoorOpen = null;

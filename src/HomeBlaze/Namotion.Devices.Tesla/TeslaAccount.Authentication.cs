@@ -17,7 +17,6 @@ public partial class TeslaAccount
 
     private TeslaTokenManager? _tokenManager;
     private string? _tokenManagerRefreshToken;
-    private bool _isReauthenticationRequired;
 
     /// <summary>
     /// Replaces the refresh token with one the user entered. A rotation of the previous token that completes later does
@@ -35,24 +34,28 @@ public partial class TeslaAccount
     /// Returns the token manager. It is kept across polls and configuration changes, so that a restart of the loop does
     /// not refresh again, and replaced only when the configured refresh token was replaced.
     /// </summary>
+    /// <remarks>Call it only while the poll lock is held.</remarks>
     private TeslaTokenManager GetTokenManager()
     {
+        TeslaTokenManager? tokenManager = null;
         lock (_refreshTokenLock)
         {
             var refreshToken = RefreshToken;
-            if (_tokenManager is null || refreshToken != _tokenManagerRefreshToken)
+            if (_tokenManager is not null && refreshToken == _tokenManagerRefreshToken)
             {
-                TeslaTokenManager? tokenManager = null;
-                tokenManager = new TeslaTokenManager(_authClient, refreshToken, _timeProvider,
-                    rotatedRefreshToken => OnRefreshTokenRotatedAsync(tokenManager!, rotatedRefreshToken));
-
-                _tokenManager = tokenManager;
-                _tokenManagerRefreshToken = refreshToken;
-                _isReauthenticationRequired = false;
+                return _tokenManager;
             }
 
-            return _tokenManager;
+            tokenManager = new TeslaTokenManager(_authClient, refreshToken, _timeProvider,
+                rotatedRefreshToken => OnRefreshTokenRotatedAsync(tokenManager!, rotatedRefreshToken));
+
+            _tokenManager = tokenManager;
+            _tokenManagerRefreshToken = refreshToken;
         }
+
+        // A replaced refresh token has not been rejected yet.
+        IsReauthenticationRequired = false;
+        return tokenManager;
     }
 
     /// <summary>
@@ -95,7 +98,7 @@ public partial class TeslaAccount
 
     private void UpdateAuthenticationState(TeslaTokenManager tokenManager)
     {
-        _isReauthenticationRequired = false;
+        IsReauthenticationRequired = false;
         IsAuthenticated = true;
         AuthenticatedUser = tokenManager.AuthenticatedUser ?? AuthenticatedUser;
         AuthenticatedAt = tokenManager.AuthenticatedAt ?? AuthenticatedAt;
@@ -104,7 +107,7 @@ public partial class TeslaAccount
     private void SetReauthenticationRequired(TeslaReauthenticationRequiredException exception)
     {
         _logger.LogWarning("Tesla rejected the refresh token ({Error}); polling waits for a new refresh token.", exception.Error);
-        _isReauthenticationRequired = true;
+        IsReauthenticationRequired = true;
         IsAuthenticated = false;
         Status = ServiceStatus.Error;
         StatusMessage = ReauthenticationRequiredMessage;

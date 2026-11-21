@@ -41,7 +41,7 @@ public class TeslaAccountConnectorTests
         var vehicle = Assert.Single(connection.Vehicles);
         Assert.Equal("TESTVIN0000000001", vehicle.Vin);
         Assert.Null(vehicle.DisplayName);
-        Assert.Equal("online", vehicle.State);
+        Assert.Equal(TeslaVehicleState.Online, vehicle.State);
 
         Assert.Contains("refresh_token=refresh-1&", handler.Requests[0].Body);
         Assert.Equal("Bearer access-1", handler.Requests[1].Authorization);
@@ -56,7 +56,7 @@ public class TeslaAccountConnectorTests
             .Respond(TokenPath, HttpStatusCode.OK, TokenJson("access-1", "refresh-1"))
             .Respond(ProductsPath, HttpStatusCode.OK, """{"response":[]}""");
         using var httpClient = new HttpClient(handler);
-        var login = TeslaAuthClient.CreateLogin();
+        var login = TeslaAccountConnector.CreateLogin();
 
         // Act
         var connection = await TeslaAccountConnector.ConnectWithLoginAsync(
@@ -96,7 +96,7 @@ public class TeslaAccountConnectorTests
         // Arrange
         var handler = new FakeHttpMessageHandler();
         using var httpClient = new HttpClient(handler);
-        var login = TeslaAuthClient.CreateLogin();
+        var login = TeslaAccountConnector.CreateLogin();
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() => TeslaAccountConnector.ConnectWithLoginAsync(

@@ -14,6 +14,6 @@ public class VerifyChecksTests
     [Fact]
     public Task PublicApi() => Verify(typeof(TeslaAccount).Assembly.GeneratePublicApi(new ApiGeneratorOptions
     {
-        DenyNamespacePrefixes = ["System", "XamlGeneratedNamespace", "CarServer", "VCSEC", "Keys", "Errors", "ManagedCharging", "Google"]
+        DenyNamespacePrefixes = ["System", "XamlGeneratedNamespace"]
     }));
 }

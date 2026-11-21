@@ -29,7 +29,7 @@ public partial class TeslaSpeedLimitMode : ITitleProvider, IIconProvider
     [State(Unit = StateUnit.KilometerPerHour, Position = 4)] public partial decimal? MaximumLimit { get; internal set; }
     [State(IsDiscrete = true, Position = 5)] public partial bool? IsPinCodeSet { get; internal set; }
 
-    public TeslaSpeedLimitMode()
+    internal TeslaSpeedLimitMode()
     {
         IsActive = null;
         CurrentLimit = null;

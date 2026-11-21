@@ -63,7 +63,7 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
 
     [State(Position = 12)] public partial TeslaNavigation Navigation { get; internal set; }
 
-    public TeslaDriveState(ILogger logger)
+    internal TeslaDriveState(ILogger logger)
     {
         _logger = logger;
         Location = null;

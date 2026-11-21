@@ -87,7 +87,7 @@ public partial class TeslaAccount
     /// </summary>
     internal TimeSpan GetNextPollDelay()
     {
-        if (_isReauthenticationRequired)
+        if (IsReauthenticationRequired)
         {
             return Timeout.InfiniteTimeSpan;
         }
@@ -332,6 +332,11 @@ public partial class TeslaAccount
 
                 await Task.Delay(WakeUpCheckInterval, _timeProvider, cancellationToken);
             }
+        }
+        catch (TeslaReauthenticationRequiredException exception)
+        {
+            SetReauthenticationRequired(exception);
+            throw;
         }
         finally
         {

@@ -21,6 +21,10 @@ public class TeslaAuthenticationTests
         return Encode("{\"alg\":\"none\"}") + "." + Encode($$"""{"email":"{{email}}"}""") + ".";
     }
 
+    /// <summary>Returns the access token that an API call receives.</summary>
+    private static Task<string> GetAccessTokenAsync(TeslaTokenManager manager, CancellationToken cancellationToken) =>
+        manager.CallAsync(Task.FromResult, cancellationToken);
+
     [Fact]
     public async Task WhenAccessTokenIsRequested_ThenRefreshTokenIsRotatedAndPersistedBeforeUse()
     {
@@ -33,12 +37,11 @@ public class TeslaAuthenticationTests
             token => { persisted.Add(token); return Task.CompletedTask; });
 
         // Act
-        var accessToken = await manager.GetAccessTokenAsync(CancellationToken.None);
+        var accessToken = await GetAccessTokenAsync(manager, CancellationToken.None);
 
         // Assert
         Assert.Equal("access-1", accessToken);
         Assert.Equal(["refresh-2"], persisted);
-        Assert.Equal("refresh-2", manager.RefreshToken);
         Assert.Equal("owner@example.com", manager.AuthenticatedUser);
         Assert.Equal(Start, manager.AuthenticatedAt);
         var body = handler.Requests.Single().Body!;
@@ -64,15 +67,13 @@ public class TeslaAuthenticationTests
         });
 
         // Act
-        await Assert.ThrowsAsync<IOException>(() => manager.GetAccessTokenAsync(CancellationToken.None));
-        var rotatedAfterFailure = manager.RefreshToken;
-        await Assert.ThrowsAsync<IOException>(() => manager.GetAccessTokenAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<IOException>(() => GetAccessTokenAsync(manager, CancellationToken.None));
+        await Assert.ThrowsAsync<IOException>(() => GetAccessTokenAsync(manager, CancellationToken.None));
         shouldFail = false;
-        var accessToken = await manager.GetAccessTokenAsync(CancellationToken.None);
-        var accessTokenAfterPersist = await manager.GetAccessTokenAsync(CancellationToken.None);
+        var accessToken = await GetAccessTokenAsync(manager, CancellationToken.None);
+        var accessTokenAfterPersist = await GetAccessTokenAsync(manager, CancellationToken.None);
 
         // Assert
-        Assert.Equal("refresh-2", rotatedAfterFailure);
         Assert.Equal("access-1", accessToken);
         Assert.Equal("access-1", accessTokenAfterPersist);
         Assert.Equal(["refresh-2", "refresh-2", "refresh-2"], persisted);
@@ -92,12 +93,12 @@ public class TeslaAuthenticationTests
         var shouldFail = true;
         var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", time,
             _ => shouldFail ? throw new IOException("disk full") : Task.CompletedTask);
-        await Assert.ThrowsAsync<IOException>(() => manager.GetAccessTokenAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<IOException>(() => GetAccessTokenAsync(manager, CancellationToken.None));
 
         // Act
         time.Advance(TimeSpan.FromHours(7.5));
         shouldFail = false;
-        var accessToken = await manager.GetAccessTokenAsync(CancellationToken.None);
+        var accessToken = await GetAccessTokenAsync(manager, CancellationToken.None);
 
         // Assert
         Assert.Equal("access-2", accessToken);
@@ -114,13 +115,13 @@ public class TeslaAuthenticationTests
         using var httpClient = new HttpClient(handler);
         var time = new FakeTimeProvider(Start);
         var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", time, _ => Task.CompletedTask);
-        await manager.GetAccessTokenAsync(CancellationToken.None);
+        await GetAccessTokenAsync(manager, CancellationToken.None);
 
         // Act
         time.Advance(TimeSpan.FromMinutes(4));
-        var beforeHalf = await manager.GetAccessTokenAsync(CancellationToken.None);
+        var beforeHalf = await GetAccessTokenAsync(manager, CancellationToken.None);
         time.Advance(TimeSpan.FromMinutes(2));
-        var afterHalf = await manager.GetAccessTokenAsync(CancellationToken.None);
+        var afterHalf = await GetAccessTokenAsync(manager, CancellationToken.None);
 
         // Assert
         Assert.Equal("access-1", beforeHalf);
@@ -168,11 +169,11 @@ public class TeslaAuthenticationTests
         using var httpClient = new HttpClient(handler);
         var time = new FakeTimeProvider(Start);
         var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", time, _ => Task.CompletedTask);
-        await manager.GetAccessTokenAsync(CancellationToken.None);
+        await GetAccessTokenAsync(manager, CancellationToken.None);
 
         // Act
         time.Advance(TimeSpan.FromHours(6)); // 2 h left of 8 h
-        await manager.GetAccessTokenAsync(CancellationToken.None);
+        await GetAccessTokenAsync(manager, CancellationToken.None);
 
         // Assert
         Assert.Single(handler.Requests);
@@ -187,16 +188,18 @@ public class TeslaAuthenticationTests
             .Respond(TokenPath, HttpStatusCode.OK, TokenJson("access-2", "refresh-3"));
         using var httpClient = new HttpClient(handler);
         var time = new FakeTimeProvider(Start);
-        var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", time, _ => Task.CompletedTask);
-        await manager.GetAccessTokenAsync(CancellationToken.None);
+        var persisted = new List<string>();
+        var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", time,
+            token => { persisted.Add(token); return Task.CompletedTask; });
+        await GetAccessTokenAsync(manager, CancellationToken.None);
 
         // Act
         time.Advance(TimeSpan.FromHours(7.5));
-        var accessToken = await manager.GetAccessTokenAsync(CancellationToken.None);
+        var accessToken = await GetAccessTokenAsync(manager, CancellationToken.None);
 
         // Assert
         Assert.Equal("access-2", accessToken);
-        Assert.Equal("refresh-3", manager.RefreshToken);
+        Assert.Equal(["refresh-2", "refresh-3"], persisted);
     }
 
     [Fact]
@@ -211,9 +214,9 @@ public class TeslaAuthenticationTests
             async _ => { persistEntered.TrySetResult(); await persistGate.Task; });
 
         // Act
-        var first = manager.GetAccessTokenAsync(CancellationToken.None);
+        var first = GetAccessTokenAsync(manager, CancellationToken.None);
         await persistEntered.Task;
-        var second = manager.GetAccessTokenAsync(CancellationToken.None);
+        var second = GetAccessTokenAsync(manager, CancellationToken.None);
         var secondCompletedBeforePersist = second.IsCompleted;
         persistGate.SetResult();
         var accessTokens = await Task.WhenAll(first, second);
@@ -238,12 +241,12 @@ public class TeslaAuthenticationTests
         using var cancellation = new CancellationTokenSource();
 
         // Act
-        var canceled = manager.GetAccessTokenAsync(cancellation.Token);
+        var canceled = GetAccessTokenAsync(manager, cancellation.Token);
         await persistEntered.Task;
         await cancellation.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceled);
         persistGate.SetResult();
-        var accessToken = await manager.GetAccessTokenAsync(CancellationToken.None);
+        var accessToken = await GetAccessTokenAsync(manager, CancellationToken.None);
 
         // Assert
         Assert.Equal("access-1", accessToken);
@@ -260,7 +263,7 @@ public class TeslaAuthenticationTests
         var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", TimeProvider.System, _ => Task.CompletedTask);
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<TeslaReauthenticationRequiredException>(() => manager.GetAccessTokenAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<TeslaReauthenticationRequiredException>(() => GetAccessTokenAsync(manager, CancellationToken.None));
         Assert.DoesNotContain("refresh-1", exception.Message);
     }
 
@@ -273,7 +276,7 @@ public class TeslaAuthenticationTests
         var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", TimeProvider.System, _ => Task.CompletedTask);
 
         // Act & Assert
-        await Assert.ThrowsAsync<TeslaReauthenticationRequiredException>(() => manager.GetAccessTokenAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<TeslaReauthenticationRequiredException>(() => GetAccessTokenAsync(manager, CancellationToken.None));
     }
 
     [Fact]
@@ -285,7 +288,7 @@ public class TeslaAuthenticationTests
         var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", TimeProvider.System, _ => Task.CompletedTask);
 
         // Act & Assert
-        var exception = await Assert.ThrowsAsync<TeslaApiException>(() => manager.GetAccessTokenAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<TeslaApiException>(() => GetAccessTokenAsync(manager, CancellationToken.None));
         Assert.Equal(HttpStatusCode.BadGateway, exception.StatusCode);
         Assert.DoesNotContain("refresh-1", exception.Message);
     }
@@ -298,7 +301,9 @@ public class TeslaAuthenticationTests
             .Respond(TokenPath, HttpStatusCode.OK, TokenJson("access-1", "refresh-2"))
             .Respond(TokenPath, HttpStatusCode.OK, TokenJson("access-2", "refresh-3"));
         using var httpClient = new HttpClient(handler);
-        var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", new FakeTimeProvider(Start), _ => Task.CompletedTask);
+        var persisted = new List<string>();
+        var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", new FakeTimeProvider(Start),
+            token => { persisted.Add(token); return Task.CompletedTask; });
         var usedTokens = new List<string>();
 
         // Act
@@ -313,7 +318,7 @@ public class TeslaAuthenticationTests
         // Assert
         Assert.Equal(42, result);
         Assert.Equal(["access-1", "access-2"], usedTokens);
-        Assert.Equal("refresh-3", manager.RefreshToken);
+        Assert.Equal(["refresh-2", "refresh-3"], persisted);
     }
 
     [Fact]

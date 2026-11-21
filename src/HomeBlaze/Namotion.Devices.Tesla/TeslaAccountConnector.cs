@@ -1,12 +1,14 @@
 using System.Globalization;
 using System.Text;
 using Namotion.Devices.Tesla.Client;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Tesla.Client.Dto;
+using Namotion.Devices.Tesla.Mapping;
 
 namespace Namotion.Devices.Tesla;
 
 /// <summary>A vehicle found while connecting an account.</summary>
-public sealed record TeslaVehicleSummary(string Vin, string? DisplayName, string? State);
+public sealed record TeslaVehicleSummary(string Vin, string? DisplayName, TeslaVehicleState? State);
 
 /// <summary>
 /// The result of connecting an account: the rotated refresh token to store and the vehicles found.
@@ -33,6 +35,9 @@ public sealed record TeslaConnection(string RefreshToken, string? Email, IReadOn
 /// </remarks>
 public static class TeslaAccountConnector
 {
+    /// <summary>Starts a browser login; open <see cref="TeslaLogin.Url"/> and pass the pasted callback to <see cref="ConnectWithLoginAsync(TeslaLogin, string, TimeProvider, CancellationToken)"/>.</summary>
+    public static TeslaLogin CreateLogin() => TeslaAuthClient.CreateLogin();
+
     /// <summary>Refreshes the pasted refresh token and lists the vehicles.</summary>
     /// <exception cref="TeslaReauthenticationRequiredException">Tesla rejected the refresh token.</exception>
     /// <exception cref="TeslaApiException">Tesla failed.</exception>
@@ -82,8 +87,8 @@ public static class TeslaAccountConnector
             .Where(product => !string.IsNullOrEmpty(product.Vin))
             .Select(product => new TeslaVehicleSummary(
                 product.Vin!,
-                string.IsNullOrWhiteSpace(product.DisplayName) ? null : product.DisplayName,
-                product.State))
+                TeslaValues.Text(product.DisplayName),
+                TeslaValues.Enum<TeslaVehicleState>(product.State, NullLogger.Instance)))
             .ToArray();
         return new TeslaConnection(tokens.RefreshToken, tokens.Email, vehicles);
     }

@@ -35,19 +35,11 @@ internal sealed class TeslaTokenManager
         _state = new TokenState(refreshToken, null, default, true, null, null);
     }
 
-    /// <summary>The current refresh token; it changes with every refresh.</summary>
-    public string RefreshToken => _state.RefreshToken;
-
     /// <summary>The email claim of the last ID token, or null.</summary>
     public string? AuthenticatedUser => _state.AuthenticatedUser;
 
     /// <summary>The time of the last successful refresh, or null.</summary>
     public DateTimeOffset? AuthenticatedAt => _state.AuthenticatedAt;
-
-    /// <summary>Returns a valid access token and refreshes it first when needed.</summary>
-    /// <exception cref="TeslaReauthenticationRequiredException">Tesla rejected the refresh token.</exception>
-    public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken) =>
-        GetAccessTokenAsync(null, cancellationToken);
 
     /// <summary>
     /// Calls the API with an access token. After a 401 it refreshes the token once and calls again; a second 401

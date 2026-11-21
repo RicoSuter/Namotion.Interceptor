@@ -37,7 +37,7 @@ public partial class TeslaVehicle :
     private Func<TeslaVehicle, CancellationToken, Task>? _wakeUp;
     private bool _hasWarnedAboutCachedData;
 
-    public TeslaVehicle(long id, string vin, TimeProvider timeProvider, ILogger logger)
+    internal TeslaVehicle(long id, string vin, TimeProvider timeProvider, ILogger logger)
     {
         Id = id;
         _timeProvider = timeProvider;

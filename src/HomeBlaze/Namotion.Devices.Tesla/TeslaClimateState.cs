@@ -89,7 +89,7 @@ public partial class TeslaClimateState : ITitleProvider, IIconProvider
 
     [State(Position = 28)] public partial TeslaSeatHeaters SeatHeaters { get; internal set; }
 
-    public TeslaClimateState(ILogger logger)
+    internal TeslaClimateState(ILogger logger)
     {
         _logger = logger;
         IsClimateOn = null;

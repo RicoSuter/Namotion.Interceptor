@@ -8,7 +8,7 @@ using Namotion.Devices.Tesla.Client.Dto;
 namespace Namotion.Devices.Tesla.Client;
 
 /// <summary>A token set from the Tesla authorization server. <see cref="object.ToString"/> leaves out the tokens.</summary>
-public sealed record TeslaTokens(string AccessToken, string RefreshToken, DateTimeOffset ExpiresAt, string? Email)
+internal sealed record TeslaTokens(string AccessToken, string RefreshToken, DateTimeOffset ExpiresAt, string? Email)
 {
     private bool PrintMembers(StringBuilder builder)
     {
@@ -33,7 +33,7 @@ public sealed record TeslaLogin(string Url, string State, string CodeVerifier)
 /// <summary>
 /// Calls the Tesla authorization server for the Owner API client.
 /// </summary>
-public sealed class TeslaAuthClient
+internal sealed class TeslaAuthClient
 {
     private const string TokenAddress = "https://auth.tesla.com/oauth2/v3/token";
     private const string AuthorizeAddress = "https://auth.tesla.com/oauth2/v3/authorize";

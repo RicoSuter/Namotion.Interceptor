@@ -91,7 +91,7 @@
                 {
                     <MudListItem T="string" Icon="@Icons.Material.Filled.DirectionsCar">
                         @(vehicle.DisplayName ?? vehicle.Vin)
-                        <MudText Typo="Typo.caption" Inline="true">(@vehicle.Vin, @(vehicle.State ?? "unknown"))</MudText>
+                        <MudText Typo="Typo.caption" Inline="true">(@vehicle.Vin, @(vehicle.State?.ToString() ?? "Unknown"))</MudText>
                     </MudListItem>
                 }
             </MudList>
@@ -105,7 +105,7 @@
     private const string AuthAppAddress = "https://apps.apple.com/app/auth-app-for-tesla/id1552058613";
 
     private readonly CancellationTokenSource _disposeCancellation = new();
-    private TeslaLogin _login = TeslaAuthClient.CreateLogin();
+    private TeslaLogin _login = TeslaAccountConnector.CreateLogin();
     private string _refreshToken = string.Empty;
     private string _callback = string.Empty;
     private bool _connecting;
@@ -183,7 +183,7 @@
             _connecting = false;
             if (renewLogin)
             {
-                _login = TeslaAuthClient.CreateLogin();
+                _login = TeslaAccountConnector.CreateLogin();
             }
         }
     }

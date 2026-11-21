@@ -63,6 +63,7 @@ public partial class TeslaAccount : BackgroundService,
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
         IsAuthenticated = false;
+        IsReauthenticationRequired = false;
         AuthenticatedUser = null;
         AuthenticatedAt = null;
         Vehicles = new Dictionary<string, TeslaVehicle>();
@@ -115,6 +116,13 @@ public partial class TeslaAccount : BackgroundService,
 
     [State(IsDiscrete = true)]
     public partial bool IsAuthenticated { get; internal set; }
+
+    /// <summary>
+    /// Whether Tesla rejected the refresh token. Polling then waits until the refresh token is replaced; other failures
+    /// such as a network outage retry by themselves.
+    /// </summary>
+    [State(IsDiscrete = true)]
+    public partial bool IsReauthenticationRequired { get; internal set; }
 
     [State]
     public partial string? AuthenticatedUser { get; internal set; }

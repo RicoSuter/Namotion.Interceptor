@@ -30,7 +30,7 @@ public partial class TeslaDisplaySettings : ITitleProvider, IIconProvider
     [State(Position = 6)] public partial string? TirePressureUnits { get; internal set; }
     [State(IsDiscrete = true, Position = 7)] public partial bool? ShowsRangeUnits { get; internal set; }
 
-    public TeslaDisplaySettings()
+    internal TeslaDisplaySettings()
     {
         Is24HourTime = null;
         ChargeRateUnits = null;

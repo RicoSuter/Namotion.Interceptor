@@ -122,7 +122,7 @@ public partial class TeslaVehicleSpecification : ITitleProvider, IIconProvider
     /// <summary>The offset of the time zone of the vehicle from UTC.</summary>
     [State(Position = 47)] public partial TimeSpan? UtcOffset { get; internal set; }
 
-    public TeslaVehicleSpecification()
+    internal TeslaVehicleSpecification()
     {
         CarType = null;
         CarSpecialType = null;

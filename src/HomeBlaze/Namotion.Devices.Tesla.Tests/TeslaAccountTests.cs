@@ -4,6 +4,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Namotion.Devices.Tesla.Client;
 using Namotion.Devices.Tesla.Tests.Testing;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -211,7 +212,50 @@ public class TeslaAccountTests
         Assert.False(account.IsAuthenticated);
         Assert.Equal(ServiceStatus.Error, account.Status);
         Assert.Equal("Re-authentication required", account.StatusMessage);
+        Assert.True(account.IsReauthenticationRequired);
         Assert.Equal(Timeout.InfiniteTimeSpan, account.GetNextPollDelay());
+    }
+
+    [Fact]
+    public async Task WhenFirstPollFailsWithANetworkError_ThenReauthenticationIsNotRequired()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler()
+            .Respond(TokenPath, () => Task.FromException<HttpResponseMessage>(new HttpRequestException("Network unreachable")));
+        var (account, _, _) = Create(handler);
+
+        // Act
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, account.Status);
+        Assert.False(account.IsAuthenticated);
+        Assert.False(account.IsReauthenticationRequired);
+    }
+
+    [Fact]
+    public async Task WhenRejectedRefreshTokenIsReplaced_ThenReauthenticationIsNoLongerRequired()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler()
+            .Respond(TokenPath, HttpStatusCode.Unauthorized, """{"error":"login_required"}""")
+            .Respond(TokenPath, HttpStatusCode.OK, TokenJson)
+            .Respond(ProductsPath, HttpStatusCode.OK, FixtureLoader.Load("products.json"))
+            .Respond(VehicleDataPath, HttpStatusCode.OK, FixtureLoader.Load("vehicle-data.json"));
+        var (account, _, _) = Create(handler);
+        await account.PollOnceAsync(CancellationToken.None);
+        var isRequiredBeforeReplacement = account.IsReauthenticationRequired;
+
+        // Act
+        account.ReplaceRefreshToken("refresh-new");
+        await account.ApplyConfigurationAsync(CancellationToken.None);
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(isRequiredBeforeReplacement);
+        Assert.False(account.IsReauthenticationRequired);
+        Assert.True(account.IsAuthenticated);
+        Assert.Equal(ServiceStatus.Running, account.Status);
     }
 
     [Fact]
@@ -458,6 +502,27 @@ public class TeslaAccountTests
         // Assert
         Assert.Equal(0, wakeUpsBeforeOperation);
         Assert.Equal(1, CountRequests(handler, WakeUpPath));
+    }
+
+    [Fact]
+    public async Task WhenWakeUpIsRejected_ThenReauthenticationIsRequired()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler()
+            .Respond(TokenPath, HttpStatusCode.OK, TokenJson)
+            .Respond(TokenPath, HttpStatusCode.Unauthorized, """{"error":"login_required"}""")
+            .Respond(ProductsPath, HttpStatusCode.OK, FixtureLoader.Load("products.json").Replace("\"online\"", "\"asleep\""))
+            .Respond(WakeUpPath, HttpStatusCode.Unauthorized, """{"error":"invalid bearer token"}""");
+        var (account, _, _) = Create(handler);
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<TeslaReauthenticationRequiredException>(
+            () => account.Vehicles.Single().Value.WakeUpAsync(CancellationToken.None));
+        Assert.True(account.IsReauthenticationRequired);
+        Assert.False(account.IsAuthenticated);
+        Assert.Equal(ServiceStatus.Error, account.Status);
+        Assert.Equal(Timeout.InfiniteTimeSpan, account.GetNextPollDelay());
     }
 
     [Fact]

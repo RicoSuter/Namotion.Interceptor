@@ -33,7 +33,7 @@ public partial class TeslaSoftwareUpdate : ITitleProvider, IIconProvider
     /// <summary>The time the installation is expected to take.</summary>
     [State(Position = 5)] public partial TimeSpan? ExpectedDuration { get; internal set; }
 
-    public TeslaSoftwareUpdate(ILogger logger)
+    internal TeslaSoftwareUpdate(ILogger logger)
     {
         _logger = logger;
         Status = null;

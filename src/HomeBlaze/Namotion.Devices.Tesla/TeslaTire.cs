@@ -26,7 +26,7 @@ public partial class TeslaTire : ITitleProvider, IIconProvider
     /// <summary>The time of the last pressure reading of the tire sensor.</summary>
     [State(Position = 5)] public partial DateTimeOffset? LastSeen { get; internal set; }
 
-    public TeslaTire(string title)
+    internal TeslaTire(string title)
     {
         Title = title;
         Pressure = null;

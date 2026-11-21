@@ -29,7 +29,7 @@ public partial class TeslaNavigation : ITitleProvider, IIconProvider
     /// <summary>The delay that traffic adds to the time to arrival.</summary>
     [State(Position = 6)] public partial TimeSpan? TrafficDelay { get; internal set; }
 
-    public TeslaNavigation()
+    internal TeslaNavigation()
     {
         Destination = null;
         DestinationLocation = null;

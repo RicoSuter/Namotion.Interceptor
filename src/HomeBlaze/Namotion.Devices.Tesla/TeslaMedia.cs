@@ -66,7 +66,7 @@ public partial class TeslaMedia : ITitleProvider, IIconProvider, IMediaTrackStat
 
     public string? CurrentTrackUri => null;
 
-    public TeslaMedia(ILogger logger)
+    internal TeslaMedia(ILogger logger)
     {
         _logger = logger;
         PlaybackStatus = null;

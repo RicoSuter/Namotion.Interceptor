@@ -57,8 +57,7 @@
 
     private TeslaAccount? Account => Subject as TeslaAccount;
 
-    private bool IsReauthenticationRequired =>
-        Account is { IsAuthenticated: false, Status: global::HomeBlaze.Abstractions.ServiceStatus.Error };
+    private bool IsReauthenticationRequired => Account?.IsReauthenticationRequired == true;
 
     public bool IsValid =>
         TryParseInterval(_statePollingInterval, out _) &&

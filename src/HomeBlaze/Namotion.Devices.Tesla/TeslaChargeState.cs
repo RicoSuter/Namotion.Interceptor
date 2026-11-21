@@ -144,7 +144,7 @@ public partial class TeslaChargeState : ITitleProvider, IIconProvider
     [State(Unit = StateUnit.WattHour, IsEstimated = true, Position = 50)]
     public decimal? EstimatedBatteryCapacity => GetEstimatedBatteryCapacity();
 
-    public TeslaChargeState(ILogger logger)
+    internal TeslaChargeState(ILogger logger)
     {
         _logger = logger;
         ChargingState = null;
