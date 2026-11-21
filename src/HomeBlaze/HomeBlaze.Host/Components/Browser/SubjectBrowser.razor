@@ -259,43 +259,38 @@
         _isPathPending = !BuildPanesFromPath(panes);
 
         // The panes that show the same subject at the same path stay, so that a pane an awaited handler holds is still
-        // found.
+        // found. Their title can change without a change of the paths.
         var keptCount = 0;
+        var hasRenamedPane = false;
         while (keptCount < panes.Count && keptCount < _panes.Count &&
                ReferenceEquals(panes[keptCount].Subject, _panes[keptCount].Subject) &&
                panes[keptCount].Path == _panes[keptCount].Path)
         {
+            if (_panes[keptCount].DisplayName != panes[keptCount].DisplayName)
+            {
+                _panes[keptCount].DisplayName = panes[keptCount].DisplayName;
+                hasRenamedPane = true;
+            }
+
             keptCount++;
         }
 
-        // A title can change without a change of the paths.
-        var hasRenamedPane = false;
-        for (var i = 0; i < keptCount; i++)
+        if (keptCount < panes.Count || keptCount < _panes.Count)
         {
-            if (_panes[i].DisplayName != panes[i].DisplayName)
-            {
-                _panes[i].DisplayName = panes[i].DisplayName;
-                hasRenamedPane = true;
-            }
+            // A shorter path leaves placeholders behind like closed panes do, see RemovePanesFrom, and new panes take
+            // them.
+            var previousPaneCount = _panes.Count + _placeholderCount;
+            _panes.RemoveRange(keptCount, _panes.Count - keptCount);
+            _panes.AddRange(panes.GetRange(keptCount, panes.Count - keptCount));
+            _placeholderCount = Math.Max(0, previousPaneCount - _panes.Count);
+            ScrollToLastPaneAfterRender();
+        }
+        else if (!hasRenamedPane)
+        {
+            return false;
         }
 
-        if (keptCount == panes.Count && keptCount == _panes.Count)
-        {
-            if (hasRenamedPane)
-            {
-                RebuildBreadcrumbs();
-            }
-
-            return hasRenamedPane;
-        }
-
-        // A shorter path leaves placeholders behind like closed panes do, see RemovePanesFrom, and new panes take them.
-        var previousPaneCount = _panes.Count + _placeholderCount;
-        _panes.RemoveRange(keptCount, _panes.Count - keptCount);
-        _panes.AddRange(panes.GetRange(keptCount, panes.Count - keptCount));
-        _placeholderCount = Math.Max(0, previousPaneCount - _panes.Count);
         RebuildBreadcrumbs();
-        ScrollToLastPaneAfterRender();
         return true;
     }
 
@@ -493,14 +488,14 @@
             if (paneIndex > 0)
             {
                 RemovePanesFrom(paneIndex);
-                UpdateUrl();
-                StateHasChanged();
             }
-            else if (_isPathPending)
+            else if (!_isPathPending)
             {
-                UpdateUrl();
-                StateHasChanged();
+                return;
             }
+
+            UpdateUrl();
+            StateHasChanged();
         }
         catch (Exception ex)
         {
