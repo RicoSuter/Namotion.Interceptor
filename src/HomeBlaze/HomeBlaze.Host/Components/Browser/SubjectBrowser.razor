@@ -119,8 +119,8 @@
 
     private string? _lastNavigatedUrl;
 
-    // Whether Path reaches subjects that do not exist yet, such as while the storage loads after a restart. The panes it
-    // reaches are added once they exist, until the user changes the panes.
+    // Whether Path reaches subjects that do not exist yet, such as while the storage loads after a restart. Until the
+    // user changes the panes, Path alone decides them on each change of the paths, like a reload of the page would.
     private bool _isPathPending;
     private bool _scrollToLastPane;
     private int _placeholderCount;
@@ -243,23 +243,46 @@
         {
             var decodedSegments = segments.Skip(1).Select(Uri.UnescapeDataString);
             Path = string.Join("/", decodedSegments);
-           
-            RebuildFromPath();
-            
+
+            // A link to the subject of the last pane, such as to one of its properties, still scrolls to it.
+            if (!RebuildFromPath())
+            {
+                ScrollToLastPaneAfterRender();
+            }
+
             InvokeAsync(StateHasChanged);
         }
     }
 
-    private void RebuildFromPath()
+    // Shows the panes that Path reaches. Returns whether a pane changed.
+    private bool RebuildFromPath()
     {
-        var previousPaneCount = _panes.Count + _placeholderCount;
-        _panes.Clear();
-        _isPathPending = !BuildPanesFromPath(_panes);
-        RebuildBreadcrumbs();
+        var panes = new List<SubjectPane>();
+        _isPathPending = !BuildPanesFromPath(panes);
 
-        // A shorter path leaves placeholders behind like closed panes do, see RemovePanesFrom.
+        // The panes that show the same subject at the same path stay, so that a pane an awaited handler holds is still
+        // found.
+        var keptCount = 0;
+        while (keptCount < panes.Count && keptCount < _panes.Count &&
+               ReferenceEquals(panes[keptCount].Subject, _panes[keptCount].Subject) &&
+               panes[keptCount].Path == _panes[keptCount].Path)
+        {
+            keptCount++;
+        }
+
+        if (keptCount == panes.Count && keptCount == _panes.Count)
+        {
+            return false;
+        }
+
+        // A shorter path leaves placeholders behind like closed panes do, see RemovePanesFrom, and new panes take them.
+        var previousPaneCount = _panes.Count + _placeholderCount;
+        _panes.RemoveRange(keptCount, _panes.Count - keptCount);
+        _panes.AddRange(panes.GetRange(keptCount, panes.Count - keptCount));
         _placeholderCount = Math.Max(0, previousPaneCount - _panes.Count);
+        RebuildBreadcrumbs();
         ScrollToLastPaneAfterRender();
+        return true;
     }
 
     // Adds the panes that Path reaches to the empty list. Returns whether it reaches all of Path.
@@ -446,6 +469,9 @@
         if (confirmed != true)
             return;
 
+        // A delete is a change of the panes by the user, also when the pane closes on the change of the paths it causes.
+        _isPathPending = false;
+
         try
         {
             await deleteOperation.InvokeAsync(null, ServiceProvider, CancellationToken.None);
@@ -529,54 +555,35 @@
             return;
         }
 
+        // A pending path shows what it reaches now, not the subjects that its panes showed before, such as an item that
+        // moved to another index.
+        if (_isPathPending)
+        {
+            if (RebuildFromPath())
+            {
+                StateHasChanged();
+            }
+
+            return;
+        }
+
         var paneCount = _panes.Count;
-        var hasChanged = FollowReplacedSubjects();
+        if (!FollowReplacedSubjects())
+        {
+            return;
+        }
+
+        // Closed like a deleted subject's pane, so that the URL and a reload show what is left.
         if (_panes.Count < paneCount)
         {
-            // Closed like a deleted subject's pane, so that the URL and a reload show what is left.
             UpdateUrl();
         }
         else
         {
-            var hasAddedPanes = _isPathPending && AddPendingPanes();
-            if (!hasChanged && !hasAddedPanes)
-            {
-                return;
-            }
-
             RebuildBreadcrumbs();
         }
 
         StateHasChanged();
-    }
-
-    // Adds the panes of Path that exist now after the open panes. Returns whether it added one.
-    private bool AddPendingPanes()
-    {
-        var panes = new List<SubjectPane>();
-        _isPathPending = !BuildPanesFromPath(panes);
-        if (panes.Count <= _panes.Count)
-        {
-            return false;
-        }
-
-        // A pane that FollowReplacedSubjects keeps on a moved item is not the subject that Path now reaches, and the
-        // panes after it would belong to another subject.
-        for (var i = 0; i < _panes.Count; i++)
-        {
-            if (!ReferenceEquals(panes[i].Subject, _panes[i].Subject))
-            {
-                _isPathPending = false;
-                return false;
-            }
-        }
-
-        // The new panes take the places of the first placeholders, like a pane that OnPropertyClick adds.
-        var addedCount = panes.Count - _panes.Count;
-        _panes.AddRange(panes.GetRange(_panes.Count, addedCount));
-        _placeholderCount = Math.Max(0, _placeholderCount - addedCount);
-        ScrollToLastPaneAfterRender();
-        return true;
     }
 
     // Replaces the subject of each pane that its property and index no longer reach, and closes the panes from the first
