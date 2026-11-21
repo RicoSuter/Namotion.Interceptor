@@ -47,6 +47,11 @@ public class DerivedPropertyRequiredPropertiesTests
         machine.Worker.Evaluator = _ =>
         {
             var value = root.Anchor;
+            if (DerivedPropertyTestHelpers.IsAttachBaseline)
+            {
+                return value;
+            }
+
             evaluations++;
             otherRoot.Machine = new EvaluatorMachine();
 
@@ -58,6 +63,40 @@ public class DerivedPropertyRequiredPropertiesTests
 
         // Assert
         Assert.Equal(1, evaluations);
+        Assert.NotNull(otherRoot.Machine);
+        Assert.Equal(
+            [new PropertyReference(root, nameof(EvaluatorRoot.Anchor))],
+            new PropertyReference(machine.Worker, nameof(EvaluatorWorker.Result)).GetRequiredProperties().ToArray());
+    }
+
+    [Fact]
+    public void WhenGetterAttachesASubjectAsASideEffectAlsoBeforeTheAttach_ThenRequiredPropertiesContainOnlyTheGettersOwnReads()
+    {
+        // Arrange: as above, but the evaluation that records the value before the attach assigns a machine as well.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithParents()
+            .WithRegistry();
+
+        var root = new EvaluatorRoot(context);
+        var otherRoot = new EvaluatorRoot(context);
+        var machine = new EvaluatorMachine();
+        var evaluations = 0;
+        machine.Worker.Evaluator = _ =>
+        {
+            var value = root.Anchor;
+            evaluations++;
+            otherRoot.Machine = new EvaluatorMachine();
+
+            return value;
+        };
+
+        // Act
+        root.Machine = machine;
+
+        // Assert
+        Assert.Equal(2, evaluations);
         Assert.NotNull(otherRoot.Machine);
         Assert.Equal(
             [new PropertyReference(root, nameof(EvaluatorRoot.Anchor))],

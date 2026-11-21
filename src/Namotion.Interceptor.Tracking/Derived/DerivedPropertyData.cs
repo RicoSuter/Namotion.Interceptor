@@ -44,6 +44,24 @@ internal sealed class DerivedPropertyData
     internal object? LastKnownValue;
 
     /// <summary>
+    /// The value of the getter before its subject's attach made the subject observable, valid while
+    /// <see cref="HasAttachBaseline"/> is set; the attach takes both. Read and written under lock(this).
+    /// </summary>
+    internal object? AttachBaseline;
+
+    /// <summary>
+    /// <see cref="AttachBaseline"/> holds a value, and the dependencies hold what the baseline evaluation read. Read and
+    /// written under lock(this).
+    /// </summary>
+    internal bool HasAttachBaseline;
+
+    /// <summary>
+    /// The sum of the versions the baseline evaluation read. Versions only increase, so with the same dependencies an
+    /// equal sum means that none of them was written since. Read and written under lock(this).
+    /// </summary>
+    internal long AttachBaselineVersionSum;
+
+    /// <summary>
     /// Incremented by every landed write of this property (source role), after the value landed and a full fence;
     /// read by evaluations to detect a write between a read and the commit of its dependency.
     /// </summary>
@@ -205,14 +223,14 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Updates dependencies (RequiredProperties) and used-by properties (UsedByProperties) to the recorded set.
-    /// Called under lock(this).
+    /// Returns whether they differ from the previous ones, in order. Called under lock(this).
     /// </summary>
-    internal void UpdateDependencies(in PropertyReference derivedProperty, ReadOnlySpan<RecordedDependency> recorded)
+    internal bool UpdateDependencies(in PropertyReference derivedProperty, ReadOnlySpan<RecordedDependency> recorded)
     {
         var previous = RequiredPropertiesSpan;
         if (previous.Length == recorded.Length && IsSameOrder(previous, recorded))
         {
-            return;
+            return false;
         }
 
         foreach (ref readonly var old in previous)
@@ -232,6 +250,7 @@ internal sealed class DerivedPropertyData
         }
 
         SetRequiredProperties(recorded);
+        return true;
     }
 
     private static bool IsSameOrder(ReadOnlySpan<PropertyReference> previous, ReadOnlySpan<RecordedDependency> recorded)
