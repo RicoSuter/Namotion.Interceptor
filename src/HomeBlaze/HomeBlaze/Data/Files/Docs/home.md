@@ -65,6 +65,7 @@ Per-device documentation and setup guides.
 - [Shelly](devices/Shelly.md): Shelly Gen2+ devices via the RPC API
 - [Sonos](devices/Sonos.md): Sonos households over the local UPnP API: rooms with their satellites, groups, playback, favorites and live events
 - [SunSpec](devices/SunSpec.md): SunSpec inverters, meters and batteries (SolarEdge and others) via Modbus TCP, read only
+- [Tesla](devices/Tesla.md): Tesla vehicles through the Owner API, read only and without waking the vehicle
 - [Wallbox](devices/Wallbox.md): Wallbox EV chargers via the cloud API
 
 ### Architecture

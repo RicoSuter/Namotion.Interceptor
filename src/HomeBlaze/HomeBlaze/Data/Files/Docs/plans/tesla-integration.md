@@ -1,12 +1,12 @@
 ---
 title: Tesla Integration
 navTitle: Tesla
-status: Planned
+status: Implemented
 ---
 
 # Tesla Integration
 
-This plan migrates the Tesla vehicle integration of HomeBlaze v1 (`HomeBlaze.Tesla`) to a v2 device library and introduces vehicle abstractions that a Hyundai Bluelink integration will share. The v1 Tesla Wall Connector is not migrated: no installation has one, and it cannot be tested.
+This plan is implemented. The deviations that came up during implementation are folded into the sections below; the user documentation is [Tesla](../devices/Tesla.md). It migrates the Tesla vehicle integration of HomeBlaze v1 (`HomeBlaze.Tesla`) to a v2 device library and introduces vehicle abstractions that a Hyundai Bluelink integration will share. The v1 Tesla Wall Connector is not migrated: no installation has one, and it cannot be tested.
 
 ## Goals and Phases
 
@@ -45,11 +45,13 @@ IChargingState { IsPluggedIn, IsCharging, ChargingPower, MaximumChargingPower }
 
 No property is renamed or removed, so paths, history and configuration files stay valid. Only code that names `IEnergyChargerState` breaks, which the pull request lists with its migration step (replace `IEnergyChargerState` with `IChargingState`). The only implementer in the repository is `WallboxCharger`.
 
+`IsPluggedIn` and `IsCharging` are discrete, and all four members have the category "Charging" with the positions 101, 102 (flags) and 330, 331 (`ChargingPower`, `MaximumChargingPower`), so that a charger and a vehicle group alike.
+
 Two units are added to `StateUnit`: `KilometerPerHour` (speed, speed limit) and `Bar` (tire pressure).
 
 ### New interfaces
 
-In `HomeBlaze.Abstractions/Devices/Vehicles/`, with positions in the documented ranges and categories:
+In `HomeBlaze.Abstractions/Devices/Vehicles/`, with positions in the documented ranges and categories. `IVehicleState` has the category "Vehicle" and the positions 223 to 225 (`Range`, `TotalDrivenDistance`, `Location`), `IVehicleChargingState` the category "Charging" and 341, 342, and `IVehicleClimateState` the category "Climate" and the positions 153 (`IsClimateOn`), 201 and 202:
 
 | Interface | Members |
 |-----------|---------|
@@ -102,15 +104,15 @@ TeslaAccount                                   hub: provider, tokens, polling
 
 ### TeslaVehicle and its children
 
-`TeslaVehicle` implements `IElectricVehicle`, `IVehicleClimateState`, `IDoorLockState`, `IDeviceInfo`, `ISoftwareState`, `IConnectionState`, `ILastUpdatedProvider`, `ITitleProvider` and `IIconProvider`. Its interface properties are `[Derived]` and read the children, as `WallboxCharger.ChargeLevel` reads its session. It holds identity and status itself: `Vin`, `DisplayName`, `Model`, `VehicleState` (enum `Online`, `Asleep`, `Offline`, `Unknown`), the derived `IsAwake` (true when online, false when asleep or offline, `null` when unknown; discrete, so history shows every wake and sleep), `IsConnected` (true when online or asleep, false when offline: an asleep car is still reachable through Tesla's servers), `CommandSigning` (enum from `/products`), `IsInService`, and the operation `Wake Up`, which wakes the car, waits until it is online and fetches its data.
+`TeslaVehicle` implements `IElectricVehicle`, `IVehicleClimateState`, `IDoorLockState`, `IDeviceInfo`, `ISoftwareState`, `IConnectionState`, `ILastUpdatedProvider`, `ITitleProvider` and `IIconProvider`. Its interface properties are `[Derived]` and read the children, as `WallboxCharger.ChargeLevel` reads its session. It holds identity and status itself: `Vin`, `DisplayName`, `VehicleName`, `VehicleState` (enum `Online`, `Asleep`, `Offline`, `Unknown`), the derived `IsAwake` (true when online, false when asleep or offline, `null` when unknown; discrete, so history shows every wake and sleep), `IsConnected` (true when online or asleep, false when offline: an asleep car is still reachable through Tesla's servers), `CommandSigning` (enum from `/products`), `IsInService`, and the operation `Wake Up`, which wakes the car, waits until it is online (at most 2 minutes, polling of the account pauses meanwhile) and fetches its data. `Wake Up` is enabled only while the car is asleep or offline. `Model` is not stored: it is derived from the car type of `TeslaVehicleSpecification` (`vehicle_config`), so it is `null` until the first `vehicle_data` read, because the cached snapshot carries no specification. `ProductCode` is the trim badging, `SerialNumber` the VIN, and `MaximumChargingPower` is derived from the charger voltage, the lower of the pilot current and the maximum requested current, and the phases. The phases come from the measured power, voltage and current when charging, because Tesla is reported to send 2 phases while charging on 3-phase AC, and from the reported phases otherwise; it is `null` while the car does not charge.
 
 Every field of `vehicle_data` and `cached_data` that describes the car is exposed in the child that it belongs to. Dropped are only API internals (tokens, `id_s`, user ID, backseat token, `feature_bitmask`, API version, the per-section timestamps, which feed `LastUpdated`) and deprecated fields (`option_codes`). The fixture decides the final property list; the groups are:
 
 | Child | Content |
 |-------|---------|
 | `TeslaChargeState` | charging state (enum), battery level, usable battery level, charge limit with minimum, maximum and standard, charging power, currents (actual, requested, maximum, pilot), voltage, phases, added energy and range, remaining time, fast charger present, brand and type, cable, charge port door, latch and color, battery heater, scheduled charging mode and start, scheduled departure, off-peak and preconditioning settings, estimated battery capacity (v1, derived) |
-| `TeslaClimateState` | climate on, auto conditioning, preconditioning, inside, outside, driver and passenger temperature, minimum and maximum settable temperature, fan, defrosters, cabin overheat protection and its activation temperature, climate keeper mode, battery heater, mirror, wiper and steering wheel heaters |
-| `TeslaSeatHeaters` | levels of the front left, front right and three rear seats (physical sides), auto seat climate of the front seats |
+| `TeslaClimateState` | climate on, auto conditioning, preconditioning, inside, outside, driver and passenger temperature, minimum and maximum settable temperature, fan, defrosters, cabin overheat protection and its activation temperature, climate keeper mode, battery heater, mirror and wiper heaters |
+| `TeslaSeatHeaters` | levels of the front left, front right, rear left, rear center and rear right seats (physical sides, `FrontLeftLevel` and so on), auto seat climate of the front left and right seats, and the steering wheel heater (on, level, auto), which therefore is not in `TeslaClimateState` |
 | `TeslaDriveState` | location, native location, heading, speed, shift state (enum), derived `IsDriving`, drive power, GPS time |
 | `TeslaNavigation` | active route destination, minutes and distance to arrival, energy at arrival, traffic delay, destination location |
 | `TeslaVehicleBody` | lock state, each door, window, frunk and trunk open, derived "any open" flags, sentry mode, valet mode, user present, remote start, dashcam state, homelink nearby, center display state |
@@ -121,7 +123,7 @@ Every field of `vehicle_data` and `cached_data` that describes the car is expose
 | `TeslaVehicleSpecification` | car type, special type, trim badging, colors, wheel type, seat and roof options, drive unit, charge port type, feature flags (`vehicle_config`) |
 | `TeslaDisplaySettings` | the units and 24 h setting of the car's display |
 
-Modeling rules: readings are nullable and `null` until observed; setters are `internal`; every partial property is initialized in the constructor; enums for string states with an `Unknown` value, and an unknown value is logged once; percentages as fractions from 0 to 1; distances in km (the API reports miles), energy in Wh, power in W; `DateTimeOffset` for Unix times; `TimeSpan` for minutes after midnight. Placeholder values become `null`: a charger voltage of 0 to 2 V when not charging, `"<invalid>"`, a blank software version, an empty vehicle name. The title is the vehicle name, else the display name from `/products`, else the model with the last six VIN characters.
+Modeling rules: readings are nullable and `null` until observed; setters are `internal`; every partial property is initialized in the constructor; enums for string states with an `Unknown` value, and an unknown value is logged once; percentages as fractions from 0 to 1; distances in km (the API reports miles), energy in Wh, power in W; `DateTimeOffset` for Unix times; `TimeSpan` for minutes after midnight. Placeholder values become `null`: a charger voltage of 0 to 2 V when not charging, `"<invalid>"`, a blank software version, an empty vehicle name. `TeslaMedia` implements `IMediaTrackState` and `IVolumeState`, not the vehicle. The title is the vehicle name, else the display name from `/products`, else the model with the last six VIN characters.
 
 ## Data Sources
 
@@ -131,7 +133,7 @@ DTOs are internal and mapped explicitly to the subjects; no subject property has
 2. `GET /api/1/vehicles/{id}/vehicle_data?endpoints=charge_state;climate_state;closures_state;drive_state;gui_settings;location_data;vehicle_config;vehicle_state;vehicle_data_combo` while the car is online: the full JSON. A 408 means that the car is asleep.
 3. `POST /api/1/vehicles/{id}/wake_up`: only from the `Wake Up` operation.
 
-Both sources fill the same subjects through one mapping per field. A protobuf field that is absent leaves the property unchanged, because every field of the schema is optional. A value from the JSON is newer than `cached_data` when its timestamp is newer, and the mapping compares the timestamps so that an older cache does not overwrite a newer reading.
+Both sources fill the same subjects through one mapping per field, and both are applied on every poll, also while the car is awake, so the two must produce identical values for the same state, otherwise history would flap between them: every protobuf float goes through the same decimal conversion, miles are rounded to the hundredths that the snapshot reports, coordinates are reduced to float precision, enums and oneofs become exactly the strings and enum members that the JSON gives, and a protobuf enum that maps to unknown is skipped instead of overwriting a value. Where the two sources genuinely disagree, the JSON decides and the protobuf field is not mapped. A protobuf field that is absent leaves the property unchanged, because every field of the schema is optional. Each section has a timestamp clock: data that is older than the data already applied to the section is ignored, data with an equal timestamp applies, so that an older cache never overwrites a newer reading.
 
 ## Polling
 
@@ -141,16 +143,16 @@ Both sources fill the same subjects through one mapping per field. A protobuf fi
 - For each online vehicle, it reads `vehicle_data` every `ActivePollingInterval` while charging, driving or with a user present, else every `IdlePollingInterval`.
 - After `IdleTimeout` without activity (not charging, parked, no user present, climate and sentry off), it stops reading `vehicle_data` for `SleepWindow` so that the car can fall asleep, as TeslaMate does. It resumes when the car is still online afterwards or becomes active.
 - An asleep or offline vehicle is never read with `vehicle_data` and keeps its last values.
-- Nothing but the `Wake Up` operation calls `wake_up`. The account log records every `vehicle_data` read and every wake with its reason, so that a car that does not sleep can be traced.
-- A failure of one vehicle does not stop the others. A 429 waits for `Retry-After` (default 5 min), `403 account disabled: EXCEEDED_LIMIT` waits 15 minutes, a 5xx or network error waits `RetryInterval`. Status and status message follow the Wallbox pattern.
+- Nothing but the `Wake Up` operation calls `wake_up`. The account log records every wake at information level and every `vehicle_data` read at debug level, so that a car that does not sleep can be traced. Every interval is at least 10 seconds.
+- A failure of one vehicle, in reading or in applying its data, does not stop the others. A 429 waits for `Retry-After` (default 5 min), `403 account disabled: EXCEEDED_LIMIT` waits 15 minutes, a 5xx or network error waits `RetryInterval`. Status and status message follow the Wallbox pattern.
 - A configuration change (`ApplyConfigurationAsync`) restarts the loop.
 - Time comes from an injected `TimeProvider`.
 
 ## Authentication
 
-- The access token lives in memory. It is refreshed when less than one hour is left and after a 401.
-- Refresh: `POST https://auth.tesla.com/oauth2/v3/token`, form-encoded, `grant_type=refresh_token`, `client_id=ownerapi`, `scope=openid email offline_access`. The China region (`auth.tesla.cn`, `owner-api.vn.cloud.tesla.cn`) follows the `iss` claim of the token.
-- The rotated refresh token is written to the configuration through `TryGetFirstParent<IConfigurationWriter>()` before the new access token is used, as `FritzBox` persists its pinned key. When writing fails, the token stays in memory, a warning is logged and the write is retried on the next loop.
+- The access token lives in memory. It is refreshed when less than one hour or half of its lifetime is left and after a 401 (once; a second 401 requires re-authentication).
+- Refresh: `POST https://auth.tesla.com/oauth2/v3/token`, form-encoded, `grant_type=refresh_token`, `client_id=ownerapi`, `scope=openid email offline_access`. The China region is not supported: a refresh token does not tell its region before the first refresh, and no installation needs it.
+- The rotated refresh token is written to the configuration through `TryGetFirstParent<IConfigurationWriter>()` before the new access token is used, as `FritzBox` persists its pinned key. The writer is only found through `TryGetFirstParent<IConfigurationWriter>()`, so the account has to live in a storage file; an account in the root configuration keeps rotated tokens in memory only and logs a warning. When writing fails, the token stays pending in the token manager, the access token is not handed out, and the next call retries only the write, without another refresh. A token that the user replaced in the configuration while a rotation ran wins over the rotated one.
 - A rejected refresh (`login_required`, `invalid_grant`) sets `IsAuthenticated` false and the status message "Re-authentication required", and the loop waits for a configuration change.
 - `AuthenticatedUser` is the email claim of the ID token, `AuthenticatedAt` the time of the last successful refresh.
 - The client owns one long-lived `HttpClient` on a `SocketsHttpHandler` with TLS 1.3 and HTTP/2 (`RequestVersionExact`), disposed with the account.
@@ -160,7 +162,7 @@ Both sources fill the same subjects through one mapping per field. A protobuf fi
 
 In `Namotion.Devices.Tesla.HomeBlaze`, following the Wallbox and Hue components:
 
-- `TeslaAccountSetupComponent`: refresh token field with instructions and links to `tesla_auth` and Auth app for Tesla, and a warning not to share the token with TeslaMate; a Connect button that refreshes the token and lists the vehicles from `/products` (model, name or VIN, online or asleep); a collapsed "Sign in with Tesla" section with the login link and a field for the pasted callback URL.
+- `TeslaAccountSetupComponent`: refresh token field with instructions and links to `tesla_auth` and Auth app for Tesla, and a warning not to share the token with TeslaMate; a Connect button that refreshes the token and lists the vehicles from `/products` (name or VIN, VIN and state; no model, because `/products` does not return one). Connecting rotates the token at Tesla, so cancelling the dialog or closing it while it connects discards the new token and the user has to create another one. The links are shown as text to copy, because a link that opens a new window does not work in a kiosk browser; a collapsed "Sign in with Tesla" section with the login address and a field for the pasted callback URL, which is cleared after use.
 - `TeslaAccountEditComponent`: name and polling intervals, and a "Replace token" section with the setup flow. Uses `OnInitialized`.
 - `TeslaAccountWidget`: status, number of vehicles, a warning when re-authentication is required.
 - `TeslaVehicleWidget`: model and name, battery bar with the charge limit marked, range, charging indicator with power and remaining time, lock state, inside and outside temperature, online or asleep with the time of the last update.
@@ -177,6 +179,8 @@ In `Namotion.Devices.Tesla.HomeBlaze`, following the Wallbox and Hue components:
 - Data of a car that sleeps since HomeBlaze started is only available when `cached_data` is filled; otherwise it appears once the car wakes.
 - The location is state like any other, readable by automations and AI agents.
 - One refresh token per application: sharing it with TeslaMate makes both log out each other.
+- The China region is not supported.
+- Connecting rotates the pasted refresh token, so cancelling the dialog afterwards discards the new token, and the account has to live in a storage file so that rotated tokens persist.
 
 ## Tests
 
