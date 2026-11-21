@@ -220,7 +220,7 @@ public class TeslaVehicleDetailsTests
     }
 
     [Fact]
-    public void WhenSoftwareUpdateHasNoVersion_ThenNoUpdateIsAvailable()
+    public void WhenSoftwareUpdateHasNoStatus_ThenNoUpdateDetailsAreShown()
     {
         // Act
         var update = CreateSoftwareUpdateFromFixture();
@@ -228,9 +228,9 @@ public class TeslaVehicleDetailsTests
         // Assert
         Assert.Null(update.Version);   // " "
         Assert.Null(update.Status);    // ""
-        Assert.Equal(TimeSpan.FromSeconds(2700), update.ExpectedDuration);
-        Assert.Equal(0m, update.DownloadProgress);
-        Assert.Equal(0.01m, update.InstallProgress);
+        Assert.Null(update.ExpectedDuration); // 2700 s of the last update
+        Assert.Null(update.DownloadProgress);
+        Assert.Null(update.InstallProgress); // 1% of the last update
     }
 
     [Theory]
@@ -270,7 +270,7 @@ public class TeslaVehicleDetailsTests
         Assert.Equal(TeslaSoftwareUpdateStatus.Downloading, update.Status);
         Assert.Equal("2026.40.1 abc", update.Version);
         Assert.Equal(0.42m, update.DownloadProgress);
-        Assert.Equal(0.01m, update.InstallProgress); // absent in the snapshot, unchanged
+        Assert.Null(update.InstallProgress); // absent in the snapshot, unchanged
     }
 
     [Fact]

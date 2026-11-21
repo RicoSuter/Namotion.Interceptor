@@ -9,7 +9,7 @@ using Namotion.Interceptor.Attributes;
 namespace Namotion.Devices.Tesla;
 
 /// <summary>
-/// The software update of a Tesla vehicle. <see cref="Status"/> and <see cref="Version"/> are null while no update is pending.
+/// The software update of a Tesla vehicle. All properties are null while no update is pending.
 /// </summary>
 [ExcludeFromCreation]
 [InterceptorSubject]
@@ -57,6 +57,7 @@ public partial class TeslaSoftwareUpdate : ITitleProvider, IIconProvider
         DownloadProgress = TeslaValues.Percent(dto.DownloadPerc);
         InstallProgress = TeslaValues.Percent(dto.InstallPerc);
         ExpectedDuration = TeslaValues.FromSeconds(dto.ExpectedDurationSec);
+        ClearDetailsWithoutPendingUpdate();
     }
 
     // The snapshot also has the scheduled time and the remaining warning time, which the JSON of this library does not read.
@@ -72,6 +73,19 @@ public partial class TeslaSoftwareUpdate : ITitleProvider, IIconProvider
         if (proto.OptionalDownloadPercCase != SoftwareUpdateState.OptionalDownloadPercOneofCase.None) DownloadProgress = TeslaValues.Percent(proto.DownloadPerc);
         if (proto.OptionalInstallPercCase != SoftwareUpdateState.OptionalInstallPercOneofCase.None) InstallProgress = TeslaValues.Percent(proto.InstallPerc);
         if (proto.OptionalExpectedDurationSecCase != SoftwareUpdateState.OptionalExpectedDurationSecOneofCase.None) ExpectedDuration = TeslaValues.FromSeconds(proto.ExpectedDurationSec);
+        ClearDetailsWithoutPendingUpdate();
+    }
+
+    // Tesla keeps reporting the progress and duration of the last update (for example 1% and 45 minutes) while none is pending.
+    private void ClearDetailsWithoutPendingUpdate()
+    {
+        if (Status is null)
+        {
+            Version = null;
+            DownloadProgress = null;
+            InstallProgress = null;
+            ExpectedDuration = null;
+        }
     }
 
     private void UpdateStatusFromProtobuf(SoftwareUpdateState proto)
