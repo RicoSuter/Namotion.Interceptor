@@ -3,6 +3,7 @@ using HomeBlaze.Automation.Runtime;
 using HomeBlaze.Automation.Tests.Testing;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Automation.Tests.Runtime;
 
@@ -16,7 +17,7 @@ public class AutomationStatusReporterTests
         // Arrange
         var logger = new MessageLogger();
         using var provider = new ServiceCollection().BuildServiceProvider();
-        using var automation = new Automation(new SubjectPathResolver(() => null), TimeProvider.System, new AllowAllAutomationAuthorizer(), provider, logger)
+        using var automation = new Automation(new SubjectPathResolver(InterceptorSubjectContext.Create(), () => null), TimeProvider.System, new AllowAllAutomationAuthorizer(), provider, logger)
         {
             Name = "Storm"
         };
@@ -44,7 +45,7 @@ public class AutomationStatusReporterTests
         // Arrange
         var logger = new MessageLogger();
         using var provider = new ServiceCollection().BuildServiceProvider();
-        using var automation = new Automation(new SubjectPathResolver(() => null), TimeProvider.System, new AllowAllAutomationAuthorizer(), provider, logger)
+        using var automation = new Automation(new SubjectPathResolver(InterceptorSubjectContext.Create(), () => null), TimeProvider.System, new AllowAllAutomationAuthorizer(), provider, logger)
         {
             Name = "Storm"
         };

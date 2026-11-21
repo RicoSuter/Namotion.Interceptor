@@ -33,7 +33,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<RootManager>();
         // The root accessor is deferred so constructing the resolver does not pull in RootManager,
         // which depends on the resolver.
-        services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
+        services.AddSingleton(sp => new SubjectPathResolver(context, () => sp.GetRequiredService<RootManager>().Root));
         services.AddSingleton<DeveloperModeService>();
         services.AddSingleton(serviceProvider => new ClientConnectionService(
             serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System,

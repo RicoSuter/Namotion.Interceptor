@@ -102,6 +102,6 @@ public class SubjectPathResolverSecretTests
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer);
         var root = new SecretConfigTestSubject(context) { SecretKey = "s3cr3t", PublicConfig = "visible" };
-        return (new SubjectPathResolver(() => root), root);
+        return (new SubjectPathResolver(context, () => root), root);
     }
 }

@@ -19,7 +19,7 @@ internal sealed class TestGraph
             .WithService<ILifecycleHandler>(() => new MethodPropertyInitializer(), handler => handler is MethodPropertyInitializer)
             .WithService<IPropertyLifecycleHandler>(() => new PropertyAttributeInitializer(), handler => handler is PropertyAttributeInitializer);
         Root = new TestRoot(Context);
-        Resolver = new SubjectPathResolver(() => Root);
+        Resolver = new SubjectPathResolver(Context, () => Root);
         Context.AddService(Resolver);
     }
 

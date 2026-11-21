@@ -36,7 +36,7 @@ public class MetadataLinkResolverTests
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(MetadataLinkResolverTests).Assembly);
         var shownRoot = root;
-        return new MetadataLinkResolver(new SubjectPathResolver(() => shownRoot), new SubjectComponentRegistry(typeProvider));
+        return new MetadataLinkResolver(new SubjectPathResolver(context, () => shownRoot), new SubjectComponentRegistry(typeProvider));
     }
 
     [Fact]

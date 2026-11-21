@@ -47,7 +47,7 @@ public class RootManagerDataDirectoryTests
         configuration.Setup(instance => instance[HomeBlazePaths.RootConfigurationFileKey]).Returns(rootFile);
 
         RootManager? rootManager = null;
-        var pathResolver = new SubjectPathResolver(() => rootManager!.Root);
+        var pathResolver = new SubjectPathResolver(context, () => rootManager!.Root);
         rootManager = new RootManager(typeRegistry, serializer, context, pathResolver, configuration.Object);
         return (rootManager, context);
     }

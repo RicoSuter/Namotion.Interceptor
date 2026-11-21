@@ -1,12 +1,13 @@
 using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Components.Tests;
 
 public class ValueMapTests
 {
     // Conditions on the value need no graph; a path of a case leads nowhere here.
-    private static readonly SubjectPathResolver Resolver = new(() => null);
+    private static readonly SubjectPathResolver Resolver = new(InterceptorSubjectContext.Create(), () => null);
 
     private static ValueMapCase? Find(ValueMap map, object? value) =>
         map.FindCase(new ValueBinding(null, value, null), Resolver);

@@ -164,7 +164,7 @@ namespace HomeBlaze.Services
     public class SubjectPathResolver : HomeBlaze.Abstractions.ISubjectPathResolver, Namotion.Interceptor.Tracking.Lifecycle.IChildIndexHandler, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
     {
         public const char Separator = '/';
-        public SubjectPathResolver(System.Func<Namotion.Interceptor.IInterceptorSubject?> getRoot) { }
+        public SubjectPathResolver(Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.IInterceptorSubject?> getRoot) { }
         public long PathsVersion { get; }
         public string? GetPath(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style) { }
         public string? GetPath(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Abstractions.PathStyle style, HomeBlaze.Services.ISubjectPathRecorder? recorder) { }

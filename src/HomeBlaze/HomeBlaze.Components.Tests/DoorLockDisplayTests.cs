@@ -4,13 +4,14 @@ using HomeBlaze.Components.Controls;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Display;
 using MudBlazor;
+using Namotion.Interceptor;
 using Xunit;
 
 namespace HomeBlaze.Components.Tests;
 
 public class DoorLockDisplayTests
 {
-    private static readonly SubjectPathResolver Resolver = new(() => null);
+    private static readonly SubjectPathResolver Resolver = new(InterceptorSubjectContext.Create(), () => null);
 
     private const string ClosedDoor = Icons.Material.Filled.DoorFront;
     private const string OpenDoor = Icons.Material.Filled.MeetingRoom;

@@ -43,7 +43,7 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
             .WithRegistry();
         var child = new TestContainer(context) { Name = "Child" };
         var root = new TestContainer(context) { Name = "Root", Child = child };
-        var resolver = new SubjectPathResolver(() => root);
+        var resolver = new SubjectPathResolver(context, () => root);
         Assert.Equal("/Child", resolver.GetPath(child, PathStyle.Canonical));
 
         // Act
@@ -320,7 +320,7 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        context.AddService(new SubjectPathResolver(() => null));
+        context.AddService(new SubjectPathResolver(context, () => null));
 
         // Act
         context.WithRegistry();

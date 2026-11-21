@@ -20,7 +20,7 @@ public sealed class PersistenceTestGraph : IDisposable
             new SubjectTypeRegistry(typeProvider),
             new ConfigurableSubjectSerializer(typeProvider, _serviceProvider),
             Context,
-            new SubjectPathResolver(() => null));
+            new SubjectPathResolver(Context, () => null));
 
         Device = new PersistedDevice(Context);
         Store = new RecordingConfigurationStore(Context) { Device = Device };

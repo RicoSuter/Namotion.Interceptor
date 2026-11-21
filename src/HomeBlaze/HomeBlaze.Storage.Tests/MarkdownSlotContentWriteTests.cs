@@ -409,7 +409,7 @@ public class MarkdownSlotContentWriteTests : IDisposable
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
-        services.AddSingleton(provider => new SubjectPathResolver(() => provider.GetRequiredService<RootManager>().Root));
+        services.AddSingleton(provider => new SubjectPathResolver(context, () => provider.GetRequiredService<RootManager>().Root));
         services.AddSingleton<MarkdownContentParser>();
         var serviceProvider = services.BuildServiceProvider();
 
