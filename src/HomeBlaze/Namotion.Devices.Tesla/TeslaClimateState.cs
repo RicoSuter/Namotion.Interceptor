@@ -47,11 +47,11 @@ public partial class TeslaClimateState : ITitleProvider, IIconProvider
     /// <summary>The fan speed level.</summary>
     [State(Position = 10)] public partial int? FanStatus { get; internal set; }
 
-    /// <summary>Tesla's indicator in which direction the driver side temperature is regulated.</summary>
-    [State(Position = 11)] public partial int? DriverTemperatureDirection { get; internal set; }
+    /// <summary>Tesla's indicator in which direction the left side temperature is regulated.</summary>
+    [State(Position = 11)] public partial int? LeftTemperatureDirection { get; internal set; }
 
-    /// <summary>Tesla's indicator in which direction the passenger side temperature is regulated.</summary>
-    [State(Position = 12)] public partial int? PassengerTemperatureDirection { get; internal set; }
+    /// <summary>Tesla's indicator in which direction the right side temperature is regulated.</summary>
+    [State(Position = 12)] public partial int? RightTemperatureDirection { get; internal set; }
 
     [State(IsDiscrete = true, Position = 13)] public partial TeslaHvacAutoRequest? HvacAutoRequest { get; internal set; }
 
@@ -102,8 +102,8 @@ public partial class TeslaClimateState : ITitleProvider, IIconProvider
         MinimumTemperatureSetting = null;
         MaximumTemperatureSetting = null;
         FanStatus = null;
-        DriverTemperatureDirection = null;
-        PassengerTemperatureDirection = null;
+        LeftTemperatureDirection = null;
+        RightTemperatureDirection = null;
         HvacAutoRequest = null;
         ClimateKeeperMode = null;
         DefrostMode = null;
@@ -144,6 +144,7 @@ public partial class TeslaClimateState : ITitleProvider, IIconProvider
         }
 
         UpdateOperationFromProtobuf(proto);
+        UpdateModesFromProtobuf(proto);
         UpdateTemperaturesFromProtobuf(proto);
         UpdateHeatersFromProtobuf(proto);
         UpdateCabinOverheatProtectionFromProtobuf(proto);
@@ -170,8 +171,8 @@ public partial class TeslaClimateState : ITitleProvider, IIconProvider
         PassengerTemperatureSetting = dto.PassengerTempSetting;
         MinimumTemperatureSetting = dto.MinAvailTemp;
         MaximumTemperatureSetting = dto.MaxAvailTemp;
-        DriverTemperatureDirection = dto.LeftTempDirection;
-        PassengerTemperatureDirection = dto.RightTempDirection;
+        LeftTemperatureDirection = dto.LeftTempDirection;
+        RightTemperatureDirection = dto.RightTempDirection;
     }
 
     private void UpdateHeatersFromJson(TeslaClimateStateDto dto)
@@ -196,13 +197,13 @@ public partial class TeslaClimateState : ITitleProvider, IIconProvider
 
     private void UpdateSeatHeatersFromJson(TeslaClimateStateDto dto)
     {
-        SeatHeaters.DriverLevel = dto.SeatHeaterLeft;
-        SeatHeaters.PassengerLevel = dto.SeatHeaterRight;
+        SeatHeaters.FrontLeftLevel = dto.SeatHeaterLeft;
+        SeatHeaters.FrontRightLevel = dto.SeatHeaterRight;
         SeatHeaters.RearLeftLevel = dto.SeatHeaterRearLeft;
         SeatHeaters.RearCenterLevel = dto.SeatHeaterRearCenter;
         SeatHeaters.RearRightLevel = dto.SeatHeaterRearRight;
-        SeatHeaters.IsAutoSeatClimateDriverOn = dto.AutoSeatClimateLeft;
-        SeatHeaters.IsAutoSeatClimatePassengerOn = dto.AutoSeatClimateRight;
+        SeatHeaters.IsAutoSeatClimateFrontLeftOn = dto.AutoSeatClimateLeft;
+        SeatHeaters.IsAutoSeatClimateFrontRightOn = dto.AutoSeatClimateRight;
         SeatHeaters.IsSteeringWheelHeaterOn = dto.SteeringWheelHeater;
         SeatHeaters.SteeringWheelHeatLevel = dto.SteeringWheelHeatLevel;
         SeatHeaters.IsAutoSteeringWheelHeatOn = dto.AutoSteeringWheelHeat;
@@ -214,9 +215,13 @@ public partial class TeslaClimateState : ITitleProvider, IIconProvider
         if (proto.OptionalIsAutoConditioningOnCase != ClimateState.OptionalIsAutoConditioningOnOneofCase.None) IsAutoConditioningOn = proto.IsAutoConditioningOn;
         if (proto.OptionalIsPreconditioningCase != ClimateState.OptionalIsPreconditioningOneofCase.None) IsPreconditioning = proto.IsPreconditioning;
         if (proto.OptionalFanStatusCase != ClimateState.OptionalFanStatusOneofCase.None) FanStatus = proto.FanStatus;
-        if (proto.OptionalHvacAutoRequestCase != ClimateState.OptionalHvacAutoRequestOneofCase.None) HvacAutoRequest = TeslaProtoValues.HvacAutoRequest(proto.HvacAutoRequest);
-        if (proto.ClimateKeeperMode is { } climateKeeperMode) ClimateKeeperMode = TeslaProtoValues.ClimateKeeperMode(climateKeeperMode);
-        if (proto.DefrostMode is { } defrostMode) DefrostMode = TeslaProtoValues.DefrostMode(defrostMode);
+    }
+
+    private void UpdateModesFromProtobuf(ClimateState proto)
+    {
+        if (proto.OptionalHvacAutoRequestCase != ClimateState.OptionalHvacAutoRequestOneofCase.None && TeslaProtoValues.HvacAutoRequest(proto.HvacAutoRequest) is { } hvacAutoRequest) HvacAutoRequest = hvacAutoRequest;
+        if (proto.ClimateKeeperMode is { } climateKeeperMode && TeslaProtoValues.ClimateKeeperMode(climateKeeperMode) is { } mappedClimateKeeperMode) ClimateKeeperMode = mappedClimateKeeperMode;
+        if (proto.DefrostMode is { } defrostMode && TeslaProtoValues.DefrostMode(defrostMode) is { } mappedDefrostMode) DefrostMode = mappedDefrostMode;
     }
 
     private void UpdateTemperaturesFromProtobuf(ClimateState proto)
@@ -227,8 +232,8 @@ public partial class TeslaClimateState : ITitleProvider, IIconProvider
         if (proto.OptionalPassengerTempSettingCase != ClimateState.OptionalPassengerTempSettingOneofCase.None) PassengerTemperatureSetting = TeslaValues.Decimal(proto.PassengerTempSetting);
         if (proto.OptionalMinAvailTempCelsiusCase != ClimateState.OptionalMinAvailTempCelsiusOneofCase.None) MinimumTemperatureSetting = TeslaValues.Decimal(proto.MinAvailTempCelsius);
         if (proto.OptionalMaxAvailTempCelsiusCase != ClimateState.OptionalMaxAvailTempCelsiusOneofCase.None) MaximumTemperatureSetting = TeslaValues.Decimal(proto.MaxAvailTempCelsius);
-        if (proto.OptionalLeftTempDirectionCase != ClimateState.OptionalLeftTempDirectionOneofCase.None) DriverTemperatureDirection = proto.LeftTempDirection;
-        if (proto.OptionalRightTempDirectionCase != ClimateState.OptionalRightTempDirectionOneofCase.None) PassengerTemperatureDirection = proto.RightTempDirection;
+        if (proto.OptionalLeftTempDirectionCase != ClimateState.OptionalLeftTempDirectionOneofCase.None) LeftTemperatureDirection = proto.LeftTempDirection;
+        if (proto.OptionalRightTempDirectionCase != ClimateState.OptionalRightTempDirectionOneofCase.None) RightTemperatureDirection = proto.RightTempDirection;
     }
 
     private void UpdateHeatersFromProtobuf(ClimateState proto)
@@ -246,26 +251,26 @@ public partial class TeslaClimateState : ITitleProvider, IIconProvider
     {
         if (proto.OptionalAllowCabinOverheatProtectionCase != ClimateState.OptionalAllowCabinOverheatProtectionOneofCase.None) IsCabinOverheatProtectionAllowed = proto.AllowCabinOverheatProtection;
         if (proto.OptionalSupportsFanOnlyCabinOverheatProtectionCase != ClimateState.OptionalSupportsFanOnlyCabinOverheatProtectionOneofCase.None) IsFanOnlyCabinOverheatProtectionSupported = proto.SupportsFanOnlyCabinOverheatProtection;
-        if (proto.OptionalCabinOverheatProtectionCase != ClimateState.OptionalCabinOverheatProtectionOneofCase.None) CabinOverheatProtection = TeslaProtoValues.CabinOverheatProtection(proto.CabinOverheatProtection);
+        if (proto.OptionalCabinOverheatProtectionCase != ClimateState.OptionalCabinOverheatProtectionOneofCase.None && TeslaProtoValues.CabinOverheatProtection(proto.CabinOverheatProtection) is { } protection) CabinOverheatProtection = protection;
         if (proto.OptionalCabinOverheatProtectionActivelyCoolingCase != ClimateState.OptionalCabinOverheatProtectionActivelyCoolingOneofCase.None) IsCabinOverheatProtectionCooling = proto.CabinOverheatProtectionActivelyCooling;
-        if (proto.OptionalCopActivationTemperatureCase != ClimateState.OptionalCopActivationTemperatureOneofCase.None) CabinOverheatProtectionTemperature = TeslaProtoValues.CabinOverheatProtectionTemperature(proto.CopActivationTemperature);
+        if (proto.OptionalCopActivationTemperatureCase != ClimateState.OptionalCopActivationTemperatureOneofCase.None && TeslaProtoValues.CabinOverheatProtectionTemperature(proto.CopActivationTemperature) is { } temperature) CabinOverheatProtectionTemperature = temperature;
     }
 
     private void UpdateSeatHeatersFromProtobuf(ClimateState proto)
     {
-        if (proto.OptionalSeatHeaterLeftCase != ClimateState.OptionalSeatHeaterLeftOneofCase.None) SeatHeaters.DriverLevel = proto.SeatHeaterLeft;
-        if (proto.OptionalSeatHeaterRightCase != ClimateState.OptionalSeatHeaterRightOneofCase.None) SeatHeaters.PassengerLevel = proto.SeatHeaterRight;
+        if (proto.OptionalSeatHeaterLeftCase != ClimateState.OptionalSeatHeaterLeftOneofCase.None) SeatHeaters.FrontLeftLevel = proto.SeatHeaterLeft;
+        if (proto.OptionalSeatHeaterRightCase != ClimateState.OptionalSeatHeaterRightOneofCase.None) SeatHeaters.FrontRightLevel = proto.SeatHeaterRight;
         if (proto.OptionalSeatHeaterRearLeftCase != ClimateState.OptionalSeatHeaterRearLeftOneofCase.None) SeatHeaters.RearLeftLevel = proto.SeatHeaterRearLeft;
         if (proto.OptionalSeatHeaterRearCenterCase != ClimateState.OptionalSeatHeaterRearCenterOneofCase.None) SeatHeaters.RearCenterLevel = proto.SeatHeaterRearCenter;
         if (proto.OptionalSeatHeaterRearRightCase != ClimateState.OptionalSeatHeaterRearRightOneofCase.None) SeatHeaters.RearRightLevel = proto.SeatHeaterRearRight;
-        if (proto.OptionalAutoSeatClimateLeftCase != ClimateState.OptionalAutoSeatClimateLeftOneofCase.None) SeatHeaters.IsAutoSeatClimateDriverOn = proto.AutoSeatClimateLeft;
-        if (proto.OptionalAutoSeatClimateRightCase != ClimateState.OptionalAutoSeatClimateRightOneofCase.None) SeatHeaters.IsAutoSeatClimatePassengerOn = proto.AutoSeatClimateRight;
+        if (proto.OptionalAutoSeatClimateLeftCase != ClimateState.OptionalAutoSeatClimateLeftOneofCase.None) SeatHeaters.IsAutoSeatClimateFrontLeftOn = proto.AutoSeatClimateLeft;
+        if (proto.OptionalAutoSeatClimateRightCase != ClimateState.OptionalAutoSeatClimateRightOneofCase.None) SeatHeaters.IsAutoSeatClimateFrontRightOn = proto.AutoSeatClimateRight;
     }
 
     private void UpdateSteeringWheelHeaterFromProtobuf(ClimateState proto)
     {
         if (proto.OptionalSteeringWheelHeaterCase != ClimateState.OptionalSteeringWheelHeaterOneofCase.None) SeatHeaters.IsSteeringWheelHeaterOn = proto.SteeringWheelHeater;
-        if (proto.OptionalSteeringWheelHeatLevelCase != ClimateState.OptionalSteeringWheelHeatLevelOneofCase.None) SeatHeaters.SteeringWheelHeatLevel = TeslaProtoValues.SteeringWheelHeatLevel(proto.SteeringWheelHeatLevel);
+        if (proto.OptionalSteeringWheelHeatLevelCase != ClimateState.OptionalSteeringWheelHeatLevelOneofCase.None && TeslaProtoValues.SteeringWheelHeatLevel(proto.SteeringWheelHeatLevel) is { } heatLevel) SeatHeaters.SteeringWheelHeatLevel = heatLevel;
         if (proto.OptionalAutoSteeringWheelHeatCase != ClimateState.OptionalAutoSteeringWheelHeatOneofCase.None) SeatHeaters.IsAutoSteeringWheelHeatOn = proto.AutoSteeringWheelHeat;
     }
 }

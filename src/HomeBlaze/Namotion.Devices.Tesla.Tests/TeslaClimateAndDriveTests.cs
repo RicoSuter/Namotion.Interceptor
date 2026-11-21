@@ -46,8 +46,8 @@ public class TeslaClimateAndDriveTests
         Assert.Equal(TeslaCabinOverheatProtection.Off, climate.CabinOverheatProtection);
         Assert.Equal(TeslaCabinOverheatProtectionTemperature.High, climate.CabinOverheatProtectionTemperature);
         Assert.Equal(TeslaClimateKeeperMode.Off, climate.ClimateKeeperMode);
-        Assert.Equal(0, climate.SeatHeaters.DriverLevel);
-        Assert.True(climate.SeatHeaters.IsAutoSeatClimateDriverOn);
+        Assert.Equal(0, climate.SeatHeaters.FrontLeftLevel);
+        Assert.True(climate.SeatHeaters.IsAutoSeatClimateFrontLeftOn);
     }
 
     [Fact]
@@ -64,8 +64,8 @@ public class TeslaClimateAndDriveTests
         Assert.Equal(28.0m, climate.MaximumTemperatureSetting);
         Assert.Equal(0, climate.FanStatus);
         Assert.Equal(0, climate.DefrostMode);
-        Assert.Equal(0, climate.DriverTemperatureDirection);
-        Assert.Equal(0, climate.PassengerTemperatureDirection);
+        Assert.Equal(0, climate.LeftTemperatureDirection);
+        Assert.Equal(0, climate.RightTemperatureDirection);
         Assert.Equal(TeslaHvacAutoRequest.On, climate.HvacAutoRequest);
         Assert.False(climate.IsFrontDefrosterOn);
         Assert.False(climate.IsRearDefrosterOn);
@@ -77,11 +77,11 @@ public class TeslaClimateAndDriveTests
         Assert.False(climate.IsCabinOverheatProtectionAllowed);
         Assert.True(climate.IsFanOnlyCabinOverheatProtectionSupported);
         Assert.False(climate.IsCabinOverheatProtectionCooling);
-        Assert.Equal(0, climate.SeatHeaters.PassengerLevel);
+        Assert.Equal(0, climate.SeatHeaters.FrontRightLevel);
         Assert.Equal(0, climate.SeatHeaters.RearLeftLevel);
         Assert.Equal(0, climate.SeatHeaters.RearCenterLevel);
         Assert.Equal(0, climate.SeatHeaters.RearRightLevel);
-        Assert.True(climate.SeatHeaters.IsAutoSeatClimatePassengerOn);
+        Assert.True(climate.SeatHeaters.IsAutoSeatClimateFrontRightOn);
         Assert.False(climate.SeatHeaters.IsSteeringWheelHeaterOn);
         Assert.Equal(0, climate.SeatHeaters.SteeringWheelHeatLevel);
         Assert.True(climate.SeatHeaters.IsAutoSteeringWheelHeatOn);
@@ -104,7 +104,7 @@ public class TeslaClimateAndDriveTests
         Assert.Equal(21.0m, climate.DriverTemperatureSetting); // not in the snapshot, unchanged
         Assert.Equal(TeslaCabinOverheatProtection.Off, climate.CabinOverheatProtection); // not in the snapshot, unchanged
         Assert.Equal(TeslaClimateKeeperMode.Off, climate.ClimateKeeperMode); // not in the snapshot, unchanged
-        Assert.Equal(0, climate.SeatHeaters.DriverLevel); // not in the snapshot, unchanged
+        Assert.Equal(0, climate.SeatHeaters.FrontLeftLevel); // not in the snapshot, unchanged
     }
 
     [Fact]
@@ -160,8 +160,8 @@ public class TeslaClimateAndDriveTests
         Assert.Equal(16m, climate.MinimumTemperatureSetting);
         Assert.Equal(27m, climate.MaximumTemperatureSetting);
         Assert.Equal(4, climate.FanStatus);
-        Assert.Equal(1, climate.DriverTemperatureDirection);
-        Assert.Equal(-1, climate.PassengerTemperatureDirection);
+        Assert.Equal(1, climate.LeftTemperatureDirection);
+        Assert.Equal(-1, climate.RightTemperatureDirection);
         Assert.True(climate.IsFrontDefrosterOn);
         Assert.True(climate.IsRearDefrosterOn);
         Assert.True(climate.IsSideMirrorHeaterOn);
@@ -177,20 +177,20 @@ public class TeslaClimateAndDriveTests
         Assert.Equal(TeslaClimateKeeperMode.Camp, climate.ClimateKeeperMode);
         Assert.Equal(2, climate.DefrostMode);
         Assert.Equal(TeslaHvacAutoRequest.Override, climate.HvacAutoRequest);
-        Assert.Equal(3, climate.SeatHeaters.DriverLevel);
-        Assert.Equal(2, climate.SeatHeaters.PassengerLevel);
+        Assert.Equal(3, climate.SeatHeaters.FrontLeftLevel);
+        Assert.Equal(2, climate.SeatHeaters.FrontRightLevel);
         Assert.Equal(1, climate.SeatHeaters.RearLeftLevel);
         Assert.Equal(2, climate.SeatHeaters.RearCenterLevel);
         Assert.Equal(3, climate.SeatHeaters.RearRightLevel);
-        Assert.False(climate.SeatHeaters.IsAutoSeatClimateDriverOn);
-        Assert.False(climate.SeatHeaters.IsAutoSeatClimatePassengerOn);
+        Assert.False(climate.SeatHeaters.IsAutoSeatClimateFrontLeftOn);
+        Assert.False(climate.SeatHeaters.IsAutoSeatClimateFrontRightOn);
         Assert.True(climate.SeatHeaters.IsSteeringWheelHeaterOn);
         Assert.Equal(2, climate.SeatHeaters.SteeringWheelHeatLevel);
         Assert.False(climate.SeatHeaters.IsAutoSteeringWheelHeatOn);
     }
 
     [Fact]
-    public void WhenClimateSnapshotReportsUnknownValues_ThenValuesBecomeNull()
+    public void WhenClimateSnapshotReportsUnknownValues_ThenEnumValuesStay()
     {
         // Arrange
         var climate = CreateClimateFromFixture();
@@ -204,9 +204,9 @@ public class TeslaClimateAndDriveTests
         climate.Update(snapshot.ClimateState);
 
         // Assert
-        Assert.Null(climate.CabinOverheatProtectionTemperature);
-        Assert.Null(climate.ClimateKeeperMode);
-        Assert.Null(climate.SeatHeaters.SteeringWheelHeatLevel);
+        Assert.Equal(TeslaCabinOverheatProtectionTemperature.High, climate.CabinOverheatProtectionTemperature);
+        Assert.Equal(TeslaClimateKeeperMode.Off, climate.ClimateKeeperMode);
+        Assert.Equal(0, climate.SeatHeaters.SteeringWheelHeatLevel);
         Assert.Null(climate.InsideTemperature);
     }
 
@@ -499,19 +499,135 @@ public class TeslaClimateAndDriveTests
     }
 
     [Fact]
-    public void WhenDriveSnapshotHasInvalidShiftState_ThenShiftStateBecomesNull()
+    public void WhenParkedSnapshotHasInvalidShiftStateAndNoSpeed_ThenVehicleIsParked()
     {
         // Arrange
-        var drive = CreateDriveFromFixture();
+        var drive = new TeslaDriveState(NullLogger.Instance);
+        drive.Update(CreateSnapshot(0).DriveState);
         var snapshot = CreateSnapshot(60_000);
-        snapshot.DriveState.ShiftState = new ShiftState { SNA = new CarServer.Void() };
+        snapshot.DriveState.ShiftState = new ShiftState { Invalid = new CarServer.Void() };
+        snapshot.DriveState.ClearSpeedFloat();
 
         // Act
         drive.Update(snapshot.DriveState);
 
         // Assert
-        Assert.Null(drive.ShiftState);
-        Assert.Null(drive.IsDriving);
+        Assert.Equal(TeslaShiftState.Park, drive.ShiftState);
+        Assert.False(drive.IsDriving);
+    }
+
+    [Fact]
+    public void WhenSnapshotHasSnaShiftStateAndNoSpeed_ThenVehicleIsParked()
+    {
+        // Arrange
+        var drive = new TeslaDriveState(NullLogger.Instance);
+        var snapshot = CreateSnapshot(0);
+        snapshot.DriveState.ShiftState = new ShiftState { SNA = new CarServer.Void() };
+        snapshot.DriveState.ClearSpeedFloat();
+
+        // Act
+        drive.Update(snapshot.DriveState);
+
+        // Assert
+        Assert.Equal(TeslaShiftState.Park, drive.ShiftState);
+    }
+
+    [Fact]
+    public void WhenSnapshotHasInvalidShiftStateAndSpeed_ThenShiftStateStays()
+    {
+        // Arrange
+        var drive = CreateDriveFromFixture();
+        var snapshot = CreateSnapshot(60_000);
+        snapshot.DriveState.ShiftState = new ShiftState { Invalid = new CarServer.Void() };
+
+        // Act
+        drive.Update(snapshot.DriveState);
+
+        // Assert
+        Assert.Equal(TeslaShiftState.Park, drive.ShiftState);
+        Assert.False(drive.IsDriving);
+    }
+
+    [Fact]
+    public void WhenSnapshotAndJsonDescribeTheSameCoordinate_ThenTheValuesAreEqual()
+    {
+        // Arrange
+        var jsonDrive = new TeslaDriveState(NullLogger.Instance);
+        jsonDrive.Update(new TeslaDriveStateDto
+        {
+            Latitude = 47.123456789m,
+            Longitude = 8.987654321m,
+            NativeLatitude = 47.123456789m,
+            NativeLongitude = 8.987654321m,
+            ActiveRouteDestination = "Test Destination",
+            ActiveRouteLatitude = 47.123456789m,
+            ActiveRouteLongitude = 8.987654321m,
+            Timestamp = FixtureTimestamp
+        });
+        var snapshot = CreateSnapshot(0);
+        snapshot.LocationState.Latitude = 47.123456789f;
+        snapshot.LocationState.Longitude = 8.987654321f;
+        snapshot.LocationState.NativeLatitude = 47.123456789f;
+        snapshot.LocationState.NativeLongitude = 8.987654321f;
+        snapshot.DriveState.ActiveRouteDestination = "Test Destination";
+        snapshot.DriveState.ActiveRouteCoordinates = new LatLong { Latitude = 47.123456789f, Longitude = 8.987654321f };
+        var protobufDrive = new TeslaDriveState(NullLogger.Instance);
+
+        // Act
+        protobufDrive.Update(snapshot.LocationState);
+        protobufDrive.Update(snapshot.DriveState);
+
+        // Assert
+        Assert.NotNull(jsonDrive.Location);
+        Assert.Equal(jsonDrive.Location, protobufDrive.Location);
+        Assert.Equal(jsonDrive.NativeLocation, protobufDrive.NativeLocation);
+        Assert.Equal(jsonDrive.Navigation.DestinationLocation, protobufDrive.Navigation.DestinationLocation);
+    }
+
+    [Fact]
+    public void WhenSnapshotHasFractionalSpeed_ThenItIsRoundedLikeTheJson()
+    {
+        // Arrange
+        var drive = CreateDriveFromFixture();
+        var snapshot = CreateSnapshot(60_000);
+        snapshot.DriveState.SpeedFloat = 49.6f;
+
+        // Act
+        drive.Update(snapshot.DriveState);
+
+        // Assert
+        Assert.Equal(80.4672m, drive.Speed); // 50 mph
+    }
+
+    [Fact]
+    public void WhenSnapshotHasWholeAndFractionalSpeed_ThenWholeSpeedWins()
+    {
+        // Arrange
+        var drive = CreateDriveFromFixture();
+        var snapshot = CreateSnapshot(60_000);
+        snapshot.DriveState.Speed = 30;
+        snapshot.DriveState.SpeedFloat = 30.4f;
+
+        // Act
+        drive.Update(snapshot.DriveState);
+
+        // Assert
+        Assert.Equal(48.28032m, drive.Speed); // 30 mph
+    }
+
+    [Fact]
+    public void WhenSnapshotHasNoRoute_ThenNavigationIsCleared()
+    {
+        // Arrange
+        var drive = new TeslaDriveState(NullLogger.Instance);
+        drive.Update(new TeslaDriveStateDto { ActiveRouteDestination = "Test Destination", ActiveRouteMinutesToArrival = 12m, Timestamp = FixtureTimestamp });
+
+        // Act
+        drive.Update(CreateSnapshot(60_000).DriveState);
+
+        // Assert
+        Assert.Null(drive.Navigation.Destination);
+        Assert.Null(drive.Navigation.TimeToArrival);
     }
 
     [Fact]

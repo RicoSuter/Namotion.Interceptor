@@ -118,8 +118,8 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
 
     private void UpdateLocationFromJson(TeslaDriveStateDto dto)
     {
-        Location = TeslaValues.Coordinate(dto.Latitude, dto.Longitude);
-        NativeLocation = TeslaValues.Coordinate(dto.NativeLatitude, dto.NativeLongitude);
+        Location = TeslaValues.Coordinate(TeslaValues.ToFloatPrecision(dto.Latitude), TeslaValues.ToFloatPrecision(dto.Longitude));
+        NativeLocation = TeslaValues.Coordinate(TeslaValues.ToFloatPrecision(dto.NativeLatitude), TeslaValues.ToFloatPrecision(dto.NativeLongitude));
         NativeLocationType = TeslaValues.Enum<TeslaGpsCoordinateType>(dto.NativeType, _logger);
         IsNativeLocationSupported = dto.NativeLocationSupported is { } supported ? supported > 0 : null;
         Heading = dto.Heading;
@@ -130,7 +130,7 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
     {
         // Tesla omits the shift state and the speed while the vehicle is parked.
         ShiftState = TeslaValues.ShiftState(dto.ShiftState) ?? (dto.Speed is null ? TeslaShiftState.Park : null);
-        Speed = TeslaValues.MilesPerHourToKilometersPerHour(dto.Speed);
+        Speed = TeslaValues.MilesPerHourToKilometersPerHour(TeslaValues.WholeNumber(dto.Speed));
         Power = TeslaValues.KilowattsToWatts(dto.Power);
         Navigation.UpdateFromJson(dto);
     }
@@ -150,7 +150,7 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
 
     private void UpdateLocationDetailsFromProtobuf(LocationState proto)
     {
-        if (proto.NativeType is { } nativeType) NativeLocationType = TeslaProtoValues.CoordinateType(nativeType);
+        if (proto.NativeType is { } nativeType && TeslaProtoValues.CoordinateType(nativeType) is { } mappedType) NativeLocationType = mappedType;
         if (proto.OptionalNativeLocationSupportedCase != LocationState.OptionalNativeLocationSupportedOneofCase.None) IsNativeLocationSupported = proto.NativeLocationSupported;
         if (proto.OptionalHeadingCase != LocationState.OptionalHeadingOneofCase.None) Heading = proto.Heading;
         if (proto.OptionalGpsAsOfCase != LocationState.OptionalGpsAsOfOneofCase.None) GpsTime = TeslaValues.FromUnixSeconds((long)proto.GpsAsOf);
@@ -159,10 +159,38 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
 
     private void UpdateDriveFromProtobuf(DriveState proto)
     {
-        if (proto.ShiftState is { } shiftState) ShiftState = TeslaProtoValues.ShiftState(shiftState);
         if (proto.OptionalPowerCase != DriveState.OptionalPowerOneofCase.None) Power = TeslaValues.KilowattsToWatts(proto.Power);
-
-        if (proto.OptionalSpeedFloatCase != DriveState.OptionalSpeedFloatOneofCase.None) Speed = TeslaValues.MilesPerHourToKilometersPerHour(TeslaValues.Decimal(proto.SpeedFloat));
-        else if (proto.OptionalSpeedCase != DriveState.OptionalSpeedOneofCase.None) Speed = TeslaValues.MilesPerHourToKilometersPerHour(proto.Speed);
+        UpdateShiftStateFromProtobuf(proto);
+        UpdateSpeedFromProtobuf(proto);
     }
+
+    // A parked vehicle reports an invalid shift state and no speed, where the JSON omits both.
+    private void UpdateShiftStateFromProtobuf(DriveState proto)
+    {
+        if (proto.ShiftState is not { } shiftState)
+        {
+            return;
+        }
+
+        var mapped = TeslaProtoValues.ShiftState(shiftState);
+        if (mapped is null && !HasSpeed(proto))
+        {
+            mapped = TeslaShiftState.Park;
+        }
+
+        if (mapped is not null)
+        {
+            ShiftState = mapped;
+        }
+    }
+
+    // The JSON speed is whole miles per hour, so the fractional speed of the snapshot is rounded to match.
+    private void UpdateSpeedFromProtobuf(DriveState proto)
+    {
+        if (proto.OptionalSpeedCase != DriveState.OptionalSpeedOneofCase.None) Speed = TeslaValues.MilesPerHourToKilometersPerHour(proto.Speed);
+        else if (proto.OptionalSpeedFloatCase != DriveState.OptionalSpeedFloatOneofCase.None) Speed = TeslaValues.MilesPerHourToKilometersPerHour(TeslaValues.WholeNumber(TeslaValues.Decimal(proto.SpeedFloat)));
+    }
+
+    private static bool HasSpeed(DriveState proto) =>
+        proto.OptionalSpeedCase != DriveState.OptionalSpeedOneofCase.None || proto.OptionalSpeedFloatCase != DriveState.OptionalSpeedFloatOneofCase.None;
 }

@@ -49,7 +49,7 @@ public partial class TeslaNavigation : ITitleProvider, IIconProvider
         }
 
         Destination = destination;
-        DestinationLocation = TeslaValues.Coordinate(dto.ActiveRouteLatitude, dto.ActiveRouteLongitude);
+        DestinationLocation = TeslaValues.Coordinate(TeslaValues.ToFloatPrecision(dto.ActiveRouteLatitude), TeslaValues.ToFloatPrecision(dto.ActiveRouteLongitude));
         TimeToArrival = TeslaValues.Minutes(dto.ActiveRouteMinutesToArrival);
         DistanceToArrival = TeslaValues.MilesToKilometers(dto.ActiveRouteMilesToArrival);
         EnergyAtArrival = TeslaValues.Percent(dto.ActiveRouteEnergyAtArrival);
@@ -58,17 +58,14 @@ public partial class TeslaNavigation : ITitleProvider, IIconProvider
 
     internal void UpdateFromProtobuf(DriveState proto)
     {
-        if (proto.OptionalActiveRouteDestinationCase != DriveState.OptionalActiveRouteDestinationOneofCase.None)
+        var destination = proto.OptionalActiveRouteDestinationCase != DriveState.OptionalActiveRouteDestinationOneofCase.None ? TeslaValues.Text(proto.ActiveRouteDestination) : null;
+        if (destination is null)
         {
-            var destination = TeslaValues.Text(proto.ActiveRouteDestination);
-            if (destination is null)
-            {
-                Clear();
-                return;
-            }
-
-            Destination = destination;
+            Clear();
+            return;
         }
+
+        Destination = destination;
 
         if (proto.OptionalActiveRouteMinutesToArrivalCase != DriveState.OptionalActiveRouteMinutesToArrivalOneofCase.None) TimeToArrival = TeslaValues.Minutes(TeslaValues.Decimal(proto.ActiveRouteMinutesToArrival));
         if (proto.OptionalActiveRouteMilesToArrivalCase != DriveState.OptionalActiveRouteMilesToArrivalOneofCase.None) DistanceToArrival = TeslaValues.MilesToKilometers(TeslaValues.Decimal(proto.ActiveRouteMilesToArrival));

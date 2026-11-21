@@ -344,14 +344,19 @@ public partial class TeslaChargeState : ITitleProvider, IIconProvider
     private void UpdateChargerFromProtobuf(ChargeState proto)
     {
         if (proto.OptionalFastChargerPresentCase != ChargeState.OptionalFastChargerPresentOneofCase.None) IsFastChargerPresent = proto.FastChargerPresent;
-        if (proto.FastChargerBrand is { } brand) FastChargerBrand = TeslaProtoValues.FastChargerBrand(brand);
-        if (proto.FastChargerType is { } type) FastChargerType = TeslaProtoValues.FastChargerType(type);
-        if (proto.ConnChargeCable is { } cable) ChargeCable = TeslaProtoValues.ChargeCable(cable);
+        if (proto.FastChargerBrand is { } brand && TeslaProtoValues.FastChargerBrand(brand) is { } mappedBrand) FastChargerBrand = mappedBrand;
+        if (proto.FastChargerType is { } type && TeslaProtoValues.FastChargerType(type) is { } mappedType) FastChargerType = mappedType;
+        if (proto.ConnChargeCable is { } cable && TeslaProtoValues.ChargeCable(cable) is { } mappedCable) ChargeCable = mappedCable;
         if (proto.OptionalChargePortDoorOpenCase != ChargeState.OptionalChargePortDoorOpenOneofCase.None) IsChargePortDoorOpen = proto.ChargePortDoorOpen;
-        if (proto.ChargePortLatch is { } latch) ChargePortLatch = TeslaProtoValues.ChargePortLatch(latch);
-        if (proto.OptionalChargePortColorCase != ChargeState.OptionalChargePortColorOneofCase.None) ChargePortColor = TeslaProtoValues.ChargePortColor(proto.ChargePortColor);
-        if (proto.OptionalChargePortColdWeatherModeCase != ChargeState.OptionalChargePortColdWeatherModeOneofCase.None) IsChargePortColdWeatherMode = proto.ChargePortColdWeatherMode;
+        UpdateChargePortFromProtobuf(proto);
         UpdateFlagsFromProtobuf(proto);
+    }
+
+    private void UpdateChargePortFromProtobuf(ChargeState proto)
+    {
+        if (proto.ChargePortLatch is { } latch && TeslaProtoValues.ChargePortLatch(latch) is { } mappedLatch) ChargePortLatch = mappedLatch;
+        if (proto.OptionalChargePortColorCase != ChargeState.OptionalChargePortColorOneofCase.None && TeslaProtoValues.ChargePortColor(proto.ChargePortColor) is { } mappedColor) ChargePortColor = mappedColor;
+        if (proto.OptionalChargePortColdWeatherModeCase != ChargeState.OptionalChargePortColdWeatherModeOneofCase.None) IsChargePortColdWeatherMode = proto.ChargePortColdWeatherMode;
     }
 
     private void UpdateFlagsFromProtobuf(ChargeState proto)
@@ -365,7 +370,7 @@ public partial class TeslaChargeState : ITitleProvider, IIconProvider
 
     private void UpdateScheduleFromProtobuf(ChargeState proto)
     {
-        if (proto.OptionalScheduledChargingModeCase != ChargeState.OptionalScheduledChargingModeOneofCase.None) ScheduledChargingMode = TeslaProtoValues.ScheduledChargingMode(proto.ScheduledChargingMode);
+        if (proto.OptionalScheduledChargingModeCase != ChargeState.OptionalScheduledChargingModeOneofCase.None && TeslaProtoValues.ScheduledChargingMode(proto.ScheduledChargingMode) is { } mappedMode) ScheduledChargingMode = mappedMode;
         if (proto.OptionalScheduledChargingPendingCase != ChargeState.OptionalScheduledChargingPendingOneofCase.None) IsScheduledChargingPending = proto.ScheduledChargingPending;
         if (proto.OptionalScheduledChargingStartTimeMinutesCase != ChargeState.OptionalScheduledChargingStartTimeMinutesOneofCase.None) ScheduledChargingStartTime = TeslaValues.MinutesAfterMidnight((int)proto.ScheduledChargingStartTimeMinutes);
         if (proto.OptionalPreconditioningEnabledCase != ChargeState.OptionalPreconditioningEnabledOneofCase.None) IsPreconditioningEnabled = proto.PreconditioningEnabled;
@@ -374,9 +379,9 @@ public partial class TeslaChargeState : ITitleProvider, IIconProvider
 
     private void UpdateScheduleDaysFromProtobuf(ChargeState proto)
     {
-        if (proto.OffPeakChargingTimes is { } offPeakTimes) OffPeakChargingDays = TeslaProtoValues.Days(offPeakTimes);
+        if (proto.OffPeakChargingTimes is { } offPeakTimes && TeslaProtoValues.Days(offPeakTimes) is { } offPeakDays) OffPeakChargingDays = offPeakDays;
         if (proto.OptionalOffPeakHoursEndTimeCase != ChargeState.OptionalOffPeakHoursEndTimeOneofCase.None) OffPeakChargingEndTime = TeslaValues.MinutesAfterMidnight((int)proto.OffPeakHoursEndTime);
-        if (proto.PreconditioningTimes is { } preconditioningTimes) PreconditioningDays = TeslaProtoValues.Days(preconditioningTimes);
+        if (proto.PreconditioningTimes is { } preconditioningTimes && TeslaProtoValues.Days(preconditioningTimes) is { } preconditioningDays) PreconditioningDays = preconditioningDays;
     }
 
     private decimal? GetEstimatedBatteryCapacity()

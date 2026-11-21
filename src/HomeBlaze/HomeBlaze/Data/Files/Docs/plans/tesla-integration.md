@@ -110,7 +110,7 @@ Every field of `vehicle_data` and `cached_data` that describes the car is expose
 |-------|---------|
 | `TeslaChargeState` | charging state (enum), battery level, usable battery level, charge limit with minimum, maximum and standard, charging power, currents (actual, requested, maximum, pilot), voltage, phases, added energy and range, remaining time, fast charger present, brand and type, cable, charge port door, latch and color, battery heater, scheduled charging mode and start, scheduled departure, off-peak and preconditioning settings, estimated battery capacity (v1, derived) |
 | `TeslaClimateState` | climate on, auto conditioning, preconditioning, inside, outside, driver and passenger temperature, minimum and maximum settable temperature, fan, defrosters, cabin overheat protection and its activation temperature, climate keeper mode, battery heater, mirror, wiper and steering wheel heaters |
-| `TeslaSeatHeaters` | levels of the driver, passenger and three rear seats, auto seat climate |
+| `TeslaSeatHeaters` | levels of the front left, front right and three rear seats (physical sides), auto seat climate of the front seats |
 | `TeslaDriveState` | location, native location, heading, speed, shift state (enum), derived `IsDriving`, drive power, GPS time |
 | `TeslaNavigation` | active route destination, minutes and distance to arrival, energy at arrival, traffic delay, destination location |
 | `TeslaVehicleBody` | lock state, each door, window, frunk and trunk open, derived "any open" flags, sentry mode, valet mode, user present, remote start, dashcam state, homelink nearby, center display state |

@@ -186,7 +186,7 @@ public class TeslaChargeStateTests
     }
 
     [Fact]
-    public void WhenSnapshotReportsSna_ThenValuesBecomeNull()
+    public void WhenSnapshotReportsSna_ThenValuesStay()
     {
         // Arrange
         var charge = CreateFromFixture();
@@ -199,9 +199,9 @@ public class TeslaChargeStateTests
         charge.Update(snapshot.ChargeState);
 
         // Assert
-        Assert.Null(charge.ChargeCable);
-        Assert.Null(charge.ChargePortLatch);
-        Assert.Null(charge.FastChargerBrand);
+        Assert.Equal("IEC", charge.ChargeCable);
+        Assert.Equal(TeslaChargePortLatch.Engaged, charge.ChargePortLatch);
+        Assert.Null(charge.FastChargerBrand); // "<invalid>" in the JSON, so the same as before
     }
 
     [Fact]

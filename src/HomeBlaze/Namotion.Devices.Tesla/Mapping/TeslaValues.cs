@@ -27,6 +27,11 @@ internal static class TeslaValues
     public static decimal? Decimal(float value) =>
         float.IsFinite(value) && Math.Abs(value) < MaximumDecimalFloat ? (decimal)value : null;
 
+    /// <summary>Rounds a JSON value to the precision of a protobuf float, so that both sources produce the same value.</summary>
+    public static decimal? ToFloatPrecision(decimal? value) => value is null ? null : Decimal((float)value.Value);
+
+    public static decimal? WholeNumber(decimal? value) => value is null ? null : Math.Round(value.Value, MidpointRounding.AwayFromZero);
+
     public static decimal? MilesToKilometers(decimal? miles) => miles * KilometersPerMile;
 
     public static decimal? MilesPerHourToKilometersPerHour(decimal? milesPerHour) => milesPerHour * KilometersPerMile;
