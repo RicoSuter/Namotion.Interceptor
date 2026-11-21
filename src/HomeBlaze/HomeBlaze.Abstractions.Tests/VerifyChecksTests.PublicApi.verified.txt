@@ -367,12 +367,12 @@ namespace HomeBlaze.Abstractions.Devices.Energy
         decimal? BatteryLevel { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
-    [System.ComponentModel.Description("Energy charger device with plug-in and charging state.")]
-    public interface IEnergyCharger : HomeBlaze.Abstractions.Devices.Energy.IEnergyChargerState { }
-    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
-    [System.ComponentModel.Description("Reports whether a charger is plugged in and actively charging.")]
-    public interface IEnergyChargerState
+    [System.ComponentModel.Description("Reports whether a charging cable is plugged in, whether it charges and with which" +
+        " power.")]
+    public interface IChargingState
     {
+        [HomeBlaze.Abstractions.Attributes.State(Position=331, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        decimal? ChargingPower { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=102)]
         bool? IsCharging { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=101)]
@@ -381,8 +381,11 @@ namespace HomeBlaze.Abstractions.Devices.Energy
         decimal? MaximumChargingPower { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Energy charger device with plug-in and charging state.")]
+    public interface IEnergyCharger : HomeBlaze.Abstractions.Devices.Energy.IChargingState { }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Electric vehicle charger with state and control.")]
-    public interface IVehicleCharger : HomeBlaze.Abstractions.Devices.Energy.IEnergyChargerState, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerController, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerState { }
+    public interface IVehicleCharger : HomeBlaze.Abstractions.Devices.Energy.IChargingState, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerController, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerState { }
     public interface IVehicleChargerController
     {
         System.Threading.Tasks.Task PauseChargingAsync(System.Threading.CancellationToken cancellationToken);
@@ -390,12 +393,10 @@ namespace HomeBlaze.Abstractions.Devices.Energy
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Electric vehicle charger state with charge level and power.")]
-    public interface IVehicleChargerState : HomeBlaze.Abstractions.Devices.Energy.IEnergyChargerState
+    public interface IVehicleChargerState : HomeBlaze.Abstractions.Devices.Energy.IChargingState
     {
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         decimal? ChargeLevel { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
-        decimal? ChargingPower { get; }
     }
 }
 namespace HomeBlaze.Abstractions.Devices.Light

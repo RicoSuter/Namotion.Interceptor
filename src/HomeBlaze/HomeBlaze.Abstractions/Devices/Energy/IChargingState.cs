@@ -5,14 +5,14 @@ using HomeBlaze.Abstractions.Attributes;
 namespace HomeBlaze.Abstractions.Devices.Energy;
 
 /// <summary>
-/// State interface for energy chargers.
+/// State of one end of a charging cable: a charger or a device that is charged, such as a vehicle.
 /// </summary>
 [SubjectAbstraction]
-[Description("Reports whether a charger is plugged in and actively charging.")]
-public interface IEnergyChargerState
+[Description("Reports whether a charging cable is plugged in, whether it charges and with which power.")]
+public interface IChargingState
 {
     /// <summary>
-    /// Whether a device is plugged in.
+    /// Whether the charging cable is plugged in.
     /// </summary>
     [State(Position = 101)]
     bool? IsPluggedIn { get; }
@@ -22,6 +22,12 @@ public interface IEnergyChargerState
     /// </summary>
     [State(Position = 102)]
     bool? IsCharging { get; }
+
+    /// <summary>
+    /// The current charging power in watts.
+    /// </summary>
+    [State(Unit = StateUnit.Watt, Position = 331)]
+    decimal? ChargingPower { get; }
 
     /// <summary>
     /// The maximum charging power in watts.
