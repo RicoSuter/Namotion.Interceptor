@@ -36,8 +36,8 @@ Implemented (one pull request):
 Follow-up pull requests, stacked on the first, one each:
 
 - Sonos (SSDP), which adds the response headers to `SsdpResponse`
+- Ecowitt (its UDP broadcast request)
 - myStrom (its UDP announcements)
-- Ecowitt (its UDP broadcast discovery)
 
 Out of scope, with the contract kept compatible:
 
@@ -179,13 +179,15 @@ Picking a row opens the configure page for the result's type, as picking the typ
 | `NukiBridge` | The Nuki cloud lookup, which runs when the user first opens the Discover page and on Scan again | `NukiDiscoveredBridge`, key bridge ID | The host address and port |
 | `ShellyDevice` | mDNS `_shelly._tcp` | `ShellyDiscoveredDevice(DeviceId, HostAddress, Application, DisplayName)`, key device ID | The device ID the running subject read from the device, otherwise a new persisted `DeviceId`, otherwise the host address |
 | `SonosSystem` | SSDP `urn:schemas-upnp-org:device:ZonePlayer:1` through the shared `ISsdpSearch` | `SonosDiscoveredHousehold(HouseholdId, Speakers, SeedHost)`, one per household, key household ID | Any player or satellite RINCON ID the running subject knows, or the host of its `SeedHost`, ignoring case |
+| `EcowittGateway` | The broadcast request of the Ecowitt local API to UDP `255.255.255.255:46000`, with its own socket | `EcowittDiscoveredGateway(MacAddress, HostAddress, DeviceName, FirmwareVersion)`, key MAC address | The MAC address the running subject read from the gateway, ignoring case and separators, or the host address, ignoring case: either one matching is enough |
 
 - A Gen2+ Shelly announces two `_shelly._tcp` instances with the same SRV host, one named by its device ID and one by its user-given name. The discoverer takes the device ID from the SRV host name (without `.local`, lower case) and skips an instance without one, whose name could be the user-given one; it merges the instances into one result and shows the user-given name, or the device ID when there is none. `Application` comes from the `app` TXT record.
 - `FritzBox.Udn` and `ShellyDevice.DeviceId` are new `[Configuration]` properties, written by the component that receives the result. Shelly prefers the device ID the running subject read from the device over the stored one, so a Shelly created before this change is recognized while it is connected, and a stored ID that went stale when the device at the address was replaced does not decide. Subjects do not write their own configuration for discovery.
 - `FritzBoxDiscovery.DiscoverAsync` takes the SSDP search as a parameter, so the Setup component and the discoverer share parsing and description.
 - The Setup components keep their own search for when the type is picked directly. The Hue Setup component keeps the HueApi locator with its network scan fallback.
 - Every Sonos speaker answers the search, satellites included, and names its household in the `X-RINCON-HOUSEHOLD` header. The discoverer skips an answer whose USN does not start with `uuid:RINCON_` or that has no such header, takes the speaker's RINCON ID from the USN, and groups the speakers by household ID. The seed host is that of the speaker with the lowest RINCON ID, so a household gives the same seed in every scan in which that speaker answers. `SonosSystem` has no household setting, so the seed is what pins a new system to the household.
-- `FritzBoxSetupComponent`, `HueBridgeSetupComponent`, `NukiBridgeSetupComponent`, `ShellyDeviceEditComponent` and `SonosSystemEditComponent` implement `ISubjectDiscoveryComponent`. The Setup components preselect the result in their lists; the Shelly component fills in the host address and device ID, the Sonos component `SeedHost`.
+- The Ecowitt discoverer sends the request `FF FF 12 00 04 16` (header, command `CMD_BROADCAST`, size, checksum) from one socket bound to any IPv4 address, repeats it after 1 second, and listens for 3 seconds. Each gateway answers with a unicast frame that carries its MAC address, IPv4 address, API port and a name such as `GW2000A-WIFIE157 V3.3.3`; the first word is shown as the name and the rest as the firmware version. The probe reads at most 64 datagrams of at most 512 bytes and drops a frame whose header, command, size, name length or checksum is wrong. A gateway also announces the same frame on UDP port 59387, which the discoverer does not listen to, so it binds no fixed port. On Linux a limited broadcast leaves on the adapter of the default route only, and it never leaves a Docker bridge network.
+- `FritzBoxSetupComponent`, `HueBridgeSetupComponent`, `NukiBridgeSetupComponent`, `ShellyDeviceEditComponent`, `SonosSystemEditComponent` and `EcowittGatewayEditComponent` implement `ISubjectDiscoveryComponent`. The Setup components preselect the result in their lists; the Shelly component fills in the host address and device ID, the Sonos component `SeedHost`, the Ecowitt component the host address.
 
 ## Breaking changes
 
@@ -214,4 +216,4 @@ This repository has no component test framework, so the Discover page keeps its 
 
 One E2E test with a fake discoverer: open Discover, pick the result, create, and find the stored subject.
 
-Manual verification against a real network: the Discover page found a FRITZ!Box with three repeaters, a Hue bridge, a Nuki bridge and several Shelly Gen2 devices, each Shelly once, under its user-given name when it has one. The Sonos discoverer, run against the same network from a console, found one household with the 10 speakers that answered, chose the same seed speaker in repeated scans, and recognized a system whose `SeedHost` named one of them. Docker bridge networking was not tested; the page shows a hint for it.
+Manual verification against a real network: the Discover page found a FRITZ!Box with three repeaters, a Hue bridge, a Nuki bridge and several Shelly Gen2 devices, each Shelly once, under its user-given name when it has one. The Sonos discoverer, run against the same network from a console, found one household with the 10 speakers that answered, chose the same seed speaker in repeated scans, and recognized a system whose `SeedHost` named one of them. The Ecowitt discoverer, run from a console, found a GW2000A within 30 ms in each scan and recognized a gateway configured with its address. Docker bridge networking was not tested; the page shows a hint for it.
