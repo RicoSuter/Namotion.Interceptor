@@ -97,6 +97,7 @@ public partial class BluelinkAccount
             }
 
             var tokenManager = GetTokenManager();
+            await tokenManager.EnsureAccessTokenAsync(cancellationToken);
             await action(tokenManager);
             UpdateAuthenticationState(tokenManager);
         }

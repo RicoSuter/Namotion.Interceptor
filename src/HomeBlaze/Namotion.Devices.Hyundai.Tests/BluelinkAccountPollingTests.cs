@@ -178,4 +178,23 @@ public class BluelinkAccountPollingTests
         Assert.Equal(1, handler.Count(BluelinkResponses.VehiclesPath));
         Assert.Equal(1, handler.Count(BluelinkResponses.StatusPath("VEHICLE-2")));
     }
+
+    [Fact]
+    public async Task WhenReadingOneVehicleFailsWithANetworkError_ThenTheOtherIsStillRead()
+    {
+        // Arrange
+        var handler = TestAccount.CreateHandler();
+        handler.Reset(BluelinkResponses.StatusPath("VEHICLE-2"))
+            .Respond(BluelinkResponses.StatusPath("VEHICLE-2"), () => throw new HttpRequestException("Network unreachable."));
+        var (account, _, _) = TestAccount.Create(handler);
+
+        // Act
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.Equal("IONIQ 5: Network unreachable.", account.StatusMessage);
+        Assert.Equal(0.465m, account.Vehicles["TESTVIN0000000001"].Charge.BatteryLevel);
+        Assert.Equal(1, handler.Count(BluelinkResponses.ParkLocationPath("VEHICLE-1")));
+    }
 }

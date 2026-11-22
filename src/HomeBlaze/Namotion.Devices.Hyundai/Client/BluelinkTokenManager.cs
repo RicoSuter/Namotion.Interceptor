@@ -82,6 +82,11 @@ internal sealed class BluelinkTokenManager
             return true;
         }, cancellationToken);
 
+    /// <summary>Makes sure a fresh access token is available, so that a refresh or sign in fails here and not inside a vehicle call.</summary>
+    /// <exception cref="BluelinkReauthenticationRequiredException">The refresh is rejected and no password is stored, or the sign in is rejected.</exception>
+    /// <exception cref="BluelinkApiException">The refresh or the token exchange failed otherwise; the caller retries later.</exception>
+    public Task EnsureAccessTokenAsync(CancellationToken cancellationToken) => GetAccessTokenAsync(cancellationToken);
+
     private async Task<string> GetAccessTokenAsync(CancellationToken cancellationToken)
     {
         if (!_isPersisted)

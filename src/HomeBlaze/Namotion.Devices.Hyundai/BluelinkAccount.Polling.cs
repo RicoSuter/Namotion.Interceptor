@@ -24,10 +24,6 @@ public partial class BluelinkAccount
     private DateTimeOffset _pausedUntil = DateTimeOffset.MinValue;
     private DateTimeOffset? _vehicleListReadAt;
 
-    // The last failure of a vehicle API call itself, which tells it apart from a failed token refresh around the call.
-    // Only touched while _lock is held.
-    private BluelinkApiException? _lastVehicleCallFailure;
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
@@ -145,6 +141,7 @@ public partial class BluelinkAccount
             await SaveUnsavedConfigurationAsync(cancellationToken);
             await EnsureDeviceIdAsync(cancellationToken);
             var tokenManager = GetTokenManager();
+            await tokenManager.EnsureAccessTokenAsync(cancellationToken);
 
             var now = _timeProvider.GetUtcNow();
             if (_vehicleListReadAt is not { } readAt || now - readAt >= VehicleListInterval)
@@ -161,7 +158,7 @@ public partial class BluelinkAccount
                 {
                     await ReadVehicleAsync(tokenManager, vehicle, cancellationToken);
                 }
-                catch (BluelinkApiException exception) when (IsVehicleFailure(exception, cancellationToken))
+                catch (Exception exception) when (!IsAccountFailure(exception, cancellationToken))
                 {
                     _logger.LogWarning(exception, "Reading the Bluelink vehicle {Vin} failed.", vehicle.Vin);
                     failure = $"{vehicle.Title}: {exception.Message}";
@@ -186,15 +183,15 @@ public partial class BluelinkAccount
     /// <remarks>Call it only while <see cref="_lock"/> is held.</remarks>
     private async Task ReadVehicleAsync(BluelinkTokenManager tokenManager, BluelinkVehicle vehicle, CancellationToken cancellationToken)
     {
-        var state = await CallVehicleAsync(tokenManager, accessToken => _apiClient.GetStoredStatusAsync(CreateRequest(accessToken, vehicle), cancellationToken), cancellationToken);
+        var state = await tokenManager.CallAsync(accessToken => _apiClient.GetStoredStatusAsync(CreateRequest(accessToken, vehicle), cancellationToken), cancellationToken);
         vehicle.ApplyStatus(BluelinkStatusParser.Parse(state), _timeProvider.GetUtcNow());
 
         try
         {
-            var location = await CallVehicleAsync(tokenManager, accessToken => _apiClient.GetParkLocationAsync(CreateRequest(accessToken, vehicle), cancellationToken), cancellationToken);
+            var location = await tokenManager.CallAsync(accessToken => _apiClient.GetParkLocationAsync(CreateRequest(accessToken, vehicle), cancellationToken), cancellationToken);
             vehicle.ApplyLocation(location);
         }
-        catch (BluelinkApiException exception) when (IsVehicleFailure(exception, cancellationToken))
+        catch (BluelinkApiException exception) when (!IsAccountFailure(exception, cancellationToken))
         {
             // Some accounts answer the parking location with an error.
             _logger.LogDebug(exception, "Reading the parking location of the Bluelink vehicle {Vin} failed.", vehicle.Vin);
@@ -204,36 +201,12 @@ public partial class BluelinkAccount
     private BluelinkVehicleRequest CreateRequest(string accessToken, BluelinkVehicle vehicle) =>
         new(accessToken, DeviceId, vehicle.VehicleId, vehicle.Protocol);
 
-    /// <summary>Calls the vehicle API through the token manager and records a failure of the call itself for <see cref="IsVehicleFailure"/>.</summary>
-    /// <remarks>Call it only while <see cref="_lock"/> is held.</remarks>
-    private Task<T> CallVehicleAsync<T>(BluelinkTokenManager tokenManager, Func<string, Task<T>> call, CancellationToken cancellationToken) =>
-        tokenManager.CallAsync(async accessToken =>
-        {
-            try
-            {
-                return await call(accessToken);
-            }
-            catch (BluelinkApiException exception)
-            {
-                _lastVehicleCallFailure = exception;
-                throw;
-            }
-        }, cancellationToken);
-
-    /// <summary>
-    /// Whether a failure concerns only one vehicle: thrown by its vehicle API call and not an account failure. A failed
-    /// token refresh concerns the whole account.
-    /// </summary>
-    /// <remarks>Call it only while <see cref="_lock"/> is held.</remarks>
-    private bool IsVehicleFailure(BluelinkApiException exception, CancellationToken cancellationToken) =>
-        ReferenceEquals(exception, _lastVehicleCallFailure) && !IsAccountFailure(exception, cancellationToken);
-
     /// <summary>Whether a failure concerns the whole account, so that it stops the cycle instead of one vehicle.</summary>
     private static bool IsAccountFailure(Exception exception, CancellationToken cancellationToken) => exception switch
     {
         OperationCanceledException => cancellationToken.IsCancellationRequested,
         BluelinkReauthenticationRequiredException or BluelinkRequestLimitException => true,
-        // A token expired answer after the refresh is not a vehicle's fault.
+        // A second token expired answer, after the refresh, concerns the account and not one vehicle.
         BluelinkApiException { IsRateLimited: true } or BluelinkApiException { IsDeviceNotRegistered: true } or BluelinkApiException { IsFingerprintRejected: true } or BluelinkApiException { IsTokenExpired: true } => true,
         _ => false
     };

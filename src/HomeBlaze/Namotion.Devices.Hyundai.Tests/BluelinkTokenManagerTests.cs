@@ -56,6 +56,28 @@ public class BluelinkTokenManagerTests
     }
 
     [Fact]
+    public async Task WhenAccessTokenIsEnsured_ThenTokensAreRefreshedOnceAndPersisted()
+    {
+        // Arrange
+        var harness = new Harness();
+        harness.Handler.Respond(BluelinkResponses.RefreshPath, HttpStatusCode.OK, BluelinkResponses.Tokens(1))
+            .Respond(BluelinkResponses.ExchangePath, HttpStatusCode.OK, BluelinkResponses.Ccs(1));
+        var manager = harness.Create();
+
+        // Act
+        await manager.EnsureAccessTokenAsync(CancellationToken.None);
+        var requestsAfterFirstCall = harness.Handler.Requests.Count;
+        harness.Time.Advance(TimeSpan.FromMinutes(50));
+        await manager.EnsureAccessTokenAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, harness.Handler.Count(BluelinkResponses.RefreshPath));
+        Assert.Equal(1, harness.Handler.Count(BluelinkResponses.ExchangePath));
+        Assert.Equal([BluelinkResponses.TokenSet(1)], harness.Persisted);
+        Assert.Equal(requestsAfterFirstCall, harness.Handler.Requests.Count);
+    }
+
+    [Fact]
     public async Task WhenAccessTokenIsFresh_ThenNoRefreshHappens()
     {
         // Arrange
