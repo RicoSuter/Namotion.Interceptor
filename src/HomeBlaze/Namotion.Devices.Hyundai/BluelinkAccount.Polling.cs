@@ -20,9 +20,18 @@ public partial class BluelinkAccount
     // Replaced by the loop once completed; read with Volatile because ApplyConfigurationAsync runs on another thread.
     private TaskCompletionSource _configurationChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    // Only touched while _lock is held, or by the loop between polls.
-    private DateTimeOffset _pausedUntil = DateTimeOffset.MinValue;
+    // The end of the pause after Hyundai's request limit (5091) in UTC ticks. Written while _lock is held and read by
+    // the loop without it, hence Volatile.
+    private long _pausedUntilTicks;
+
+    // Only touched while _lock is held.
     private DateTimeOffset? _vehicleListReadAt;
+
+    private DateTimeOffset PausedUntil
+    {
+        get => new(Volatile.Read(ref _pausedUntilTicks), TimeSpan.Zero);
+        set => Volatile.Write(ref _pausedUntilTicks, value.UtcTicks);
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -66,6 +75,7 @@ public partial class BluelinkAccount
         {
             Status = ServiceStatus.Stopped;
             StatusMessage = MissingCredentialsMessage;
+            ClearAuthenticationState();
             return Timeout.InfiniteTimeSpan;
         }
 
@@ -74,7 +84,7 @@ public partial class BluelinkAccount
             return Timeout.InfiniteTimeSpan;
         }
 
-        var pause = _pausedUntil - _timeProvider.GetUtcNow();
+        var pause = PausedUntil - _timeProvider.GetUtcNow();
         if (pause > TimeSpan.Zero)
         {
             return pause;
@@ -118,7 +128,7 @@ public partial class BluelinkAccount
         var delay = Status == ServiceStatus.Error
             ? AtLeast(RetryInterval, MinimumRetryInterval)
             : AtLeast(StatusPollingInterval, MinimumPollingInterval);
-        var pause = _pausedUntil - _timeProvider.GetUtcNow();
+        var pause = PausedUntil - _timeProvider.GetUtcNow();
         return pause > delay ? pause : delay;
     }
 
@@ -131,6 +141,7 @@ public partial class BluelinkAccount
     internal async Task PollOnceAsync(CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);
+        BluelinkTokenManager? tokenManager = null;
         try
         {
             if (Status == ServiceStatus.Stopped)
@@ -140,38 +151,13 @@ public partial class BluelinkAccount
 
             await SaveUnsavedConfigurationAsync(cancellationToken);
             await EnsureDeviceIdAsync(cancellationToken);
-            var tokenManager = GetTokenManager();
+            tokenManager = GetTokenManager();
             await tokenManager.EnsureAccessTokenAsync(cancellationToken);
-
-            var now = _timeProvider.GetUtcNow();
-            if (_vehicleListReadAt is not { } readAt || now - readAt >= VehicleListInterval)
-            {
-                var vehicles = await tokenManager.CallAsync(accessToken => _apiClient.GetVehiclesAsync(accessToken, DeviceId, cancellationToken), cancellationToken);
-                UpdateVehicles(vehicles);
-                _vehicleListReadAt = now;
-            }
-
-            string? failure = null;
-            foreach (var vehicle in Vehicles.Values)
-            {
-                try
-                {
-                    await ReadVehicleAsync(tokenManager, vehicle, cancellationToken);
-                }
-                catch (Exception exception) when (!IsAccountFailure(exception, cancellationToken))
-                {
-                    _logger.LogWarning(exception, "Reading the Bluelink vehicle {Vin} failed.", vehicle.Vin);
-                    failure = $"{vehicle.Title}: {exception.Message}";
-                }
-            }
-
-            UpdateAuthenticationState(tokenManager);
-            Status = ServiceStatus.Running;
-            StatusMessage = failure;
+            await ReadVehiclesAsync(tokenManager, cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            HandleAccountFailure(exception);
+            HandleAccountFailure(exception, tokenManager);
         }
         finally
         {
@@ -179,16 +165,47 @@ public partial class BluelinkAccount
         }
     }
 
+    /// <summary>Reads the vehicle list when it is due, then the stored status and parking location of every vehicle.</summary>
+    /// <remarks>Call it only while <see cref="_lock"/> is held.</remarks>
+    private async Task ReadVehiclesAsync(BluelinkTokenManager tokenManager, CancellationToken cancellationToken)
+    {
+        var now = _timeProvider.GetUtcNow();
+        if (_vehicleListReadAt is not { } readAt || now - readAt >= VehicleListInterval)
+        {
+            var vehicles = await tokenManager.CallAsync(accessToken => _apiClient.GetVehiclesAsync(accessToken, tokenManager.DeviceId, cancellationToken), cancellationToken);
+            UpdateVehicles(vehicles);
+            _vehicleListReadAt = now;
+        }
+
+        string? failure = null;
+        foreach (var vehicle in Vehicles.Values)
+        {
+            try
+            {
+                await ReadVehicleAsync(tokenManager, vehicle, cancellationToken);
+            }
+            catch (Exception exception) when (!IsAccountFailure(exception, cancellationToken))
+            {
+                _logger.LogWarning(exception, "Reading the Bluelink vehicle {Vin} failed.", vehicle.Vin);
+                failure = $"{vehicle.Title}: {exception.Message}";
+            }
+        }
+
+        UpdateAuthenticationState(tokenManager);
+        Status = ServiceStatus.Running;
+        StatusMessage = failure;
+    }
+
     /// <summary>Reads the stored status and the stored parking location; a failing location keeps the previous one.</summary>
     /// <remarks>Call it only while <see cref="_lock"/> is held.</remarks>
     private async Task ReadVehicleAsync(BluelinkTokenManager tokenManager, BluelinkVehicle vehicle, CancellationToken cancellationToken)
     {
-        var state = await tokenManager.CallAsync(accessToken => _apiClient.GetStoredStatusAsync(CreateRequest(accessToken, vehicle), cancellationToken), cancellationToken);
+        var state = await tokenManager.CallAsync(accessToken => _apiClient.GetStoredStatusAsync(CreateRequest(tokenManager, accessToken, vehicle), cancellationToken), cancellationToken);
         vehicle.ApplyStatus(BluelinkStatusParser.Parse(state), _timeProvider.GetUtcNow());
 
         try
         {
-            var location = await tokenManager.CallAsync(accessToken => _apiClient.GetParkLocationAsync(CreateRequest(accessToken, vehicle), cancellationToken), cancellationToken);
+            var location = await tokenManager.CallAsync(accessToken => _apiClient.GetParkLocationAsync(CreateRequest(tokenManager, accessToken, vehicle), cancellationToken), cancellationToken);
             vehicle.ApplyLocation(location);
         }
         catch (BluelinkApiException exception) when (!IsAccountFailure(exception, cancellationToken))
@@ -198,49 +215,58 @@ public partial class BluelinkAccount
         }
     }
 
-    private BluelinkVehicleRequest CreateRequest(string accessToken, BluelinkVehicle vehicle) =>
-        new(accessToken, DeviceId, vehicle.VehicleId, vehicle.Protocol);
+    private static BluelinkVehicleRequest CreateRequest(BluelinkTokenManager tokenManager, string accessToken, BluelinkVehicle vehicle) =>
+        new(accessToken, tokenManager.DeviceId, vehicle.VehicleId, vehicle.Protocol);
 
     /// <summary>Whether a failure concerns the whole account, so that it stops the cycle instead of one vehicle.</summary>
     private static bool IsAccountFailure(Exception exception, CancellationToken cancellationToken) => exception switch
     {
         OperationCanceledException => cancellationToken.IsCancellationRequested,
-        BluelinkReauthenticationRequiredException or BluelinkRequestLimitException => true,
+        BluelinkReauthenticationRequiredException or BluelinkRequestLimitException or BluelinkCredentialsReplacedException => true,
         // A second token expired answer, after the refresh, concerns the account and not one vehicle.
         BluelinkApiException { IsRateLimited: true } or BluelinkApiException { IsDeviceNotRegistered: true } or BluelinkApiException { IsFingerprintRejected: true } or BluelinkApiException { IsTokenExpired: true } => true,
         _ => false
     };
 
+    /// <summary>Reports a failure of the whole account; a failure of credentials replaced meanwhile is an ordinary failure.</summary>
+    /// <param name="exception">The failure.</param>
+    /// <param name="tokenManager">The manager in use, or null when none could be created.</param>
     /// <remarks>Call it only while <see cref="_lock"/> is held.</remarks>
-    private void HandleAccountFailure(Exception exception)
+    private void HandleAccountFailure(Exception exception, BluelinkTokenManager? tokenManager)
     {
         switch (exception)
         {
             case BluelinkReauthenticationRequiredException reauthentication:
-                SetReauthenticationRequired(reauthentication);
+                HandleRejection(reauthentication, tokenManager);
+                break;
+
+            case BluelinkCredentialsReplacedException:
+                ReportCredentialsReplaced();
                 break;
 
             case BluelinkApiException { IsRateLimited: true }:
-                _pausedUntil = _timeProvider.GetUtcNow() + RateLimitPause;
+                PausedUntil = _timeProvider.GetUtcNow() + RateLimitPause;
                 _logger.LogWarning("Hyundai's request limit was reached; pausing the Bluelink account for {Pause}.", RateLimitPause);
                 Status = ServiceStatus.Error;
                 StatusMessage = $"Hyundai's request limit was reached; polling resumes at {(_timeProvider.GetLocalNow() + RateLimitPause).ToString("HH:mm", CultureInfo.InvariantCulture)}.";
                 break;
 
             case BluelinkRequestLimitException:
-                _pausedUntil = _timeProvider.GetUtcNow() + _budget.TimeUntilReset;
+                // No pause: the next iteration waits until midnight, unless the limit was raised meanwhile.
                 Status = ServiceStatus.Error;
                 StatusMessage = RequestLimitMessage;
                 break;
 
             case BluelinkApiException { IsDeviceNotRegistered: true }:
-                ResetDeviceId();
+                ResetDeviceId(tokenManager);
                 Status = ServiceStatus.Error;
                 StatusMessage = exception.Message;
                 break;
 
             default:
-                _logger.LogError(exception, "Polling the Bluelink account failed.");
+                // Caller cancellation never gets here, so a canceled task is an HTTP timeout.
+                _logger.Log(exception is BluelinkApiException or HttpRequestException or TaskCanceledException ? LogLevel.Warning : LogLevel.Error,
+                    exception, "The Bluelink account failed.");
                 Status = ServiceStatus.Error;
                 StatusMessage = exception.Message;
                 break;

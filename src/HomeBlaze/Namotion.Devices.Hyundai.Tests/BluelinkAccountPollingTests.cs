@@ -197,4 +197,124 @@ public class BluelinkAccountPollingTests
         Assert.Equal(0.465m, account.Vehicles["TESTVIN0000000001"].Charge.BatteryLevel);
         Assert.Equal(1, handler.Count(BluelinkResponses.ParkLocationPath("VEHICLE-1")));
     }
+
+    [Fact]
+    public async Task WhenBudgetRunsOutDuringAPollAndTheLimitIsRaised_ThenTheNextIterationPolls()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        account.DailyRequestLimit = 3;
+        await account.PollOnceAsync(CancellationToken.None);
+        var messageAfterLimit = account.StatusMessage;
+
+        // Act
+        account.DailyRequestLimit = 150;
+        await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Daily request limit reached", messageAfterLimit);
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.Equal(1, handler.Count(BluelinkResponses.StatusPath("VEHICLE-2")));
+    }
+
+    [Fact]
+    public async Task WhenBudgetIsSpentAtTheStartOfAnIteration_ThenAccountReportsTheLimitAndWaitsUntilMidnight()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        account.DailyRequestLimit = 5;
+        var requestCount = handler.Requests.Count;
+
+        // Act
+        var delay = await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, account.Status);
+        Assert.Equal("Daily request limit reached", account.StatusMessage);
+        Assert.Equal(TimeSpan.FromHours(13.5), delay);
+        Assert.Equal(requestCount, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task WhenDeviceIsNotRegistered_ThenTheNextPollRegistersAgainWithANewTokenManager()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        handler.Reset(BluelinkResponses.StatusPath("VEHICLE-1")).Respond(BluelinkResponses.StatusPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Failure("4002"));
+        await account.PollOnceAsync(CancellationToken.None);
+        var statusAfterFailure = account.Status;
+        var deviceIdAfterFailure = account.DeviceId;
+        handler.Reset(BluelinkResponses.StatusPath("VEHICLE-1")).Respond(BluelinkResponses.StatusPath("VEHICLE-1"), HttpStatusCode.OK, FixtureLoader.Load("carstatus-legacy-ev.json"))
+            .Respond(BluelinkResponses.RegisterPath, HttpStatusCode.OK, BluelinkResponses.Success("""{"deviceId":"device-9"}"""));
+
+        // Act
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, statusAfterFailure);
+        Assert.Equal(string.Empty, deviceIdAfterFailure);
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.Equal("device-9", account.DeviceId);
+        Assert.Equal(2, handler.Count(BluelinkResponses.RefreshPath));
+        Assert.Equal(1, handler.Count(BluelinkResponses.VehiclesPath));
+        Assert.Equal("device-9", handler.Requests.Last(request => request.Uri.AbsolutePath == BluelinkResponses.StatusPath("VEHICLE-1")).Header("ccsp-device-id"));
+    }
+
+    [Fact]
+    public async Task WhenTheVehicleListChanges_ThenVanishedVehiclesAreRemovedAndKnownOnesUpdatedInPlace()
+    {
+        // Arrange
+        var (account, handler, time) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        var kona = account.Vehicles["TESTVIN0000000001"];
+        handler.Reset(BluelinkResponses.VehiclesPath).Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, BluelinkResponses.Success(
+            """{"vehicles":[{"vin":"TESTVIN0000000001","vehicleId":"VEHICLE-1","vehicleName":"KONA","type":"EV","nickname":"Kona Electric","ccuCCS2ProtocolSupport":0}]}"""));
+
+        // Act
+        time.Advance(TimeSpan.FromHours(24));
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["TESTVIN0000000001"], account.Vehicles.Keys);
+        Assert.Same(kona, account.Vehicles["TESTVIN0000000001"]);
+        Assert.Equal("Kona Electric", kona.Nickname);
+    }
+
+    [Fact]
+    public async Task WhenTheTokenExpiresAgainAfterTheRefresh_ThenThePollFailsWithoutReauthentication()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        handler.Reset(BluelinkResponses.StatusPath("VEHICLE-1")).Respond(BluelinkResponses.StatusPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Failure("7501"));
+
+        // Act
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, account.Status);
+        Assert.False(account.IsReauthenticationRequired);
+        Assert.Equal(2, handler.Count(BluelinkResponses.RefreshPath));
+        Assert.Equal(1, handler.Count(BluelinkResponses.StatusPath("VEHICLE-2")));
+    }
+
+    [Fact]
+    public async Task WhenCredentialsAreRemoved_ThenAuthenticationStateIsCleared()
+    {
+        // Arrange
+        var (account, _, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Act
+        account.Tokens = string.Empty;
+        await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Missing credentials", account.StatusMessage);
+        Assert.False(account.IsAuthenticated);
+        Assert.Null(account.AuthenticatedUser);
+        Assert.Null(account.AuthenticatedAt);
+    }
 }

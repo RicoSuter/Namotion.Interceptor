@@ -52,6 +52,9 @@ internal sealed class BluelinkTokenManager
         _login = login;
     }
 
+    /// <summary>The device ID the manager signs with; vehicle API calls with its access tokens send it.</summary>
+    public string DeviceId => _deviceId;
+
     /// <summary>The time of the last successful refresh or login, or null.</summary>
     public DateTimeOffset? AuthenticatedAt { get; private set; }
 

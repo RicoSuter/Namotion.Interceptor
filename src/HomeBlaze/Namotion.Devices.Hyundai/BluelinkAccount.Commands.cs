@@ -20,16 +20,17 @@ public partial class BluelinkAccount
     bool IBluelinkVehicleCommands.CanRefresh(decimal? auxiliaryBatteryLevel) =>
         IsAuthenticated && RequestsToday < DailyRequestLimit && auxiliaryBatteryLevel is { } level && level >= MinimumAuxiliaryBatteryLevel;
 
-    Task IBluelinkVehicleCommands.RefreshAsync(BluelinkVehicle vehicle, CancellationToken cancellationToken) =>
-        RunAsync(async tokenManager =>
+    async Task IBluelinkVehicleCommands.RefreshAsync(BluelinkVehicle vehicle, CancellationToken cancellationToken)
+    {
+        if (vehicle.AuxiliaryBatteryLevel is not { } level || level < MinimumAuxiliaryBatteryLevel)
         {
-            if (vehicle.AuxiliaryBatteryLevel is not { } level || level < MinimumAuxiliaryBatteryLevel)
-            {
-                throw new InvalidOperationException("Refresh is refused while the 12 V battery is below the minimum level or unknown.");
-            }
+            throw new InvalidOperationException("Refresh is refused while the 12 V battery is below the minimum level or unknown.");
+        }
 
+        await RunAsync(async tokenManager =>
+        {
             _logger.LogInformation("Asking the Bluelink vehicle {Vin} to upload its status.", vehicle.Vin);
-            await tokenManager.CallAsync(accessToken => _apiClient.RequestStatusAsync(CreateRequest(accessToken, vehicle), cancellationToken), cancellationToken);
+            await tokenManager.CallAsync(accessToken => _apiClient.RequestStatusAsync(CreateRequest(tokenManager, accessToken, vehicle), cancellationToken), cancellationToken);
             if (vehicle.Protocol == BluelinkProtocol.Ccs2)
             {
                 await Task.Delay(Ccs2RefreshWait, _timeProvider, cancellationToken);
@@ -37,6 +38,7 @@ public partial class BluelinkAccount
 
             await ReadVehicleAsync(tokenManager, vehicle, cancellationToken);
         }, cancellationToken);
+    }
 
     Task IBluelinkVehicleCommands.SetChargingAsync(BluelinkVehicle vehicle, bool start, CancellationToken cancellationToken) =>
         RunCommandAsync(vehicle, needsPin: true,
@@ -71,8 +73,8 @@ public partial class BluelinkAccount
             _logger.LogInformation("Sending a command to the Bluelink vehicle {Vin}.", vehicle.Vin);
             var messageId = await tokenManager.CallAsync(async accessToken =>
             {
-                var controlToken = needsControlToken ? await GetControlTokenAsync(accessToken, cancellationToken) : null;
-                return await send(CreateRequest(accessToken, vehicle), controlToken);
+                var controlToken = needsControlToken ? await GetControlTokenAsync(accessToken, tokenManager.DeviceId, cancellationToken) : null;
+                return await send(CreateRequest(tokenManager, accessToken, vehicle), controlToken);
             }, cancellationToken);
 
             await WaitForCommandResultAsync(tokenManager, vehicle, messageId, cancellationToken);
@@ -81,9 +83,11 @@ public partial class BluelinkAccount
     }
 
     /// <summary>Runs a refresh or command under the account lock, after checks that fail before any call.</summary>
+    /// <exception cref="BluelinkRequestLimitException">The daily request limit is reached; nothing was sent.</exception>
     private async Task RunAsync(Func<BluelinkTokenManager, Task> action, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);
+        BluelinkTokenManager? tokenManager = null;
         try
         {
             if (!IsAuthenticated)
@@ -91,19 +95,25 @@ public partial class BluelinkAccount
                 throw new InvalidOperationException("The Bluelink account is not connected.");
             }
 
-            if (_pausedUntil > _timeProvider.GetUtcNow())
+            if (_budget.Remaining == 0)
+            {
+                throw new BluelinkRequestLimitException();
+            }
+
+            if (PausedUntil > _timeProvider.GetUtcNow())
             {
                 throw new InvalidOperationException("Requests of the Bluelink account are paused after Hyundai's request limit was reached.");
             }
 
-            var tokenManager = GetTokenManager();
+            await EnsureDeviceIdAsync(cancellationToken);
+            tokenManager = GetTokenManager();
             await tokenManager.EnsureAccessTokenAsync(cancellationToken);
             await action(tokenManager);
             UpdateAuthenticationState(tokenManager);
         }
-        catch (Exception exception) when (IsAccountFailure(exception, cancellationToken))
+        catch (Exception exception) when (exception is not OperationCanceledException && IsAccountFailure(exception, cancellationToken))
         {
-            HandleAccountFailure(exception);
+            HandleAccountFailure(exception, tokenManager);
             throw;
         }
         finally
@@ -118,7 +128,7 @@ public partial class BluelinkAccount
         {
             await Task.Delay(CommandResultInterval, _timeProvider, cancellationToken);
             var result = await tokenManager.CallAsync(
-                accessToken => _apiClient.GetCommandResultAsync(CreateRequest(accessToken, vehicle), messageId, cancellationToken), cancellationToken);
+                accessToken => _apiClient.GetCommandResultAsync(CreateRequest(tokenManager, accessToken, vehicle), messageId, cancellationToken), cancellationToken);
 
             if (result == BluelinkCommandResult.Success)
             {
@@ -135,7 +145,7 @@ public partial class BluelinkAccount
     }
 
     /// <summary>Returns the cached control token, or exchanges the PIN for a new one.</summary>
-    private async Task<string> GetControlTokenAsync(string accessToken, CancellationToken cancellationToken)
+    private async Task<string> GetControlTokenAsync(string accessToken, string deviceId, CancellationToken cancellationToken)
     {
         if (_controlToken is { } cached && _timeProvider.GetUtcNow() < cached.ExpiresAt - ControlTokenAhead)
         {
@@ -144,7 +154,7 @@ public partial class BluelinkAccount
 
         try
         {
-            _controlToken = await _apiClient.GetControlTokenAsync(accessToken, DeviceId, Pin, cancellationToken);
+            _controlToken = await _apiClient.GetControlTokenAsync(accessToken, deviceId, Pin, cancellationToken);
             return _controlToken.AccessToken;
         }
         catch (BluelinkPinRejectedException exception)

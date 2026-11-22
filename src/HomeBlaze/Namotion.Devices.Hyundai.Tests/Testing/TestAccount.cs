@@ -3,6 +3,9 @@ using System.Net;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Devices.Hyundai.Tests.Testing;
 
@@ -48,4 +51,30 @@ internal static class TestAccount
         };
         return (account, handler, time);
     }
+
+    /// <summary>Attaches the account to a configuration writer, as a storage file holds it.</summary>
+    public static TestConfigurationWriter AttachWriter(BluelinkAccount account, FakeHttpMessageHandler handler) =>
+        new(InterceptorSubjectContext.Create().WithParents()) { Handler = handler, Account = account };
+
+    /// <summary>Advances the fake clock in 5 second steps until the task completes, then awaits it.</summary>
+    public static async Task AdvanceUntilCompletedAsync(FakeTimeProvider time, Task task)
+    {
+        await AsyncTestHelpers.WaitUntilAsync(() =>
+        {
+            if (!task.IsCompleted)
+            {
+                time.Advance(TimeSpan.FromSeconds(5));
+            }
+
+            return task.IsCompleted;
+        });
+        await task;
+    }
+
+    /// <summary>A response that answers once the test completes it.</summary>
+    public static TaskCompletionSource<HttpResponseMessage> CreateHeldResponse() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public static HttpResponseMessage CreateResponse(HttpStatusCode statusCode, string body) =>
+        new(statusCode) { Content = new StringContent(body) };
 }
