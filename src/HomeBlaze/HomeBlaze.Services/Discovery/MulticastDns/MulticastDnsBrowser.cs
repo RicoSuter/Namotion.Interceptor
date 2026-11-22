@@ -30,9 +30,16 @@ internal sealed class MulticastDnsBrowser : IMulticastDnsBrowser
         var query = DnsMessage.CreatePointerQuery(MulticastDnsServiceCollector.GetServiceName(serviceType));
         var collector = new MulticastDnsServiceCollector();
 
+        var adapterAddresses = NetworkAdapters.GetMulticastIPv4Addresses();
+        if (adapterAddresses.Count == 0)
+        {
+            _logger.LogDebug("No IPv4 adapter supports multicast; the mDNS browse for {ServiceType} is skipped.", serviceType);
+            return [];
+        }
+
         using var window = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         window.CancelAfter(ListeningWindow);
-        await Task.WhenAll(NetworkAdapters.GetMulticastIPv4Addresses()
+        await Task.WhenAll(adapterAddresses
             .Select(address => QueryAdapterAsync(address, query, collector, window.Token)));
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -46,6 +53,9 @@ internal sealed class MulticastDnsBrowser : IMulticastDnsBrowser
         {
             using var client = new UdpClient(new IPEndPoint(localAddress, 0));
             client.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, localAddress.GetAddressBytes());
+
+            // RFC 6762 section 11: the time to live of a multicast query is 255.
+            client.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastTimeToLive, 255);
 
             _ = SendQueriesAsync(client, query, cancellationToken);
             for (var messageCount = 0; messageCount < MaximumMessagesPerAdapter; messageCount++)
