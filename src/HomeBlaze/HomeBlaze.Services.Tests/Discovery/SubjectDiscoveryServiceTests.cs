@@ -52,6 +52,27 @@ public class SubjectDiscoveryServiceTests
     }
 
     [Fact]
+    public async Task WhenAllDiscoverersComplete_ThenTheScanTokenIsCanceled()
+    {
+        // Arrange
+        var receivedToken = CancellationToken.None;
+        var service = CreateService(
+            TimeProvider.System,
+            new LambdaDiscoverer<DiscoveryTestSubject>((_, cancellationToken) =>
+            {
+                receivedToken = cancellationToken;
+                return TestScans.Yield(new TestDiscoveryResult("a"));
+            }));
+
+        // Act
+        await service.ScanAsync([typeof(DiscoveryTestSubject)], [], _ => { }, _ => { }, CancellationToken.None);
+
+        // Assert
+        Assert.True(receivedToken.CanBeCanceled);
+        Assert.True(receivedToken.IsCancellationRequested);
+    }
+
+    [Fact]
     public async Task WhenTheTimeLimitPasses_ThenAHangingDiscovererEndsWithoutAFailure()
     {
         // Arrange

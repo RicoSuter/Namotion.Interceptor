@@ -56,7 +56,7 @@ public sealed class SubjectDiscoveryService
     /// <paramref name="onFailure"/> with its subject type; the others carry on.
     /// </summary>
     /// <remarks>
-    /// The callbacks run on thread pool threads, concurrently for different discoverers.
+    /// The callbacks run on thread pool threads, concurrently for different discoverers, and must not throw.
     /// </remarks>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     public async Task ScanAsync(
@@ -71,9 +71,17 @@ public sealed class SubjectDiscoveryService
 
         var scan = new DiscoveryScan(_ssdpSearch, _multicastDnsBrowser, scanCancellation.Token);
         var discoverers = _getDiscoverers().Where(discoverer => subjectTypes.Contains(discoverer.SubjectType));
-        await Task.WhenAll(discoverers.Select(discoverer => Task.Run(
-            () => RunAsync(discoverer, scan, existingSubjects, onResult, onFailure, scanCancellation.Token),
-            CancellationToken.None)));
+        try
+        {
+            await Task.WhenAll(discoverers.Select(discoverer => Task.Run(
+                () => RunAsync(discoverer, scan, existingSubjects, onResult, onFailure, scanCancellation.Token),
+                CancellationToken.None)));
+        }
+        finally
+        {
+            // Ends the queries the discoverers shared through the scan.
+            await scanCancellation.CancelAsync();
+        }
 
         cancellationToken.ThrowIfCancellationRequested();
     }
