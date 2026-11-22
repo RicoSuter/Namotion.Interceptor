@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.E2E.Tests.Models;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
@@ -1141,6 +1142,59 @@ public class SubjectSetupDialogTests
             Assert.NotNull(createdMotor);
             Assert.Contains(createdMotor, registry.KnownSubjects.Keys);
             Assert.Equal(MotorStatus.Running, createdMotor.Status);
+            isCompleted = true;
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(filePath);
+                await _fixture.ReconcileStorageAsync();
+            }
+            catch (Exception exception) when (!isCompleted)
+            {
+                // The failure of the test itself is the one to report.
+                _output.WriteLine($"Deleting {filePath} failed: {exception}");
+            }
+        }
+    }
+
+    [Fact]
+    public async Task WhenAFoundDeviceIsPicked_ThenItsComponentStartsFromTheDeviceAndTheSubjectIsStored()
+    {
+        // The file is written to the test output directory, which later runs reuse, so it is removed again.
+        var name = $"Discovered{Guid.NewGuid():N}";
+        var filePath = Path.Combine(AppContext.BaseDirectory, "TestData", $"{name}.json");
+        var isCompleted = false;
+        try
+        {
+            // Arrange
+            var page = await _fixture.CreatePageAsync();
+            await OpenDialogAsync(page);
+            await Dialog(page).GetByTestId("picker-mode-discover").ClickAsync();
+            var row = Dialog(page).GetByTestId("discovery-row").Filter(new() { HasText = DiscoverableTestDiscoverer.DeviceName });
+            await Assertions.Expect(row).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+
+            // Act
+            await row.ClickAsync();
+            await ExpectConfigurePageAsync(page);
+
+            // Assert - the component and the name start from the device.
+            await Assertions.Expect(Dialog(page).GetByTestId("discoverable-host"))
+                .ToHaveTextAsync($"Host: {DiscoverableTestDiscoverer.HostAddress}", new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(NameInput(page)).ToHaveValueAsync(DiscoverableTestDiscoverer.DeviceName);
+
+            // Act
+            await NameInput(page).FillAsync(name);
+            await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+            await CreateButton(page).ClickAsync();
+
+            // Assert
+            await Assertions.Expect(Dialog(page)).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await _fixture.WaitForFileTextAsync(
+                filePath,
+                text => text.Contains(DiscoverableTestDiscoverer.HostAddress, StringComparison.Ordinal),
+                "The created file does not contain the host address of the found device.");
             isCompleted = true;
         }
         finally
