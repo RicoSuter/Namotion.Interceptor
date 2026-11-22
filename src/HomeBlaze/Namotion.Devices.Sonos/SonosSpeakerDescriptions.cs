@@ -96,7 +96,7 @@ internal static class SonosSpeakerDescriptions
     /// request to another host than the one the answer named, so a redirect fails the request.
     /// </summary>
     private static SocketsHttpHandler CreateHandler() =>
-        new() { AllowAutoRedirect = false, UseProxy = false, ConnectTimeout = DescriptionTimeout };
+        new() { AllowAutoRedirect = false, UseProxy = false };
 
     /// <summary>
     /// Reads the description of a speaker the way a connection reads it, plain HTTP at the fixed path on the host
