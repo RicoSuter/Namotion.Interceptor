@@ -49,7 +49,6 @@ internal sealed class TeslaChargeStateDto
     [JsonPropertyName("scheduled_departure_time")] public long? ScheduledDepartureTime { get; init; }
     [JsonPropertyName("scheduled_departure_time_minutes")] public int? ScheduledDepartureTimeMinutes { get; init; }
     [JsonPropertyName("supercharger_session_trip_planner")] public bool? SuperchargerSessionTripPlanner { get; init; }
-    [JsonPropertyName("time_to_full_charge")] public decimal? TimeToFullCharge { get; init; }
     [JsonPropertyName("timestamp")] public long? Timestamp { get; init; }
     [JsonPropertyName("trip_charging")] public bool? TripCharging { get; init; }
     [JsonPropertyName("usable_battery_level")] public int? UsableBatteryLevel { get; init; }

@@ -12,6 +12,4 @@ internal sealed class TeslaProductDto
     [JsonPropertyName("in_service")] public bool? InService { get; init; }
     [JsonPropertyName("command_signing")] public string? CommandSigning { get; init; }
     [JsonPropertyName("cached_data")] public string? CachedData { get; init; }
-    [JsonPropertyName("device_type")] public string? DeviceType { get; init; }
-    [JsonPropertyName("access_type")] public string? AccessType { get; init; }
 }

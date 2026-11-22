@@ -4,9 +4,7 @@ namespace Namotion.Devices.Tesla.Client.Dto;
 
 internal sealed class TeslaVehicleStateDto
 {
-    [JsonPropertyName("api_version")] public int? ApiVersion { get; init; }
     [JsonPropertyName("autopark_state_v2")] public string? AutoparkStateV2 { get; init; }
-    [JsonPropertyName("calendar_supported")] public bool? CalendarSupported { get; init; }
     [JsonPropertyName("car_version")] public string? CarVersion { get; init; }
     [JsonPropertyName("center_display_state")] public int? CenterDisplayState { get; init; }
     [JsonPropertyName("dashcam_clip_save_available")] public bool? DashcamClipSaveAvailable { get; init; }
@@ -21,13 +19,10 @@ internal sealed class TeslaVehicleStateDto
     [JsonPropertyName("fp_window")] public int? FpWindow { get; init; }
     [JsonPropertyName("rd_window")] public int? RdWindow { get; init; }
     [JsonPropertyName("rp_window")] public int? RpWindow { get; init; }
-    [JsonPropertyName("feature_bitmask")] public string? FeatureBitmask { get; init; }
     [JsonPropertyName("homelink_nearby")] public bool? HomelinkNearby { get; init; }
     [JsonPropertyName("is_user_present")] public bool? IsUserPresent { get; init; }
     [JsonPropertyName("locked")] public bool? Locked { get; init; }
-    [JsonPropertyName("notifications_supported")] public bool? NotificationsSupported { get; init; }
     [JsonPropertyName("odometer")] public decimal? Odometer { get; init; }
-    [JsonPropertyName("parsed_calendar_supported")] public bool? ParsedCalendarSupported { get; init; }
     [JsonPropertyName("remote_start")] public bool? RemoteStart { get; init; }
     [JsonPropertyName("remote_start_enabled")] public bool? RemoteStartEnabled { get; init; }
     [JsonPropertyName("remote_start_supported")] public bool? RemoteStartSupported { get; init; }
