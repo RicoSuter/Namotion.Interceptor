@@ -148,6 +148,20 @@ public class ShellyDeviceDiscovererTests
     }
 
     [Fact]
+    public void WhenTheRunningSubjectReadAnotherDeviceIdThanTheStoredOne_ThenTheReadOneDecides()
+    {
+        // Arrange
+        var device = CreateDevice();
+        device.HostAddress = "192.168.1.41";
+        device.DeviceId = "shellyplus1pm-replaced";
+        device.DeviceInfo = new ShellyDeviceInfo { Id = "shellyplus1pm-a8032ab12345" };
+
+        // Act & Assert
+        Assert.True(ShellyDeviceDiscoverer.IsSameDevice(device, Found()));
+        Assert.False(ShellyDeviceDiscoverer.IsSameDevice(device, Found(deviceId: "shellyplus1pm-replaced")));
+    }
+
+    [Fact]
     public void WhenTheSubjectHasNoDeviceId_ThenTheHostAddressDecides()
     {
         // Arrange

@@ -23,8 +23,9 @@ public sealed class FritzBoxDiscoverer : SubjectDiscoverer<FritzBox, FritzBoxDis
     /// <inheritdoc />
     protected override bool Matches(FritzBox existing, FritzBoxDiscoveryResult result) => IsSameRouter(existing, result);
 
+    // The UDN recognizes a router that moved to another address; the host address one that was added without
+    // discovery, and a router that replaced it at the same address, which a stale stored UDN must not hide.
     internal static bool IsSameRouter(FritzBox existing, FritzBoxDiscoveryResult result) =>
-        existing.Udn is { } udn && result.Udn is not null
-            ? string.Equals(udn, result.Udn, StringComparison.OrdinalIgnoreCase)
-            : string.Equals(existing.HostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase);
+        (result.Udn is not null && string.Equals(existing.Udn?.Trim(), result.Udn, StringComparison.OrdinalIgnoreCase)) ||
+        string.Equals(existing.HostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase);
 }

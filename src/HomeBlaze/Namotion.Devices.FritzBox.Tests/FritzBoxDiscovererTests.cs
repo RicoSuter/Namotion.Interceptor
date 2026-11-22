@@ -12,11 +12,25 @@ public class FritzBoxDiscovererTests
         new(hostAddress, "FRITZ!Box 7590", "FRITZ!Box 7590", udn, IsRepeater: false);
 
     [Fact]
-    public void WhenBothHaveAUdn_ThenTheUdnDecides()
+    public void WhenTheUdnsMatch_ThenARouterAtAnotherAddressIsTheSame()
     {
         // Act & Assert
         Assert.True(FritzBoxDiscoverer.IsSameRouter(CreateRouter("192.168.178.1", "uuid:a"), Found("192.168.178.2", "UUID:A")));
-        Assert.False(FritzBoxDiscoverer.IsSameRouter(CreateRouter("192.168.178.1", "uuid:a"), Found("192.168.178.1", "uuid:b")));
+    }
+
+    [Fact]
+    public void WhenTheHostAddressesMatch_ThenARouterWithAnotherUdnIsTheSame()
+    {
+        // Act & Assert
+        Assert.True(FritzBoxDiscoverer.IsSameRouter(CreateRouter("192.168.178.1", "uuid:a"), Found("192.168.178.1", "uuid:b")));
+    }
+
+    [Fact]
+    public void WhenNeitherTheUdnNorTheHostAddressMatches_ThenTheRouterIsAnother()
+    {
+        // Act & Assert
+        Assert.False(FritzBoxDiscoverer.IsSameRouter(CreateRouter("192.168.178.1", "uuid:a"), Found("192.168.178.2", "uuid:b")));
+        Assert.False(FritzBoxDiscoverer.IsSameRouter(CreateRouter("192.168.178.1", "uuid:a"), Found("192.168.178.2", null)));
     }
 
     [Fact]
