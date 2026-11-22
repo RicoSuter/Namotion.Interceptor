@@ -86,6 +86,13 @@ namespace Namotion.Devices.Nuki
         public static System.TimeSpan GetEffectiveInterval(System.TimeSpan configured, System.TimeSpan fallback) { }
         public static string? ValidateHostAddress(string? hostAddress) { }
     }
+    public sealed class NukiBridgeDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscoverer<Namotion.Devices.Nuki.NukiBridge, Namotion.Devices.Nuki.NukiDiscoveredBridge>
+    {
+        public NukiBridgeDiscoverer(System.Net.Http.IHttpClientFactory httpClientFactory) { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Nuki.NukiBridgeDiscoverer.<DiscoverAsync>d__2))]
+        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Nuki.NukiDiscoveredBridge> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
+        protected override bool Matches(Namotion.Devices.Nuki.NukiBridge existing, Namotion.Devices.Nuki.NukiDiscoveredBridge result) { }
+    }
     public static class NukiBridgeDiscovery
     {
         public const string DiscoveryAddress = "https://api.nuki.io/discover/bridges";
@@ -142,11 +149,14 @@ namespace Namotion.Devices.Nuki
         SmartDoor = 3,
         SmartLock3 = 4,
     }
-    public sealed class NukiDiscoveredBridge : System.IEquatable<Namotion.Devices.Nuki.NukiDiscoveredBridge>
+    public sealed class NukiDiscoveredBridge : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, System.IEquatable<Namotion.Devices.Nuki.NukiDiscoveredBridge>
     {
         public NukiDiscoveredBridge(long BridgeId, string HostAddress) { }
         public long BridgeId { get; init; }
+        public string? Detail { get; }
+        public string DisplayName { get; }
         public string HostAddress { get; init; }
+        public string Key { get; }
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
