@@ -191,7 +191,7 @@ A HomeBlaze automation can call `Refresh` on a schedule when fresher values are 
 | `GET /api/v1/spa/vehicles/{id}/ccs2/carstatus/latest` | Every `StatusPollingInterval`, per vehicle, both protocols | No |
 | `GET /api/v1/spa/vehicles/{id}/location/park` | Every `StatusPollingInterval`, per vehicle | No |
 
-The stored status changes only when the vehicle uploads it, for example when the ignition is switched off or charging starts or ends. Hours without change while the vehicle is parked are normal; `LastUpdated` shows the age. A status older than the applied one is skipped. A failing parking location keeps the previous one, because some accounts answer it with an error.
+The stored status changes only when the vehicle uploads it, for example when the ignition is switched off or charging starts or ends. Hours without change while the vehicle is parked are normal; `LastUpdated` shows the age. A status older than the applied one is skipped. A failing parking location, such as an error answer that some accounts give, a timeout or a network error, keeps the previous one and fails neither the poll nor a `Refresh` or command.
 
 ### Call budget
 
@@ -235,6 +235,6 @@ The integration uses region 1 ("Europe") of the community library hyundai_kia_co
 | `POST /api/v1/spa/vehicles/{id}/charge/target` | `prd.eu-ccapi.hyundai.com:8080` | Charge limits |
 | `GET /api/v1/spa/notifications/{id}/records` | `prd.eu-ccapi.hyundai.com:8080` | Results of commands |
 
-Every call times out after 30 seconds; the status request of `Refresh` after 90 seconds. A timeout of the status or location read fails the poll of that vehicle; any other timeout fails the poll, or the `Refresh` or command that made the call.
+Every call times out after 30 seconds; the status request of `Refresh` after 90 seconds. A timeout fails what made the call: in a poll, a status read fails only that vehicle and any other call fails the poll; otherwise the `Refresh` or command. A failing parking location never fails anything; the previous location is kept.
 
 Every vehicle API call carries the `Stamp` header of the app. The access token lives in memory and is refreshed 6 minutes before it expires, and after a call answered with an expired token; each refresh replaces the token set, which is stored before the new access token is used. The control token of the PIN is kept in memory until shortly before it expires.

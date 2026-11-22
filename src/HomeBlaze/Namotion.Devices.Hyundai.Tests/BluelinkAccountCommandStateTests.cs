@@ -272,6 +272,30 @@ public class BluelinkAccountCommandStateTests
     }
 
     [Fact]
+    public async Task WhenTheParkingLocationFailsWithANetworkErrorDuringRefresh_ThenTheRefreshStillCompletes()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        var kona = account.Vehicles[Kona];
+        var previousLocation = kona.Location;
+        handler.Reset(BluelinkResponses.ParkLocationPath("VEHICLE-1"))
+            .Respond(BluelinkResponses.ParkLocationPath("VEHICLE-1"), () => throw new HttpRequestException("Network unreachable."))
+            .Respond(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Success());
+
+        // Act
+        await kona.RefreshAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, handler.Count(BluelinkResponses.ParkLocationPath("VEHICLE-1")));
+        Assert.Equal(2, handler.Count(BluelinkResponses.StatusPath("VEHICLE-1")));
+        Assert.NotNull(previousLocation);
+        Assert.Equal(previousLocation, kona.Location);
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.False(kona.IsBusy);
+    }
+
+    [Fact]
     public async Task WhenCommandFails_ThenTheVehicleIsNoLongerBusy()
     {
         // Arrange

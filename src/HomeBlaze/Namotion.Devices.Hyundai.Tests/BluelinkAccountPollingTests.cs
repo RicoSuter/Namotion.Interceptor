@@ -1,6 +1,7 @@
 using System.Net;
 using HomeBlaze.Abstractions;
 using Namotion.Devices.Hyundai.Tests.Testing;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Devices.Hyundai.Tests;
 
@@ -228,6 +229,29 @@ public class BluelinkAccountPollingTests
         Assert.Equal("IONIQ 5: Network unreachable.", account.StatusMessage);
         Assert.Equal(0.465m, account.Vehicles["TESTVIN0000000001"].Charge.BatteryLevel);
         Assert.Equal(1, handler.Count(BluelinkResponses.ParkLocationPath("VEHICLE-1")));
+    }
+
+    [Fact]
+    public async Task WhenTheParkingLocationTimesOut_ThenThePollSucceedsAndThePreviousLocationIsKept()
+    {
+        // Arrange
+        var (account, handler, time) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        var kona = account.Vehicles["TESTVIN0000000001"];
+        var previousLocation = kona.Location;
+        handler.Reset(BluelinkResponses.ParkLocationPath("VEHICLE-1")).RespondNever(BluelinkResponses.ParkLocationPath("VEHICLE-1"));
+        var poll = account.PollOnceAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Count(BluelinkResponses.ParkLocationPath("VEHICLE-1")) == 2);
+
+        // Act
+        time.Advance(TimeSpan.FromSeconds(30));
+        await poll;
+
+        // Assert
+        Assert.NotNull(previousLocation);
+        Assert.Equal(previousLocation, kona.Location);
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.Null(account.StatusMessage);
     }
 
     [Fact]

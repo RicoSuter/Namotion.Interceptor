@@ -140,9 +140,16 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
     /// <summary>Ends the operation started with a successful <see cref="TryStartOperation"/>.</summary>
     internal void EndOperation()
     {
-        // Cleared before the slot is freed, so that it cannot overwrite the true of the next operation.
-        IsBusy = false;
-        Volatile.Write(ref _operationRunning, 0);
+        // Cleared before the slot is freed, so that it cannot overwrite the true of the next operation; the slot is
+        // freed also when clearing throws.
+        try
+        {
+            IsBusy = false;
+        }
+        finally
+        {
+            Volatile.Write(ref _operationRunning, 0);
+        }
     }
 
     internal void UpdateInfo(BluelinkVehicleInfo info)
