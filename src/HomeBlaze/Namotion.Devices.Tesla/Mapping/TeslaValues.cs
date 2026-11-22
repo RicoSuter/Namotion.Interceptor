@@ -31,7 +31,13 @@ internal static class TeslaValues
     public static decimal? ToFloatPrecision(decimal? value) => value is null ? null : Decimal((float)value.Value);
 
     /// <summary>Converts protobuf miles to the two decimals of the JSON miles.</summary>
-    public static decimal? Miles(float value) => Decimal(value) is { } miles ? Math.Round(miles, 2, MidpointRounding.AwayFromZero) : null;
+    public static decimal? Miles(float value) => Miles(Decimal(value));
+
+    /// <summary>Rounds miles to two decimals, the precision both sources share.</summary>
+    public static decimal? Miles(decimal? miles) => miles is null ? null : Math.Round(miles.Value, 2, MidpointRounding.AwayFromZero);
+
+    /// <summary>The last six characters of a VIN, which identify a vehicle in titles.</summary>
+    public static string VinSuffix(string vin) => vin[^Math.Min(6, vin.Length)..];
 
     public static decimal? WholeNumber(decimal? value) => value is null ? null : Math.Round(value.Value, MidpointRounding.AwayFromZero);
 

@@ -905,5 +905,6 @@ namespace Namotion.Devices.Tesla
         public string? DisplayName { get; init; }
         public Namotion.Devices.Tesla.TeslaVehicleState? State { get; init; }
         public string Vin { get; init; }
+        public string VinSuffix { get; }
     }
 }

@@ -31,7 +31,7 @@
                             {
                                 <MudListItem T="string" Icon="@Icons.Material.Filled.DirectionsCar">
                                     @(vehicle.DisplayName ?? "Tesla")
-                                    <MudText Typo="Typo.caption" Inline="true">(@VinSuffix(vehicle.Vin), @(vehicle.State?.ToString() ?? "Unknown"))</MudText>
+                                    <MudText Typo="Typo.caption" Inline="true">(@vehicle.VinSuffix, @(vehicle.State?.ToString() ?? "Unknown"))</MudText>
                                 </MudListItem>
                             }
                         </MudList>
@@ -185,8 +185,6 @@
     /// <summary>Raised when the user discards the connection to enter a different token; drop the stored refresh token.</summary>
     [Parameter]
     public EventCallback OnReset { get; set; }
-
-    private static string VinSuffix(string vin) => vin[^Math.Min(6, vin.Length)..];
 
     private Task UseDifferentTokenAsync()
     {

@@ -95,7 +95,7 @@ public partial class TeslaVehicle
         // The snapshot reports hundredths of a mile, so the JSON miles are rounded to match.
         if (_odometerClock.TryAdvance(timestamp))
         {
-            TotalDrivenDistance = TeslaValues.MilesToKilometers(state.Odometer is { } miles ? Math.Round(miles, 2, MidpointRounding.AwayFromZero) : null);
+            TotalDrivenDistance = TeslaValues.MilesToKilometers(TeslaValues.Miles(state.Odometer));
         }
     }
 

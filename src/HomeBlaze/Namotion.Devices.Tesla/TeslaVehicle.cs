@@ -159,7 +159,7 @@ public partial class TeslaVehicle :
     // Display
 
     [Derived]
-    public string? Title => VehicleName ?? DisplayName ?? $"{Model ?? "Tesla"}: {Vin[^Math.Min(6, Vin.Length)..]}";
+    public string? Title => VehicleName ?? DisplayName ?? $"{Model ?? "Tesla"}: {TeslaValues.VinSuffix(Vin)}";
 
     [Derived] public string IconName => "DirectionsCar";
 

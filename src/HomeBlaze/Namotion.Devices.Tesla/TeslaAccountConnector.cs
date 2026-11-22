@@ -8,7 +8,11 @@ using Namotion.Devices.Tesla.Mapping;
 namespace Namotion.Devices.Tesla;
 
 /// <summary>A vehicle found while connecting an account.</summary>
-public sealed record TeslaVehicleSummary(string Vin, string? DisplayName, TeslaVehicleState? State);
+public sealed record TeslaVehicleSummary(string Vin, string? DisplayName, TeslaVehicleState? State)
+{
+    /// <summary>The last six characters of the VIN, as the vehicle title shows them.</summary>
+    public string VinSuffix => TeslaValues.VinSuffix(Vin);
+}
 
 /// <summary>
 /// The result of connecting an account: the rotated refresh token to store and the vehicles found.

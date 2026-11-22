@@ -32,6 +32,30 @@ public class TeslaValuesTests
         Assert.Equal(58691.17m, Math.Round(result!.Value, 2));
     }
 
+    [Fact]
+    public void WhenJsonAndProtobufMilesAreRounded_ThenTheyShareOneRule()
+    {
+        // Act
+        var fromJson = TeslaValues.Miles(36469.004009m);
+        var fromProtobuf = TeslaValues.Miles(36469.004f);
+
+        // Assert
+        Assert.Equal(36469.00m, fromJson);
+        Assert.Equal(fromJson, fromProtobuf);
+    }
+
+    [Theory]
+    [InlineData("TESTVIN0000000001", "000001")]
+    [InlineData("ABC", "ABC")]
+    public void WhenVinSuffixIsRequested_ThenTheLastSixCharactersAreReturned(string vin, string expected)
+    {
+        // Act
+        var suffix = TeslaValues.VinSuffix(vin);
+
+        // Assert
+        Assert.Equal(expected, suffix);
+    }
+
     [Theory]
     [InlineData(float.NaN)]
     [InlineData(float.PositiveInfinity)]
