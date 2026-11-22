@@ -4294,7 +4294,7 @@ Append to each device page a section like this, adapted per device:
 
 `FritzBox.md`:
 
-```markdown
+```md
 ## Discovery
 
 The Discover page of the create dialog finds FRITZ!Box routers and repeaters over SSDP and at `fritz.box`. A router that is already added is recognized by its unique device name, or by its host address when it was added without discovery.
@@ -4302,7 +4302,7 @@ The Discover page of the create dialog finds FRITZ!Box routers and repeaters ove
 
 `PhilipsHue.md`:
 
-```markdown
+```md
 ## Discovery
 
 The Discover page of the create dialog finds Hue bridges over mDNS (`_hue._tcp`), without asking the Hue cloud. A bridge that is already added is recognized by its bridge ID. Its setup page still asks you to press the Link button.
@@ -4310,7 +4310,7 @@ The Discover page of the create dialog finds Hue bridges over mDNS (`_hue._tcp`)
 
 `Nuki.md`:
 
-```markdown
+```md
 ## Discovery
 
 The Discover page of the create dialog asks the Nuki discovery service, which lists the bridges seen from your public IP address. It only does so when you open the Discover page. A bridge that is already added is recognized by its host address and port.
@@ -4318,7 +4318,7 @@ The Discover page of the create dialog asks the Nuki discovery service, which li
 
 `Shelly.md`:
 
-```markdown
+```md
 ## Discovery
 
 The Discover page of the create dialog finds Shelly devices of the second generation and later over mDNS (`_shelly._tcp`). A device that is already added is recognized by its device ID, which a device added without discovery reports once it is connected, or by its host address.
@@ -4330,7 +4330,7 @@ Adjust the Nuki text if Task 18 added the bridge ID match.
 
 In `.claude/commands/create-homeblaze-library.md`, add to the deliverables list after the Setup component item:
 
-```markdown
+```md
    - Discoverer (`{SubjectName}Discoverer.cs` in the device library): only if the device announces itself (mDNS, SSDP) or a vendor service lists it. Derive from `SubjectDiscoverer<TSubject, TResult>`, let the result record implement `IDiscoveryResult`, query through `scan.Ssdp` or `scan.MulticastDns`, and implement the type's own `Matches` rule. The Setup component (or the Edit component when there is none) must implement `ISubjectDiscoveryComponent` and start from the picked result. See `docs/architecture/design/discovery.md` in the HomeBlaze docs.
 ```
 - [ ] **Step 4: Commit**
