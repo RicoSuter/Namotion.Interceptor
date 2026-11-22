@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Namotion.Devices.Hyundai.Client;
 using Namotion.Devices.Hyundai.Tests.Testing;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Devices.Hyundai.Tests;
 
@@ -16,9 +17,9 @@ public class BluelinkAccountCommandTests
     private const string Kona = "TESTVIN0000000001";
     private const string Ioniq = "TESTVIN0000000002";
 
-    private static async Task<(BluelinkAccount Account, FakeHttpMessageHandler Handler, FakeTimeProvider Time)> CreatePolledAsync(string pin = "")
+    private static async Task<(BluelinkAccount Account, FakeHttpMessageHandler Handler, FakeTimeProvider Time)> CreatePolledAsync(string pin = "", RecordingLogger? logger = null)
     {
-        var (account, handler, time) = TestAccount.Create(pin: pin);
+        var (account, handler, time) = TestAccount.Create(pin: pin, loggerFactory: logger is null ? null : new RecordingLoggerFactory(logger));
         await account.PollOnceAsync(CancellationToken.None);
         return (account, handler, time);
     }
@@ -72,6 +73,46 @@ public class BluelinkAccountCommandTests
 
         // Assert
         Assert.Equal(BluelinkCommandResult.Failed, exception.Result);
+    }
+
+    [Fact]
+    public async Task WhenCommandFails_ThenOneWarningIsLogged()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var (account, handler, time) = await CreatePolledAsync(logger: logger);
+        handler.Respond(BluelinkResponses.LegacyTemperaturePath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-7"))
+            .Respond(BluelinkResponses.RecordsPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Records("MSG-7", "fail"));
+        var warningCount = logger.Warnings.Count;
+
+        // Act
+        var exception = await Assert.ThrowsAsync<BluelinkCommandException>(() =>
+            TestAccount.AdvanceUntilCompletedAsync(time, account.Vehicles[Kona].Climate.StartClimateAsync(21m, CancellationToken.None)));
+
+        // Assert
+        Assert.Equal($"The Bluelink operation StartClimate of the vehicle {Kona} failed: {exception.Message}", Assert.Single(logger.Warnings.Skip(warningCount)));
+    }
+
+    [Fact]
+    public async Task WhenVehicleIsBusy_ThenTheRejectionIsNotLogged()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var (account, handler, _) = await CreatePolledAsync(logger: logger);
+        var heldResponse = TestAccount.CreateHeldResponse();
+        handler.RespondAfter(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1"), heldResponse.Task);
+        var kona = account.Vehicles[Kona];
+        var refresh = kona.RefreshAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Count(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1")) == 1);
+        var warningCount = logger.Warnings.Count;
+
+        // Act
+        await Assert.ThrowsAsync<InvalidOperationException>(() => kona.Charge.StartChargingAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Equal(warningCount, logger.Warnings.Count);
+        heldResponse.SetResult(TestAccount.CreateResponse(HttpStatusCode.OK, BluelinkResponses.Success()));
+        await refresh;
     }
 
     [Fact]

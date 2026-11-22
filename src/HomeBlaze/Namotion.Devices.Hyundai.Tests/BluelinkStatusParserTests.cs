@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions.Devices.Locks;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Hyundai.Client;
 using Namotion.Devices.Hyundai.Mapping;
 using Namotion.Devices.Hyundai.Tests.Testing;
@@ -11,13 +12,13 @@ public class BluelinkStatusParserTests
     private static BluelinkVehicleStatus ParseFixture()
     {
         using var document = JsonDocument.Parse(FixtureLoader.Load("carstatus-legacy-ev.json"));
-        return BluelinkStatusParser.Parse(document.RootElement.Find("resMsg.state.Vehicle")!.Value);
+        return BluelinkStatusParser.Parse(document.RootElement.Find("resMsg.state.Vehicle")!.Value, NullLogger.Instance);
     }
 
     private static BluelinkVehicleStatus Parse(string vehicleJson)
     {
         using var document = JsonDocument.Parse(vehicleJson);
-        return BluelinkStatusParser.Parse(document.RootElement);
+        return BluelinkStatusParser.Parse(document.RootElement, NullLogger.Instance);
     }
 
     [Fact]

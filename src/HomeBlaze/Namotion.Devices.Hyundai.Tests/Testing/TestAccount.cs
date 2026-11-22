@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Namotion.Interceptor;
@@ -22,11 +23,11 @@ internal static class TestAccount
         .Respond(BluelinkResponses.ParkLocationPath("VEHICLE-2"), HttpStatusCode.OK, FixtureLoader.Load("location-park.json"));
 
     public static (BluelinkAccount Account, FakeHttpMessageHandler Handler, FakeTimeProvider Time) Create(
-        FakeHttpMessageHandler? handler = null, string password = "", string pin = "")
+        FakeHttpMessageHandler? handler = null, string password = "", string pin = "", ILoggerFactory? loggerFactory = null)
     {
         handler ??= CreateHandler();
         var time = new FakeTimeProvider(Start);
-        var account = new BluelinkAccount(time, NullLoggerFactory.Instance, () => new HttpClient(handler))
+        var account = new BluelinkAccount(time, loggerFactory ?? NullLoggerFactory.Instance, () => new HttpClient(handler))
         {
             Email = "user@example.invalid",
             Password = password,

@@ -203,7 +203,7 @@ public partial class BluelinkAccount
     private async Task ReadVehicleAsync(BluelinkTokenManager tokenManager, BluelinkVehicle vehicle, CancellationToken cancellationToken)
     {
         var state = await tokenManager.CallAsync(accessToken => _apiClient.GetStoredStatusAsync(CreateRequest(tokenManager, accessToken, vehicle), cancellationToken), cancellationToken);
-        vehicle.ApplyStatus(BluelinkStatusParser.Parse(state), _timeProvider.GetUtcNow());
+        vehicle.ApplyStatus(BluelinkStatusParser.Parse(state, _logger), _timeProvider.GetUtcNow());
 
         try
         {

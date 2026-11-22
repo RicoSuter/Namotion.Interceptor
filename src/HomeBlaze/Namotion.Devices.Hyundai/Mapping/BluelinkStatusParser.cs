@@ -2,52 +2,61 @@
 using System.Globalization;
 using System.Text.Json;
 using HomeBlaze.Abstractions.Devices.Locks;
+using Microsoft.Extensions.Logging;
 using Namotion.Devices.Hyundai.Client;
 
 namespace Namotion.Devices.Hyundai.Mapping;
 
 /// <summary>
 /// Parses the CCS2 status tree (<c>resMsg.state.Vehicle</c> of <c>/ccs2/carstatus/latest</c>), which the server returns
-/// for both protocols. The rules follow <c>_update_vehicle_properties_ccs2</c> of hyundai_kia_connect_api.
+/// for both protocols. The rules follow <c>_update_vehicle_properties_ccs2</c> of hyundai_kia_connect_api. A missing core
+/// field, an unknown code or a core number that is not one is logged through <see cref="BluelinkApiChanges"/>.
 /// </summary>
 internal static class BluelinkStatusParser
 {
     private const decimal MilesToKilometers = 1.609344m;
     private const decimal PsiToBar = 0.0689476m;
 
-    public static BluelinkVehicleStatus Parse(JsonElement vehicle)
+    public static BluelinkVehicleStatus Parse(JsonElement vehicle, ILogger logger)
     {
-        var chargingState = vehicle.GetInt32("Green.ChargingInformation.Charging.State");
-        var fastening = vehicle.GetInt32("Green.ChargingInformation.ConnectorFastening.State");
+        var chargingState = GetCode(vehicle, "Green.ChargingInformation.Charging.State", 2, logger);
+        var fastening = GetCode(vehicle, "Green.ChargingInformation.ConnectorFastening.State", 1, logger);
         var remainingMinutes = vehicle.GetDecimal("Green.ChargingInformation.Charging.RemainTime");
         var isCharging = GetIsCharging(chargingState, fastening, remainingMinutes);
-        var pressureScale = GetPressureScale(vehicle);
+        var pressureScale = GetPressureScale(vehicle, logger);
+        var time = ParseTime(vehicle.GetString("Date"));
+        if (time is null)
+        {
+            LogMissingOrNotNumeric(vehicle, "Date", isRequired: true, logger);
+        }
 
         return new BluelinkVehicleStatus
         {
-            Time = ParseTime(vehicle.GetString("Date")),
-            TotalDrivenDistance = vehicle.GetDecimal("Drivetrain.Odometer"),
+            Time = time,
+            TotalDrivenDistance = GetNumber(vehicle, "Drivetrain.Odometer", isRequired: true, logger),
             AuxiliaryBatteryLevel = vehicle.GetInt32("Electronics.Battery.SensorReliability") == 1 ? null : GetPercent(vehicle, "Electronics.Battery.Level"),
 
-            BatteryLevel = GetPercent(vehicle, "Green.BatteryManagement.BatteryRemain.Ratio"),
-            IsPluggedIn = GetIsPluggedIn(vehicle.GetInt32("Green.ChargingConnector.LockState"), chargingState, fastening),
+            BatteryLevel = ToPercent(GetNumber(vehicle, "Green.BatteryManagement.BatteryRemain.Ratio", isRequired: true, logger)),
+            IsPluggedIn = GetIsPluggedIn(GetCode(vehicle, "Green.ChargingConnector.LockState", 5, logger), chargingState, fastening),
             IsCharging = isCharging,
             // Reported in kW.
             ChargingPower = vehicle.GetDecimal("Green.Electric.SmartGrid.RealTimePower") * 1000m,
             RemainingChargingTime = isCharging == true && remainingMinutes > 0 ? TimeSpan.FromMinutes((double)remainingMinutes.Value) : null,
             ChargeLimit = GetPercent(vehicle, "Green.ChargingInformation.TargetSoC.Standard"),
             FastChargeLimit = GetPercent(vehicle, "Green.ChargingInformation.TargetSoC.Quick"),
-            Range = GetRange(vehicle),
+            Range = GetRange(vehicle, logger),
 
             IsClimateOn = vehicle.GetDecimal("Cabin.HVAC.Row1.Driver.Blower.SpeedLevel") is { } speed ? speed > 0 : null,
-            DriverTemperatureSetting = GetCelsius(vehicle, "Cabin.HVAC.Row1.Driver.Temperature"),
-            OutsideTemperature = GetCelsius(vehicle, "Cabin.HVAC.OutsideTemperature"),
-            IsFrontDefrosterOn = GetOnOff(vehicle, "Body.Windshield.Front.Defog.State"),
-            IsSteeringWheelHeaterOn = GetOnOff(vehicle, "Cabin.SteeringWheel.Heat.State"),
+            DriverTemperatureSetting = GetCelsius(vehicle, "Cabin.HVAC.Row1.Driver.Temperature", logger),
+            OutsideTemperature = GetCelsius(vehicle, "Cabin.HVAC.OutsideTemperature", logger),
+            IsFrontDefrosterOn = GetOnOff(vehicle, "Body.Windshield.Front.Defog.State", logger),
+            IsSteeringWheelHeaterOn = GetOnOff(vehicle, "Cabin.SteeringWheel.Heat.State", logger),
 
             LockState = GetLockState(
-                IsDoorLocked(vehicle, "Row1.Driver"), IsDoorLocked(vehicle, "Row1.Passenger"),
-                IsDoorLocked(vehicle, "Row2.Left"), IsDoorLocked(vehicle, "Row2.Right")),
+                IsDoorLocked(vehicle, "Cabin.Door.Row1.Driver.Lock", logger, isRequired: true),
+                IsDoorLocked(vehicle, "Cabin.Door.Row1.Passenger.Lock", logger),
+                IsDoorLocked(vehicle, "Cabin.Door.Row2.Left.Lock", logger),
+                IsDoorLocked(vehicle, "Cabin.Door.Row2.Right.Lock", logger)),
             IsDriverFrontDoorOpen = vehicle.GetFlag("Cabin.Door.Row1.Driver.Open"),
             IsPassengerFrontDoorOpen = vehicle.GetFlag("Cabin.Door.Row1.Passenger.Open"),
             IsDriverRearDoorOpen = vehicle.GetFlag("Cabin.Door.Row2.Left.Open"),
@@ -100,18 +109,64 @@ internal static class BluelinkStatusParser
         _ => null
     };
 
-    private static decimal? GetPercent(JsonElement vehicle, string path) =>
-        vehicle.GetDecimal(path) is { } percent and >= 0m and <= 100m ? percent / 100m : null;
+    private static decimal? GetPercent(JsonElement vehicle, string path) => ToPercent(vehicle.GetDecimal(path));
 
-    private static decimal? GetRange(JsonElement vehicle)
+    private static decimal? ToPercent(decimal? value) => value is { } percent and >= 0m and <= 100m ? percent / 100m : null;
+
+    /// <summary>Reads a number; logs a value that is not a number, and a missing field when every status has it.</summary>
+    private static decimal? GetNumber(JsonElement vehicle, string path, bool isRequired, ILogger logger)
+    {
+        var value = vehicle.GetDecimal(path);
+        if (value is null)
+        {
+            LogMissingOrNotNumeric(vehicle, path, isRequired, logger);
+        }
+
+        return value;
+    }
+
+    /// <summary>Reads a code and logs one outside 0 to <paramref name="maximum"/>; a required field also logs when missing or not a number.</summary>
+    private static int? GetCode(JsonElement vehicle, string path, int maximum, ILogger logger, bool isRequired = false)
+    {
+        var code = vehicle.GetInt32(path);
+        if (code is { } value)
+        {
+            if (value < 0 || value > maximum)
+            {
+                BluelinkApiChanges.LogUnknownValue(logger, path, value.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+        else if (isRequired)
+        {
+            LogMissingOrNotNumeric(vehicle, path, isRequired: true, logger);
+        }
+
+        return code;
+    }
+
+    private static void LogMissingOrNotNumeric(JsonElement vehicle, string path, bool isRequired, ILogger logger)
+    {
+        if (vehicle.Find(path) is { } element)
+        {
+            // Only a leaf is logged as text, so that an object never puts a part of the response into the log.
+            BluelinkApiChanges.LogUnknownValue(logger, path,
+                element.ValueKind is JsonValueKind.String or JsonValueKind.Number ? element.ToString() : element.ValueKind.ToString());
+        }
+        else if (isRequired)
+        {
+            BluelinkApiChanges.LogMissing(logger, path);
+        }
+    }
+
+    private static decimal? GetRange(JsonElement vehicle, ILogger logger)
     {
         // 4095 marks an invalid reading of the 12-bit field.
-        if (vehicle.GetDecimal("Drivetrain.FuelSystem.DTE.Total") is not { } total || total is < 0m or > 4094m)
+        if (GetNumber(vehicle, "Drivetrain.FuelSystem.DTE.Total", isRequired: false, logger) is not { } total || total is < 0m or > 4094m)
         {
             return null;
         }
 
-        return vehicle.GetInt32("Drivetrain.FuelSystem.DTE.Unit") switch
+        return GetCode(vehicle, "Drivetrain.FuelSystem.DTE.Unit", 3, logger) switch
         {
             1 => total,
             2 or 3 => Math.Round(total * MilesToKilometers, 1),
@@ -119,11 +174,11 @@ internal static class BluelinkStatusParser
         };
     }
 
-    /// <summary>Reads a temperature in °C (unit 0); "OFF" or another unit is null.</summary>
-    private static decimal? GetCelsius(JsonElement vehicle, string path) =>
-        vehicle.GetInt32(path + ".Unit") == 0 ? vehicle.GetDecimal(path + ".Value") : null;
+    /// <summary>Reads a temperature in °C (unit 0); "OFF" or another unit, such as °F (1), is null.</summary>
+    private static decimal? GetCelsius(JsonElement vehicle, string path, ILogger logger) =>
+        GetCode(vehicle, path + ".Unit", 1, logger) == 0 ? vehicle.GetDecimal(path + ".Value") : null;
 
-    private static bool? GetOnOff(JsonElement vehicle, string path) => vehicle.GetInt32(path) switch
+    private static bool? GetOnOff(JsonElement vehicle, string path, ILogger logger) => GetCode(vehicle, path, 2, logger) switch
     {
         1 => true,
         0 or 2 => false,
@@ -131,7 +186,7 @@ internal static class BluelinkStatusParser
     };
 
     /// <summary>Lock 1 means unlocked; hyundai_kia_connect_api reads a door as locked when Lock is 0.</summary>
-    private static bool? IsDoorLocked(JsonElement vehicle, string door) => vehicle.GetInt32($"Cabin.Door.{door}.Lock") switch
+    private static bool? IsDoorLocked(JsonElement vehicle, string path, ILogger logger, bool isRequired = false) => GetCode(vehicle, path, 1, logger, isRequired) switch
     {
         null => null,
         0 => true,
@@ -168,7 +223,8 @@ internal static class BluelinkStatusParser
     }
 
     /// <summary>The factor from the raw pressure to bar: psi (0) is whole psi, kPa (1) counts 5 kPa steps, bar (2) counts 0.1 bar steps.</summary>
-    private static decimal? GetPressureScale(JsonElement vehicle) => vehicle.GetInt32("Chassis.Axle.Tire.PressureUnit") switch
+    /// <remarks>Unit 3 is indirect tire pressure monitoring, which reports no pressure.</remarks>
+    private static decimal? GetPressureScale(JsonElement vehicle, ILogger logger) => GetCode(vehicle, "Chassis.Axle.Tire.PressureUnit", 3, logger) switch
     {
         0 => PsiToBar,
         1 => 0.05m,
