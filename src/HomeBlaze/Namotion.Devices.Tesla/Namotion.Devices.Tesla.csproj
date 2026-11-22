@@ -14,6 +14,8 @@
 
   <ItemGroup>
     <Protobuf Include="Protos\*.proto" GrpcServices="None" Access="Internal" ProtoRoot="Protos" />
+    <!-- The code generated from the Apache-2.0 protos ships in this assembly, so its license ships with it. -->
+    <None Update="Protos\LICENSE" Link="ThirdPartyNotices\tesla-vehicle-command-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
