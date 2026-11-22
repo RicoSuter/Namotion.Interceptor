@@ -66,6 +66,16 @@ public sealed record SubjectNameOptions(string Label, string Suffix, IReadOnlyCo
         return name;
     }
 
+    /// <summary>
+    /// Suggests a name for a new subject that represents a found device: <paramref name="preferredName"/> without
+    /// surrounding whitespace when <see cref="Validate"/> accepts it, otherwise <see cref="SuggestName(Type)"/>.
+    /// </summary>
+    public string SuggestName(string preferredName, Type type)
+    {
+        var trimmedName = preferredName.Trim();
+        return Validate(trimmedName) is null ? trimmedName : SuggestName(type);
+    }
+
     private bool IsTaken(string name)
     {
         var nameWithSuffix = name + Suffix;

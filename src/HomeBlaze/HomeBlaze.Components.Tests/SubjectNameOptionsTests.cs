@@ -168,4 +168,30 @@ public class SubjectNameOptionsTests
         Assert.Equal("SubjectNameOptionsTests3", name);
         Assert.Null(options.Validate(name));
     }
+
+    [Fact]
+    public void WhenThePreferredNameIsValid_ThenItIsSuggested()
+    {
+        // Arrange
+        var options = new SubjectNameOptions("File name", ".json", ["Other.json"]);
+
+        // Act
+        var name = options.SuggestName("  Philips Hue - 1A2B3C ", typeof(SubjectNameOptionsTests));
+
+        // Assert
+        Assert.Equal("Philips Hue - 1A2B3C", name);
+    }
+
+    [Fact]
+    public void WhenThePreferredNameIsTaken_ThenTheTypeNameIsSuggested()
+    {
+        // Arrange
+        var options = new SubjectNameOptions("File name", ".json", ["Living room.json"]);
+
+        // Act
+        var name = options.SuggestName("Living room", typeof(SubjectNameOptionsTests));
+
+        // Assert
+        Assert.Equal(nameof(SubjectNameOptionsTests), name);
+    }
 }
