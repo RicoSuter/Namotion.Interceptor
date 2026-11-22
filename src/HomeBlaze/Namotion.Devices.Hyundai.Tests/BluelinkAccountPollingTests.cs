@@ -1,0 +1,181 @@
+using System.Net;
+using HomeBlaze.Abstractions;
+using Namotion.Devices.Hyundai.Tests.Testing;
+
+namespace Namotion.Devices.Hyundai.Tests;
+
+public class BluelinkAccountPollingTests
+{
+    [Fact]
+    public async Task WhenAccountPolls_ThenElectricVehiclesAreDiscoveredByVin()
+    {
+        // Arrange
+        var (account, _, _) = TestAccount.Create();
+
+        // Act
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.True(account.IsAuthenticated);
+        Assert.Equal("user@example.invalid", account.AuthenticatedUser);
+        Assert.Equal(["TESTVIN0000000001", "TESTVIN0000000002"], account.Vehicles.Keys.Order());
+        var kona = account.Vehicles["TESTVIN0000000001"];
+        Assert.Equal(BluelinkProtocol.Legacy, kona.Protocol);
+        Assert.Equal(0.465m, kona.Charge.BatteryLevel);
+        Assert.Equal(1.234567, kona.Location!.Value.Latitude, 6);
+    }
+
+    [Fact]
+    public async Task WhenAccountPolls_ThenOnlyStoredStatusEndpointsAreCalled()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+
+        // Act
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(0, handler.Count(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1")));
+        Assert.Equal(0, handler.Count(BluelinkResponses.Ccs2StatusRequestPath("VEHICLE-2")));
+        Assert.Equal(5, account.RequestsToday);
+    }
+
+    [Fact]
+    public async Task WhenPolledAgainWithinADay_ThenVehicleListIsNotReadAgainAndVehiclesStay()
+    {
+        // Arrange
+        var (account, handler, time) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        var kona = account.Vehicles["TESTVIN0000000001"];
+
+        // Act
+        time.Advance(TimeSpan.FromMinutes(30));
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, handler.Count(BluelinkResponses.VehiclesPath));
+        Assert.Same(kona, account.Vehicles["TESTVIN0000000001"]);
+    }
+
+    [Fact]
+    public async Task WhenOneVehicleFails_ThenTheOtherIsStillRead()
+    {
+        // Arrange
+        var handler = TestAccount.CreateHandler();
+        handler.Reset(BluelinkResponses.StatusPath("VEHICLE-2")).Respond(BluelinkResponses.StatusPath("VEHICLE-2"), HttpStatusCode.OK, BluelinkResponses.Failure("5031", "unavailable"));
+        var (account, _, _) = TestAccount.Create(handler);
+
+        // Act
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.Contains("5031", account.StatusMessage, StringComparison.Ordinal);
+        Assert.Equal(0.465m, account.Vehicles["TESTVIN0000000001"].Charge.BatteryLevel);
+    }
+
+    [Fact]
+    public async Task WhenHyundaiLimitsRequests_ThenPollingPausesForTwoHours()
+    {
+        // Arrange
+        var handler = TestAccount.CreateHandler();
+        handler.Reset(BluelinkResponses.VehiclesPath).Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, BluelinkResponses.Failure("5091", "Exceeds number of requests"));
+        var (account, _, _) = TestAccount.Create(handler);
+
+        // Act
+        await account.PollOnceAsync(CancellationToken.None);
+        var delay = await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, account.Status);
+        Assert.StartsWith("Hyundai's request limit was reached; polling resumes at 12:30", account.StatusMessage, StringComparison.Ordinal);
+        Assert.Equal(TimeSpan.FromHours(2), delay);
+    }
+
+    [Fact]
+    public async Task WhenBudgetLeavesOnlyTheReserve_ThenPollingWaitsUntilMidnight()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        account.DailyRequestLimit = 14;
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Act
+        var delay = await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromHours(13.5), delay);
+        Assert.Equal(1, handler.Count(BluelinkResponses.VehiclesPath));
+    }
+
+    [Fact]
+    public async Task WhenCredentialsAreMissing_ThenAccountIsStopped()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        account.Tokens = string.Empty;
+
+        // Act
+        var delay = await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, account.Status);
+        Assert.Equal("Missing credentials", account.StatusMessage);
+        Assert.Equal(Timeout.InfiniteTimeSpan, delay);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task WhenPollingIntervalIsTooShort_ThenAtLeastFifteenMinutesAreWaited()
+    {
+        // Arrange
+        var (account, _, _) = TestAccount.Create();
+        account.StatusPollingInterval = TimeSpan.FromMinutes(1);
+
+        // Act
+        var delay = await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMinutes(15), delay);
+    }
+
+    [Fact]
+    public async Task WhenDeviceIdIsMissing_ThenADeviceIsRegisteredFirst()
+    {
+        // Arrange
+        var handler = TestAccount.CreateHandler()
+            .Respond(BluelinkResponses.RegisterPath, HttpStatusCode.OK, BluelinkResponses.Success("""{"deviceId":"device-9"}"""));
+        var (account, _, _) = TestAccount.Create(handler);
+        account.DeviceId = string.Empty;
+
+        // Act
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("device-9", account.DeviceId);
+        Assert.Equal("device-9", handler.Requests.Last(request => request.Uri.AbsolutePath == BluelinkResponses.VehiclesPath).Header("ccsp-device-id"));
+    }
+
+    [Fact]
+    public async Task WhenTokenRefreshFailsTransientlyDuringAPoll_ThenAccountRetriesWithoutReauthentication()
+    {
+        // Arrange
+        var (account, handler, time) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        handler.Reset(BluelinkResponses.RefreshPath).Respond(BluelinkResponses.RefreshPath, HttpStatusCode.ServiceUnavailable, "{}");
+        time.Advance(TimeSpan.FromHours(1));
+
+        // Act
+        await account.PollOnceAsync(CancellationToken.None);
+        var delay = account.GetNextPollDelay();
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, account.Status);
+        Assert.StartsWith("Bluelink returned 503", account.StatusMessage, StringComparison.Ordinal);
+        Assert.False(account.IsReauthenticationRequired);
+        Assert.Equal(TimeSpan.FromMinutes(5), delay);
+        Assert.Equal(1, handler.Count(BluelinkResponses.VehiclesPath));
+        Assert.Equal(1, handler.Count(BluelinkResponses.StatusPath("VEHICLE-2")));
+    }
+}
