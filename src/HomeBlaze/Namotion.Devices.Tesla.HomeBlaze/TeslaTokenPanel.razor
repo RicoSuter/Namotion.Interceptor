@@ -229,16 +229,14 @@
         var renewLogin = isLogin;
         try
         {
+            // Closing the panel cancels only the vehicle listing. The connection is passed on also then, because Tesla
+            // has already replaced the pasted refresh token.
             var connection = await connect(_disposeCancellation.Token);
             _isConnected = true;
             _email = connection.Email;
             _vehicles = connection.Vehicles;
             _vehicleListError = connection.VehicleListError;
             await OnConnected.InvokeAsync(connection);
-        }
-        catch (OperationCanceledException) when (_disposeCancellation.IsCancellationRequested)
-        {
-            // The panel was closed.
         }
         catch (TeslaReauthenticationRequiredException)
         {

@@ -313,7 +313,7 @@ public class TeslaAuthenticationTests
     }
 
     [Fact]
-    public async Task WhenTheRefreshedTokenIsUnauthorizedAgain_ThenReauthenticationIsRequired()
+    public async Task WhenTheRefreshedTokenIsUnauthorizedAgain_ThenTheApiExceptionIsThrownWithoutReauthentication()
     {
         // Arrange
         var handler = new FakeHttpMessageHandler()
@@ -323,8 +323,9 @@ public class TeslaAuthenticationTests
         var manager = new TeslaTokenManager(new TeslaAuthClient(httpClient), "refresh-1", new FakeTimeProvider(Start), _ => Task.CompletedTask);
 
         // Act & Assert
-        await Assert.ThrowsAsync<TeslaReauthenticationRequiredException>(() => manager.CallAsync<int>(
+        var exception = await Assert.ThrowsAsync<TeslaApiException>(() => manager.CallAsync<int>(
             _ => throw new TeslaApiException(HttpStatusCode.Unauthorized, "unauthorized"), CancellationToken.None));
+        Assert.Equal(HttpStatusCode.Unauthorized, exception.StatusCode);
         Assert.Equal(2, handler.Requests.Count);
     }
 

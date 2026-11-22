@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.Extensions.Time.Testing;
 using Namotion.Devices.Tesla.Client;
 using Namotion.Devices.Tesla.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using static Namotion.Devices.Tesla.Tests.Testing.TokenResponses;
 
 namespace Namotion.Devices.Tesla.Tests;
@@ -79,6 +80,31 @@ public class TeslaAccountConnectorTests
         Assert.Equal("refresh-2", connection.RefreshToken);
         Assert.Empty(connection.Vehicles);
         Assert.Contains("503", connection.VehicleListError);
+    }
+
+    [Fact]
+    public async Task WhenConnectingIsCanceledDuringTheTokenRefresh_ThenTheRotatedTokenIsStillReturned()
+    {
+        // Arrange
+        var tokenResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new FakeHttpMessageHandler()
+            .Respond(TokenPath, () => tokenResponse.Task)
+            .Respond(ProductsPath, HttpStatusCode.OK, FixtureLoader.Load("products.json"));
+        using var httpClient = new HttpClient(handler);
+        using var cancellation = new CancellationTokenSource();
+        var connect = TeslaAccountConnector.ConnectWithRefreshTokenAsync(
+            httpClient, "refresh-1", new FakeTimeProvider(Start), cancellation.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Requests.Count == 1);
+
+        // Act
+        await cancellation.CancelAsync();
+        tokenResponse.SetResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(TokenJson("access-1", "refresh-2")) });
+        var connection = await connect;
+
+        // Assert
+        Assert.Equal("refresh-2", connection.RefreshToken);
+        Assert.Empty(connection.Vehicles);
+        Assert.NotNull(connection.VehicleListError);
     }
 
     [Fact]

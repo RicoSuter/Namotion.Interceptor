@@ -272,6 +272,28 @@ public class TeslaAccountTests
     }
 
     [Fact]
+    public async Task WhenReadingVehicleIsUnauthorizedAfterARefresh_ThenOnlyTheVehicleFailsAndReauthenticationIsNotRequired()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler()
+            .Respond(TokenPath, HttpStatusCode.OK, TokenJson)
+            .Respond(TokenPath, HttpStatusCode.OK, """{"access_token":"access-2","refresh_token":"refresh-3","expires_in":28800}""")
+            .Respond(ProductsPath, HttpStatusCode.OK, FixtureLoader.Load("products.json"))
+            .Respond(VehicleDataPath, HttpStatusCode.Unauthorized, """{"error":"unauthorized"}""");
+        var (account, _, _) = Create(handler);
+
+        // Act
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, CountRequests(handler, TokenPath));
+        Assert.False(account.IsReauthenticationRequired);
+        Assert.True(account.IsAuthenticated);
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.Contains("401", account.StatusMessage);
+    }
+
+    [Fact]
     public async Task WhenFirstPollFailsWithANetworkError_ThenReauthenticationIsNotRequired()
     {
         // Arrange

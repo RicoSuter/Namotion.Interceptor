@@ -55,7 +55,10 @@ public static class TeslaAccountConnector
     /// <summary>Starts a browser login; open <see cref="TeslaLogin.Url"/> and pass the pasted callback to <see cref="ConnectWithLoginAsync(TeslaLogin, string, TimeProvider, CancellationToken)"/>.</summary>
     public static TeslaLogin CreateLogin() => TeslaAuthClient.CreateLogin();
 
-    /// <summary>Refreshes the pasted refresh token and lists the vehicles.</summary>
+    /// <summary>
+    /// Refreshes the pasted refresh token and lists the vehicles. Cancellation stops only the listing, so that the rotated
+    /// refresh token is always returned.
+    /// </summary>
     /// <exception cref="TeslaReauthenticationRequiredException">Tesla rejected the refresh token.</exception>
     /// <exception cref="TeslaApiException">Tesla failed.</exception>
     public static async Task<TeslaConnection> ConnectWithRefreshTokenAsync(string refreshToken, TimeProvider timeProvider, CancellationToken cancellationToken)
@@ -64,7 +67,10 @@ public static class TeslaAccountConnector
         return await ConnectWithRefreshTokenAsync(httpClient, refreshToken, timeProvider, cancellationToken);
     }
 
-    /// <summary>Exchanges the code of the pasted callback address of <paramref name="login"/> and lists the vehicles.</summary>
+    /// <summary>
+    /// Exchanges the code of the pasted callback address of <paramref name="login"/> and lists the vehicles. Cancellation
+    /// stops only the listing, so that the refresh token is always returned.
+    /// </summary>
     /// <exception cref="FormatException">The pasted text holds an error from Tesla, has no code or belongs to another login.</exception>
     /// <exception cref="TeslaReauthenticationRequiredException">Tesla rejected the code.</exception>
     /// <exception cref="TeslaApiException">Tesla failed.</exception>
@@ -76,14 +82,17 @@ public static class TeslaAccountConnector
 
     internal static async Task<TeslaConnection> ConnectWithRefreshTokenAsync(HttpClient httpClient, string refreshToken, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
-        var tokens = await new TeslaAuthClient(httpClient).RefreshAsync(refreshToken.Trim(), timeProvider, cancellationToken);
+        // Not canceled: Tesla may already have rotated the refresh token, and only the response holds the new one. The
+        // HTTP client timeout bounds it.
+        var tokens = await new TeslaAuthClient(httpClient).RefreshAsync(refreshToken.Trim(), timeProvider, CancellationToken.None);
         return await ListVehiclesAsync(httpClient, tokens, timeProvider, cancellationToken);
     }
 
     internal static async Task<TeslaConnection> ConnectWithLoginAsync(HttpClient httpClient, TeslaLogin login, string pastedCallback, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
         var code = TeslaAuthClient.ParseCallbackCode(pastedCallback, login.State);
-        var tokens = await new TeslaAuthClient(httpClient).ExchangeCodeAsync(code, login.CodeVerifier, timeProvider, cancellationToken);
+        // Not canceled, like the refresh: the code is used up once it is sent.
+        var tokens = await new TeslaAuthClient(httpClient).ExchangeCodeAsync(code, login.CodeVerifier, timeProvider, CancellationToken.None);
         return await ListVehiclesAsync(httpClient, tokens, timeProvider, cancellationToken);
     }
 
@@ -94,10 +103,14 @@ public static class TeslaAccountConnector
         {
             products = await new TeslaOwnerApiClient(httpClient, timeProvider, NullLogger.Instance).GetVehicleProductsAsync(tokens.AccessToken, cancellationToken);
         }
-        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        catch (Exception exception)
         {
-            // Tesla has already replaced the given refresh token, so the rotated one is returned to be stored.
-            return new TeslaConnection(tokens.RefreshToken, tokens.Email, [], exception.Message);
+            // Tesla has already replaced the given refresh token, so the rotated one is returned to be stored, also
+            // when the listing was canceled.
+            var error = exception is OperationCanceledException && cancellationToken.IsCancellationRequested
+                ? "Listing the vehicles was canceled."
+                : exception.Message;
+            return new TeslaConnection(tokens.RefreshToken, tokens.Email, [], error);
         }
 
         var vehicles = products
