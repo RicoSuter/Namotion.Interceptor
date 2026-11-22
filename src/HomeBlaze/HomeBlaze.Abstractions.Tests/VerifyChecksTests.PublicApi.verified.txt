@@ -542,7 +542,7 @@ namespace HomeBlaze.Abstractions.Devices.Vehicles
     {
         [HomeBlaze.Abstractions.Attributes.Operation(Icon="BatteryChargingFull", Position=3, Title="Set Charge Limit")]
         [System.ComponentModel.Category("Charging")]
-        System.Threading.Tasks.Task SetChargeLimitAsync(decimal chargeLimit, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task SetChargeLimitAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal chargeLimit, System.Threading.CancellationToken cancellationToken);
         [HomeBlaze.Abstractions.Attributes.Operation(Icon="EvStation", Position=1, Title="Start Charging")]
         [System.ComponentModel.Category("Charging")]
         System.Threading.Tasks.Task StartChargingAsync(System.Threading.CancellationToken cancellationToken);
@@ -571,7 +571,7 @@ namespace HomeBlaze.Abstractions.Devices.Vehicles
     {
         [HomeBlaze.Abstractions.Attributes.Operation(Icon="Thermostat", Position=1, Title="Start Climate")]
         [System.ComponentModel.Category("Climate")]
-        System.Threading.Tasks.Task StartClimateAsync(decimal temperature, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task StartClimateAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)] decimal temperature, System.Threading.CancellationToken cancellationToken);
         [HomeBlaze.Abstractions.Attributes.Operation(Icon="Stop", Position=2, Title="Stop Climate")]
         [System.ComponentModel.Category("Climate")]
         System.Threading.Tasks.Task StopClimateAsync(System.Threading.CancellationToken cancellationToken);
