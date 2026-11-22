@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Services.Secrets;
 using HomeBlaze.Services.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -37,6 +38,8 @@ public class ConfigurableSubjectSerializer
     private readonly IServiceProvider _serviceProvider;
     private readonly JsonSerializerOptions _jsonPropertyOptions;
     private readonly JsonSerializerOptions _cSharpPropertyOptions;
+    // Null without a SecretStore service, which leaves secret values as they are.
+    private readonly SecretReferences? _secrets;
     // Never cleared: holds its Type keys, and with them their assemblies, as long as the serializer lives, like TypeProvider.
     private readonly ConcurrentDictionary<(Type Type, ConfigurationNaming Naming), JsonElement?> _defaultConfigurations = new();
 
@@ -44,15 +47,20 @@ public class ConfigurableSubjectSerializer
     {
         _typeProvider = typeProvider;
         _serviceProvider = serviceProvider;
-        _jsonPropertyOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.JsonProperty);
-        _cSharpPropertyOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.CSharpProperty);
+
+        // One instance for both namings, so a key read with one naming is kept when written with the other.
+        _secrets = serviceProvider.GetService<SecretStore>() is { } store
+            ? new SecretReferences(store, serviceProvider.GetService<ILogger<ConfigurableSubjectSerializer>>())
+            : null;
+        _jsonPropertyOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.JsonProperty, _secrets);
+        _cSharpPropertyOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.CSharpProperty, _secrets);
     }
 
     private static JsonSerializerOptions CreateOptions(
-        TypeProvider typeProvider, IServiceProvider serviceProvider, ConfigurationNaming naming) =>
+        TypeProvider typeProvider, IServiceProvider serviceProvider, ConfigurationNaming naming, SecretReferences? secrets) =>
         new()
         {
-            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider, serviceProvider, naming),
+            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider, serviceProvider, naming) { Secrets = secrets },
             PropertyNamingPolicy = naming == ConfigurationNaming.JsonProperty ? JsonNamingPolicy.CamelCase : null,
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

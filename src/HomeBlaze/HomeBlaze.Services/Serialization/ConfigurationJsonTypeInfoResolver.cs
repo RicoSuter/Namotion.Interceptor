@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Services.Secrets;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -26,6 +27,11 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
     private readonly TypeProvider _typeProvider;
     private readonly IServiceProvider _serviceProvider;
     private readonly ConfigurationNaming _naming;
+
+    /// <summary>
+    /// Turns secret values into references and back. Null leaves secret values as they are.
+    /// </summary>
+    internal SecretReferences? Secrets { get; init; }
 
     /// <param name="typeProvider">The types that a <c>$type</c> discriminator can name.</param>
     /// <param name="serviceProvider">Creates the configurable types that have no parameterless constructor.</param>
@@ -104,6 +110,16 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                     continue;
                 }
 
+                if (property.AttributeProvider is PropertyInfo propertyInfo && SecretReferences.IsSecret(propertyInfo))
+                {
+                    // Also without a store, so that the same type fails whether or not secrets are stored.
+                    SecretReferences.EnsureSupported(type, propertyInfo.Name, propertyInfo.PropertyType);
+                    if (Secrets is { } secrets)
+                    {
+                        WrapSecret(property, propertyInfo.Name, secrets);
+                    }
+                }
+
                 var ignoreNulls = options.DefaultIgnoreCondition == JsonIgnoreCondition.WhenWritingNull;
                 property.ShouldSerialize = (parent, value) =>
                 {
@@ -128,6 +144,21 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
         }
 
         return typeInfo;
+    }
+
+    // The getter serves every write, also of the overload of the serializer that excludes properties. The setter only
+    // serves subjects nested in a configuration: the serializer sets the properties of the subject it reads itself.
+    private static void WrapSecret(JsonPropertyInfo property, string propertyName, SecretReferences secrets)
+    {
+        if (property.Get is { } get)
+        {
+            property.Get = owner => secrets.Write(owner, propertyName, get(owner));
+        }
+
+        if (property.Set is { } set)
+        {
+            property.Set = (owner, value) => set(owner, secrets.Read(owner, propertyName, value));
+        }
     }
 
     private static void RemovePropertiesWithoutConfiguration(JsonTypeInfo typeInfo)
