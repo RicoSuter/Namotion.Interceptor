@@ -55,7 +55,7 @@ public sealed class ShellyDeviceDiscoverer : SubjectDiscoverer<ShellyDevice, She
                 var device = devices[index];
                 devices[index] = device with
                 {
-                    Name = device.Name == deviceId && name is not null ? name : device.Name,
+                    DisplayName = device.DisplayName == deviceId && name is not null ? name : device.DisplayName,
                     Application = device.Application ?? application
                 };
             }

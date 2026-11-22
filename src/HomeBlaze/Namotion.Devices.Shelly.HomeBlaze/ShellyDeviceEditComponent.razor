@@ -135,9 +135,9 @@
                 _hostAddress = discovered.HostAddress;
 
                 // Without a user-given name the subject's title falls back to the name the device reports.
-                if (string.IsNullOrWhiteSpace(_name) && discovered.Name != discovered.DeviceId)
+                if (string.IsNullOrWhiteSpace(_name) && discovered.DisplayName != discovered.DeviceId)
                 {
-                    _name = discovered.Name;
+                    _name = discovered.DisplayName;
                 }
             }
         }
