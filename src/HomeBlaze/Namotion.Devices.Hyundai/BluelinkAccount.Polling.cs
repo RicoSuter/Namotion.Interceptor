@@ -9,7 +9,7 @@ namespace Namotion.Devices.Hyundai;
 public partial class BluelinkAccount
 {
     private const string MissingCredentialsMessage = "Missing credentials";
-    private const int CommandReserve = 10;
+    private const string ReserveMessage = "Polling pauses until midnight to keep the remaining requests for commands.";
 
     private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan MinimumRetryInterval = TimeSpan.FromMinutes(1);
@@ -89,23 +89,7 @@ public partial class BluelinkAccount
             return pause;
         }
 
-        var remaining = _budget.Remaining;
-        if (remaining == 0)
-        {
-            Status = ServiceStatus.Error;
-            StatusMessage = BluelinkRequestLimitException.LimitMessage;
-            return _budget.TimeUntilReset;
-        }
-
-        if (remaining < CommandReserve)
-        {
-            Status = ServiceStatus.Running;
-            StatusMessage = "Polling pauses until midnight to keep the remaining requests for commands.";
-            return _budget.TimeUntilReset;
-        }
-
-        await PollOnceAsync(stoppingToken);
-        return GetNextPollDelay();
+        return await PollOnceAsync(stoppingToken) ? GetNextPollDelay() : _budget.TimeUntilReset;
     }
 
     private bool HasCredentials => !string.IsNullOrWhiteSpace(Email) && !string.IsNullOrWhiteSpace(Tokens);
@@ -139,8 +123,11 @@ public partial class BluelinkAccount
     /// <summary>
     /// One polling cycle: the vehicle list when it is due, then the stored status and parking location of every vehicle.
     /// Handles every failure except cancellation and reports it in <see cref="Status"/> and <see cref="StatusMessage"/>.
+    /// Nothing is read once the daily request limit is reached or the calls of the cycle would leave fewer than a command
+    /// needs.
     /// </summary>
-    internal async Task PollOnceAsync(CancellationToken cancellationToken)
+    /// <returns>False when the requests left today stop polling until midnight.</returns>
+    internal async Task<bool> PollOnceAsync(CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);
         BluelinkTokenManager? tokenManager = null;
@@ -152,14 +139,28 @@ public partial class BluelinkAccount
             }
 
             await SaveUnsavedConfigurationAsync(cancellationToken);
+            if (_budget.Remaining == 0)
+            {
+                Status = ServiceStatus.Error;
+                StatusMessage = BluelinkRequestLimitException.LimitMessage;
+                return false;
+            }
+
+            if (!HasRequestsForPoll(IsVehicleListDue(_timeProvider.GetUtcNow())))
+            {
+                PausePollingForCommands();
+                return false;
+            }
+
             await EnsureDeviceIdAsync(cancellationToken);
             tokenManager = GetTokenManager();
             await tokenManager.EnsureAccessTokenAsync(cancellationToken);
-            await ReadVehiclesAsync(tokenManager, cancellationToken);
+            return await ReadVehiclesAsync(tokenManager, cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             HandleAccountFailure(exception, tokenManager);
+            return true;
         }
         finally
         {
@@ -167,16 +168,42 @@ public partial class BluelinkAccount
         }
     }
 
-    /// <summary>Reads the vehicle list when it is due, then the stored status and parking location of every vehicle.</summary>
+    /// <summary>Whether the calls of a poll leave at least the calls of the most expensive command.</summary>
     /// <remarks>Call it only while <see cref="_lock"/> is held.</remarks>
-    private async Task ReadVehiclesAsync(BluelinkTokenManager tokenManager, CancellationToken cancellationToken)
+    private bool HasRequestsForPoll(bool isVehicleListDue)
+    {
+        var cost = WithDeviceRegistration((isVehicleListDue ? VehicleListCost : 0) + ReadVehicleCost * Vehicles.Count);
+        return _budget.Remaining >= CommandReserve + cost;
+    }
+
+    private void PausePollingForCommands()
+    {
+        Status = ServiceStatus.Running;
+        StatusMessage = ReserveMessage;
+    }
+
+    /// <remarks>Call it only while <see cref="_lock"/> is held.</remarks>
+    private bool IsVehicleListDue(DateTimeOffset now) => _vehicleListReadAt is not { } readAt || now - readAt >= VehicleListInterval;
+
+    /// <summary>Reads the vehicle list when it is due, then the stored status and parking location of every vehicle.</summary>
+    /// <returns>False when the vehicle list added vehicles whose reads would leave fewer calls than a command needs.</returns>
+    /// <remarks>Call it only while <see cref="_lock"/> is held.</remarks>
+    private async Task<bool> ReadVehiclesAsync(BluelinkTokenManager tokenManager, CancellationToken cancellationToken)
     {
         var now = _timeProvider.GetUtcNow();
-        if (_vehicleListReadAt is not { } readAt || now - readAt >= VehicleListInterval)
+        if (IsVehicleListDue(now))
         {
             var vehicles = await tokenManager.CallAsync(accessToken => _apiClient.GetVehiclesAsync(accessToken, tokenManager.DeviceId, cancellationToken), cancellationToken);
             UpdateVehicles(vehicles);
             _vehicleListReadAt = now;
+
+            // The check before the cycle counted the vehicles known then.
+            if (!HasRequestsForPoll(isVehicleListDue: false))
+            {
+                UpdateAuthenticationState(tokenManager);
+                PausePollingForCommands();
+                return false;
+            }
         }
 
         string? failure = null;
@@ -196,6 +223,7 @@ public partial class BluelinkAccount
         UpdateAuthenticationState(tokenManager);
         Status = ServiceStatus.Running;
         StatusMessage = failure;
+        return true;
     }
 
     /// <summary>Reads the stored status and the stored parking location; a failing location keeps the previous one.</summary>
@@ -224,7 +252,7 @@ public partial class BluelinkAccount
     private static bool IsAccountFailure(Exception exception, CancellationToken cancellationToken) => exception switch
     {
         OperationCanceledException => cancellationToken.IsCancellationRequested,
-        BluelinkReauthenticationRequiredException or BluelinkRequestLimitException or BluelinkCredentialsReplacedException => true,
+        BluelinkReauthenticationRequiredException or BluelinkRequestLimitException { IsLimitReached: true } or BluelinkCredentialsReplacedException => true,
         // A second token expired answer, after the refresh, concerns the account and not one vehicle.
         BluelinkApiException apiException => apiException.IsRateLimited || apiException.IsDeviceNotRegistered || apiException.IsFingerprintRejected || apiException.IsTokenExpired,
         _ => false

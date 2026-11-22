@@ -63,11 +63,34 @@ public sealed class BluelinkReauthenticationRequiredException(string message) : 
 /// <summary>The credentials were replaced while the previous ones were in use; the request was not sent with the replaced credentials.</summary>
 public sealed class BluelinkCredentialsReplacedException(string message) : Exception(message);
 
-/// <summary>The daily request limit of the account is reached; requests resume after local midnight or once the limit is raised.</summary>
-public sealed class BluelinkRequestLimitException() : InvalidOperationException(LimitMessage)
+/// <summary>
+/// The daily request limit of the account is reached, or too few requests are left today for an operation to finish;
+/// requests resume after local midnight or once the limit is raised.
+/// </summary>
+public sealed class BluelinkRequestLimitException : InvalidOperationException
 {
-    /// <summary>The message of the exception, which the account also shows as its status message.</summary>
+    /// <summary>The message at the limit, which the account also shows as its status message.</summary>
     internal const string LimitMessage = "Daily request limit reached.";
+
+    internal const string TooFewRequestsMessage = "Too few requests are left today for this operation.";
+
+    /// <summary>Creates the exception for a reached limit.</summary>
+    public BluelinkRequestLimitException()
+        : this(LimitMessage, isLimitReached: true)
+    {
+    }
+
+    private BluelinkRequestLimitException(string message, bool isLimitReached)
+        : base(message)
+    {
+        IsLimitReached = isLimitReached;
+    }
+
+    /// <summary>Whether the limit is reached; false when only too few requests are left for the operation.</summary>
+    internal bool IsLimitReached { get; }
+
+    /// <summary>Creates the exception for an operation that could run out of requests before it finishes.</summary>
+    internal static BluelinkRequestLimitException CreateTooFewRequests() => new(TooFewRequestsMessage, isLimitReached: false);
 }
 
 /// <summary>The result of a command, read from the notification records of the vehicle.</summary>

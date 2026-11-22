@@ -7,6 +7,8 @@ namespace Namotion.Devices.Hyundai.Tests;
 
 public class BluelinkAccountPollingTests
 {
+    private const string ReserveMessage = "Polling pauses until midnight to keep the remaining requests for commands.";
+
     [Fact]
     public async Task WhenAccountPolls_ThenElectricVehiclesAreDiscoveredByVin()
     {
@@ -130,28 +132,105 @@ public class BluelinkAccountPollingTests
     }
 
     [Fact]
-    public async Task WhenBudgetLeavesOnlyTheReserve_ThenPollingWaitsUntilMidnight()
+    public async Task WhenAPollWouldLeaveFewerRequestsThanACommandNeeds_ThenPollingWaitsUntilMidnight()
     {
-        // Arrange
+        // Arrange (two vehicles: a poll needs 4 calls, a command keeps 13)
         var (account, handler, _) = TestAccount.Create();
-        account.DailyRequestLimit = 14;
         await account.PollOnceAsync(CancellationToken.None);
+        account.DailyRequestLimit = account.RequestsToday + 16;
+        var requestCount = handler.Requests.Count;
 
         // Act
         var delay = await account.RunIterationAsync(CancellationToken.None);
 
         // Assert
         Assert.Equal(TimeSpan.FromHours(13.5), delay);
-        Assert.Equal(1, handler.Count(BluelinkResponses.VehiclesPath));
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.Equal(ReserveMessage, account.StatusMessage);
+        Assert.Equal(requestCount, handler.Requests.Count);
     }
 
     [Fact]
-    public async Task WhenBudgetLeavesOnlyTheReserveAfterAnError_ThenStatusIsRunningWithTheReserveMessage()
+    public async Task WhenAPollLeavesExactlyTheRequestsOfACommand_ThenItPolls()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        account.DailyRequestLimit = account.RequestsToday + 17;
+
+        // Act
+        var delay = await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMinutes(30), delay);
+        Assert.Equal(2, handler.Count(BluelinkResponses.StatusPath("VEHICLE-2")));
+        Assert.Equal(13, account.DailyRequestLimit - account.RequestsToday);
+    }
+
+    [Theory]
+    [InlineData(17, false)]
+    [InlineData(18, true)]
+    public async Task WhenTheVehicleListIsDue_ThenThePollAlsoKeepsItsCall(int limit, bool expectedPoll)
+    {
+        // Arrange
+        var (account, handler, time) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        time.Advance(TimeSpan.FromHours(24));
+        account.DailyRequestLimit = limit;
+
+        // Act
+        await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(expectedPoll ? 2 : 1, handler.Count(BluelinkResponses.VehiclesPath));
+        Assert.Equal(expectedPoll ? null : ReserveMessage, account.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenTheVehicleListAddsVehiclesThatTheBudgetCannotRead_ThenThePollStopsBeforeReadingThem()
+    {
+        // Arrange (no vehicle known yet: the check before the list counts only the list)
+        var (account, handler, _) = TestAccount.Create();
+        account.DailyRequestLimit = 14;
+
+        // Act
+        var delay = await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromHours(13.5), delay);
+        Assert.Equal(2, account.Vehicles.Count);
+        Assert.Equal(0, handler.Count(BluelinkResponses.StatusPath("VEHICLE-1")));
+        Assert.Equal(13, account.DailyRequestLimit - account.RequestsToday);
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.Equal(ReserveMessage, account.StatusMessage);
+        Assert.True(account.IsAuthenticated);
+    }
+
+    [Fact]
+    public async Task WhenNoDeviceIsRegistered_ThenThePollAlsoKeepsTheCallOfTheRegistration()
+    {
+        // Arrange
+        var handler = TestAccount.CreateHandler()
+            .Respond(BluelinkResponses.RegisterPath, HttpStatusCode.OK, BluelinkResponses.Success("""{"deviceId":"device-9"}"""));
+        var (account, _, _) = TestAccount.Create(handler);
+        account.DeviceId = string.Empty;
+        account.DailyRequestLimit = 14;
+
+        // Act
+        await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Empty(handler.Requests);
+        Assert.Equal(ReserveMessage, account.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenPollingPausesForCommandsAfterAnError_ThenStatusIsRunningWithTheReserveMessage()
     {
         // Arrange
         var (account, _, _) = TestAccount.Create();
-        account.DailyRequestLimit = 14;
         await account.PollOnceAsync(CancellationToken.None);
+        account.DailyRequestLimit = account.RequestsToday + 16;
         account.Status = ServiceStatus.Error;
 
         // Act
@@ -159,7 +238,7 @@ public class BluelinkAccountPollingTests
 
         // Assert
         Assert.Equal(ServiceStatus.Running, account.Status);
-        Assert.Equal("Polling pauses until midnight to keep the remaining requests for commands.", account.StatusMessage);
+        Assert.Equal(ReserveMessage, account.StatusMessage);
     }
 
     [Fact]
@@ -275,12 +354,13 @@ public class BluelinkAccountPollingTests
     }
 
     [Fact]
-    public async Task WhenBudgetRunsOutDuringAPollAndTheLimitIsRaised_ThenTheNextIterationPolls()
+    public async Task WhenTheBudgetIsSpentAndTheLimitIsRaised_ThenTheNextIterationPolls()
     {
         // Arrange
         var (account, handler, _) = TestAccount.Create();
-        account.DailyRequestLimit = 3;
         await account.PollOnceAsync(CancellationToken.None);
+        account.DailyRequestLimit = account.RequestsToday;
+        await account.RunIterationAsync(CancellationToken.None);
         var messageAfterLimit = account.StatusMessage;
 
         // Act
@@ -290,7 +370,8 @@ public class BluelinkAccountPollingTests
         // Assert
         Assert.Equal("Daily request limit reached.", messageAfterLimit);
         Assert.Equal(ServiceStatus.Running, account.Status);
-        Assert.Equal(1, handler.Count(BluelinkResponses.StatusPath("VEHICLE-2")));
+        Assert.Null(account.StatusMessage);
+        Assert.Equal(2, handler.Count(BluelinkResponses.StatusPath("VEHICLE-2")));
     }
 
     [Fact]

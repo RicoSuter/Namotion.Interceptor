@@ -12,6 +12,7 @@ public class BluelinkAccountCommandStateTests
     private const string Kona = "TESTVIN0000000001";
     private const string Ioniq = "TESTVIN0000000002";
     private const string BusyMessage = "Another operation of this vehicle is running.";
+    private const string TooFewRequestsMessage = "Too few requests are left today for this operation.";
 
     [Fact]
     public async Task WhenCommandIsCanceledDuringTheResultWait_ThenAccountStateIsUnchanged()
@@ -73,6 +74,92 @@ public class BluelinkAccountCommandStateTests
         Assert.Equal(requestCount, handler.Requests.Count);
         Assert.Equal(ServiceStatus.Error, account.Status);
         Assert.Equal("Daily request limit reached.", account.StatusMessage);
+    }
+
+    [Theory]
+    [InlineData(Ioniq, 13)]
+    [InlineData(Kona, 12)]
+    public async Task WhenFewerRequestsAreLeftThanACommandNeeds_ThenItIsDisabledAndRefusedBeforeAnyRequest(string vin, int cost)
+    {
+        // Arrange (the CCS2 vehicle exchanges the PIN, the legacy one does not)
+        var (account, handler, _) = TestAccount.Create(pin: "1234");
+        await account.PollOnceAsync(CancellationToken.None);
+        var charge = account.Vehicles[vin].Charge;
+        account.DailyRequestLimit = account.RequestsToday + cost;
+        var isEnabledWithTheCost = charge.StartCharging_IsEnabled;
+        account.DailyRequestLimit = account.RequestsToday + cost - 1;
+        var requestCount = handler.Requests.Count;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<BluelinkRequestLimitException>(() => charge.StartChargingAsync(CancellationToken.None));
+        Assert.Equal(TooFewRequestsMessage, exception.Message);
+        Assert.True(isEnabledWithTheCost);
+        Assert.False(charge.StartCharging_IsEnabled);
+        Assert.Equal(requestCount, handler.Requests.Count);
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.Null(account.StatusMessage);
+        Assert.False(account.Vehicles[vin].IsBusy);
+    }
+
+    [Fact]
+    public async Task WhenExactlyTheRequestsOfTheLongestCommandAreLeft_ThenTheCommandFinishes()
+    {
+        // Arrange (the result arrives with the last of the 9 checks)
+        var (account, handler, time) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        handler.Respond(BluelinkResponses.LegacyChargePath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-7"));
+        for (var check = 0; check < 8; check++)
+        {
+            handler.Respond(BluelinkResponses.RecordsPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Records("MSG-7", null));
+        }
+
+        handler.Respond(BluelinkResponses.RecordsPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Records("MSG-7", "success"));
+        account.DailyRequestLimit = account.RequestsToday + 12;
+
+        // Act
+        await TestAccount.AdvanceUntilCompletedAsync(time, account.Vehicles[Kona].Charge.StartChargingAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Equal(9, handler.Count(BluelinkResponses.RecordsPath("VEHICLE-1")));
+        Assert.Equal(2, handler.Count(BluelinkResponses.ParkLocationPath("VEHICLE-1")));
+        Assert.Equal(account.DailyRequestLimit, account.RequestsToday);
+        Assert.Equal(ServiceStatus.Running, account.Status);
+    }
+
+    [Fact]
+    public async Task WhenFewerThanThreeRequestsAreLeft_ThenRefreshIsDisabledAndRefusedBeforeAnyRequest()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        var kona = account.Vehicles[Kona];
+        account.DailyRequestLimit = account.RequestsToday + 2;
+        var requestCount = handler.Requests.Count;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<BluelinkRequestLimitException>(() => kona.RefreshAsync(CancellationToken.None));
+        Assert.Equal(TooFewRequestsMessage, exception.Message);
+        Assert.False(kona.Refresh_IsEnabled);
+        Assert.Equal(requestCount, handler.Requests.Count);
+        Assert.Equal(ServiceStatus.Running, account.Status);
+    }
+
+    [Fact]
+    public async Task WhenThreeRequestsAreLeft_ThenRefreshFinishes()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        handler.Respond(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Success());
+        var kona = account.Vehicles[Kona];
+        account.DailyRequestLimit = account.RequestsToday + 3;
+
+        // Act
+        await kona.RefreshAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, handler.Count(BluelinkResponses.ParkLocationPath("VEHICLE-1")));
+        Assert.Equal(account.DailyRequestLimit, account.RequestsToday);
     }
 
     [Fact]

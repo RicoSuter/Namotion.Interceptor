@@ -8,6 +8,18 @@ public partial class BluelinkAccount
 {
     private const int CommandResultAttempts = 9;
 
+    // The most vehicle API calls of each operation. An operation fails before any call when fewer are left, so that a
+    // started one never runs out of requests mid-way.
+    private const int ReadVehicleCost = 2; // stored status and parking location
+    private const int RefreshCost = 1 + ReadVehicleCost;
+    private const int CommandCost = 1 + CommandResultAttempts + ReadVehicleCost;
+    private const int PinExchangeCost = 1;
+    private const int VehicleListCost = 1;
+    private const int DeviceRegistrationCost = 1;
+
+    // Polling keeps the calls of the most expensive command.
+    private const int CommandReserve = CommandCost + PinExchangeCost;
+
     private static readonly TimeSpan CommandResultInterval = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan Ccs2RefreshWait = TimeSpan.FromSeconds(25);
     private static readonly TimeSpan ControlTokenAhead = TimeSpan.FromSeconds(30);
@@ -15,13 +27,20 @@ public partial class BluelinkAccount
     // Only touched while _lock is held.
     private BluelinkCcsToken? _controlToken;
 
-    private bool CanSendRequests => IsAuthenticated && RequestsToday < DailyRequestLimit;
+    // Reads RequestsToday rather than the budget, so that the derived IsEnabled attributes update with it.
+    private bool CanSendRequests(int cost) => IsAuthenticated && DailyRequestLimit - RequestsToday >= WithDeviceRegistration(cost);
 
     bool IBluelinkVehicleCommands.CanSendCommands(BluelinkProtocol protocol) =>
-        CanSendRequests && (protocol == BluelinkProtocol.Legacy || !string.IsNullOrEmpty(Pin));
+        CanSendRequests(GetCommandCost(needsControlToken: protocol == BluelinkProtocol.Ccs2)) &&
+        (protocol == BluelinkProtocol.Legacy || !string.IsNullOrEmpty(Pin));
 
     bool IBluelinkVehicleCommands.CanRefresh(decimal? auxiliaryBatteryLevel) =>
-        CanSendRequests && IsAuxiliaryBatteryAtMinimum(auxiliaryBatteryLevel);
+        CanSendRequests(RefreshCost) && IsAuxiliaryBatteryAtMinimum(auxiliaryBatteryLevel);
+
+    private static int GetCommandCost(bool needsControlToken) => needsControlToken ? CommandCost + PinExchangeCost : CommandCost;
+
+    /// <summary>Adds the device registration that a poll or operation makes first when no device ID is stored.</summary>
+    private int WithDeviceRegistration(int cost) => string.IsNullOrEmpty(DeviceId) ? cost + DeviceRegistrationCost : cost;
 
     async Task IBluelinkVehicleCommands.RefreshAsync(BluelinkVehicle vehicle, CancellationToken cancellationToken)
     {
@@ -30,7 +49,7 @@ public partial class BluelinkAccount
             throw new InvalidOperationException("Refresh is refused while the 12 V battery is below the minimum level or unknown.");
         }
 
-        await RunAsync(vehicle, "Refresh", async tokenManager =>
+        await RunAsync(vehicle, "Refresh", RefreshCost, async tokenManager =>
         {
             _logger.LogInformation("Asking the Bluelink vehicle {Vin} to upload its status.", vehicle.Vin);
             await tokenManager.CallAsync(accessToken => _apiClient.RequestStatusAsync(CreateRequest(tokenManager, accessToken, vehicle), cancellationToken), cancellationToken);
@@ -86,7 +105,7 @@ public partial class BluelinkAccount
             throw new InvalidOperationException("A PIN is required for commands of this vehicle; enter it in the account settings.");
         }
 
-        await RunAsync(vehicle, operation, async tokenManager =>
+        await RunAsync(vehicle, operation, GetCommandCost(needsControlToken), async tokenManager =>
         {
             _logger.LogInformation("Sending a command to the Bluelink vehicle {Vin}.", vehicle.Vin);
             var messageId = await tokenManager.CallAsync(async accessToken =>
@@ -103,10 +122,11 @@ public partial class BluelinkAccount
     /// <summary>Runs a refresh or command of the vehicle; the vehicle is busy from before the account lock is awaited until it ends.</summary>
     /// <param name="vehicle">The vehicle.</param>
     /// <param name="operation">The name of the operation, for the log.</param>
+    /// <param name="cost">The most vehicle API calls of the operation, without a device registration.</param>
     /// <param name="action">The calls of the operation.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="InvalidOperationException">Another operation of the vehicle is running; nothing was sent.</exception>
-    private async Task RunAsync(BluelinkVehicle vehicle, string operation, Func<BluelinkTokenManager, Task> action, CancellationToken cancellationToken)
+    private async Task RunAsync(BluelinkVehicle vehicle, string operation, int cost, Func<BluelinkTokenManager, Task> action, CancellationToken cancellationToken)
     {
         if (!vehicle.TryStartOperation())
         {
@@ -115,7 +135,7 @@ public partial class BluelinkAccount
 
         try
         {
-            await RunLockedAsync(vehicle, operation, action, cancellationToken);
+            await RunLockedAsync(vehicle, operation, cost, action, cancellationToken);
         }
         finally
         {
@@ -127,8 +147,11 @@ public partial class BluelinkAccount
     /// Runs a refresh or command under the account lock, after checks that fail before any call. A failure after the
     /// checks is logged, unless it is the caller's cancellation or a failure of the whole account.
     /// </summary>
-    /// <exception cref="BluelinkRequestLimitException">The daily request limit is reached; nothing was sent.</exception>
-    private async Task RunLockedAsync(BluelinkVehicle vehicle, string operation, Func<BluelinkTokenManager, Task> action, CancellationToken cancellationToken)
+    /// <exception cref="BluelinkRequestLimitException">
+    /// The daily request limit is reached, or fewer requests than <paramref name="cost"/> are left, which leaves the
+    /// account status unchanged; nothing was sent.
+    /// </exception>
+    private async Task RunLockedAsync(BluelinkVehicle vehicle, string operation, int cost, Func<BluelinkTokenManager, Task> action, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);
         BluelinkTokenManager? tokenManager = null;
@@ -145,7 +168,8 @@ public partial class BluelinkAccount
                 throw new InvalidOperationException("The Bluelink account is not connected.");
             }
 
-            if (_budget.Remaining == 0)
+            var remaining = _budget.Remaining;
+            if (remaining == 0)
             {
                 throw new BluelinkRequestLimitException();
             }
@@ -153,6 +177,11 @@ public partial class BluelinkAccount
             if (PausedUntil > _timeProvider.GetUtcNow())
             {
                 throw new InvalidOperationException("Requests of the Bluelink account are paused after Hyundai's request limit was reached.");
+            }
+
+            if (remaining < WithDeviceRegistration(cost))
+            {
+                throw BluelinkRequestLimitException.CreateTooFewRequests();
             }
 
             checksPassed = true;

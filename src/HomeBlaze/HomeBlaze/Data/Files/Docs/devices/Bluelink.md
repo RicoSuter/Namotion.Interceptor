@@ -73,7 +73,7 @@ The sample file `Devices/Bluelink.json` has no credentials and shows the status 
 |----------|------|-----------------|
 | Stopped | No email or no tokens | "Missing credentials" |
 | Starting | First poll | |
-| Running | Polling | Empty, or the failure of the last vehicle that could not be read; the other vehicles are not affected. "Polling pauses until midnight to keep the remaining requests for commands." while polling saves the last calls of the day. |
+| Running | Polling | Empty, or the failure of the last vehicle that could not be read; the other vehicles are not affected. "Polling pauses until midnight to keep the remaining requests for commands." while polling keeps the last calls of the day for commands. |
 | Error | Re-authentication required, replaced credentials, Hyundai's request limit, the daily request limit, or a failed poll | The cause, for example "Re-authentication required: Hyundai rejected the email or password.", "Hyundai's request limit was reached; polling resumes at 14:32.", "Daily request limit reached." |
 
 After an error, the next poll follows after `RetryInterval`, unless re-authentication is required or a pause applies.
@@ -178,7 +178,7 @@ The title is the nickname, else the model (or "Hyundai" without one), a colon an
 | `Start Climate`, `Start Climate With Defrost` | `Climate` | Yes | Starts the climate with a temperature from 14.0 to 31.5 °C in steps of 0.5, for `ClimateDuration`. A `Ccs2` vehicle needs the PIN. |
 | `Stop Climate` | `Climate` | Yes | Stops the climate. A `Ccs2` vehicle needs the PIN. |
 
-A command fails before any call when the account has no credentials, is not connected, is paused after Hyundai's request limit or has spent its budget, when a `Ccs2` vehicle needs a PIN that is not stored, and when the temperature, a charge limit or `ClimateDuration` is invalid. A command waits for its result: the account checks the notification records of the vehicle every 10 seconds for at most 90 seconds, then reads the stored status and parking location once. A rejected command, a vehicle that does not respond and a result that does not arrive in time fail the operation with the reason. Hyundai rejecting the PIN fails the command without a retry, because five wrong PINs lock PIN entry for a while. Values change only from what the vehicle reports, never from what a command asked for. Canceling a command does not change the status of the account. The operations are disabled while the account is not connected or has spent its budget, and the commands that need the PIN while a `Ccs2` vehicle has none; `Refresh` also while the 12 V battery is below the minimum or unknown.
+A command fails before any call when the account has no credentials, is not connected, is paused after Hyundai's request limit, has spent its budget or has fewer calls left than the command may need (see [Call budget](#call-budget)), when a `Ccs2` vehicle needs a PIN that is not stored, and when the temperature, a charge limit or `ClimateDuration` is invalid. A command waits for its result: the account checks the notification records of the vehicle every 10 seconds for at most 90 seconds, then reads the stored status and parking location once. A rejected command, a vehicle that does not respond and a result that does not arrive in time fail the operation with the reason. Hyundai rejecting the PIN fails the command without a retry, because five wrong PINs lock PIN entry for a while. Values change only from what the vehicle reports, never from what a command asked for. Canceling a command does not change the status of the account. The operations are disabled while the account is not connected or has fewer calls left than they may need, and the commands that need the PIN while a `Ccs2` vehicle has none; `Refresh` also while the 12 V battery is below the minimum or unknown.
 
 While one operation of a vehicle runs, `IsBusy` is `true` and all operations of that vehicle are disabled. A call that arrives anyway fails at once with "Another operation of this vehicle is running.", before any call. An operation of another vehicle of the same account waits until the running one and any poll in progress have finished.
 
@@ -199,12 +199,13 @@ The stored status changes only when the vehicle uploads it, for example when the
 
 Hyundai blocks an account that makes too many calls in a day (about 200, not documented), for up to a day, and then the official app fails too. The account therefore counts its calls to the vehicle API in `RequestsToday`, per local day:
 
-- Polling pauses once fewer than 10 calls are left, so that commands and `Refresh` still work, and continues after midnight.
+- Polling pauses once a poll would leave fewer than 13 calls, the most a command may need, so that every command and `Refresh` that starts can finish, and continues after midnight.
+- `Refresh` and commands fail before any call when fewer calls are left than they may need. The error reads "Too few requests are left today for this operation.", and the status of the account does not change.
 - At `DailyRequestLimit`, polling, `Refresh` and commands stop, and both the status message and the error of a refused command read "Daily request limit reached." They continue after midnight, or at once when the limit is raised.
 - When Hyundai reports its limit (5091), polling, `Refresh` and commands pause for 2 hours; meanwhile `Refresh` and commands fail before any call.
-- The vehicle API calls of the setup and authentication calls are not counted; the PIN exchange of a command is. The counter starts at 0 after a restart.
+- Setup calls and authentication calls are not counted; a device registration by a poll and the PIN exchange of a command are. The counter starts at 0 after a restart.
 
-One vehicle with the default interval needs about 100 calls a day. `Refresh` needs 3 calls (the request and the status and location read); a command needs 4 to 13 (the PIN exchange of a `Ccs2` vehicle, the command, up to 9 result checks, and the status and location read).
+One vehicle with the default interval needs about 100 calls a day. A poll needs 2 calls per vehicle (the status and location read) and 1 more when the vehicle list is due. `Refresh` needs 3 calls (the request and the status and location read). A command needs 4 to 12 (the command, up to 9 result checks, and the status and location read), and 13 with the PIN exchange of a `Ccs2` vehicle. A poll, `Refresh` or command that has to register a device first needs 1 more.
 
 ## Known Limitations
 
