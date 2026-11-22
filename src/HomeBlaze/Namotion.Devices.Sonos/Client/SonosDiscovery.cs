@@ -16,7 +16,7 @@ internal static class SonosDiscovery
     /// <summary>
     /// The most hex digits a RINCON ID may have; that of a speaker has 17.
     /// </summary>
-    internal const int MaximumSpeakerIdDigits = 32;
+    private const int MaximumSpeakerIdDigits = 32;
 
     private static readonly SearchValues<char> HexDigits = SearchValues.Create("0123456789ABCDEFabcdef");
     private static readonly TimeSpan SearchTime = TimeSpan.FromSeconds(5);
