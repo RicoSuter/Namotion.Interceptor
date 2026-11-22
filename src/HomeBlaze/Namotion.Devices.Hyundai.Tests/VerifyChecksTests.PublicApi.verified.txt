@@ -241,7 +241,6 @@ namespace Namotion.Devices.Hyundai
         public HomeBlaze.Abstractions.Common.GeoCoordinate? Location { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string? Manufacturer { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=3)]
         public string? Model { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=2)]
         public string? Nickname { get; }

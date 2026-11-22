@@ -8,7 +8,7 @@ public class BluelinkAccountTests
     [InlineData("Garage", "user@example.invalid", "Garage")]
     [InlineData("", "user@example.invalid", "Hyundai: user@example.invalid")]
     [InlineData("", "", "Hyundai")]
-    public void WhenNameAndEmailAreSet_ThenTitleUsesTheNameElseTheEmail(string name, string email, string expectedTitle)
+    public void WhenNameOrEmailChange_ThenTitleUsesTheNameElseTheEmailElseTheBrand(string name, string email, string expectedTitle)
     {
         // Arrange
         var (account, _, _) = TestAccount.Create();

@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
@@ -11,20 +12,21 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace Namotion.Devices.Hyundai.Tests;
 
 /// <summary>
-/// Reads the operations of the charge and climate children as the property panel does: from the method metadata of the
-/// property that each operation is registered as.
+/// Reads the metadata of the vehicle and its charge and climate children as the property panel does: from the state
+/// and method metadata of the registered properties.
 /// </summary>
 public class BluelinkOperationMetadataTests
 {
     [Theory]
-    [InlineData("Charge", "StartCharging", "Start Charging")]
-    [InlineData("Charge", "StopCharging", "Stop Charging")]
-    [InlineData("Charge", "SetChargeLimit", "Set Charge Limit")]
-    [InlineData("Charge", "SetChargeLimits", "Set Charge Limits")]
-    [InlineData("Climate", "StartClimate", "Start Climate")]
-    [InlineData("Climate", "StartClimateWithDefrost", "Start Climate With Defrost")]
-    [InlineData("Climate", "StopClimate", "Stop Climate")]
-    public void WhenAChildOperationIsRegistered_ThenItHasNoCategoryAndKeepsItsTitle(string child, string operation, string expectedTitle)
+    [InlineData("Charge", "StartCharging", "Start Charging", "EvStation", new StateUnit[0])]
+    [InlineData("Charge", "StopCharging", "Stop Charging", "Stop", new StateUnit[0])]
+    [InlineData("Charge", "SetChargeLimit", "Set Charge Limit", "BatteryChargingFull", new[] { StateUnit.Percent })]
+    [InlineData("Charge", "SetChargeLimits", "Set Charge Limits", "BatteryChargingFull", new[] { StateUnit.Percent, StateUnit.Percent })]
+    [InlineData("Climate", "StartClimate", "Start Climate", "Thermostat", new[] { StateUnit.DegreeCelsius })]
+    [InlineData("Climate", "StartClimateWithDefrost", "Start Climate With Defrost", "AcUnit", new[] { StateUnit.DegreeCelsius })]
+    [InlineData("Climate", "StopClimate", "Stop Climate", "Stop", new StateUnit[0])]
+    public void WhenAChildOperationIsRegistered_ThenItHasNoCategoryAndKeepsItsTitleIconAndUnits(
+        string child, string operation, string expectedTitle, string expectedIcon, StateUnit[] expectedUnits)
     {
         // Arrange
         var vehicle = CreateRegisteredVehicle();
@@ -37,8 +39,30 @@ public class BluelinkOperationMetadataTests
         Assert.NotNull(metadata);
         Assert.Equal(MethodKind.Operation, metadata.Kind);
         Assert.Equal(expectedTitle, metadata.Title);
-        Assert.NotNull(metadata.Icon);
+        Assert.Equal(expectedIcon, metadata.Icon);
         Assert.Null(metadata.Category);
+        Assert.Equal(
+            expectedUnits.Cast<StateUnit?>(),
+            metadata.Parameters.Where(parameter => !parameter.IsRuntimeProvided).Select(parameter => parameter.Unit));
+    }
+
+    [Fact]
+    public void WhenTheVehicleIsRegistered_ThenTheModelIsSortedWithTheDeviceInformation()
+    {
+        // Arrange
+        var vehicle = CreateRegisteredVehicle();
+        var registeredVehicle = vehicle.TryGetRegisteredSubject()!;
+
+        // Act
+        var model = registeredVehicle.TryGetProperty(nameof(BluelinkVehicle.Model))?.GetStateMetadata();
+        var manufacturer = registeredVehicle.TryGetProperty(nameof(BluelinkVehicle.Manufacturer))?.GetStateMetadata();
+
+        // Assert
+        Assert.NotNull(model);
+        Assert.NotNull(manufacturer);
+        Assert.Equal("Device", model.Category);
+        Assert.Equal(manufacturer.Category, model.Category);
+        Assert.Equal(manufacturer.Position + 1, model.Position);
     }
 
     private static BluelinkVehicle CreateRegisteredVehicle()
@@ -49,7 +73,10 @@ public class BluelinkOperationMetadataTests
             .WithLifecycle()
             .WithService<ILifecycleHandler>(
                 () => new MethodPropertyInitializer(),
-                handler => handler is MethodPropertyInitializer);
+                handler => handler is MethodPropertyInitializer)
+            .WithService<IPropertyLifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
 
         var vehicle = new BluelinkVehicle(
             new FakeVehicleCommands(),

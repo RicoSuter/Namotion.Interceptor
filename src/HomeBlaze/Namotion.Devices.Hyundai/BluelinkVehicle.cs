@@ -54,9 +54,6 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
     /// <summary>The name of the vehicle in the Bluelink app.</summary>
     [State(Position = 2)] public partial string? Nickname { get; internal set; }
 
-    /// <summary>The model from the vehicle list, such as KONA.</summary>
-    [State(Position = 3)] public partial string? Model { get; internal set; }
-
     [State(IsDiscrete = true, Position = 4)] public partial BluelinkProtocol Protocol { get; internal set; }
 
     /// <summary>The charge of the 12 V battery; null when the sensor is unreliable.</summary>
@@ -88,6 +85,9 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
     // IDeviceInfo
 
     [Derived] public string? Manufacturer => "Hyundai";
+
+    /// <summary>The model from the vehicle list, such as KONA.</summary>
+    public partial string? Model { get; internal set; }
 
     [Derived] public string? ProductCode => null;
 
