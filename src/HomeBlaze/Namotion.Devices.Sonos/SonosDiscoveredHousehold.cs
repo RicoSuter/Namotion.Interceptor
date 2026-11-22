@@ -15,6 +15,7 @@ public sealed record SonosDiscoveredHousehold : IDiscoveryResult
         HouseholdId = householdId;
         Speakers = speakers;
         SeedHost = seedHost;
+        IncludedItems = ToItems(speakers);
     }
 
     /// <summary>
@@ -40,4 +41,31 @@ public sealed record SonosDiscoveredHousehold : IDiscoveryResult
 
     /// <inheritdoc />
     public string? Detail => Speakers.Count == 1 ? $"1 speaker, {SeedHost}" : $"{Speakers.Count} speakers, {SeedHost}";
+
+    /// <summary>
+    /// The speakers, satellites included, ordered by room: each named by its room, or by its ID when its description
+    /// could not be read, with its model and host address.
+    /// </summary>
+    public IReadOnlyList<DiscoveredItem> IncludedItems { get; }
+
+    private static DiscoveredItem[] ToItems(IReadOnlyList<SonosDiscoveredSpeaker> speakers)
+    {
+        var items = new DiscoveredItem[speakers.Count];
+        for (var index = 0; index < items.Length; index++)
+        {
+            var speaker = speakers[index];
+            items[index] = new DiscoveredItem(
+                speaker.RoomName ?? speaker.Id,
+                speaker.ModelName is null ? speaker.HostAddress : $"{speaker.ModelName}, {speaker.HostAddress}");
+        }
+
+        // The speakers are ordered by ID; Detail breaks ties between speakers of one room, such as a sub and its player.
+        Array.Sort(items, static (first, second) =>
+        {
+            var byName = StringComparer.OrdinalIgnoreCase.Compare(first.DisplayName, second.DisplayName);
+            return byName != 0 ? byName : StringComparer.Ordinal.Compare(first.Detail, second.Detail);
+        });
+
+        return items;
+    }
 }

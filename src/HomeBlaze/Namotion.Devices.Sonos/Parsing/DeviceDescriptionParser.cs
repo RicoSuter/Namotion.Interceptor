@@ -5,7 +5,7 @@ namespace Namotion.Devices.Sonos.Parsing;
 /// <summary>
 /// The parts of <c>/xml/device_description.xml</c> the subjects use.
 /// </summary>
-internal sealed record SonosDeviceDescription(string? ModelName, string? ModelNumber, IReadOnlySet<string> ServiceIds);
+internal sealed record SonosDeviceDescription(string? ModelName, string? ModelNumber, string? RoomName, IReadOnlySet<string> ServiceIds);
 
 internal static class DeviceDescriptionParser
 {
@@ -32,6 +32,7 @@ internal static class DeviceDescriptionParser
         return new SonosDeviceDescription(
             SonosValues.NullIfEmpty((string?)device?.Element(DeviceNamespace + "modelName")),
             SonosValues.NullIfEmpty((string?)device?.Element(DeviceNamespace + "modelNumber")),
+            SonosValues.NullIfEmpty((string?)device?.Element(DeviceNamespace + "roomName")),
             serviceIds);
     }
 }

@@ -20,7 +20,7 @@ public class SonosHomeTheaterTests
     private const string RenderingControlEventPath = "/MediaRenderer/RenderingControl/Event";
 
     private static readonly SonosDeviceDescription PlainSpeaker =
-        new("Sonos One", "S18", new HashSet<string>(StringComparer.Ordinal) { "AVTransport", "RenderingControl" });
+        new("Sonos One", "S18", "Wohnzimmer", new HashSet<string>(StringComparer.Ordinal) { "AVTransport", "RenderingControl" });
 
     private static SonosDeviceDescription Soundbar() =>
         DeviceDescriptionParser.Parse(Read("device-description-ray.xml"));

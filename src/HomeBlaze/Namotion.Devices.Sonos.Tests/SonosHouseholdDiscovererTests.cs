@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using HomeBlaze.Abstractions.Discovery;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Sonos.Tests.Testing;
@@ -75,7 +77,7 @@ public class SonosHouseholdDiscovererTests
         // Assert
         var household = Assert.Single(households);
         var speaker = Assert.Single(household.Speakers);
-        Assert.Equal(new SonosDiscoveredSpeaker("RINCON_A00000000000001400", "192.168.1.101", 1400), speaker);
+        Assert.Equal(new SonosDiscoveredSpeaker("RINCON_A00000000000001400", "192.168.1.101", 1400), speaker with { DescriptionLocation = null });
     }
 
     [Fact]
@@ -135,7 +137,8 @@ public class SonosHouseholdDiscovererTests
         var search = new AnsweringSsdpSearch(
             Answer("RINCON_A00000000000001400", "192.168.1.101"),
             Answer("RINCON_B00000000000001400", "192.168.1.102"));
-        ISubjectDiscoverer discoverer = new SonosHouseholdDiscoverer();
+        using var handler = new DescriptionHandler(_ => Description("Wohnzimmer", "Sonos One"));
+        ISubjectDiscoverer discoverer = new SonosHouseholdDiscoverer(new HandlerHttpClientFactory(handler));
         var scan = new DiscoveryScan(search, new EmptyMulticastDnsBrowser(), new UnusedUdpDiscovery(), CancellationToken.None);
         var existing = CreateSystem(seedHost: "192.168.1.102");
 
@@ -148,6 +151,194 @@ public class SonosHouseholdDiscovererTests
         Assert.Equal(Household, household.HouseholdId);
         Assert.Same(existing, single.ExistingSubject);
         Assert.Equal([ZonePlayer], search.SearchTargets);
+    }
+
+    [Fact]
+    public void WhenAnAnswerNamesAPlainHttpLocation_ThenItIsKeptAsTheDescriptionLocation()
+    {
+        // Arrange
+        SsdpResponse[] responses =
+        [
+            Answer("RINCON_A00000000000001400", "192.168.1.101"),
+            new(new Uri("https://192.168.1.102:1443/xml/device_description.xml"), $"uuid:RINCON_B00000000000001400::{ZonePlayer}", HouseholdHeaders()),
+            new(new Uri("http://user:secret@192.168.1.103:1400/xml/device_description.xml"), $"uuid:RINCON_C00000000000001400::{ZonePlayer}", HouseholdHeaders())
+        ];
+
+        // Act
+        var speakers = Assert.Single(SonosHouseholdDiscoverer.ToHouseholds(responses)).Speakers;
+
+        // Assert
+        Assert.Equal(
+            [new Uri("http://192.168.1.101:1400/xml/device_description.xml"), null, null],
+            speakers.Select(speaker => speaker.DescriptionLocation));
+    }
+
+    [Fact]
+    public async Task WhenTheDescriptionsAnswer_ThenEachSpeakerIsIncludedByRoomWithModelAndAddress()
+    {
+        // Arrange
+        using var handler = new DescriptionHandler(request => request.RequestUri!.Host switch
+        {
+            "192.168.1.101" => Description("Wohnzimmer", "Sonos Arc"),
+            "192.168.1.102" => Description("Wohnzimmer", "Sonos Sub"),
+            _ => Description(" Bad ", "Sonos One")
+        });
+        var discoverer = new SonosHouseholdDiscoverer(new HandlerHttpClientFactory(handler));
+        var households = SonosHouseholdDiscoverer.ToHouseholds(
+        [
+            Answer("RINCON_A00000000000001400", "192.168.1.101"),
+            Answer("RINCON_B00000000000001400", "192.168.1.102"),
+            Answer("RINCON_C00000000000001400", "192.168.1.103")
+        ]);
+
+        // Act
+        var household = Assert.Single(await discoverer.DescribeSpeakersAsync(households, CancellationToken.None));
+
+        // Assert
+        Assert.Equal(
+            [
+                new DiscoveredItem("Bad", "Sonos One, 192.168.1.103"),
+                new DiscoveredItem("Wohnzimmer", "Sonos Arc, 192.168.1.101"),
+                new DiscoveredItem("Wohnzimmer", "Sonos Sub, 192.168.1.102")
+            ],
+            ((IDiscoveryResult)household).IncludedItems);
+        Assert.Equal("3 speakers, 192.168.1.101", household.Detail);
+        Assert.Equal("192.168.1.101", household.SeedHost);
+        Assert.Equal(3, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task WhenADescriptionTimesOutOrFails_ThenItsSpeakerIsIncludedByIdAndAddress()
+    {
+        // Arrange
+        using var handler = new DescriptionHandler(async (request, cancellationToken) =>
+        {
+            switch (request.RequestUri!.Host)
+            {
+                case "192.168.1.101":
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    throw new InvalidOperationException("Not reached.");
+                case "192.168.1.102":
+                    return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+                case "192.168.1.103":
+                    throw new HttpRequestException("Connection refused.");
+                default:
+                    return Description("Küche", "Sonos One");
+            }
+        });
+        var discoverer = new SonosHouseholdDiscoverer(new HandlerHttpClientFactory(handler), TimeSpan.FromMilliseconds(100));
+        var households = SonosHouseholdDiscoverer.ToHouseholds(
+        [
+            Answer("RINCON_A00000000000001400", "192.168.1.101"),
+            Answer("RINCON_B00000000000001400", "192.168.1.102"),
+            Answer("RINCON_C00000000000001400", "192.168.1.103"),
+            Answer("RINCON_D00000000000001400", "192.168.1.104")
+        ]);
+
+        // Act
+        var household = Assert.Single(await discoverer.DescribeSpeakersAsync(households, CancellationToken.None));
+
+        // Assert
+        Assert.Equal(
+            [
+                new DiscoveredItem("Küche", "Sonos One, 192.168.1.104"),
+                new DiscoveredItem("RINCON_A00000000000001400", "192.168.1.101"),
+                new DiscoveredItem("RINCON_B00000000000001400", "192.168.1.102"),
+                new DiscoveredItem("RINCON_C00000000000001400", "192.168.1.103")
+            ],
+            household.IncludedItems);
+    }
+
+    [Theory]
+    [InlineData("oversized")]
+    [InlineData("doctype")]
+    [InlineData("deep")]
+    [InlineData("malformed")]
+    [InlineData("redirected")]
+    public async Task WhenADescriptionIsOversizedHostileOrFromAnotherAddress_ThenItIsNotRead(string answer)
+    {
+        // Arrange
+        using var handler = new DescriptionHandler(request => answer switch
+        {
+            "oversized" => Xml($"<root xmlns=\"urn:schemas-upnp-org:device-1-0\"><device><roomName>Big</roomName>{new string(' ', SonosHouseholdDiscoverer.MaximumDescriptionBytes)}</device></root>"),
+            "doctype" => Xml("<?xml version=\"1.0\"?><!DOCTYPE root [<!ENTITY room \"Entity\">]><root xmlns=\"urn:schemas-upnp-org:device-1-0\"><device><roomName>&room;</roomName></device></root>"),
+            "deep" => Xml("<root xmlns=\"urn:schemas-upnp-org:device-1-0\"><device><roomName>Deep</roomName>" +
+                string.Concat(Enumerable.Repeat("<a>", 100)) + string.Concat(Enumerable.Repeat("</a>", 100)) + "</device></root>"),
+            "malformed" => Xml("<root><device><roomName>Open"),
+            _ => Redirected(request, Description("Elsewhere", "Sonos One"))
+        });
+        var discoverer = new SonosHouseholdDiscoverer(new HandlerHttpClientFactory(handler));
+        var households = SonosHouseholdDiscoverer.ToHouseholds([Answer("RINCON_A00000000000001400", "192.168.1.101")]);
+
+        // Act
+        var household = Assert.Single(await discoverer.DescribeSpeakersAsync(households, CancellationToken.None));
+
+        // Assert
+        Assert.Equal([new DiscoveredItem("RINCON_A00000000000001400", "192.168.1.101")], household.IncludedItems);
+        Assert.Equal(1, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task WhenAnAnswerNamesNoPlainHttpLocation_ThenItsDescriptionIsNotRequested()
+    {
+        // Arrange
+        using var handler = new DescriptionHandler(_ => Description("Wohnzimmer", "Sonos One"));
+        var discoverer = new SonosHouseholdDiscoverer(new HandlerHttpClientFactory(handler));
+        var households = SonosHouseholdDiscoverer.ToHouseholds(
+            [new(new Uri("https://192.168.1.102:1443/xml/device_description.xml"), $"uuid:RINCON_B00000000000001400::{ZonePlayer}", HouseholdHeaders())]);
+
+        // Act
+        var household = Assert.Single(await discoverer.DescribeSpeakersAsync(households, CancellationToken.None));
+
+        // Assert
+        Assert.Equal([new DiscoveredItem("RINCON_B00000000000001400", "192.168.1.102")], household.IncludedItems);
+        Assert.Equal(0, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task WhenMoreSpeakersAnswerThanDescriptionsAreRead_ThenTheFurtherSpeakersAreIncludedById()
+    {
+        // Arrange
+        using var handler = new DescriptionHandler(_ => Description("Room", "Sonos One"));
+        var discoverer = new SonosHouseholdDiscoverer(new HandlerHttpClientFactory(handler));
+        var count = SonosHouseholdDiscoverer.MaximumDescriptions + 1;
+        var households = SonosHouseholdDiscoverer.ToHouseholds(
+        [
+            .. Enumerable.Range(0, count).Select(index =>
+                Answer($"RINCON_{index:D3}000000000001400", $"10.0.{index / 250}.{index % 250 + 1}"))
+        ]);
+
+        // Act
+        var household = Assert.Single(await discoverer.DescribeSpeakersAsync(households, CancellationToken.None));
+
+        // Assert
+        Assert.Equal(SonosHouseholdDiscoverer.MaximumDescriptions, handler.RequestCount);
+        Assert.Equal(count, household.IncludedItems.Count);
+        Assert.Single(household.IncludedItems, item => item.DisplayName.StartsWith("RINCON_", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WhenTheScanIsCanceledWhileDescriptionsAreRead_ThenTheCancellationPropagates()
+    {
+        // Arrange
+        using var requested = new SemaphoreSlim(0);
+        using var handler = new DescriptionHandler(async (_, cancellationToken) =>
+        {
+            requested.Release();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Not reached.");
+        });
+        var discoverer = new SonosHouseholdDiscoverer(new HandlerHttpClientFactory(handler), Timeout.InfiniteTimeSpan);
+        var households = SonosHouseholdDiscoverer.ToHouseholds([Answer("RINCON_A00000000000001400", "192.168.1.101")]);
+        using var cancellation = new CancellationTokenSource();
+
+        // Act
+        var describing = discoverer.DescribeSpeakersAsync(households, cancellation.Token);
+        await requested.WaitAsync();
+        await cancellation.CancelAsync();
+
+        // Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => describing);
     }
 
     [Fact]
@@ -220,6 +411,53 @@ public class SonosHouseholdDiscovererTests
 
         // Act & Assert
         Assert.False(SonosHouseholdDiscoverer.IsSameHousehold(system, Found(("RINCON_A00000000000001400", "192.168.1.101"))));
+    }
+
+    private static Dictionary<string, string> HouseholdHeaders() =>
+        new(StringComparer.OrdinalIgnoreCase) { ["X-RINCON-HOUSEHOLD"] = Household };
+
+    private static HttpResponseMessage Description(string roomName, string modelName) =>
+        Xml($"<?xml version=\"1.0\" encoding=\"utf-8\"?><root xmlns=\"urn:schemas-upnp-org:device-1-0\"><device>" +
+            $"<modelName>{modelName}</modelName><roomName>{roomName}</roomName></device></root>");
+
+    private static HttpResponseMessage Xml(string xml) =>
+        new(HttpStatusCode.OK) { Content = new StringContent(xml, Encoding.UTF8, "text/xml") };
+
+    // What a handler that followed a redirect answers: the request now names where it was sent last.
+    private static HttpResponseMessage Redirected(HttpRequestMessage request, HttpResponseMessage response)
+    {
+        request.RequestUri = new Uri("http://192.0.2.1/xml/device_description.xml");
+        response.RequestMessage = request;
+        return response;
+    }
+
+    private sealed class DescriptionHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _answer;
+        private int _requestCount;
+
+        public DescriptionHandler(Func<HttpRequestMessage, HttpResponseMessage> answer)
+            : this((request, _) => Task.FromResult(answer(request)))
+        {
+        }
+
+        public DescriptionHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> answer)
+        {
+            _answer = answer;
+        }
+
+        public int RequestCount => Volatile.Read(ref _requestCount);
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _requestCount);
+            return _answer(request, cancellationToken);
+        }
+    }
+
+    private sealed class HandlerHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
     }
 
     private sealed class AnsweringSsdpSearch(params SsdpResponse[] responses) : ISsdpSearch
