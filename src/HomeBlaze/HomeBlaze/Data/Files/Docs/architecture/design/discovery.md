@@ -44,7 +44,7 @@ Out of scope, with the contract kept compatible:
 - A background inbox with a notification badge
 - Ignore, which will remember `IDiscoveryResult.Key`
 - Updating the address of a known device that moved, which will use `DiscoveredSubject.ExistingSubject`
-- Adding several found devices at once
+- Adding several found devices in one step; they are added one after the other, see [Creating several devices](#creating-several-devices)
 - Bluetooth, USB and DHCP discovery
 
 ## Contract
@@ -107,7 +107,7 @@ The Discover page further leaves out results whose type is not creatable in the 
 
 `DiscoveryScan` represents one scan. `SubjectDiscoveryService.ScanAsync` creates and owns it; the Discover page owns the cancellation of the scans it starts.
 
-- A scan is canceled only by Scan again and by closing the dialog, which disposes the page. Back, picking a row and switching to All types leave it running while the page is hidden, so its results are complete when the user returns.
+- A scan is canceled only by Scan again and by closing the dialog, which disposes the page. Back, picking a row, creating a subject from a row and switching to All types leave it running while the page is hidden, so its results are complete when the user returns.
 - Its deadline is 30 seconds, taken from an injected `TimeProvider`. The deadline is a cap, not a wait: the scan ends as soon as every discoverer has completed, normally after 3 to 5 seconds.
 - It exposes the shared services below. Within one session, a query that was already sent returns the same in-flight task, so two discoverers asking for the same question cause one query. SSDP queries are shared by exact search target, mDNS queries by service type ignoring case.
 
@@ -145,7 +145,7 @@ The picker page of `SubjectSetupDialog` gets a toggle at the top: All types or D
 `SubjectDiscoveryPage` stays in the tree while the configure page is shown, like the picker page, so its results survive Back.
 
 - The first visit starts a scan. Scan again cancels the running scan and starts a new one. Results are kept until then.
-- All discoverers run in parallel. Each row shows the icon of the type from `SubjectTypeCatalog`, the result's `DisplayName` and `Detail`, and the type's display name. Rows are ordered by type and then by name.
+- All discoverers run in parallel. Each row shows the icon of the type from `SubjectTypeCatalog`, the result's `DisplayName` and `Detail`, and the type's display name. Rows that are not added yet come first, and each part is ordered by the type's display name, then by the result's `DisplayName` ignoring case and the result's `Key`, so the list moves little while results arrive.
 - A row whose `ExistingSubject` is set is shown disabled as "already added" and links to that subject.
 - While the scan runs, the header shows a progress indicator; afterwards it shows the number of devices found.
 - With nothing found, the page says so and points to All types for adding a device by its address. Battery devices that sleep only answer while awake, which the hint mentions.
@@ -158,7 +158,18 @@ Picking a row opens the configure page for the result's type, as picking the typ
 - `SubjectEditPanel` has a dedicated `DiscoveryResult` parameter, not an `EditorParameters` entry. It passes the result on as the `DiscoveryResult` parameter of the hosted component only when `SubjectComponentRegistration.TakesDiscoveryResults` is true for that component, and never otherwise, because `DynamicComponent` rejects a parameter the component does not declare. That property is the one place that decides whether a component takes results, and the registry uses it as well.
 - The name field suggests the result's `DisplayName` when that is a valid, unused name, and the type's usual suggestion otherwise. A name the user typed is kept.
 - Back returns to the page the type was picked on and discards the created subject, as today.
-- Validation, Create, `BeforeSave` and persisting are unchanged.
+- Validation, `BeforeSave` and persisting are unchanged.
+
+### Creating several devices
+
+During the first setup a user adds many found devices, so the folder Create operation keeps the dialog open between them instead of opening it, and scanning, once per device.
+
+- `SubjectSetupOptions.OnCreatedAsync` stores each created subject while the dialog is open. Create applies the edits and the configuration, as without `BeforeSave`, and then awaits the callback. `ShowAsync` returns null when it is set. `ShowAsync` throws an `ArgumentException` when it is set without `NameField` or together with `BeforeSave`.
+- `ISubjectSetupService.CreateSubjectsAsync` passes its callback on as `OnCreatedAsync`, with its own cancellation token, and `CreateSubjectsAndAddToStorageAsync` stores each subject as `{name}.json`. The canvas, grid and markdown callers do not opt in and still close the dialog on Create.
+- A subject created from a Discover row returns the dialog to the Discover page and shows "Created" with its name. The row of the device is shown as already added, with a link to the new subject, and moves after the rows that are not added. A running scan carries on. Scan again recognizes the new subject, a single instance type is no longer offered in the type list, the used name is rejected, and the next device gets its own suggested name.
+- A subject created from the type list closes the dialog, as before.
+- Once a subject was created, Cancel reads Done on the picker page. On the configure page it still reads Cancel, as it discards the form.
+- When the callback throws, the dialog reports the error and stays on the configure page. As with `BeforeSave`, the subject counts as handed over only when it has a parent afterwards; otherwise it is discarded later.
 
 ## Error handling
 
@@ -190,12 +201,15 @@ Picking a row opens the configure page for the result's type, as picking the typ
 - `FritzBoxDiscovery.DiscoverAsync(TimeSpan, CancellationToken)` is now `DiscoverAsync(ISsdpSearch, TimeSpan timeout, CancellationToken)`. `timeout` now limits only each description request; the SSDP window is fixed at about 3 seconds. Migration: resolve `ISsdpSearch` from dependency injection (`AddHomeBlazeServices` registers it; the implementation is internal), or pass `DiscoveryScan.Ssdp` inside a discoverer.
 - `Namotion.Devices.FritzBox` no longer depends on Rssdp. Migration: add your own package reference if you used it transitively.
 - `FritzBoxSetupComponent` now injects `ISsdpSearch`. Migration: a host that shows it must call `AddHomeBlazeServices` or `AddHomeBlazeHostServices`.
+- `ISubjectSetupService.CreateSubjectAsync(IStorageContainer, CancellationToken)`, which returned one `CreateSubjectResult?`, is replaced by `CreateSubjectsAsync(IStorageContainer, Func<CreateSubjectResult, CancellationToken, Task> addSubjectAsync, CancellationToken)`, which passes each created subject to the callback, also while the dialog stays open for the next one. Migration: an implementation passes the callback on, such as to `SubjectSetupOptions.OnCreatedAsync`; a caller moves the code that handled the result into the callback.
+- `SubjectCreatorExtensions.CreateSubjectAndAddToStorageAsync` is renamed to `CreateSubjectsAndAddToStorageAsync`. Migration: rename the call.
 
 Not breaking:
 
 - `HomeBlaze.Components.Abstractions` now references `HomeBlaze.Abstractions`.
 - `HueBridge` matches bridge IDs ignoring case.
 - `FritzBox.Udn` and `ShellyDevice.DeviceId` are new configuration properties; stored subjects without them load unchanged.
+- `SubjectSetupOptions.OnCreatedAsync` is a new, optional option.
 
 ## Testing
 
@@ -208,8 +222,8 @@ Unit tests, without sockets:
 - mDNS packet parsing from captured bytes, including name compression, malformed packets and the caps
 - Each discoverer against fake `ISsdpSearch`, `IMulticastDnsBrowser` and HTTP handlers, including its `Matches` rules
 
-This repository has no component test framework, so the Discover page keeps its logic in `SubjectDiscoveryList` (ordering, failures), `SubjectNameOptions.SuggestName` (the name) and `SubjectEditPanel.CreateHostedComponentParameters` (passing the result), which unit tests cover. The E2E test covers the page itself.
+This repository has no component test framework, so the Discover page keeps its logic in `SubjectDiscoveryList` (ordering, marking a row added, failures), `SubjectNameOptions.SuggestName` (the name) and `SubjectEditPanel.CreateHostedComponentParameters` (passing the result), which unit tests cover. The E2E test covers the page itself.
 
-One E2E test with a fake discoverer: open Discover, pick the result, create, and find the stored subject.
+One E2E test with a fake discoverer that finds two devices: open Discover from the folder Create, pick the first result, create, see the dialog return to the Discover page with the device listed as added after the other one and Done in the footer, create the second device without a new scan, and find both stored subjects. Creating from the type list still closes the dialog, which the other create tests cover.
 
 Manual verification against a real network: the Discover page found a FRITZ!Box with three repeaters, a Hue bridge, a Nuki bridge and several Shelly Gen2 devices, each Shelly once, under its user-given name when it has one. Docker bridge networking was not tested; the page shows a hint for it.
