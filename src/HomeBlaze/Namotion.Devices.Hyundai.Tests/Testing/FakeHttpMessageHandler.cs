@@ -18,7 +18,7 @@ internal sealed record RecordedRequest(HttpMethod Method, Uri Uri, string? Body,
 internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 {
     private readonly Lock _lock = new();
-    private readonly Dictionary<string, Queue<Func<Task<HttpResponseMessage>>>> _responses = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Queue<Func<CancellationToken, Task<HttpResponseMessage>>>> _responses = new(StringComparer.Ordinal);
     private readonly List<RecordedRequest> _requests = [];
 
     public IReadOnlyList<RecordedRequest> Requests
@@ -48,19 +48,28 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
         });
 
     public FakeHttpMessageHandler Respond(string path, Func<HttpResponseMessage> factory) =>
-        Enqueue(path, () => Task.FromResult(factory()));
+        Enqueue(path, _ => Task.FromResult(factory()));
 
     /// <summary>Answers the path with the response once the task completes, for example to hold a request while a test acts.</summary>
     public FakeHttpMessageHandler RespondAfter(string path, Task<HttpResponseMessage> response) =>
-        Enqueue(path, () => response);
+        Enqueue(path, _ => response);
 
-    private FakeHttpMessageHandler Enqueue(string path, Func<Task<HttpResponseMessage>> factory)
+    /// <summary>Holds the request until it is canceled, as a car that never answers.</summary>
+    public FakeHttpMessageHandler RespondNever(string path) =>
+        Enqueue(path, async cancellationToken =>
+        {
+            var never = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+            await using var registration = cancellationToken.Register(() => never.TrySetCanceled(cancellationToken));
+            return await never.Task;
+        });
+
+    private FakeHttpMessageHandler Enqueue(string path, Func<CancellationToken, Task<HttpResponseMessage>> factory)
     {
         lock (_lock)
         {
             if (!_responses.TryGetValue(path, out var queue))
             {
-                _responses[path] = queue = new Queue<Func<Task<HttpResponseMessage>>>();
+                _responses[path] = queue = new Queue<Func<CancellationToken, Task<HttpResponseMessage>>>();
             }
 
             queue.Enqueue(factory);
@@ -89,7 +98,7 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
             .Concat(request.Content?.Headers ?? Enumerable.Empty<KeyValuePair<string, IEnumerable<string>>>())
             .ToDictionary(header => header.Key, header => string.Join(",", header.Value), StringComparer.OrdinalIgnoreCase);
 
-        Func<Task<HttpResponseMessage>>? factory = null;
+        Func<CancellationToken, Task<HttpResponseMessage>>? factory = null;
         lock (_lock)
         {
             _requests.Add(new RecordedRequest(request.Method, request.RequestUri!, body, headers));
@@ -99,7 +108,7 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
             }
         }
 
-        var response = factory is null ? null : await factory();
+        var response = factory is null ? null : await factory(cancellationToken);
         response ??= new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("{}") };
         response.RequestMessage = request;
         return response;

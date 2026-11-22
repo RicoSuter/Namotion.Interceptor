@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Time.Testing;
 using Namotion.Devices.Hyundai.Client;
 using Namotion.Devices.Hyundai.Tests.Testing;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Devices.Hyundai.Tests;
 
@@ -16,9 +17,9 @@ public class BluelinkVehicleApiClientTests
     private static (BluelinkVehicleApiClient Client, FakeHttpMessageHandler Handler, BluelinkRequestBudget Budget) Create(string path, HttpStatusCode statusCode, string body) =>
         Create(new FakeHttpMessageHandler().Respond(path, statusCode, body));
 
-    private static (BluelinkVehicleApiClient Client, FakeHttpMessageHandler Handler, BluelinkRequestBudget Budget) Create(FakeHttpMessageHandler handler, int limit = 100)
+    private static (BluelinkVehicleApiClient Client, FakeHttpMessageHandler Handler, BluelinkRequestBudget Budget) Create(FakeHttpMessageHandler handler, int limit = 100, FakeTimeProvider? time = null)
     {
-        var time = new FakeTimeProvider(Now);
+        time ??= new FakeTimeProvider(Now);
         var budget = new BluelinkRequestBudget(time, () => limit);
         return (new BluelinkVehicleApiClient(new HttpClient(handler), time, budget), handler, budget);
     }
@@ -528,5 +529,86 @@ public class BluelinkVehicleApiClientTests
         var request = Assert.Single(handler.Requests);
         Assert.Null(request.Header("Authorization"));
         Assert.Contains("\"pushType\":\"GCM\"", request.Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WhenOrdinaryCallGetsNoAnswerFor30Seconds_ThenItThrowsTimeoutException()
+    {
+        // Arrange
+        var time = new FakeTimeProvider(Now);
+        var handler = new FakeHttpMessageHandler().RespondNever(BluelinkResponses.VehiclesPath);
+        var (client, _, _) = Create(handler, time: time);
+        var task = client.GetVehiclesAsync("ccs-1", "device-1", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Requests.Count == 1);
+
+        // Act
+        time.Advance(TimeSpan.FromSeconds(30));
+
+        // Assert
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() => task);
+        Assert.Equal("The Bluelink request timed out after 30 seconds.", exception.Message);
+        Assert.IsAssignableFrom<OperationCanceledException>(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task WhenPinExchangeGetsNoAnswerFor30Seconds_ThenItThrowsTimeoutException()
+    {
+        // Arrange
+        var time = new FakeTimeProvider(Now);
+        var handler = new FakeHttpMessageHandler().RespondNever(BluelinkResponses.PinPath);
+        var (client, _, _) = Create(handler, time: time);
+        var task = client.GetControlTokenAsync("ccs-1", "device-1", "1234", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Requests.Count == 1);
+
+        // Act
+        time.Advance(TimeSpan.FromSeconds(30));
+
+        // Assert
+        await Assert.ThrowsAsync<TimeoutException>(() => task);
+    }
+
+    [Theory]
+    [InlineData(BluelinkProtocol.Legacy)]
+    [InlineData(BluelinkProtocol.Ccs2)]
+    public async Task WhenStatusRequestGetsNoAnswer_ThenItTimesOutOnlyAfter90Seconds(BluelinkProtocol protocol)
+    {
+        // Arrange
+        var time = new FakeTimeProvider(Now);
+        var request = protocol == BluelinkProtocol.Legacy ? LegacyRequest : Ccs2Request;
+        var path = protocol == BluelinkProtocol.Legacy
+            ? BluelinkResponses.LegacyStatusRequestPath(request.VehicleId)
+            : BluelinkResponses.Ccs2StatusRequestPath(request.VehicleId);
+        var handler = new FakeHttpMessageHandler().RespondNever(path);
+        var (client, _, _) = Create(handler, time: time);
+        var task = client.RequestStatusAsync(request, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Requests.Count == 1);
+
+        // Act
+        time.Advance(TimeSpan.FromSeconds(30));
+        var isCompletedAfter30Seconds = task.IsCompleted;
+        time.Advance(TimeSpan.FromSeconds(60));
+
+        // Assert
+        Assert.False(isCompletedAfter30Seconds);
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() => task);
+        Assert.Equal("The Bluelink request timed out after 90 seconds.", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenCallerCancelsHeldCall_ThenItThrowsOperationCanceledExceptionAndNotTimeoutException()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler().RespondNever(BluelinkResponses.VehiclesPath);
+        var (client, _, _) = Create(handler);
+        using var cancellation = new CancellationTokenSource();
+        var task = client.GetVehiclesAsync("ccs-1", "device-1", cancellation.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Requests.Count == 1);
+
+        // Act
+        await cancellation.CancelAsync();
+
+        // Assert
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+        Assert.IsNotType<TimeoutException>(exception);
     }
 }

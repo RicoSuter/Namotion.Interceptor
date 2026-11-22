@@ -93,10 +93,11 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
     }
 
     /// <summary>Asks the car to upload its status. Reaches the car and costs 12 V battery.</summary>
+    /// <exception cref="TimeoutException">The car did not answer within 90 seconds.</exception>
     public Task RequestStatusAsync(BluelinkVehicleRequest request, CancellationToken cancellationToken) =>
         SendAsync(HttpMethod.Get, request.Protocol == BluelinkProtocol.Legacy
             ? $"{SpaV1}vehicles/{request.VehicleId}/status"
-            : $"{SpaV1}vehicles/{request.VehicleId}/ccs2/carstatus", request, null, null, cancellationToken);
+            : $"{SpaV1}vehicles/{request.VehicleId}/ccs2/carstatus", request, null, null, cancellationToken, waitsForCar: true);
 
     /// <returns>The message ID of the command.</returns>
     public Task<string> SetChargingAsync(BluelinkVehicleRequest request, bool start, string? controlToken, CancellationToken cancellationToken)
@@ -247,7 +248,7 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
             writer.WriteString("pin", pin);
         }), Encoding.UTF8, "application/json");
 
-        using var response = await httpClient.SendAsync(message, cancellationToken);
+        using var response = await httpClient.SendWithTimeoutAsync(timeProvider, message, waitsForCar: false, cancellationToken);
         var text = await response.Content.ReadAsStringAsync(cancellationToken);
         return BluelinkVehicleApiResponses.ParseControlToken(response.StatusCode, text, timeProvider.GetUtcNow());
     }
@@ -284,10 +285,10 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
             : throw new BluelinkApiException(HttpStatusCode.OK, null, "The command returned no message ID.");
     }
 
-    private Task<JsonElement> SendAsync(HttpMethod method, string url, BluelinkVehicleRequest request, string? body, string? controlToken, CancellationToken cancellationToken) =>
-        SendAsync(method, url, new CallIdentity(request.AccessToken, request.DeviceId, request.Protocol), body, controlToken, cancellationToken);
+    private Task<JsonElement> SendAsync(HttpMethod method, string url, BluelinkVehicleRequest request, string? body, string? controlToken, CancellationToken cancellationToken, bool waitsForCar = false) =>
+        SendAsync(method, url, new CallIdentity(request.AccessToken, request.DeviceId, request.Protocol), body, controlToken, cancellationToken, waitsForCar);
 
-    private async Task<JsonElement> SendAsync(HttpMethod method, string url, CallIdentity identity, string? body, string? controlToken, CancellationToken cancellationToken)
+    private async Task<JsonElement> SendAsync(HttpMethod method, string url, CallIdentity identity, string? body, string? controlToken, CancellationToken cancellationToken, bool waitsForCar = false)
     {
         budget.Consume();
         using var message = new HttpRequestMessage(method, url);
@@ -321,7 +322,7 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
             message.Content = new StringContent(body, Encoding.UTF8, "application/json");
         }
 
-        using var response = await httpClient.SendAsync(message, cancellationToken);
+        using var response = await httpClient.SendWithTimeoutAsync(timeProvider, message, waitsForCar, cancellationToken);
         var text = await response.Content.ReadAsStringAsync(cancellationToken);
         return BluelinkVehicleApiResponses.ParseEnvelope(response.StatusCode, text);
     }

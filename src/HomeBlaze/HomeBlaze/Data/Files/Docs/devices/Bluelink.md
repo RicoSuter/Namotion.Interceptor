@@ -207,7 +207,7 @@ One vehicle with the default interval needs about 100 calls a day. `Refresh` nee
 - **Europe and Hyundai only, electric vehicles only.** Kia, Genesis, other regions and petrol, hybrid and plug-in hybrid vehicles are not supported.
 - **Values can be hours old.** Polling reads the status that Hyundai's servers stored, which the vehicle updates only at certain events.
 - **Refresh and commands cost 12 V battery.** They reach the vehicle. Frequent forced refreshes have drained the 12 V batteries of other users' vehicles, which is why polling never forces one. Hyundai rejects commands while the 12 V battery is low (about 40 %).
-- **The legacy Refresh is not verified.** For a `Legacy` vehicle, the integration expects Hyundai to answer the status request only once the vehicle uploaded its status, within the HTTP timeout of 30 seconds. A vehicle that takes longer fails the `Refresh` with a timeout.
+- **The legacy Refresh is not verified.** For a `Legacy` vehicle, the integration expects Hyundai to answer the status request only once the vehicle uploaded its status (the first refresh of a 2021 Kona Electric took about 25 seconds), within the timeout of 90 seconds. A vehicle that takes longer fails the `Refresh` with a timeout.
 - **The daily limit is a guess.** Hyundai does not document it. The counter resets on a restart.
 - **The protocol flag can be wrong.** Some vehicles report the wrong protocol; their commands then fail with 5031 or 5153.
 - **No seat heating, no lock or unlock, no charging current.** Seat heating fails on some older vehicles, and unlocking from HomeBlaze is not wanted.
@@ -231,5 +231,7 @@ The integration uses region 1 ("Europe") of the community library hyundai_kia_co
 | `POST /api/v2/spa/vehicles/{id}/ccs2/control/charge`, `.../ccs2/control/temperature`, `PUT /api/v1/user/pin` | `prd.eu-ccapi.hyundai.com:8080` | CCS2 commands with the control token of the PIN |
 | `POST /api/v1/spa/vehicles/{id}/charge/target` | `prd.eu-ccapi.hyundai.com:8080` | Charge limits |
 | `GET /api/v1/spa/notifications/{id}/records` | `prd.eu-ccapi.hyundai.com:8080` | Results of commands |
+
+A vehicle API call times out after 30 seconds; the status request of `Refresh` waits up to 90 seconds for the vehicle, for both protocols. The calls of the sign in and the token refresh time out after 2 minutes. A timeout fails the poll of that vehicle or the `Refresh` or command that made the call.
 
 Every vehicle API call carries the `Stamp` header of the app. The access token lives in memory and is refreshed 6 minutes before it expires, and after a call answered with an expired token; each refresh replaces the token set, which is stored before the new access token is used. The control token of the PIN is kept in memory until shortly before it expires.
