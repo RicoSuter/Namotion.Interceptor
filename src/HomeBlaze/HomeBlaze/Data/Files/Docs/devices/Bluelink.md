@@ -5,6 +5,8 @@ icon: DirectionsCar
 
 # Hyundai Bluelink
 
+> **Unofficial:** This integration uses Hyundai's unofficial Bluelink API with the app identity that community libraries use. It is not affiliated with or endorsed by Hyundai, using it may violate Hyundai's terms of use, and Hyundai can block it at any time. Use it at your own risk.
+
 The Bluelink integration reads the Hyundai electric vehicles of a Bluelink account in Europe through the unofficial Bluelink API: battery, range, charging, charge limits, climate, doors, windows, lock, tires, odometer, 12 V battery and parking location. It can start and stop charging, set the charge limits and start and stop the climate. It is careful with the vehicle and the API: polling reads only the status that Hyundai's servers stored and never reaches the vehicle, and only the `Refresh` operation and the commands do. See [Known Limitations](#known-limitations) for what it cannot do.
 
 ## Setup
