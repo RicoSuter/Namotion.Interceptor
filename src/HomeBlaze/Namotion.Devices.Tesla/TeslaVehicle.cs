@@ -101,7 +101,7 @@ public partial class TeslaVehicle :
         _ => null
     };
 
-    /// <summary>Whether the vehicle is reachable through Tesla's servers, which an asleep vehicle is.</summary>
+    /// <summary>Whether the vehicle is reachable through Tesla's servers, which an asleep vehicle is; false while offline or unknown.</summary>
     [Derived]
     public bool IsConnected => VehicleState is TeslaVehicleState.Online or TeslaVehicleState.Asleep;
 

@@ -96,7 +96,7 @@ TeslaAccount                                   tokens and polling
 
 Vehicles are discovered, not configured, and keyed by VIN. A vehicle that appears in the account is added, one that disappears is removed, and a known vehicle is updated in place, so paths and history stay stable.
 
-All readings are `null` until the vehicle reported them. Percentages are fractions from 0 to 1, distances are in km, speeds in km/h, tire pressures in bar, temperatures in °C, power in W, energy in Wh, currents in A and times of day or durations are `TimeSpan`. Values that Tesla reports as placeholders, such as a charger voltage of 0 to 2 V when not charging, `<invalid>`, a blank software version or an empty vehicle name, are `null`. Unknown enum values are `Unknown` and logged once.
+All readings are `null` until the vehicle reported them. Percentages are fractions from 0 to 1, distances are in km, speeds in km/h, tire pressures in bar, temperatures in °C, power in W, energy in Wh, currents in A and times of day or durations are `TimeSpan`. Values that Tesla reports as placeholders, such as a charger voltage of 0 to 2 V when not charging, `<invalid>`, a blank software version or an empty vehicle name, are `null`. Unknown enum values are `Unknown`; the first unknown value of each enum type is logged once per process. Unknown shift states are not logged.
 
 | Subject | Interfaces |
 |---------|------------|
@@ -130,7 +130,7 @@ Every value has one path. The vehicle holds its identity, the odometer and the l
 | `VehicleState` | | `Online`, `Asleep`, `Offline` or `Unknown` |
 | `IsAwake` | | `true` when online, `false` when asleep or offline, `null` when unknown; discrete, so history records every wake and sleep |
 | `IsBusy` | | `true` while a `Wake Up` of the vehicle runs |
-| `IsConnected` | | `true` when online or asleep, `false` when offline: an asleep vehicle is still reachable through Tesla's servers |
+| `IsConnected` | | `true` when online or asleep, `false` when offline or unknown: an asleep vehicle is still reachable through Tesla's servers |
 | `CommandSigning` | | Whether the vehicle requires signed commands (`Off`, `Allowed`, `Required`) |
 | `IsInService` | | Whether the vehicle is in service at Tesla |
 | `LastUpdated` | | Time of the newest data: the newest section timestamp of the data, and the read time only when the vehicle data has no timestamp |
@@ -151,7 +151,7 @@ The title is the name set in the vehicle, else the display name of the account, 
 | `ChargeLimit`, `MinimumChargeLimit`, `MaximumChargeLimit`, `StandardChargeLimit` | Percent | Charge limit with its bounds and the standard limit |
 | `Range`, `IdealRange`, `EstimatedRange` | km | Rated, ideal and estimated range |
 | `ChargingPower` | W | Current charging power |
-| `MaximumChargingPower` | W | Derived: power at the highest current that the charger offers and the vehicle can request; `null` when the vehicle does not charge. The phases come from the measured power, because Tesla reports 2 phases while charging on 3-phase AC. |
+| `MaximumChargingPower` | W | Derived: charger voltage times the highest current that the charger offers and the vehicle can request; not `null` whenever a charger voltage is reported, for example while plugged in. The phases come from the measured power, because Tesla reports 2 phases while charging on 3-phase AC. |
 | `ChargingCurrent`, `RequestedChargingCurrent`, `MaximumRequestedChargingCurrent`, `PilotCurrent`, `ChargingCurrentSetting` | A | Actual, requested, maximum requested and charger offered current, and the current setting of the vehicle |
 | `ChargerVoltage` | V | Charger voltage, `null` when not charging |
 | `ChargerPhases` | | Number of phases as Tesla reports it |
@@ -278,7 +278,7 @@ The integration uses two Tesla hosts. The Owner API is unofficial and not docume
 | `POST /oauth2/v3/token` (`grant_type=authorization_code`) | `auth.tesla.com` | Exchanges the code of [Sign in with Tesla](#sign-in-with-tesla) (PKCE) |
 | `GET /oauth2/v3/authorize` | `auth.tesla.com` | Sign in address of Sign in with Tesla, redirects to `tesla://auth/callback` |
 | `GET /api/1/products` | `owner-api.teslamotors.com` | Vehicle list with state, `command_signing`, `in_service` and `cached_data`. Never wakes a vehicle. |
-| `GET /api/1/vehicles/{id}/vehicle_data` | `owner-api.teslamotors.com` | Full data of an online vehicle (`charge_state`, `climate_state`, `closures_state`, `drive_state`, `gui_settings`, `location_data`, `vehicle_config`, `vehicle_state`). 408 when the vehicle is asleep. |
+| `GET /api/1/vehicles/{id}/vehicle_data` | `owner-api.teslamotors.com` | Full data of an online vehicle (`charge_state`, `climate_state`, `closures_state`, `drive_state`, `gui_settings`, `location_data`, `vehicle_config`, `vehicle_state`, `vehicle_data_combo`). 408 when the vehicle is asleep. |
 | `POST /api/1/vehicles/{id}/wake_up` | `owner-api.teslamotors.com` | Wakes the vehicle, only from the `Wake Up` operation |
 
 The access token lives in memory and is refreshed when it has less than an hour or half of its lifetime left, and after a 401. Tesla's vehicle protobuf schemas (`teslamotors/vehicle-command`, Apache 2.0) are vendored in the library to decode `cached_data`.

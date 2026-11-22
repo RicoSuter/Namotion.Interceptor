@@ -148,7 +148,10 @@ public partial class TeslaChargeState : IVehicleChargingState, ITitleProvider, I
     [State(Unit = StateUnit.WattHour, IsEstimated = true, Position = 50)]
     public decimal? EstimatedBatteryCapacity => GetEstimatedBatteryCapacity();
 
-    /// <summary>The power at the highest current that the charger offers and the vehicle can request, or null when the vehicle does not charge.</summary>
+    /// <summary>
+    /// The charger voltage times the highest current that the charger offers and the vehicle can request; not null whenever a
+    /// charger voltage is reported, for example while plugged in.
+    /// </summary>
     [Derived]
     [Category("")]
     [State(Unit = StateUnit.Watt, Position = 51)]
