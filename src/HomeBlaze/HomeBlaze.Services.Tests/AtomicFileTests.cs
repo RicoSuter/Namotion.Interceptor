@@ -1,4 +1,6 @@
+using System.Runtime.Versioning;
 using System.Text;
+using HomeBlaze.Services.Tests.Secrets;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -94,5 +96,19 @@ public sealed class AtomicFileTests : IDisposable
 
         // Assert
         Assert.Equal(isTemporaryFile, result);
+    }
+
+    [UnixFact]
+    [UnsupportedOSPlatform("windows")]
+    public void WhenAFileIsWrittenWithAUnixCreateMode_ThenTheFileHasThatMode()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "Secrets.json");
+
+        // Act
+        AtomicFile.WriteAllBytes(path, "{}"u8, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+        // Assert
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
     }
 }
