@@ -6,6 +6,7 @@ namespace HomeBlaze.Abstractions.Devices.Vehicles;
 /// <summary>
 /// Controls the charging of a vehicle. Implemented by the subject that implements <see cref="IVehicleChargingState"/>.
 /// Implementations throw <see cref="InvalidOperationException"/> when a command cannot be sent now, for example while the vehicle is not connected.
+/// Chargers, such as wallboxes, implement <see cref="Energy.IVehicleChargerController"/> (pause and resume) instead.
 /// </summary>
 [SubjectAbstraction]
 [Description("Starts and stops the charging of a vehicle and sets its charge limit.")]
