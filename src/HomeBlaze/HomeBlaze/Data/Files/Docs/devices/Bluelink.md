@@ -16,7 +16,7 @@ The Bluelink integration reads the Hyundai electric vehicles of a Bluelink accou
 
 Connecting never reaches a vehicle. Leading and trailing spaces of the email and the PIN are removed. The PIN is checked only when one is entered and the account has an electric `Ccs2` vehicle, because five wrong PINs lock PIN entry for a while; a rejected PIN fails the connect. When Hyundai refuses the device registration, HomeBlaze signs in with a random device identity instead, as the reference library does; the account keeps it until Hyundai answers that the device is not registered (4002), and then registers a new device with the next poll.
 
-The account has to live in a storage file, such as `Devices/Bluelink.json`, and not in the root configuration. Hyundai replaces the tokens with every refresh, and HomeBlaze writes the new ones back through the storage file that holds the account before it uses them; an account in the root configuration keeps them in memory only, logs a warning and signs in again after every restart. When saving fails, the account keeps the tokens in memory and retries saving with the next call.
+The account has to live in a storage file, such as `Devices/Bluelink.json`, and not in the root configuration. Hyundai replaces the tokens with every refresh, and HomeBlaze writes the new ones back through the storage file that holds the account before it uses them; an account in the root configuration keeps them in memory only, logs a warning and signs in again after every restart. When saving fails, the account keeps the tokens in memory and retries saving with the next call or poll.
 
 ### Re-authentication
 
