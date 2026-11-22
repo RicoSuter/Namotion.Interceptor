@@ -26,9 +26,10 @@ internal static class BluelinkJson
     public static JsonElement? Find(this JsonElement element, string path)
     {
         var current = element;
-        foreach (var name in path.Split('.'))
+        var remaining = path.AsSpan();
+        foreach (var range in remaining.Split('.'))
         {
-            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(name, out current))
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(remaining[range], out current))
             {
                 return null;
             }
@@ -38,15 +39,9 @@ internal static class BluelinkJson
     }
 
     /// <summary>Reads a number or a numeric string; null when missing or not numeric.</summary>
-    public static decimal? GetDecimal(this JsonElement element, string path) => element.Find(path) switch
-    {
-        { ValueKind: JsonValueKind.Number } number when number.TryGetDecimal(out var value) => value,
-        { ValueKind: JsonValueKind.String } text when decimal.TryParse(text.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) => value,
-        _ => null
-    };
+    public static decimal? GetDecimal(this JsonElement element, string path) => ToDecimal(element.Find(path));
 
-    public static int? GetInt32(this JsonElement element, string path) =>
-        element.GetDecimal(path) is { } value && value == decimal.Truncate(value) && value is >= int.MinValue and <= int.MaxValue ? (int)value : null;
+    public static int? GetInt32(this JsonElement element, string path) => ToInt32(element.GetDecimal(path));
 
     /// <summary>Reads a string, or a number as its raw text; null when missing, and for booleans, objects and arrays.</summary>
     public static string? GetString(this JsonElement element, string path) => element.Find(path) switch
@@ -61,7 +56,16 @@ internal static class BluelinkJson
     {
         { ValueKind: JsonValueKind.True } => true,
         { ValueKind: JsonValueKind.False } => false,
-        var other when other is not null && element.GetInt32(path) is { } value => value switch { 0 => false, 1 => true, _ => null },
+        var other => ToInt32(ToDecimal(other)) switch { 0 => false, 1 => true, _ => null }
+    };
+
+    private static decimal? ToDecimal(JsonElement? element) => element switch
+    {
+        { ValueKind: JsonValueKind.Number } number when number.TryGetDecimal(out var value) => value,
+        { ValueKind: JsonValueKind.String } text when decimal.TryParse(text.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) => value,
         _ => null
     };
+
+    private static int? ToInt32(decimal? value) =>
+        value is { } number && number == decimal.Truncate(number) && number is >= int.MinValue and <= int.MaxValue ? (int)number : null;
 }

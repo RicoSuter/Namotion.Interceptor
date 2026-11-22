@@ -17,7 +17,7 @@ internal readonly record struct BluelinkVehicleRequest(string AccessToken, strin
     }
 }
 
-/// <summary>A vehicle of the vehicle list.</summary>
+/// <summary>A vehicle of the vehicle list; a blank nickname or model name is null.</summary>
 internal sealed record BluelinkVehicleInfo(string VehicleId, string Vin, string? Nickname, string? ModelName, string? Type, BluelinkProtocol Protocol)
 {
     /// <summary>Whether the vehicle is a battery electric vehicle, the only type the integration supports.</summary>
@@ -64,7 +64,7 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
                 }
 
                 vehicles.Add(new BluelinkVehicleInfo(
-                    vehicleId, vin, entry.GetString("nickname"), entry.GetString("vehicleName"), entry.GetString("type"),
+                    vehicleId, vin, GetText(entry, "nickname"), GetText(entry, "vehicleName"), entry.GetString("type"),
                     entry.GetInt32("ccuCCS2ProtocolSupport") is > 0 ? BluelinkProtocol.Ccs2 : BluelinkProtocol.Legacy));
             }
         }
@@ -99,7 +99,7 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
             : $"{SpaV1}vehicles/{request.VehicleId}/ccs2/carstatus", request, null, null, cancellationToken);
 
     /// <returns>The message ID of the command.</returns>
-    public async Task<string> SetChargingAsync(BluelinkVehicleRequest request, bool start, string? controlToken, CancellationToken cancellationToken)
+    public Task<string> SetChargingAsync(BluelinkVehicleRequest request, bool start, string? controlToken, CancellationToken cancellationToken)
     {
         RequireControlToken(request, controlToken);
         var action = start ? "start" : "stop";
@@ -110,16 +110,15 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
                 writer.WriteString("action", action);
                 writer.WriteString("deviceId", request.DeviceId);
             });
-            return GetMessageId(await SendAsync(HttpMethod.Post, $"{SpaV1}vehicles/{request.VehicleId}/control/charge", request, body, null, cancellationToken));
+            return SendCommandAsync($"{SpaV1}vehicles/{request.VehicleId}/control/charge", request, body, null, cancellationToken);
         }
 
-        var command = BluelinkJson.Write(writer => writer.WriteString("command", action));
-        return GetMessageId(await SendAsync(HttpMethod.Post, $"{SpaV2}vehicles/{request.VehicleId}/ccs2/control/charge", request, command, controlToken, cancellationToken));
+        return SendCommandAsync($"{SpaV2}vehicles/{request.VehicleId}/ccs2/control/charge", request, CreateCcs2Command(action), controlToken, cancellationToken);
     }
 
     /// <summary>Starts the climate for 1 to 30 minutes.</summary>
     /// <returns>The message ID of the command.</returns>
-    public async Task<string> StartClimateAsync(BluelinkVehicleRequest request, decimal temperature, bool defrost, int minutes, string? controlToken, CancellationToken cancellationToken)
+    public Task<string> StartClimateAsync(BluelinkVehicleRequest request, decimal temperature, bool defrost, int minutes, string? controlToken, CancellationToken cancellationToken)
     {
         RequireControlToken(request, controlToken);
         ArgumentOutOfRangeException.ThrowIfLessThan(minutes, 1);
@@ -139,7 +138,7 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
                 writer.WriteString("tempCode", temperatureCode);
                 writer.WriteString("unit", "C");
             });
-            return GetMessageId(await SendAsync(HttpMethod.Post, $"{SpaV1}vehicles/{request.VehicleId}/control/temperature", request, body, null, cancellationToken));
+            return SendCommandAsync($"{SpaV1}vehicles/{request.VehicleId}/control/temperature", request, body, null, cancellationToken);
         }
 
         BluelinkValues.ValidateTemperature(temperature);
@@ -162,11 +161,11 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
             writer.WriteString("tempUnit", "C");
             writer.WriteBoolean("windshieldFrontDefogState", defrost);
         });
-        return GetMessageId(await SendAsync(HttpMethod.Post, $"{SpaV2}vehicles/{request.VehicleId}/ccs2/control/temperature", request, command, controlToken, cancellationToken));
+        return SendCommandAsync($"{SpaV2}vehicles/{request.VehicleId}/ccs2/control/temperature", request, command, controlToken, cancellationToken);
     }
 
     /// <returns>The message ID of the command.</returns>
-    public async Task<string> StopClimateAsync(BluelinkVehicleRequest request, string? controlToken, CancellationToken cancellationToken)
+    public Task<string> StopClimateAsync(BluelinkVehicleRequest request, string? controlToken, CancellationToken cancellationToken)
     {
         RequireControlToken(request, controlToken);
         if (request.Protocol == BluelinkProtocol.Legacy)
@@ -183,16 +182,15 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
                 writer.WriteString("tempCode", "10H");
                 writer.WriteString("unit", "C");
             });
-            return GetMessageId(await SendAsync(HttpMethod.Post, $"{SpaV1}vehicles/{request.VehicleId}/control/temperature", request, body, null, cancellationToken));
+            return SendCommandAsync($"{SpaV1}vehicles/{request.VehicleId}/control/temperature", request, body, null, cancellationToken);
         }
 
-        var command = BluelinkJson.Write(writer => writer.WriteString("command", "stop"));
-        return GetMessageId(await SendAsync(HttpMethod.Post, $"{SpaV2}vehicles/{request.VehicleId}/ccs2/control/temperature", request, command, controlToken, cancellationToken));
+        return SendCommandAsync($"{SpaV2}vehicles/{request.VehicleId}/ccs2/control/temperature", request, CreateCcs2Command("stop"), controlToken, cancellationToken);
     }
 
     /// <summary>Sets both charge limits in percent; the API always takes both. Needs no PIN.</summary>
     /// <returns>The message ID of the command.</returns>
-    public async Task<string> SetChargeTargetsAsync(BluelinkVehicleRequest request, int acPercent, int dcPercent, CancellationToken cancellationToken)
+    public Task<string> SetChargeTargetsAsync(BluelinkVehicleRequest request, int acPercent, int dcPercent, CancellationToken cancellationToken)
     {
         var body = BluelinkJson.Write(writer =>
         {
@@ -207,7 +205,7 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
             writer.WriteEndObject();
             writer.WriteEndArray();
         });
-        return GetMessageId(await SendAsync(HttpMethod.Post, $"{SpaV1}vehicles/{request.VehicleId}/charge/target", request, body, null, cancellationToken));
+        return SendCommandAsync($"{SpaV1}vehicles/{request.VehicleId}/charge/target", request, body, null, cancellationToken);
     }
 
     /// <summary>Reads the result of a command from the notification records of the vehicle. Never reaches the car.</summary>
@@ -272,10 +270,19 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
         }
     }
 
-    private static string GetMessageId(JsonElement root) =>
-        root.GetString("msgId") is { Length: > 0 } messageId
+    private static string? GetText(JsonElement entry, string name) =>
+        entry.GetString(name) is { } text && !string.IsNullOrWhiteSpace(text) ? text : null;
+
+    private static string CreateCcs2Command(string command) => BluelinkJson.Write(writer => writer.WriteString("command", command));
+
+    /// <returns>The message ID of the command.</returns>
+    private async Task<string> SendCommandAsync(string url, BluelinkVehicleRequest request, string body, string? controlToken, CancellationToken cancellationToken)
+    {
+        var root = await SendAsync(HttpMethod.Post, url, request, body, controlToken, cancellationToken);
+        return root.GetString("msgId") is { Length: > 0 } messageId
             ? messageId
             : throw new BluelinkApiException(HttpStatusCode.OK, null, "The command returned no message ID.");
+    }
 
     private Task<JsonElement> SendAsync(HttpMethod method, string url, BluelinkVehicleRequest request, string? body, string? controlToken, CancellationToken cancellationToken) =>
         SendAsync(method, url, new CallIdentity(request.AccessToken, request.DeviceId, request.Protocol), body, controlToken, cancellationToken);

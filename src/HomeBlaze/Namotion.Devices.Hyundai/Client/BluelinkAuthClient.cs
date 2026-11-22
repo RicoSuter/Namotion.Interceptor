@@ -34,13 +34,7 @@ internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider tim
     /// <exception cref="BluelinkApiException">Hyundai rejected the refresh.</exception>
     public async Task<BluelinkCciTokens> RefreshAsync(BluelinkTokenSet tokens, string deviceId, CancellationToken cancellationToken)
     {
-        var body = tokens.Serialize();
-        using var request = new HttpRequestMessage(HttpMethod.Post, BluelinkAppConstants.CciHost + "/auth/v2/token-refresh")
-        {
-            Content = new StringContent(body, Encoding.UTF8, "application/json")
-        };
-        BluelinkFingerprint.AddHeaders(request, deviceId, body, timeProvider);
-
+        using var request = CreateCciRequest("/auth/v2/token-refresh", deviceId, tokens.Serialize());
         using var response = await httpClient.SendAsync(request, cancellationToken);
         var root = await ReadCciResponseAsync(response, cancellationToken);
         var refreshed = ReadCciTokens(root, tokens);
@@ -55,11 +49,7 @@ internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider tim
     /// <exception cref="BluelinkApiException">Hyundai rejected the exchange.</exception>
     public async Task<BluelinkCcsToken> ExchangeCcsAsync(BluelinkTokenSet tokens, string deviceId, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, BluelinkAppConstants.CciHost + "/auth/v1/token-exchange?serviceType=CCS")
-        {
-            Content = new ByteArrayContent([])
-        };
-        BluelinkFingerprint.AddHeaders(request, deviceId, string.Empty, timeProvider);
+        using var request = CreateCciRequest("/auth/v1/token-exchange?serviceType=CCS", deviceId, string.Empty);
         request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + tokens.AccessToken);
         request.Headers.TryAddWithoutValidation("Authentication", tokens.NonCcsToken);
         if (tokens.ExchangeableAccessToken.Length > 0)
@@ -177,14 +167,20 @@ internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider tim
 
     private async Task<BluelinkCciTokens> ExchangeCodeAsync(string code, string deviceId, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{BluelinkAppConstants.CciHost}/auth/v1/token?code={Uri.EscapeDataString(code)}")
-        {
-            Content = new ByteArrayContent([])
-        };
-        BluelinkFingerprint.AddHeaders(request, deviceId, string.Empty, timeProvider);
-
+        using var request = CreateCciRequest("/auth/v1/token?code=" + Uri.EscapeDataString(code), deviceId, string.Empty);
         using var response = await httpClient.SendAsync(request, cancellationToken);
         return ReadCciTokens(await ReadCciResponseAsync(response, cancellationToken), null);
+    }
+
+    /// <summary>Creates a signed POST to the CCI host; an empty body is sent as empty content.</summary>
+    private HttpRequestMessage CreateCciRequest(string pathAndQuery, string deviceId, string body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, BluelinkAppConstants.CciHost + pathAndQuery)
+        {
+            Content = body.Length > 0 ? new StringContent(body, Encoding.UTF8, "application/json") : new ByteArrayContent([])
+        };
+        BluelinkFingerprint.AddHeaders(request, deviceId, body, timeProvider);
+        return request;
     }
 
     private static BluelinkCciTokens ReadCciTokens(JsonElement root, BluelinkTokenSet? previous)

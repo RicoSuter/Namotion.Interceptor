@@ -25,14 +25,7 @@ internal sealed class BluelinkRequestBudget
     public event Action<int>? CountChanged;
 
     /// <summary>The calls left today.</summary>
-    public int Remaining
-    {
-        get
-        {
-            var limit = _getLimit();
-            return Math.Max(0, limit - Update());
-        }
-    }
+    public int Remaining => Math.Max(0, _getLimit() - Update());
 
     /// <summary>The time until the counter resets at local midnight.</summary>
     public TimeSpan TimeUntilReset

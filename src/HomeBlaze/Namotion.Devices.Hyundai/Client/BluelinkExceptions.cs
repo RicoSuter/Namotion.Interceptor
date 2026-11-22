@@ -48,7 +48,8 @@ public class BluelinkApiException(HttpStatusCode statusCode, string? code, strin
         return $"Bluelink returned {(int)statusCode}{codeText}{messageText}";
     }
 
-    private static string Truncate(string message) =>
+    /// <summary>Cuts a server message to the length that exception messages carry.</summary>
+    internal static string Truncate(string message) =>
         message.Length <= MaxServerMessageLength ? message : message[..MaxServerMessageLength];
 }
 

@@ -16,9 +16,9 @@ public class BluelinkVehicleTests
 {
     private static readonly DateTimeOffset ReadTime = new(2026, 11, 22, 10, 20, 0, TimeSpan.Zero);
 
-    private static (BluelinkVehicle Vehicle, FakeVehicleCommands Commands) Create(string? nickname = "Kona")
+    private static (BluelinkVehicle Vehicle, FakeVehicleCommands Commands) Create(string? nickname = "Kona", IInterceptorSubjectContext? context = null)
     {
-        var commands = new FakeVehicleCommands();
+        var commands = context is null ? new FakeVehicleCommands() : new FakeVehicleCommands(context);
         var vehicle = new BluelinkVehicle(commands, new BluelinkVehicleInfo("VEHICLE-1", "TESTVIN0000000001", nickname, "KONA", "EV", BluelinkProtocol.Legacy));
         return (vehicle, commands);
     }
@@ -317,19 +317,6 @@ public class BluelinkVehicleTests
     }
 
     [Fact]
-    public void WhenNicknameIsWhitespace_ThenInfoUpdateClearsTheNickname()
-    {
-        // Arrange
-        var (vehicle, _) = Create();
-
-        // Act
-        vehicle.UpdateInfo(new BluelinkVehicleInfo("VEHICLE-1", "TESTVIN0000000001", "  ", "KONA", "EV", BluelinkProtocol.Legacy));
-
-        // Assert
-        Assert.Null(vehicle.Nickname);
-    }
-
-    [Fact]
     public void WhenStatusWithoutTimeWasApplied_ThenAnOlderTimedStatusIsStillApplied()
     {
         // Arrange
@@ -348,8 +335,7 @@ public class BluelinkVehicleTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var commands = new TrackedVehicleCommands(context);
-        var vehicle = new BluelinkVehicle(commands, new BluelinkVehicleInfo("VEHICLE-1", "TESTVIN0000000001", "Kona", "KONA", "EV", BluelinkProtocol.Legacy));
+        var (vehicle, commands) = Create(context: context);
         ((IInterceptorSubject)vehicle).Context.AddFallbackContext(context);
         Assert.True(vehicle.Charge.StartCharging_IsEnabled);
         var firedEvents = new List<string>();
@@ -368,8 +354,7 @@ public class BluelinkVehicleTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var commands = new TrackedVehicleCommands(context);
-        var vehicle = new BluelinkVehicle(commands, new BluelinkVehicleInfo("VEHICLE-1", "TESTVIN0000000001", "Kona", "KONA", "EV", BluelinkProtocol.Legacy));
+        var (vehicle, commands) = Create(context: context);
 
         // Act
         ((IInterceptorSubject)vehicle).Context.AddFallbackContext(context);

@@ -16,7 +16,6 @@ internal sealed class BluelinkTokenManager
     private static readonly TimeSpan MinimumLifetime = TimeSpan.FromMinutes(1);
 
     private readonly BluelinkAuthClient _authClient;
-    private readonly string _deviceId;
     private readonly TimeProvider _timeProvider;
     private readonly Func<BluelinkTokenSet, Task> _persistTokens;
     private readonly Func<CancellationToken, Task<BluelinkCciTokens>> _login;
@@ -49,14 +48,14 @@ internal sealed class BluelinkTokenManager
     {
         _authClient = authClient;
         _tokens = tokens;
-        _deviceId = deviceId;
+        DeviceId = deviceId;
         _timeProvider = timeProvider;
         _persistTokens = persistTokens;
         _login = login;
     }
 
     /// <summary>The device ID the manager signs with; vehicle API calls with its access tokens send it.</summary>
-    public string DeviceId => _deviceId;
+    public string DeviceId { get; }
 
     /// <summary>The time of the last successful refresh or login, or null.</summary>
     public DateTimeOffset? AuthenticatedAt { get; private set; }
@@ -121,7 +120,7 @@ internal sealed class BluelinkTokenManager
         ExceptionDispatchInfo? exchangeFailure = null;
         try
         {
-            var ccsToken = await _authClient.ExchangeCcsAsync(_tokens, _deviceId, CancellationToken.None);
+            var ccsToken = await _authClient.ExchangeCcsAsync(_tokens, DeviceId, CancellationToken.None);
             var now = _timeProvider.GetUtcNow();
             var refreshAt = Min(now + cciTokens.ExpiresIn, ccsToken.ExpiresAt) - RefreshAhead;
             _refreshAt = refreshAt > now + MinimumLifetime ? refreshAt : now + MinimumLifetime;
@@ -150,7 +149,7 @@ internal sealed class BluelinkTokenManager
     {
         try
         {
-            return await _authClient.RefreshAsync(_tokens, _deviceId, CancellationToken.None);
+            return await _authClient.RefreshAsync(_tokens, DeviceId, CancellationToken.None);
         }
         catch (BluelinkApiException exception) when (IsRefreshRejected(exception))
         {

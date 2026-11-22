@@ -1,13 +1,23 @@
+using Namotion.Interceptor.Attributes;
+
 namespace Namotion.Devices.Hyundai.Tests.Testing;
 
-internal sealed class FakeVehicleCommands : IBluelinkVehicleCommands
+/// <summary>An account stand-in that records the commands; its intercepted flag proves that the enablement of operations follows the account.</summary>
+[InterceptorSubject]
+internal partial class FakeVehicleCommands : IBluelinkVehicleCommands
 {
-    public bool CanSend { get; set; } = true;
+    public FakeVehicleCommands()
+    {
+        CanSend = true;
+    }
+
+    public partial bool CanSend { get; set; }
+
     public List<string> Calls { get; } = [];
 
     public bool CanSendCommands(BluelinkProtocol protocol) => CanSend;
 
-    public bool CanRefresh(decimal? auxiliaryBatteryLevel) => CanSend && auxiliaryBatteryLevel >= 0.65m;
+    public bool CanRefresh(decimal? auxiliaryBatteryLevel) => CanSend;
 
     public Task RefreshAsync(BluelinkVehicle vehicle, CancellationToken cancellationToken) => Record("Refresh");
 

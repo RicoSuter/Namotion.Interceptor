@@ -70,7 +70,7 @@ public partial class BluelinkAccount
     /// <returns>The delay until the next iteration.</returns>
     internal async Task<TimeSpan> RunIterationAsync(CancellationToken stoppingToken)
     {
-        if (string.IsNullOrWhiteSpace(Email) || string.IsNullOrWhiteSpace(Tokens))
+        if (!HasCredentials)
         {
             Status = ServiceStatus.Stopped;
             StatusMessage = MissingCredentialsMessage;
@@ -107,6 +107,8 @@ public partial class BluelinkAccount
         await PollOnceAsync(stoppingToken);
         return GetNextPollDelay();
     }
+
+    private bool HasCredentials => !string.IsNullOrWhiteSpace(Email) && !string.IsNullOrWhiteSpace(Tokens);
 
     private void SignalConfigurationChanged() => Volatile.Read(ref _configurationChanged).TrySetResult();
 
@@ -224,7 +226,7 @@ public partial class BluelinkAccount
         OperationCanceledException => cancellationToken.IsCancellationRequested,
         BluelinkReauthenticationRequiredException or BluelinkRequestLimitException or BluelinkCredentialsReplacedException => true,
         // A second token expired answer, after the refresh, concerns the account and not one vehicle.
-        BluelinkApiException { IsRateLimited: true } or BluelinkApiException { IsDeviceNotRegistered: true } or BluelinkApiException { IsFingerprintRejected: true } or BluelinkApiException { IsTokenExpired: true } => true,
+        BluelinkApiException apiException => apiException.IsRateLimited || apiException.IsDeviceNotRegistered || apiException.IsFingerprintRejected || apiException.IsTokenExpired,
         _ => false
     };
 

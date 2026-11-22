@@ -15,11 +15,13 @@ public partial class BluelinkAccount
     // Only touched while _lock is held.
     private BluelinkCcsToken? _controlToken;
 
+    private bool CanSendRequests => IsAuthenticated && RequestsToday < DailyRequestLimit;
+
     bool IBluelinkVehicleCommands.CanSendCommands(BluelinkProtocol protocol) =>
-        IsAuthenticated && RequestsToday < DailyRequestLimit && (protocol == BluelinkProtocol.Legacy || !string.IsNullOrEmpty(Pin));
+        CanSendRequests && (protocol == BluelinkProtocol.Legacy || !string.IsNullOrEmpty(Pin));
 
     bool IBluelinkVehicleCommands.CanRefresh(decimal? auxiliaryBatteryLevel) =>
-        IsAuthenticated && RequestsToday < DailyRequestLimit && auxiliaryBatteryLevel is { } level && level >= MinimumAuxiliaryBatteryLevel;
+        CanSendRequests && auxiliaryBatteryLevel >= MinimumAuxiliaryBatteryLevel;
 
     async Task IBluelinkVehicleCommands.RefreshAsync(BluelinkVehicle vehicle, CancellationToken cancellationToken)
     {
@@ -104,7 +106,7 @@ public partial class BluelinkAccount
         BluelinkTokenManager? tokenManager = null;
         try
         {
-            if (string.IsNullOrWhiteSpace(Email) || string.IsNullOrWhiteSpace(Tokens))
+            if (!HasCredentials)
             {
                 throw new InvalidOperationException("The Bluelink account has no credentials.");
             }

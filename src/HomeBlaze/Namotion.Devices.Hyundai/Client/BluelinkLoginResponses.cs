@@ -6,8 +6,6 @@ namespace Namotion.Devices.Hyundai.Client;
 /// <summary>Reads the answers of the login: the public key, the cookies, the query of the sign in redirect and the exception of a failed sign in.</summary>
 internal static class BluelinkLoginResponses
 {
-    private const int MaximumDescriptionLength = 200;
-
     /// <summary>Reads the RSA key of the certs response, or null when it has none.</summary>
     public static (string KeyId, string Modulus, string Exponent)? ParsePublicKey(string text)
     {
@@ -103,7 +101,7 @@ internal static class BluelinkLoginResponses
 
             return string.Equals(description, "invalid credentials", StringComparison.OrdinalIgnoreCase)
                 ? CreateInvalidCredentialsException(isLongPassword)
-                : new BluelinkReauthenticationRequiredException($"Hyundai rejected the sign in: {Truncate(description)}.");
+                : new BluelinkReauthenticationRequiredException($"Hyundai rejected the sign in: {BluelinkApiException.Truncate(description)}.");
         }
 
         if (location.Contains("/web/v1/user/authorization", StringComparison.Ordinal))
@@ -120,9 +118,6 @@ internal static class BluelinkLoginResponses
     public static Exception CreateSignInStatusException(HttpStatusCode statusCode) => (int)statusCode is >= 400 and < 500
         ? new BluelinkReauthenticationRequiredException("Hyundai rejected the sign in.")
         : new BluelinkApiException(statusCode, null, "The sign in failed.");
-
-    private static string Truncate(string description) =>
-        description.Length <= MaximumDescriptionLength ? description : description[..MaximumDescriptionLength];
 
     private static BluelinkReauthenticationRequiredException CreateInvalidCredentialsException(bool isLongPassword) =>
         new(isLongPassword

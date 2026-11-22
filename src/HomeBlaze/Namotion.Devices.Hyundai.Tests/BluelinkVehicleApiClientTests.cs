@@ -37,6 +37,22 @@ public class BluelinkVehicleApiClientTests
     }
 
     [Fact]
+    public async Task WhenNicknameAndModelAreBlank_ThenTheyAreNull()
+    {
+        // Arrange
+        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, BluelinkResponses.Success(
+            """{"vehicles":[{"vin":"TESTVIN0000000001","vehicleId":"VEHICLE-1","vehicleName":"  ","type":"EV","nickname":" ","ccuCCS2ProtocolSupport":0}]}""")));
+
+        // Act
+        var vehicles = await client.GetVehiclesAsync("ccs-1", "device-1", CancellationToken.None);
+
+        // Assert
+        var vehicle = Assert.Single(vehicles);
+        Assert.Null(vehicle.Nickname);
+        Assert.Null(vehicle.ModelName);
+    }
+
+    [Fact]
     public async Task WhenRequestIsSent_ThenStampAndServiceHeadersAreSetAndCounted()
     {
         // Arrange

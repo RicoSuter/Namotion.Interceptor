@@ -113,8 +113,8 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
     internal void UpdateInfo(BluelinkVehicleInfo info)
     {
         VehicleId = info.VehicleId;
-        Nickname = string.IsNullOrWhiteSpace(info.Nickname) ? null : info.Nickname;
-        ModelName = string.IsNullOrWhiteSpace(info.ModelName) ? null : info.ModelName;
+        Nickname = info.Nickname;
+        ModelName = info.ModelName;
         Protocol = info.Protocol;
     }
 
