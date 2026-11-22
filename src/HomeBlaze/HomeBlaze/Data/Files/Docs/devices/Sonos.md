@@ -15,6 +15,10 @@ Controls a Sonos household over the speakers' local UPnP API on port 1400, witho
 - Speakers, soundbars, Port, Amp and portables are shown as rooms. Players whose device description lists `HTControl`, such as Arc, Beam and Ray, offer the TV input and get a `HomeTheater` child with night mode and speech enhancement. Players that list `AudioIn` offer line-in. Portables (Move, Roam) report their battery.
 - Boost and Bridge units (`IsZoneBridge`) have nothing to play and are not shown.
 
+## Discovery
+
+The Discover page of the create dialog finds Sonos households over SSDP. Every speaker that answers names its household, so the speakers of one household, satellites included, are one result, and each household on the network is its own result. Picking one fills in `SeedHost` with the speaker that has the lowest RINCON ID, which pins the new system to that household. A household that is already added is recognized by any player or satellite its system knows, or by the speaker its `SeedHost` names. A system without `SeedHost` that has not connected since HomeBlaze started knows no speakers yet, so its household shows as new until it connects.
+
 ## Configuration
 
 Create a `SonosSystem` in the UI (group "Media") or as a JSON file such as `Devices/Sonos.json`. The type alone is enough on a flat home network:
@@ -40,7 +44,7 @@ Both intervals accept 5 seconds to 1 hour; values outside that range set in JSON
 Set it to the IP address of any speaker, ideally one with a DHCP reservation, when:
 
 - **Multicast does not reach HomeBlaze**, for example under Docker bridge networking, across VLANs, or behind a firewall or access point that blocks it.
-- **The network has more than one household**, for example S1 and S2, or a neighbor's speakers. SSDP takes whichever speaker answers first. For a second household, add a second `SonosSystem` with its own `SeedHost` and `EventPort`.
+- **The network has more than one household**, for example S1 and S2, or a neighbor's speakers. SSDP takes whichever speaker answers first. For a second household, add a second `SonosSystem` with its own `SeedHost` and `EventPort`. A household picked on the Discover page gets its `SeedHost` filled in, see [Discovery](#discovery).
 - **Startup should not wait for discovery.** Known speakers are kept in memory only, so after a restart a system without `SeedHost` starts with a 5 second SSDP search.
 
 The seed only has to answer the first request; later the system moves on to another connected player when it stops answering.
@@ -303,7 +307,7 @@ Subscriptions request a 30 minute lifetime and are renewed at half the lifetime 
 |-----------|------|---------|
 | HomeBlaze to speakers | TCP 1400 | Control, polling, device descriptions, `SUBSCRIBE` and `UNSUBSCRIBE`; always needed |
 | Speakers to HomeBlaze | TCP `EventPort` (6329) | Event delivery; without it the system polls only |
-| HomeBlaze to `239.255.255.250` | UDP 1900, unicast answers | SSDP discovery; only when neither `SeedHost` nor a known speaker answers |
+| HomeBlaze to `239.255.255.250` | UDP 1900, unicast answers | SSDP discovery; on the Discover page, and when neither `SeedHost` nor a known speaker answers |
 | HomeBlaze to speakers | TCP 1443 | `PlayNotification`, over TLS; the certificate of the speaker is not validated, since no public authority issues it |
 | Browser to speakers | TCP 1400 | Album art in the widgets |
 

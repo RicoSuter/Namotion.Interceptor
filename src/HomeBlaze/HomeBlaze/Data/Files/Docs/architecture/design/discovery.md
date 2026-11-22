@@ -35,7 +35,7 @@ Implemented (one pull request):
 
 Follow-up pull requests, stacked on the first, one each:
 
-- Sonos (SSDP)
+- Sonos (SSDP), which adds the response headers to `SsdpResponse`
 - myStrom (its UDP announcements)
 - Ecowitt (its UDP broadcast discovery)
 
@@ -125,7 +125,7 @@ public interface IMulticastDnsBrowser
 }
 ```
 
-- `SsdpResponse` carries the location and unique service name of an answer for exactly the searched target.
+- `SsdpResponse` carries the location, unique service name and headers of an answer for exactly the searched target. Headers are looked up by name ignoring case, and the values of a repeated header are joined by commas.
 - `MulticastDnsService` carries the instance name, host name, addresses, port and TXT records.
 
 SSDP uses Rssdp, which `HomeBlaze.Services` references, and searches every IPv4 adapter with a listening window of about 3 seconds.
@@ -134,7 +134,7 @@ mDNS is a minimal implementation of our own, with no package and no reflection. 
 
 Any host on the network can answer, so what one query can make HomeBlaze hold or do is capped:
 
-- An SSDP search returns at most 64 answers for the searched target. The answers Rssdp collects during the window of about 3 seconds are not capped.
+- An SSDP search returns at most 64 answers for the searched target, each with at most 32 headers. A header value is cut to 256 characters, and a header whose name is longer is dropped. The answers Rssdp collects during the window of about 3 seconds are not capped.
 - An mDNS browse reads at most 512 messages per adapter and 256 records per message, keeps at most 4096 records and 256 KB of names and TXT entries, after which further records are dropped, and returns at most 64 instances.
 - `FritzBoxDiscovery` describes at most 32 locations per search, one of them reserved for `fritz.box`, and reads a bounded description from each.
 
@@ -178,12 +178,14 @@ Picking a row opens the configure page for the result's type, as picking the typ
 | `HueBridge` | mDNS `_hue._tcp`, local only | A new record with bridge ID and address, key bridge ID | The persisted `BridgeId`, ignoring case; `HueBridge` itself compares bridge IDs ignoring case as well |
 | `NukiBridge` | The Nuki cloud lookup, which runs when the user first opens the Discover page and on Scan again | `NukiDiscoveredBridge`, key bridge ID | The host address and port |
 | `ShellyDevice` | mDNS `_shelly._tcp` | `ShellyDiscoveredDevice(DeviceId, HostAddress, Application, DisplayName)`, key device ID | The device ID the running subject read from the device, otherwise a new persisted `DeviceId`, otherwise the host address |
+| `SonosSystem` | SSDP `urn:schemas-upnp-org:device:ZonePlayer:1` through the shared `ISsdpSearch` | `SonosDiscoveredHousehold(HouseholdId, Speakers, SeedHost)`, one per household, key household ID | Any player or satellite RINCON ID the running subject knows, or the host of its `SeedHost`, ignoring case |
 
 - A Gen2+ Shelly announces two `_shelly._tcp` instances with the same SRV host, one named by its device ID and one by its user-given name. The discoverer takes the device ID from the SRV host name (without `.local`, lower case) and skips an instance without one, whose name could be the user-given one; it merges the instances into one result and shows the user-given name, or the device ID when there is none. `Application` comes from the `app` TXT record.
 - `FritzBox.Udn` and `ShellyDevice.DeviceId` are new `[Configuration]` properties, written by the component that receives the result. Shelly prefers the device ID the running subject read from the device over the stored one, so a Shelly created before this change is recognized while it is connected, and a stored ID that went stale when the device at the address was replaced does not decide. Subjects do not write their own configuration for discovery.
 - `FritzBoxDiscovery.DiscoverAsync` takes the SSDP search as a parameter, so the Setup component and the discoverer share parsing and description.
 - The Setup components keep their own search for when the type is picked directly. The Hue Setup component keeps the HueApi locator with its network scan fallback.
-- `FritzBoxSetupComponent`, `HueBridgeSetupComponent`, `NukiBridgeSetupComponent` and `ShellyDeviceEditComponent` implement `ISubjectDiscoveryComponent`. The Setup components preselect the result in their lists; the Shelly component fills in the host address and device ID.
+- Every Sonos speaker answers the search, satellites included, and names its household in the `X-RINCON-HOUSEHOLD` header. The discoverer skips an answer whose USN does not start with `uuid:RINCON_` or that has no such header, takes the speaker's RINCON ID from the USN, and groups the speakers by household ID. The seed host is that of the speaker with the lowest RINCON ID, so a household gives the same seed in every scan in which that speaker answers. `SonosSystem` has no household setting, so the seed is what pins a new system to the household.
+- `FritzBoxSetupComponent`, `HueBridgeSetupComponent`, `NukiBridgeSetupComponent`, `ShellyDeviceEditComponent` and `SonosSystemEditComponent` implement `ISubjectDiscoveryComponent`. The Setup components preselect the result in their lists; the Shelly component fills in the host address and device ID, the Sonos component `SeedHost`.
 
 ## Breaking changes
 
@@ -212,4 +214,4 @@ This repository has no component test framework, so the Discover page keeps its 
 
 One E2E test with a fake discoverer: open Discover, pick the result, create, and find the stored subject.
 
-Manual verification against a real network: the Discover page found a FRITZ!Box with three repeaters, a Hue bridge, a Nuki bridge and several Shelly Gen2 devices, each Shelly once, under its user-given name when it has one. Docker bridge networking was not tested; the page shows a hint for it.
+Manual verification against a real network: the Discover page found a FRITZ!Box with three repeaters, a Hue bridge, a Nuki bridge and several Shelly Gen2 devices, each Shelly once, under its user-given name when it has one. The Sonos discoverer, run against the same network from a console, found one household with the 10 speakers that answered, chose the same seed speaker in repeated scans, and recognized a system whose `SeedHost` named one of them. Docker bridge networking was not tested; the page shows a hint for it.
