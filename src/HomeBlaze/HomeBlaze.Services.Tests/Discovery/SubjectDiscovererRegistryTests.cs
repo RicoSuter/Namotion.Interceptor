@@ -5,6 +5,7 @@ using HomeBlaze.Services.Components;
 using HomeBlaze.Services.Discovery;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Attributes;
 using Xunit;
 
 namespace HomeBlaze.Services.Tests.Discovery;
@@ -14,7 +15,8 @@ public class SubjectDiscovererRegistryTests
     private static (SubjectDiscovererRegistry Registry, TypeProvider TypeProvider) CreateRegistry(params Type[] types)
     {
         var typeProvider = new TypeProvider();
-        typeProvider.AddTypes([typeof(DiscoveryTestSetupComponent), typeof(OtherDiscoveryTestEditComponent), .. types]);
+        typeProvider.AddTypes([typeof(DiscoveryTestSetupComponent), typeof(OtherDiscoveryTestEditComponent),
+            typeof(SplitDiscoveryTestSetupComponent), typeof(SplitDiscoveryTestEditComponent), typeof(EditOnlyDiscoveryTestEditComponent), .. types]);
         var serviceProvider = new ServiceCollection().AddSingleton<TestDependency>().BuildServiceProvider();
         var registry = new SubjectDiscovererRegistry(
             typeProvider, new SubjectComponentRegistry(typeProvider), serviceProvider, NullLogger<SubjectDiscovererRegistry>.Instance);
@@ -74,6 +76,32 @@ public class SubjectDiscovererRegistryTests
     }
 
     [Fact]
+    public void WhenTheSetupComponentTakesNoResultsButTheEditComponentDoes_ThenTheDiscovererIsLeftOut()
+    {
+        // Arrange
+        var (registry, _) = CreateRegistry(typeof(SplitTestDiscoverer));
+
+        // Act
+        var discoverers = registry.GetDiscoverers();
+
+        // Assert
+        Assert.Empty(discoverers);
+    }
+
+    [Fact]
+    public void WhenOnlyAnEditComponentTakesResults_ThenTheDiscovererIsCreated()
+    {
+        // Arrange
+        var (registry, _) = CreateRegistry(typeof(EditOnlyTestDiscoverer));
+
+        // Act
+        var discoverers = registry.GetDiscoverers();
+
+        // Assert
+        Assert.IsType<EditOnlyTestDiscoverer>(Assert.Single(discoverers));
+    }
+
+    [Fact]
     public void WhenTypesAreAddedLater_ThenTheirDiscoverersAreCreated()
     {
         // Arrange
@@ -96,6 +124,47 @@ public sealed class DiscoveryTestSetupComponent : ISubjectDiscoveryComponent
 
 [SubjectComponent(SubjectComponentType.Edit, typeof(OtherDiscoveryTestSubject))]
 public sealed class OtherDiscoveryTestEditComponent;
+
+[InterceptorSubject]
+public partial class SplitDiscoveryTestSubject
+{
+    public partial string? Address { get; set; }
+}
+
+[InterceptorSubject]
+public partial class EditOnlyDiscoveryTestSubject
+{
+    public partial string? Address { get; set; }
+}
+
+[SubjectComponent(SubjectComponentType.Setup, typeof(SplitDiscoveryTestSubject))]
+public sealed class SplitDiscoveryTestSetupComponent;
+
+[SubjectComponent(SubjectComponentType.Edit, typeof(SplitDiscoveryTestSubject))]
+public sealed class SplitDiscoveryTestEditComponent : ISubjectDiscoveryComponent
+{
+    public IDiscoveryResult? DiscoveryResult { get; set; }
+}
+
+[SubjectComponent(SubjectComponentType.Edit, typeof(EditOnlyDiscoveryTestSubject))]
+public sealed class EditOnlyDiscoveryTestEditComponent : ISubjectDiscoveryComponent
+{
+    public IDiscoveryResult? DiscoveryResult { get; set; }
+}
+
+public sealed class SplitTestDiscoverer : SubjectDiscoverer<SplitDiscoveryTestSubject, TestDiscoveryResult>
+{
+    protected override IAsyncEnumerable<TestDiscoveryResult> DiscoverAsync(DiscoveryScan scan, CancellationToken cancellationToken) => TestScans.Yield();
+
+    protected override bool Matches(SplitDiscoveryTestSubject existing, TestDiscoveryResult result) => false;
+}
+
+public sealed class EditOnlyTestDiscoverer : SubjectDiscoverer<EditOnlyDiscoveryTestSubject, TestDiscoveryResult>
+{
+    protected override IAsyncEnumerable<TestDiscoveryResult> DiscoverAsync(DiscoveryScan scan, CancellationToken cancellationToken) => TestScans.Yield();
+
+    protected override bool Matches(EditOnlyDiscoveryTestSubject existing, TestDiscoveryResult result) => false;
+}
 
 public sealed class TestDependency;
 

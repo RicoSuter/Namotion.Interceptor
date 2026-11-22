@@ -19,7 +19,7 @@ public sealed class SubjectDiscovererRegistry
     private readonly Lock _lock = new();
 
     private IReadOnlyCollection<Type>? _scannedTypes;
-    private IReadOnlyList<ISubjectDiscoverer> _discoverers = [];
+    private ISubjectDiscoverer[] _discoverers = [];
 
     public SubjectDiscovererRegistry(
         TypeProvider typeProvider,
@@ -40,9 +40,10 @@ public sealed class SubjectDiscovererRegistry
     /// </summary>
     public IReadOnlyList<ISubjectDiscoverer> GetDiscoverers()
     {
-        var types = _typeProvider.Types;
         lock (_lock)
         {
+            // Read inside the lock: a thread holding an older snapshot must not roll the list back over a newer one.
+            var types = _typeProvider.Types;
             // The type provider publishes a new collection whenever types are added, such as by a plugin.
             if (!ReferenceEquals(types, _scannedTypes))
             {
@@ -54,7 +55,7 @@ public sealed class SubjectDiscovererRegistry
         }
     }
 
-    private List<ISubjectDiscoverer> CreateDiscoverers(IReadOnlyCollection<Type> types)
+    private ISubjectDiscoverer[] CreateDiscoverers(IReadOnlyCollection<Type> types)
     {
         var discoverers = new List<ISubjectDiscoverer>();
         foreach (var type in types)
@@ -64,29 +65,27 @@ public sealed class SubjectDiscovererRegistry
                 continue;
             }
 
-            ISubjectDiscoverer discoverer;
             try
             {
-                discoverer = (ISubjectDiscoverer)ActivatorUtilities.CreateInstance(_serviceProvider, type);
+                var discoverer = (ISubjectDiscoverer)ActivatorUtilities.CreateInstance(_serviceProvider, type);
+                if (!AcceptsDiscoveryResults(discoverer.SubjectType))
+                {
+                    _logger.LogError(
+                        "The subject discoverer {Discoverer} is not used: the component the create dialog shows for {SubjectType} does not implement {Interface}.",
+                        type, discoverer.SubjectType, nameof(ISubjectDiscoveryComponent));
+                    continue;
+                }
+
+                discoverers.Add(discoverer);
             }
             catch (Exception exception)
             {
+                // A broken plugin type, such as a TypeLoadException, must not take the other discoverers down.
                 _logger.LogError(exception, "The subject discoverer {Discoverer} could not be created.", type);
-                continue;
             }
-
-            if (!AcceptsDiscoveryResults(discoverer.SubjectType))
-            {
-                _logger.LogError(
-                    "The subject discoverer {Discoverer} is not used: the component the create dialog shows for {SubjectType} does not implement {Interface}.",
-                    type, discoverer.SubjectType, nameof(ISubjectDiscoveryComponent));
-                continue;
-            }
-
-            discoverers.Add(discoverer);
         }
 
-        return discoverers;
+        return discoverers.ToArray();
     }
 
     private bool AcceptsDiscoveryResults(Type subjectType)
