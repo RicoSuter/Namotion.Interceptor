@@ -47,6 +47,10 @@ public class PlaywrightFixtureTests
         using var httpClient = services.GetRequiredService<IHttpClientFactory>().CreateClient();
         var udpDiscovery = services.GetRequiredService<IUdpDiscovery>();
 
+        // The real service can also find nothing on a quiet network, so the replacement itself is checked, before any
+        // call that would use the network.
+        Assert.Same(typeof(PlaywrightFixtureTests).Assembly, udpDiscovery.GetType().Assembly);
+
         // Act
         var ssdpResponses = await services.GetRequiredService<ISsdpSearch>().SearchAsync("ssdp:all", CancellationToken.None);
         var multicastDnsServices = await services.GetRequiredService<IMulticastDnsBrowser>().BrowseAsync("_hue._tcp", CancellationToken.None);
@@ -57,8 +61,6 @@ public class PlaywrightFixtureTests
         // Assert
         Assert.Empty(ssdpResponses);
         Assert.Empty(multicastDnsServices);
-        // The real service can also find nothing on a quiet network, so the replacement itself is checked.
-        Assert.Same(typeof(PlaywrightFixtureTests).Assembly, udpDiscovery.GetType().Assembly);
         Assert.Empty(broadcastAnswers);
         Assert.Empty(listenedDatagrams);
         // The stub of the host answers with exactly this; the real service adds an error code.

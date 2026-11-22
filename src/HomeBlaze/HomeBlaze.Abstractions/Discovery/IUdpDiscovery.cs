@@ -26,8 +26,10 @@ public interface IUdpDiscovery
     IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Binds <paramref name="port"/> on every IPv4 address with address reuse, so concurrent calls and other listeners
-    /// on the host share it, and yields each datagram that arrives within <paramref name="window"/>, as it arrives.
+    /// Binds <paramref name="port"/> on every IPv4 address with address reuse and yields each datagram that arrives
+    /// within <paramref name="window"/>, as it arrives. Concurrent calls and other listeners on the host that also use
+    /// address reuse share the port; while a listener holds it without address reuse, the bind fails and the call
+    /// yields nothing.
     /// </summary>
     /// <param name="port">The port to listen on, from 1 to 65535.</param>
     /// <param name="window">How long to listen, more than zero and at most 30 seconds.</param>

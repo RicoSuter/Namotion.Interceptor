@@ -116,29 +116,14 @@ internal sealed class UdpDiscovery : IUdpDiscovery
             socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp) { EnableBroadcast = true };
             socket.Bind(AnyEndPoint);
 
-            SocketException? firstException = null;
-            var sentCount = 0;
-            foreach (var endPoint in endPoints)
-            {
-                try
-                {
-                    await socket.SendToAsync(request, SocketFlags.None, endPoint, cancellationToken);
-                    sentCount++;
-                }
-                catch (SocketException exception)
-                {
-                    // Another adapter can still send.
-                    firstException ??= exception;
-                }
-            }
-
-            if (sentCount > 0)
+            var failure = await SendToAllAsync(socket, request, endPoints, cancellationToken);
+            if (failure is null)
             {
                 return socket;
             }
 
             socket.Dispose();
-            _logger.LogDebug(firstException, "The UDP broadcast to port {Port} could not be sent.", port);
+            _logger.LogDebug(failure, "The UDP broadcast to port {Port} could not be sent.", port);
             return null;
         }
         catch (SocketException exception)
@@ -188,21 +173,34 @@ internal sealed class UdpDiscovery : IUdpDiscovery
         try
         {
             await Task.Delay(RepeatDelay, cancellationToken);
-            foreach (var endPoint in endPoints)
-            {
-                try
-                {
-                    await socket.SendToAsync(request, SocketFlags.None, endPoint, cancellationToken);
-                }
-                catch (SocketException)
-                {
-                    // Another adapter can still send.
-                }
-            }
+            await SendToAllAsync(socket, request, endPoints, cancellationToken);
         }
         catch (Exception exception) when (exception is OperationCanceledException or ObjectDisposedException)
         {
         }
+    }
+
+    /// <returns>Null when the request was sent to at least one end point, otherwise the first failure.</returns>
+    private static async Task<SocketException?> SendToAllAsync(
+        Socket socket, byte[] request, IReadOnlyList<IPEndPoint> endPoints, CancellationToken cancellationToken)
+    {
+        SocketException? firstFailure = null;
+        var sentCount = 0;
+        foreach (var endPoint in endPoints)
+        {
+            try
+            {
+                await socket.SendToAsync(request, SocketFlags.None, endPoint, cancellationToken);
+                sentCount++;
+            }
+            catch (SocketException exception)
+            {
+                // Another adapter can still send.
+                firstFailure ??= exception;
+            }
+        }
+
+        return sentCount > 0 ? null : firstFailure;
     }
 
     private async IAsyncEnumerable<UdpDatagram> ReceiveAsync(
