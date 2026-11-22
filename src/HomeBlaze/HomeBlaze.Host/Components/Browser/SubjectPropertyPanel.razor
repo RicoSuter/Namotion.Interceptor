@@ -30,7 +30,7 @@
     <div @ref="_rootElement" style="display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); height: 100%;">
         <div style="display: flex; flex-direction: column; height: 100%;">
             @{
-                ResolveUnregisteredSubject();
+                ResolveRegisteredSubject();
                 var childSections = GetChildSections();
                 var reorderContainer = GetReorderContainer(childSections);
                 if (reorderContainer is null && _isReordering)
@@ -608,26 +608,14 @@
         }
     }
 
-    protected override void OnParametersSet()
-    {
-        base.OnParametersSet();
-        ResolveRegisteredSubject();
-    }
-
-    // The subject can be shown before its attach has registered it: a write of a new subject changes the paths when it
-    // detaches the old one, before the new one is attached, and the browser can follow it then. The version is read
-    // before the lookup, so that the attach, which changes it once the registry has the subject, renders the panel again.
-    private void ResolveUnregisteredSubject()
-    {
-        if (_registeredSubject is null)
-        {
-            _ = PathResolver.PathsVersion;
-            ResolveRegisteredSubject();
-        }
-    }
-
+    // Looked up in each render rather than once per subject. The subject can be shown before its attach has registered it:
+    // a write of a new subject changes the paths when it detaches the old one, before the new one is attached, and the
+    // browser can follow it then. A subject that is detached and attached again while its pane stays is registered anew.
+    // The version is read before the lookup, so that an attach, which changes it once the registry has the subject,
+    // renders the panel again.
     private void ResolveRegisteredSubject()
     {
+        _ = PathResolver.PathsVersion;
         var registeredSubject = Subject != null && SubjectRegistry != null
             ? SubjectRegistry.TryGetRegisteredSubject(Subject)
             : null;
