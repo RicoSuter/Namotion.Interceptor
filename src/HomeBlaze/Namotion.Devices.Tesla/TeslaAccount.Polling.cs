@@ -173,6 +173,7 @@ public partial class TeslaAccount
         var vehicles = Vehicles;
         Dictionary<string, TeslaVehicle>? updatedVehicles = null;
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var seenExistingCount = 0;
         string? failure = null;
 
         foreach (var product in products)
@@ -182,7 +183,11 @@ public partial class TeslaAccount
                 continue;
             }
 
-            if (!vehicles.TryGetValue(vin, out var vehicle))
+            if (vehicles.TryGetValue(vin, out var vehicle))
+            {
+                seenExistingCount++;
+            }
+            else
             {
                 // Set up before it is attached with the dictionary below.
                 vehicle = new TeslaVehicle(product.Id, vin, _timeProvider, _loggerFactory.CreateLogger<TeslaVehicle>());
@@ -195,7 +200,7 @@ public partial class TeslaAccount
             failure = ApplyProduct(vehicle, product) ?? failure;
         }
 
-        if (vehicles.Keys.Any(vin => !seen.Contains(vin)))
+        if (seenExistingCount < vehicles.Count)
         {
             updatedVehicles = RemoveVehicles(updatedVehicles ?? vehicles, seen);
         }
@@ -257,17 +262,12 @@ public partial class TeslaAccount
         try
         {
             _logger.LogDebug("Reading Tesla vehicle {Vin} (active: {IsActive}).", vehicle.Vin, vehicle.IsActive);
-            var data = await tokenManager.CallAsync(
-                accessToken => _apiClient.GetVehicleDataAsync(accessToken, vehicle.Id, cancellationToken), cancellationToken);
-
-            if (data is null)
+            if (!await ReadVehicleAsync(tokenManager, vehicle, cancellationToken))
             {
                 _logger.LogDebug("Tesla vehicle {Vin} fell asleep before it was read.", vehicle.Vin);
                 vehicle.VehicleState = TeslaVehicleState.Asleep;
-                return null;
             }
 
-            vehicle.ApplyVehicleData(data);
             return null;
         }
         catch (Exception exception) when (IsVehicleFailure(exception, cancellationToken))
@@ -281,6 +281,21 @@ public partial class TeslaAccount
             // A failed read counts as a read, so that a failing vehicle is not read more often and can still fall asleep.
             policy.OnRead(now, vehicle.IsActive, vehicle.CanSleep, PollingSettings);
         }
+    }
+
+    /// <summary>Reads the data of a vehicle and applies it.</summary>
+    /// <returns>False when the vehicle is asleep or offline.</returns>
+    private async Task<bool> ReadVehicleAsync(TeslaTokenManager tokenManager, TeslaVehicle vehicle, CancellationToken cancellationToken)
+    {
+        var data = await tokenManager.CallAsync(
+            accessToken => _apiClient.GetVehicleDataAsync(accessToken, vehicle.Id, cancellationToken), cancellationToken);
+        if (data is null)
+        {
+            return false;
+        }
+
+        vehicle.ApplyVehicleData(data);
+        return true;
     }
 
     /// <summary>
@@ -326,13 +341,8 @@ public partial class TeslaAccount
             var deadline = _timeProvider.GetUtcNow() + WakeUpTimeout;
             while (true)
             {
-                var data = await tokenManager.CallAsync(
-                    accessToken => _apiClient.GetVehicleDataAsync(accessToken, vehicle.Id, cancellationToken), cancellationToken);
-
-                if (data is not null)
+                if (await ReadVehicleAsync(tokenManager, vehicle, cancellationToken))
                 {
-                    vehicle.ApplyVehicleData(data);
-
                     var policy = GetPollingPolicy(vehicle);
                     policy.OnActivityObserved();
                     policy.OnRead(_timeProvider.GetUtcNow(), vehicle.IsActive, vehicle.CanSleep, PollingSettings);
