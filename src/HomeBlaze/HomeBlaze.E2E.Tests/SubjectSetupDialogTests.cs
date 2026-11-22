@@ -286,11 +286,12 @@ public class SubjectSetupDialogTests
         Assert.Equal(["solid", "2px"], outline);
     }
 
+    // A phone shows fewer rows, because the toggle between the type list and the Discover page sits above the list.
     [Theory]
-    [InlineData(1300, 880)]
-    [InlineData(375, 812)]
-    [InlineData(812, 375)]
-    public async Task WhenTheViewportIsDesktopOrPhoneSized_ThenTheTypeListAndTheActionsStayInView(int width, int height)
+    [InlineData(1300, 880, 3)]
+    [InlineData(375, 812, 2)]
+    [InlineData(812, 375, 2)]
+    public async Task WhenTheViewportIsDesktopOrPhoneSized_ThenTheTypeListAndTheActionsStayInView(int width, int height, int minimumVisibleRows)
     {
         // Arrange - the navigation to the browser is in a drawer that a narrow viewport closes, so the
         // viewport is only resized once the pane is there.
@@ -323,7 +324,7 @@ public class SubjectSetupDialogTests
             }
             """);
 
-        Assert.True(pickerLayout[0] >= 3, $"Only {pickerLayout[0]} type rows are completely visible in the list.");
+        Assert.True(pickerLayout[0] >= minimumVisibleRows, $"Only {pickerLayout[0]} type rows are completely visible in the list.");
         Assert.True(pickerLayout[1] <= 0, $"The dialog content scrolls by {pickerLayout[1]} pixels, although only the list should.");
         Assert.True(pickerLayout[2] == 1, "The cancel button is outside the viewport.");
 
