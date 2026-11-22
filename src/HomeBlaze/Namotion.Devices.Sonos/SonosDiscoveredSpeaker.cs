@@ -9,18 +9,13 @@ namespace Namotion.Devices.Sonos;
 internal sealed record SonosDiscoveredSpeaker(string Id, string HostAddress, int Port)
 {
     /// <summary>
-    /// The address of its device description from its answer, a plain HTTP address on <see cref="HostAddress"/>, or
-    /// null when the answer named another scheme or user information.
-    /// </summary>
-    public Uri? DescriptionLocation { get; init; }
-
-    /// <summary>
-    /// The room name from its device description, or null when it was not read.
+    /// The room name from its device description, at most 64 characters, or null when it was not read.
     /// </summary>
     public string? RoomName { get; init; }
 
     /// <summary>
-    /// The model name from its device description, such as <c>Sonos One</c>, or null when it was not read.
+    /// The model name from its device description, such as <c>Sonos One</c>, at most 64 characters, or null when it
+    /// was not read.
     /// </summary>
     public string? ModelName { get; init; }
 }

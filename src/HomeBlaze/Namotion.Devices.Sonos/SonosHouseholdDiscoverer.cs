@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions.Discovery;
 using Namotion.Devices.Sonos.Client;
-using Namotion.Devices.Sonos.Parsing;
 
 namespace Namotion.Devices.Sonos;
 
@@ -14,31 +13,20 @@ public sealed class SonosHouseholdDiscoverer : SubjectDiscoverer<SonosSystem, So
 {
     internal const string HouseholdHeader = "X-RINCON-HOUSEHOLD";
 
-    /// <summary>
-    /// The most bytes read from one device description. That of a speaker is about 10 KB.
-    /// </summary>
-    internal const int MaximumDescriptionBytes = 64 * 1024;
+    private readonly HttpMessageHandler? _handler;
+    private readonly TimeProvider _timeProvider;
 
-    /// <summary>
-    /// The most device descriptions read in one scan, so that a hostile or malfunctioning answerer on the network
-    /// cannot make a scan read an unbounded number of them. Further speakers are listed by their ID.
-    /// </summary>
-    internal const int MaximumDescriptions = 64;
-
-    private static readonly TimeSpan DefaultDescriptionTimeout = TimeSpan.FromSeconds(2);
-
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly TimeSpan _descriptionTimeout;
-
-    public SonosHouseholdDiscoverer(IHttpClientFactory httpClientFactory)
-        : this(httpClientFactory, DefaultDescriptionTimeout)
+    public SonosHouseholdDiscoverer()
+        : this(handler: null, TimeProvider.System)
     {
     }
 
-    internal SonosHouseholdDiscoverer(IHttpClientFactory httpClientFactory, TimeSpan descriptionTimeout)
+    /// <param name="handler">The handler to send the description requests through, not disposed; null for a new one per scan.</param>
+    /// <param name="timeProvider">Runs the deadline of the description requests.</param>
+    internal SonosHouseholdDiscoverer(HttpMessageHandler? handler, TimeProvider timeProvider)
     {
-        _httpClientFactory = httpClientFactory;
-        _descriptionTimeout = descriptionTimeout;
+        _handler = handler;
+        _timeProvider = timeProvider;
     }
 
     /// <inheritdoc />
@@ -62,90 +50,11 @@ public sealed class SonosHouseholdDiscoverer : SubjectDiscoverer<SonosSystem, So
     protected override bool Matches(SonosSystem existing, SonosDiscoveredHousehold result) => IsSameHousehold(existing, result);
 
     /// <summary>
-    /// Reads the device descriptions of the speakers in parallel, together within the description timeout, and
-    /// returns the households with the room and model of each speaker whose description was read.
+    /// Returns the households with the room and model of each speaker whose device description was read.
     /// </summary>
-    internal async Task<IReadOnlyList<SonosDiscoveredHousehold>> DescribeSpeakersAsync(
-        IReadOnlyList<SonosDiscoveredHousehold> households, CancellationToken cancellationToken)
-    {
-        using var httpClient = _httpClientFactory.CreateClient(nameof(SonosHouseholdDiscoverer));
-        httpClient.Timeout = Timeout.InfiniteTimeSpan;
-        httpClient.MaxResponseContentBufferSize = MaximumDescriptionBytes;
-
-        // The requests start together, so one deadline gives each of them the timeout.
-        using var timeoutCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCancellation.CancelAfter(_descriptionTimeout);
-
-        var speakerCount = 0;
-        foreach (var household in households)
-        {
-            speakerCount += household.Speakers.Count;
-        }
-
-        var tasks = new Task<SonosDiscoveredSpeaker>[speakerCount];
-        var describedCount = 0;
-        var taskIndex = 0;
-        foreach (var household in households)
-        {
-            foreach (var speaker in household.Speakers)
-            {
-                tasks[taskIndex++] = speaker.DescriptionLocation is not null && describedCount++ < MaximumDescriptions
-                    ? DescribeSpeakerAsync(httpClient, speaker, timeoutCancellation.Token, cancellationToken)
-                    : Task.FromResult(speaker);
-            }
-        }
-
-        // Awaited together, so that no request still runs once the client is disposed.
-        var describedSpeakers = await Task.WhenAll(tasks);
-
-        var described = new SonosDiscoveredHousehold[households.Count];
-        var offset = 0;
-        for (var householdIndex = 0; householdIndex < households.Count; householdIndex++)
-        {
-            var household = households[householdIndex];
-            var count = household.Speakers.Count;
-            described[householdIndex] = new SonosDiscoveredHousehold(
-                household.HouseholdId, new ArraySegment<SonosDiscoveredSpeaker>(describedSpeakers, offset, count), household.SeedHost);
-            offset += count;
-        }
-
-        return described;
-    }
-
-    /// <returns>
-    /// The speaker with its room and model, or the speaker as it was when its description does not answer in time,
-    /// answers with an error, from another address after a redirect, with more than
-    /// <see cref="MaximumDescriptionBytes"/> or with a document that cannot be parsed.
-    /// </returns>
-    private static async Task<SonosDiscoveredSpeaker> DescribeSpeakerAsync(
-        HttpClient httpClient, SonosDiscoveredSpeaker speaker, CancellationToken timeoutToken, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var location = speaker.DescriptionLocation!;
-            using var response = await httpClient.GetAsync(location, HttpCompletionOption.ResponseContentRead, timeoutToken);
-
-            // A redirect could have led the request away from the speaker.
-            if (!response.IsSuccessStatusCode || (response.RequestMessage?.RequestUri is { } requestUri && requestUri != location))
-            {
-                return speaker;
-            }
-
-            var description = DeviceDescriptionParser.Parse(await response.Content.ReadAsStringAsync(timeoutToken));
-            return speaker with
-            {
-                RoomName = TrimToNull(description.RoomName),
-                ModelName = TrimToNull(description.ModelName)
-            };
-        }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            // Whatever the speaker answers, the household is still listed.
-            return speaker;
-        }
-    }
-
-    private static string? TrimToNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    internal Task<IReadOnlyList<SonosDiscoveredHousehold>> DescribeSpeakersAsync(
+        IReadOnlyList<SonosDiscoveredHousehold> households, CancellationToken cancellationToken) =>
+        SonosSpeakerDescriptions.DescribeAsync(households, _handler, _timeProvider, cancellationToken);
 
     internal static IReadOnlyList<SonosDiscoveredHousehold> ToHouseholds(IReadOnlyList<SsdpResponse> responses)
     {
@@ -168,10 +77,7 @@ public sealed class SonosHouseholdDiscoverer : SubjectDiscoverer<SonosSystem, So
             }
 
             // A speaker that answers on several adapters is kept once.
-            speakers.TryAdd(speakerId, new SonosDiscoveredSpeaker(speakerId, response.Location.Host, response.Location.Port)
-            {
-                DescriptionLocation = IsDescriptionLocation(response.Location) ? response.Location : null
-            });
+            speakers.TryAdd(speakerId, new SonosDiscoveredSpeaker(speakerId, response.Location.Host, response.Location.Port));
         }
 
         var households = new List<SonosDiscoveredHousehold>(speakersByHousehold.Count);
@@ -224,13 +130,6 @@ public sealed class SonosHouseholdDiscoverer : SubjectDiscoverer<SonosSystem, So
 
         return false;
     }
-
-    // Only the speaker itself is asked: the host of the location is the address of the speaker, and credentials or
-    // another scheme are no description of a Sonos speaker.
-    private static bool IsDescriptionLocation(Uri location) =>
-        location.IsAbsoluteUri &&
-        string.Equals(location.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) &&
-        location.UserInfo.Length == 0;
 
     private static string ToSeedHost(SonosDiscoveredSpeaker speaker) =>
         speaker.Port == SonosValues.DevicePort
