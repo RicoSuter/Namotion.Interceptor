@@ -17,6 +17,7 @@ public sealed class SubjectDiscoveryService
     private readonly Func<IReadOnlyList<ISubjectDiscoverer>> _getDiscoverers;
     private readonly ISsdpSearch _ssdpSearch;
     private readonly IMulticastDnsBrowser _multicastDnsBrowser;
+    private readonly IUdpDiscovery _udpDiscovery;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SubjectDiscoveryService> _logger;
 
@@ -24,9 +25,10 @@ public sealed class SubjectDiscoveryService
         SubjectDiscovererRegistry registry,
         ISsdpSearch ssdpSearch,
         IMulticastDnsBrowser multicastDnsBrowser,
+        IUdpDiscovery udpDiscovery,
         TimeProvider timeProvider,
         ILogger<SubjectDiscoveryService> logger)
-        : this(registry.GetDiscoverers, ssdpSearch, multicastDnsBrowser, timeProvider, logger)
+        : this(registry.GetDiscoverers, ssdpSearch, multicastDnsBrowser, udpDiscovery, timeProvider, logger)
     {
     }
 
@@ -34,12 +36,14 @@ public sealed class SubjectDiscoveryService
         Func<IReadOnlyList<ISubjectDiscoverer>> getDiscoverers,
         ISsdpSearch ssdpSearch,
         IMulticastDnsBrowser multicastDnsBrowser,
+        IUdpDiscovery udpDiscovery,
         TimeProvider timeProvider,
         ILogger<SubjectDiscoveryService> logger)
     {
         _getDiscoverers = getDiscoverers;
         _ssdpSearch = ssdpSearch;
         _multicastDnsBrowser = multicastDnsBrowser;
+        _udpDiscovery = udpDiscovery;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -73,7 +77,7 @@ public sealed class SubjectDiscoveryService
 
         // Read once: a discoverer task can start after the source has been disposed.
         var scanToken = scanCancellation.Token;
-        var scan = new DiscoveryScan(_ssdpSearch, _multicastDnsBrowser, scanToken);
+        var scan = new DiscoveryScan(_ssdpSearch, _multicastDnsBrowser, _udpDiscovery, scanToken);
         var reporter = new ScanReporter(onResult, onFailure);
         var discoverers = _getDiscoverers().Where(discoverer => subjectTypes.Contains(discoverer.SubjectType));
         try

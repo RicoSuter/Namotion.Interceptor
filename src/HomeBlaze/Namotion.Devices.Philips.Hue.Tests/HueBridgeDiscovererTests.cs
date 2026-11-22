@@ -23,7 +23,7 @@ public class HueBridgeDiscovererTests
         var browser = new AnsweringBrowser(Announcement("001788FFFE1A2B3C"), Announcement(null));
         var existing = new HueBridge(NullLogger<HueBridge>.Instance) { BridgeId = "001788fffe1a2b3c" };
         ISubjectDiscoverer discoverer = new HueBridgeDiscoverer();
-        var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, CancellationToken.None);
+        var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, new UnusedUdpDiscovery(), CancellationToken.None);
 
         // Act
         var discovered = await discoverer.DiscoverAsync(scan, [existing], CancellationToken.None).ToListAsync();
@@ -45,7 +45,7 @@ public class HueBridgeDiscovererTests
         var browser = new AnsweringBrowser(Announcement("001788FFFE1A2B3C"));
         var existing = new HueBridge(NullLogger<HueBridge>.Instance) { BridgeId = "001788fffe999999" };
         ISubjectDiscoverer discoverer = new HueBridgeDiscoverer();
-        var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, CancellationToken.None);
+        var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, new UnusedUdpDiscovery(), CancellationToken.None);
 
         // Act
         var discovered = await discoverer.DiscoverAsync(scan, [existing], CancellationToken.None).ToListAsync();
@@ -62,7 +62,7 @@ public class HueBridgeDiscovererTests
         // Arrange
         var browser = new AnsweringBrowser(Announcement("001788FFFE1A2B3C", instanceName: " "));
         ISubjectDiscoverer discoverer = new HueBridgeDiscoverer();
-        var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, CancellationToken.None);
+        var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, new UnusedUdpDiscovery(), CancellationToken.None);
 
         // Act
         var discovered = await discoverer.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
@@ -87,5 +87,14 @@ public class HueBridgeDiscovererTests
     {
         public Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<SsdpResponse>>([]);
+    }
+
+    private sealed class UnusedUdpDiscovery : IUdpDiscovery
+    {
+        public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

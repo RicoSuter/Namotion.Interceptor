@@ -45,6 +45,8 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetService<ILogger<SsdpSearch>>() ?? NullLogger<SsdpSearch>.Instance));
         services.AddSingleton<IMulticastDnsBrowser>(serviceProvider => new MulticastDnsBrowser(
             serviceProvider.GetService<ILogger<MulticastDnsBrowser>>() ?? NullLogger<MulticastDnsBrowser>.Instance));
+        services.AddSingleton<IUdpDiscovery>(serviceProvider => new UdpDiscovery(
+            serviceProvider.GetService<ILogger<UdpDiscovery>>() ?? NullLogger<UdpDiscovery>.Instance));
         services.AddScoped<ITimeZoneDisplay, TimeZoneDisplayService>();
         // The logging factory creates the provider when the host builds it, so the store fills from startup on,
         // before a host system subject configures it.

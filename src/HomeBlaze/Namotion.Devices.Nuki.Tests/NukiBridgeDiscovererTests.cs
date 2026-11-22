@@ -32,7 +32,7 @@ public class NukiBridgeDiscovererTests
         // Arrange
         const string json = """{"bridges": [{"bridgeId": 2117604523, "ip": "192.168.1.50", "port": 8080}], "errorCode": 0}""";
         ISubjectDiscoverer discoverer = new NukiBridgeDiscoverer(new StubHttpClientFactory(json));
-        var scan = new DiscoveryScan(new EmptySsdpSearch(), new EmptyMulticastDnsBrowser(), CancellationToken.None);
+        var scan = new DiscoveryScan(new EmptySsdpSearch(), new EmptyMulticastDnsBrowser(), new UnusedUdpDiscovery(), CancellationToken.None);
 
         // Act
         var discovered = await discoverer.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
@@ -65,5 +65,14 @@ public class NukiBridgeDiscovererTests
     {
         public Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<MulticastDnsService>>([]);
+    }
+
+    private sealed class UnusedUdpDiscovery : IUdpDiscovery
+    {
+        public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

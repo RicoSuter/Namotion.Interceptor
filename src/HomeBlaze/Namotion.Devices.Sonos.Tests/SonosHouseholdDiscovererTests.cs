@@ -136,7 +136,7 @@ public class SonosHouseholdDiscovererTests
             Answer("RINCON_A00000000000001400", "192.168.1.101"),
             Answer("RINCON_B00000000000001400", "192.168.1.102"));
         ISubjectDiscoverer discoverer = new SonosHouseholdDiscoverer();
-        var scan = new DiscoveryScan(search, new EmptyMulticastDnsBrowser(), CancellationToken.None);
+        var scan = new DiscoveryScan(search, new EmptyMulticastDnsBrowser(), new UnusedUdpDiscovery(), CancellationToken.None);
         var existing = CreateSystem(seedHost: "192.168.1.102");
 
         // Act
@@ -237,5 +237,14 @@ public class SonosHouseholdDiscovererTests
     {
         public Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<MulticastDnsService>>([]);
+    }
+
+    private sealed class UnusedUdpDiscovery : IUdpDiscovery
+    {
+        public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

@@ -132,7 +132,7 @@ namespace Namotion.Devices.Ecowitt
     }
     public sealed class EcowittGatewayDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscoverer<Namotion.Devices.Ecowitt.EcowittGateway, Namotion.Devices.Ecowitt.EcowittDiscoveredGateway>
     {
-        public EcowittGatewayDiscoverer(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Ecowitt.EcowittGatewayDiscoverer> logger) { }
+        public EcowittGatewayDiscoverer() { }
         [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Ecowitt.EcowittGatewayDiscoverer.<DiscoverAsync>d__3))]
         protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Ecowitt.EcowittDiscoveredGateway> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
         protected override bool Matches(Namotion.Devices.Ecowitt.EcowittGateway existing, Namotion.Devices.Ecowitt.EcowittDiscoveredGateway result) { }

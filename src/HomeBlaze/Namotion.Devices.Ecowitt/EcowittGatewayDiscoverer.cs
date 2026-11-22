@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions.Discovery;
-using Microsoft.Extensions.Logging;
 
 namespace Namotion.Devices.Ecowitt;
 
@@ -9,25 +8,22 @@ namespace Namotion.Devices.Ecowitt;
 /// </summary>
 public sealed class EcowittGatewayDiscoverer : SubjectDiscoverer<EcowittGateway, EcowittDiscoveredGateway>
 {
-    private readonly Func<CancellationToken, IAsyncEnumerable<EcowittBroadcastReply>> _probe;
+    internal static readonly byte[] BroadcastRequest = [0xFF, 0xFF, EcowittBroadcastReply.BroadcastCommand, 0x00, 0x04, 0x16];
 
-    public EcowittGatewayDiscoverer(ILogger<EcowittGatewayDiscoverer> logger)
-        : this(cancellationToken => EcowittBroadcastProbe.ProbeAsync(logger, cancellationToken))
-    {
-    }
-
-    internal EcowittGatewayDiscoverer(Func<CancellationToken, IAsyncEnumerable<EcowittBroadcastReply>> probe)
-    {
-        _probe = probe;
-    }
+    private const int BroadcastPort = 46000;
+    private static readonly TimeSpan ListeningWindow = TimeSpan.FromSeconds(3);
 
     /// <inheritdoc />
     protected override async IAsyncEnumerable<EcowittDiscoveredGateway> DiscoverAsync(
         DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await foreach (var reply in _probe(cancellationToken))
+        await foreach (var datagram in scan.Udp.BroadcastAsync(BroadcastPort, BroadcastRequest, ListeningWindow, cancellationToken))
         {
-            yield return ToResult(reply);
+            var reply = EcowittBroadcastReply.TryParse(datagram.Payload.Span);
+            if (reply is not null)
+            {
+                yield return ToResult(reply);
+            }
         }
     }
 

@@ -115,7 +115,7 @@ internal static class TestScans
         yield break;
     }
 
-    public static DiscoveryScan CreateScan() => new(new FakeSsdpSearch(), new FakeMulticastDnsBrowser(), CancellationToken.None);
+    public static DiscoveryScan CreateScan() => new(new FakeSsdpSearch(), new FakeMulticastDnsBrowser(), new EmptyUdpDiscovery(), CancellationToken.None);
 }
 
 internal sealed class FakeSsdpSearch : ISsdpSearch
@@ -150,4 +150,13 @@ internal sealed class FakeMulticastDnsBrowser : IMulticastDnsBrowser
         Interlocked.Increment(ref _callCount);
         return _answer.Task.WaitAsync(cancellationToken);
     }
+}
+
+internal sealed class EmptyUdpDiscovery : IUdpDiscovery
+{
+    public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken) =>
+        AsyncEnumerable.Empty<UdpDatagram>();
+
+    public IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken) =>
+        AsyncEnumerable.Empty<UdpDatagram>();
 }

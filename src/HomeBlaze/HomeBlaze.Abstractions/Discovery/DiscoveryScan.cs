@@ -1,16 +1,19 @@
 namespace HomeBlaze.Abstractions.Discovery;
 
 /// <summary>
-/// One scan for devices. Its services send each distinct query once and give every discoverer that asks the same
-/// question the same answer.
+/// One scan for devices. Its SSDP and mDNS services send each distinct query once and give every discoverer that asks
+/// the same question the same answer.
 /// </summary>
 public sealed class DiscoveryScan
 {
     /// <param name="ssdpSearch">The SSDP search to share.</param>
     /// <param name="multicastDnsBrowser">The mDNS browser to share.</param>
+    /// <param name="udpDiscovery">The UDP exchanges, passed on as <see cref="Udp"/>.</param>
     /// <param name="cancellationToken">Ends the shared queries; canceled when the scan ends.</param>
-    public DiscoveryScan(ISsdpSearch ssdpSearch, IMulticastDnsBrowser multicastDnsBrowser, CancellationToken cancellationToken)
+    public DiscoveryScan(
+        ISsdpSearch ssdpSearch, IMulticastDnsBrowser multicastDnsBrowser, IUdpDiscovery udpDiscovery, CancellationToken cancellationToken)
     {
+        Udp = udpDiscovery;
         Ssdp = new SharedSsdpSearch(new SharedQueries<IReadOnlyList<SsdpResponse>>(ssdpSearch.SearchAsync, cancellationToken, StringComparer.Ordinal));
         MulticastDns = new SharedMulticastDnsBrowser(
             new SharedQueries<IReadOnlyList<MulticastDnsService>>(multicastDnsBrowser.BrowseAsync, cancellationToken, StringComparer.OrdinalIgnoreCase));
@@ -25,6 +28,11 @@ public sealed class DiscoveryScan
     /// Browses over mDNS, once per service type and scan.
     /// </summary>
     public IMulticastDnsBrowser MulticastDns { get; }
+
+    /// <summary>
+    /// Exchanges UDP datagrams, one exchange per call, not shared between discoverers.
+    /// </summary>
+    public IUdpDiscovery Udp { get; }
 
     private sealed class SharedSsdpSearch(SharedQueries<IReadOnlyList<SsdpResponse>> queries) : ISsdpSearch
     {

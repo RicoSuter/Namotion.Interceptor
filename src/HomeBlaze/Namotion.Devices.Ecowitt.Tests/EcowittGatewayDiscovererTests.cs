@@ -1,5 +1,7 @@
+using System.Buffers.Binary;
 using System.Net;
 using System.Runtime.CompilerServices;
+using System.Text;
 using HomeBlaze.Abstractions.Discovery;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Ecowitt.Models;
@@ -16,6 +18,23 @@ public class EcowittGatewayDiscovererTests
     private static EcowittBroadcastReply Reply(string macAddress = MacAddress, string ipAddress = HostAddress, string name = "GW2000A-WIFIE157 V3.3.3") =>
         new(macAddress, IPAddress.Parse(ipAddress), name);
 
+    private static UdpDatagram Datagram(string macAddress = MacAddress, string ipAddress = HostAddress, string name = "GW2000A-WIFIE157 V3.3.3")
+    {
+        var nameBytes = Encoding.UTF8.GetBytes(name);
+        var frame = new byte[18 + nameBytes.Length + 1];
+        frame[0] = 0xFF;
+        frame[1] = 0xFF;
+        frame[2] = EcowittBroadcastReply.BroadcastCommand;
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(3), (ushort)(frame.Length - 3));
+        Convert.FromHexString(macAddress.Replace(":", string.Empty)).CopyTo(frame, 5);
+        IPAddress.Parse(ipAddress).GetAddressBytes().CopyTo(frame, 11);
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(15), 45000);
+        frame[17] = (byte)nameBytes.Length;
+        nameBytes.CopyTo(frame, 18);
+        frame[^1] = EcowittBroadcastReply.ComputeChecksum(frame.AsSpan(2, frame.Length - 3));
+        return new UdpDatagram(frame, IPAddress.Parse(ipAddress));
+    }
+
     private static EcowittDiscoveredGateway Found(string macAddress = MacAddress, string hostAddress = HostAddress) =>
         new(macAddress, hostAddress, "GW2000A-WIFIE157", "V3.3.3");
 
@@ -27,10 +46,10 @@ public class EcowittGatewayDiscovererTests
         };
 
     private static async Task<List<DiscoveredSubject>> DiscoverAsync(
-        IReadOnlyList<EcowittBroadcastReply> replies, params IInterceptorSubject[] existingSubjects)
+        FakeUdpDiscovery udpDiscovery, params IInterceptorSubject[] existingSubjects)
     {
-        ISubjectDiscoverer discoverer = new EcowittGatewayDiscoverer(cancellationToken => ToAsyncEnumerable(replies, cancellationToken));
-        var scan = new DiscoveryScan(new UnusedSsdpSearch(), new UnusedMulticastDnsBrowser(), CancellationToken.None);
+        ISubjectDiscoverer discoverer = new EcowittGatewayDiscoverer();
+        var scan = new DiscoveryScan(new UnusedSsdpSearch(), new UnusedMulticastDnsBrowser(), udpDiscovery, CancellationToken.None);
 
         var discovered = new List<DiscoveredSubject>();
         await foreach (var subject in discoverer.DiscoverAsync(scan, existingSubjects, CancellationToken.None))
@@ -41,25 +60,45 @@ public class EcowittGatewayDiscovererTests
         return discovered;
     }
 
-    private static async IAsyncEnumerable<EcowittBroadcastReply> ToAsyncEnumerable(
-        IReadOnlyList<EcowittBroadcastReply> replies, [EnumeratorCancellation] CancellationToken cancellationToken)
+    [Fact]
+    public async Task WhenGatewaysAreSearched_ThenTheBroadcastRequestOfTheLocalApiIsSentToItsPort()
     {
-        foreach (var reply in replies)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await Task.Yield();
-            yield return reply;
-        }
+        // Arrange
+        var udpDiscovery = new FakeUdpDiscovery();
+
+        // Act
+        await DiscoverAsync(udpDiscovery);
+
+        // Assert
+        var broadcast = Assert.Single(udpDiscovery.Broadcasts);
+        Assert.Equal(46000, broadcast.Port);
+        Assert.Equal(Convert.FromHexString("FFFF12000416"), broadcast.Request);
+    }
+
+    [Fact]
+    public async Task WhenADatagramIsNoValidReply_ThenItIsSkipped()
+    {
+        // Arrange
+        var invalid = Datagram().Payload.ToArray();
+        invalid[^1]++;
+        var udpDiscovery = new FakeUdpDiscovery(new UdpDatagram(invalid, IPAddress.Parse(HostAddress)), Datagram(macAddress: "3C:8A:1F:00:00:01"));
+
+        // Act
+        var discovered = await DiscoverAsync(udpDiscovery);
+
+        // Assert
+        var result = Assert.IsType<EcowittDiscoveredGateway>(Assert.Single(discovered).Result);
+        Assert.Equal("3C:8A:1F:00:00:01", result.MacAddress);
     }
 
     [Fact]
     public async Task WhenAGatewayRepliesToBothRequests_ThenItIsFoundOnce()
     {
         // Arrange
-        EcowittBroadcastReply[] replies = [Reply(), Reply(), Reply(macAddress: "3C:8A:1F:00:00:01", ipAddress: "192.168.1.217")];
+        var udpDiscovery = new FakeUdpDiscovery(Datagram(), Datagram(), Datagram(macAddress: "3C:8A:1F:00:00:01", ipAddress: "192.168.1.217"));
 
         // Act
-        var discovered = await DiscoverAsync(replies);
+        var discovered = await DiscoverAsync(udpDiscovery);
 
         // Assert
         Assert.Equal(2, discovered.Count);
@@ -81,7 +120,7 @@ public class EcowittGatewayDiscovererTests
         var existing = CreateGateway(hostAddress: "weather.local", macAddress: MacAddress);
 
         // Act
-        var discovered = await DiscoverAsync([Reply()], other, existing);
+        var discovered = await DiscoverAsync(new FakeUdpDiscovery(Datagram()), other, existing);
 
         // Assert
         Assert.Same(existing, Assert.Single(discovered).ExistingSubject);
@@ -157,6 +196,33 @@ public class EcowittGatewayDiscovererTests
 
         // Assert
         Assert.False(matches);
+    }
+
+    /// <summary>
+    /// Answers every broadcast with the datagrams it was created with and records the broadcasts.
+    /// </summary>
+    private sealed class FakeUdpDiscovery(params UdpDatagram[] datagrams) : IUdpDiscovery
+    {
+        public List<(int Port, byte[] Request)> Broadcasts { get; } = [];
+
+        public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken)
+        {
+            Broadcasts.Add((port, request.ToArray()));
+            return YieldAsync(cancellationToken);
+        }
+
+        public IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        private async IAsyncEnumerable<UdpDatagram> YieldAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            foreach (var datagram in datagrams)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await Task.Yield();
+                yield return datagram;
+            }
+        }
     }
 
     private sealed class UnusedSsdpSearch : ISsdpSearch

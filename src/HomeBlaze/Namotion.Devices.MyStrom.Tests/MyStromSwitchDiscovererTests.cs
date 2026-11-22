@@ -13,8 +13,8 @@ public class MyStromSwitchDiscovererTests
     private const string MacAddress = "FCF5C418ADAC";
     private const string HostAddress = "192.168.1.59";
 
-    private static MyStromAnnouncement Announcement(string macAddress = MacAddress, string ipAddress = HostAddress, string deviceType = "WS2") =>
-        new(macAddress, deviceType, IPAddress.Parse(ipAddress));
+    private static UdpDatagram Announcement(string macAddress = MacAddress, string ipAddress = HostAddress, byte deviceType = 0x6A) =>
+        new((byte[])[.. Convert.FromHexString(macAddress), deviceType, 0x06], IPAddress.Parse(ipAddress));
 
     private static MyStromDiscoveredSwitch Found(string macAddress = MacAddress, string hostAddress = HostAddress) =>
         new(macAddress, hostAddress, "WS2");
@@ -27,10 +27,10 @@ public class MyStromSwitchDiscovererTests
         };
 
     private static async Task<List<DiscoveredSubject>> DiscoverAsync(
-        IReadOnlyList<MyStromAnnouncement> announcements, params IInterceptorSubject[] existingSubjects)
+        FakeUdpDiscovery udpDiscovery, params IInterceptorSubject[] existingSubjects)
     {
-        ISubjectDiscoverer discoverer = new MyStromSwitchDiscoverer(cancellationToken => ToAsyncEnumerable(announcements, cancellationToken));
-        var scan = new DiscoveryScan(new UnusedSsdpSearch(), new UnusedMulticastDnsBrowser(), CancellationToken.None);
+        ISubjectDiscoverer discoverer = new MyStromSwitchDiscoverer();
+        var scan = new DiscoveryScan(new UnusedSsdpSearch(), new UnusedMulticastDnsBrowser(), udpDiscovery, CancellationToken.None);
 
         var discovered = new List<DiscoveredSubject>();
         await foreach (var subject in discoverer.DiscoverAsync(scan, existingSubjects, CancellationToken.None))
@@ -41,30 +41,47 @@ public class MyStromSwitchDiscovererTests
         return discovered;
     }
 
-    private static async IAsyncEnumerable<MyStromAnnouncement> ToAsyncEnumerable(
-        IReadOnlyList<MyStromAnnouncement> announcements, [EnumeratorCancellation] CancellationToken cancellationToken)
+    [Fact]
+    public async Task WhenSwitchesAreSearched_ThenTheAnnouncementPortIsListenedTo()
     {
-        foreach (var announcement in announcements)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await Task.Yield();
-            yield return announcement;
-        }
+        // Arrange
+        var udpDiscovery = new FakeUdpDiscovery();
+
+        // Act
+        await DiscoverAsync(udpDiscovery);
+
+        // Assert
+        Assert.Equal([7979], udpDiscovery.ListenedPorts);
+    }
+
+    [Fact]
+    public async Task WhenADatagramIsNoAnnouncementOfASupportedSwitch_ThenItIsSkipped()
+    {
+        // Arrange
+        var udpDiscovery = new FakeUdpDiscovery(
+            Announcement(macAddress: "FCF5C4000001", deviceType: 0x66),
+            new UdpDatagram(new byte[9], IPAddress.Parse("192.168.1.61")),
+            Announcement());
+
+        // Act
+        var discovered = await DiscoverAsync(udpDiscovery);
+
+        // Assert
+        var result = Assert.IsType<MyStromDiscoveredSwitch>(Assert.Single(discovered).Result);
+        Assert.Equal(MacAddress, result.MacAddress);
     }
 
     [Fact]
     public async Task WhenASwitchAnnouncesItselfTwice_ThenItIsFoundOnce()
     {
         // Arrange
-        MyStromAnnouncement[] announcements =
-        [
+        var udpDiscovery = new FakeUdpDiscovery(
             Announcement(),
-            Announcement(macAddress: "FCF5C4000001", ipAddress: "192.168.1.60", deviceType: "WSE"),
-            Announcement()
-        ];
+            Announcement(macAddress: "FCF5C4000001", ipAddress: "192.168.1.60", deviceType: 0x6B),
+            Announcement());
 
         // Act
-        var discovered = await DiscoverAsync(announcements);
+        var discovered = await DiscoverAsync(udpDiscovery);
 
         // Assert
         Assert.Equal(2, discovered.Count);
@@ -90,7 +107,7 @@ public class MyStromSwitchDiscovererTests
         var existing = CreateSwitch(hostAddress: "kitchen.local", macAddress: MacAddress);
 
         // Act
-        var discovered = await DiscoverAsync([Announcement()], other, existing);
+        var discovered = await DiscoverAsync(new FakeUdpDiscovery(Announcement()), other, existing);
 
         // Assert
         Assert.Same(existing, Assert.Single(discovered).ExistingSubject);
@@ -150,6 +167,33 @@ public class MyStromSwitchDiscovererTests
     private sealed class TestHttpClientFactory : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new();
+    }
+
+    /// <summary>
+    /// Yields the datagrams it was created with to every listener and records the ports listened to.
+    /// </summary>
+    private sealed class FakeUdpDiscovery(params UdpDatagram[] datagrams) : IUdpDiscovery
+    {
+        public List<int> ListenedPorts { get; } = [];
+
+        public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken)
+        {
+            ListenedPorts.Add(port);
+            return YieldAsync(cancellationToken);
+        }
+
+        private async IAsyncEnumerable<UdpDatagram> YieldAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            foreach (var datagram in datagrams)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await Task.Yield();
+                yield return datagram;
+            }
+        }
     }
 
     private sealed class UnusedSsdpSearch : ISsdpSearch

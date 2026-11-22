@@ -14,7 +14,7 @@ public class DiscoveryScanTests
     {
         // Arrange
         var browser = new FakeMulticastDnsBrowser();
-        var scan = new DiscoveryScan(new FakeSsdpSearch(), browser, CancellationToken.None);
+        var scan = new DiscoveryScan(new FakeSsdpSearch(), browser, new EmptyUdpDiscovery(), CancellationToken.None);
 
         // Act
         var first = scan.MulticastDns.BrowseAsync("_hue._tcp", CancellationToken.None);
@@ -31,7 +31,7 @@ public class DiscoveryScanTests
     {
         // Arrange
         var search = new FakeSsdpSearch();
-        var scan = new DiscoveryScan(search, new FakeMulticastDnsBrowser(), CancellationToken.None);
+        var scan = new DiscoveryScan(search, new FakeMulticastDnsBrowser(), new EmptyUdpDiscovery(), CancellationToken.None);
 
         // Act
         await scan.Ssdp.SearchAsync("urn:schemas-upnp-org:device:fritzbox", CancellationToken.None);
@@ -46,7 +46,7 @@ public class DiscoveryScanTests
     {
         // Arrange
         var browser = new FakeMulticastDnsBrowser();
-        var scan = new DiscoveryScan(new FakeSsdpSearch(), browser, CancellationToken.None);
+        var scan = new DiscoveryScan(new FakeSsdpSearch(), browser, new EmptyUdpDiscovery(), CancellationToken.None);
         using var stoppedWaiting = new CancellationTokenSource();
         var first = scan.MulticastDns.BrowseAsync("_hue._tcp", stoppedWaiting.Token);
         var second = scan.MulticastDns.BrowseAsync("_hue._tcp", CancellationToken.None);
@@ -58,5 +58,18 @@ public class DiscoveryScanTests
         // Assert
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
         Assert.Same(Bridge, Assert.Single(await second));
+    }
+
+    [Fact]
+    public void WhenAScanIsCreated_ThenItPassesTheUdpDiscoveryOn()
+    {
+        // Arrange
+        var udpDiscovery = new EmptyUdpDiscovery();
+
+        // Act
+        var scan = new DiscoveryScan(new FakeSsdpSearch(), new FakeMulticastDnsBrowser(), udpDiscovery, CancellationToken.None);
+
+        // Assert
+        Assert.Same(udpDiscovery, scan.Udp);
     }
 }

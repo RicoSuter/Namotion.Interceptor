@@ -16,7 +16,7 @@ public class SubjectDiscoveryServiceTests
 
     private static SubjectDiscoveryService CreateService(
         TimeProvider timeProvider, ILogger<SubjectDiscoveryService> logger, params ISubjectDiscoverer[] discoverers) =>
-        new(() => discoverers, new FakeSsdpSearch(), new FakeMulticastDnsBrowser(), timeProvider, logger);
+        new(() => discoverers, new FakeSsdpSearch(), new FakeMulticastDnsBrowser(), new EmptyUdpDiscovery(), timeProvider, logger);
 
     [Fact]
     public async Task WhenDiscoverersYieldResults_ThenEveryResultIsReported()

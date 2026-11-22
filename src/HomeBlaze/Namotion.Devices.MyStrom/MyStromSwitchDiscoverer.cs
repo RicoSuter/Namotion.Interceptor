@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions.Discovery;
-using Microsoft.Extensions.Logging;
 
 namespace Namotion.Devices.MyStrom;
 
@@ -9,25 +8,22 @@ namespace Namotion.Devices.MyStrom;
 /// </summary>
 public sealed class MyStromSwitchDiscoverer : SubjectDiscoverer<MyStromSwitch, MyStromDiscoveredSwitch>
 {
-    private readonly Func<CancellationToken, IAsyncEnumerable<MyStromAnnouncement>> _listen;
+    private const int AnnouncementPort = 7979;
 
-    public MyStromSwitchDiscoverer(ILogger<MyStromSwitchDiscoverer> logger)
-        : this(cancellationToken => MyStromAnnouncementListener.ListenAsync(logger, cancellationToken))
-    {
-    }
-
-    internal MyStromSwitchDiscoverer(Func<CancellationToken, IAsyncEnumerable<MyStromAnnouncement>> listen)
-    {
-        _listen = listen;
-    }
+    // Longer than the announcement interval of about 5 seconds, so every device announces itself once.
+    private static readonly TimeSpan ListeningWindow = TimeSpan.FromSeconds(6);
 
     /// <inheritdoc />
     protected override async IAsyncEnumerable<MyStromDiscoveredSwitch> DiscoverAsync(
         DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await foreach (var announcement in _listen(cancellationToken))
+        await foreach (var datagram in scan.Udp.ListenAsync(AnnouncementPort, ListeningWindow, cancellationToken))
         {
-            yield return ToResult(announcement);
+            var announcement = MyStromAnnouncement.TryParse(datagram.Payload.Span, datagram.SenderAddress);
+            if (announcement is not null)
+            {
+                yield return ToResult(announcement);
+            }
         }
     }
 

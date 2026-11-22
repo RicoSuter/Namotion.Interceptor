@@ -518,9 +518,10 @@ namespace HomeBlaze.Abstractions.Discovery
     }
     public sealed class DiscoveryScan
     {
-        public DiscoveryScan(HomeBlaze.Abstractions.Discovery.ISsdpSearch ssdpSearch, HomeBlaze.Abstractions.Discovery.IMulticastDnsBrowser multicastDnsBrowser, System.Threading.CancellationToken cancellationToken) { }
+        public DiscoveryScan(HomeBlaze.Abstractions.Discovery.ISsdpSearch ssdpSearch, HomeBlaze.Abstractions.Discovery.IMulticastDnsBrowser multicastDnsBrowser, HomeBlaze.Abstractions.Discovery.IUdpDiscovery udpDiscovery, System.Threading.CancellationToken cancellationToken) { }
         public HomeBlaze.Abstractions.Discovery.IMulticastDnsBrowser MulticastDns { get; }
         public HomeBlaze.Abstractions.Discovery.ISsdpSearch Ssdp { get; }
+        public HomeBlaze.Abstractions.Discovery.IUdpDiscovery Udp { get; }
     }
     public interface IDiscoveryResult
     {
@@ -540,6 +541,11 @@ namespace HomeBlaze.Abstractions.Discovery
     {
         System.Type SubjectType { get; }
         System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.DiscoveredSubject> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.IInterceptorSubject> existingSubjects, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IUdpDiscovery
+    {
+        System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.UdpDatagram> BroadcastAsync(int port, System.ReadOnlyMemory<byte> request, System.TimeSpan window, System.Threading.CancellationToken cancellationToken);
+        System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.UdpDatagram> ListenAsync(int port, System.TimeSpan window, System.Threading.CancellationToken cancellationToken);
     }
     public sealed class MulticastDnsService : System.IEquatable<HomeBlaze.Abstractions.Discovery.MulticastDnsService>
     {
@@ -564,6 +570,12 @@ namespace HomeBlaze.Abstractions.Discovery
         protected SubjectDiscoverer() { }
         protected abstract System.Collections.Generic.IAsyncEnumerable<TResult> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, System.Threading.CancellationToken cancellationToken);
         protected abstract bool Matches(TSubject existing, TResult result);
+    }
+    public readonly struct UdpDatagram : System.IEquatable<HomeBlaze.Abstractions.Discovery.UdpDatagram>
+    {
+        public UdpDatagram(System.ReadOnlyMemory<byte> Payload, System.Net.IPAddress SenderAddress) { }
+        public System.ReadOnlyMemory<byte> Payload { get; init; }
+        public System.Net.IPAddress SenderAddress { get; init; }
     }
 }
 namespace HomeBlaze.Abstractions
