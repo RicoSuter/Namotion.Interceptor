@@ -1,9 +1,15 @@
+using System.Net;
+using System.Text;
+using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Devices.Nuki;
 
 namespace HomeBlaze.E2E.Tests.Infrastructure;
 
@@ -66,6 +72,17 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
             provider => new TestTypeRegistration(this, provider.GetRequiredService<TypeProvider>()))));
 
         builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(ServerLog));
+
+        // A scan on the Discover page runs the discoverers of the application too, which must not search the network
+        // of the machine or tell the Nuki discovery service its public IP address.
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<ISsdpSearch>();
+            services.AddSingleton<ISsdpSearch, EmptySsdpSearch>();
+            services.RemoveAll<IMulticastDnsBrowser>();
+            services.AddSingleton<IMulticastDnsBrowser, EmptyMulticastDnsBrowser>();
+            services.ConfigureHttpClientDefaults(httpClient => httpClient.AddHttpMessageHandler(() => new NukiDiscoveryStub()));
+        });
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -86,5 +103,39 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         }
 
         public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class EmptySsdpSearch : ISsdpSearch
+    {
+        public Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<SsdpResponse>>([]);
+    }
+
+    private sealed class EmptyMulticastDnsBrowser : IMulticastDnsBrowser
+    {
+        public Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<MulticastDnsService>>([]);
+    }
+
+    /// <summary>
+    /// Answers the Nuki discovery service with no bridges and passes every other request on.
+    /// </summary>
+    private sealed class NukiDiscoveryStub : DelegatingHandler
+    {
+        private static readonly string DiscoveryHost = new Uri(NukiBridgeDiscovery.DiscoveryAddress).Host;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (string.Equals(request.RequestUri?.Host, DiscoveryHost, StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    RequestMessage = request,
+                    Content = new StringContent("{\"bridges\":[]}", Encoding.UTF8, "application/json")
+                });
+            }
+
+            return base.SendAsync(request, cancellationToken);
+        }
     }
 }

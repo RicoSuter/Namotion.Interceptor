@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
@@ -5,6 +6,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
+using Namotion.Devices.Nuki;
 using Xunit;
 
 namespace HomeBlaze.E2E.Tests;
@@ -35,6 +37,25 @@ public class PlaywrightFixtureTests
         // Assert
         Assert.Equal(1, _fixture.StartedHostCount);
         Assert.Contains(addresses, address => new Uri(address) == serverAddress);
+    }
+
+    [Fact]
+    public async Task WhenTheDiscoverersOfTheApplicationScan_ThenTheyFindNothingWithoutTheNetwork()
+    {
+        // Arrange
+        var services = _fixture.ServerServices;
+        using var httpClient = services.GetRequiredService<IHttpClientFactory>().CreateClient();
+
+        // Act
+        var ssdpResponses = await services.GetRequiredService<ISsdpSearch>().SearchAsync("ssdp:all", CancellationToken.None);
+        var multicastDnsServices = await services.GetRequiredService<IMulticastDnsBrowser>().BrowseAsync("_hue._tcp", CancellationToken.None);
+        var nukiAnswer = await httpClient.GetStringAsync(NukiBridgeDiscovery.DiscoveryAddress);
+
+        // Assert
+        Assert.Empty(ssdpResponses);
+        Assert.Empty(multicastDnsServices);
+        // The stub of the host answers with exactly this; the real service adds an error code.
+        Assert.Equal("{\"bridges\":[]}", nukiAnswer);
     }
 
     [Fact]
