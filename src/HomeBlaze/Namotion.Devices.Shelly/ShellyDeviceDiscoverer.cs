@@ -76,7 +76,7 @@ public sealed class ShellyDeviceDiscoverer : SubjectDiscoverer<ShellyDevice, She
     internal static bool IsSameDevice(ShellyDevice existing, ShellyDiscoveredDevice result)
     {
         // A subject created before discovery existed has no stored ID, but a connected one read it from the device.
-        var deviceId = existing.DeviceId ?? existing.DeviceInfo?.Id;
+        var deviceId = !string.IsNullOrWhiteSpace(existing.DeviceId) ? existing.DeviceId.Trim() : existing.DeviceInfo?.Id;
         return deviceId is not null
             ? string.Equals(deviceId, result.DeviceId, StringComparison.OrdinalIgnoreCase)
             : string.Equals(existing.HostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase);

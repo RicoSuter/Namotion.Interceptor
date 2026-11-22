@@ -104,6 +104,25 @@ public class ShellyDeviceDiscovererTests
     }
 
     [Fact]
+    public async Task WhenAScanRuns_ThenTheShellyServiceTypeIsBrowsed()
+    {
+        // Arrange
+        var browser = new AnsweringBrowser(Service("Kitchen"));
+        ISubjectDiscoverer discoverer = new ShellyDeviceDiscoverer();
+        var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, CancellationToken.None);
+
+        // Act
+        var discovered = await discoverer.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
+
+        // Assert
+        var single = Assert.Single(discovered);
+        var device = Assert.IsType<ShellyDiscoveredDevice>(single.Result);
+        Assert.Equal("shellyplus1pm-a8032ab12345", device.DeviceId);
+        Assert.Equal("Kitchen", device.DisplayName);
+        Assert.Equal([ShellyDeviceDiscoverer.ServiceType], browser.ServiceTypes);
+    }
+
+    [Fact]
     public void WhenTheSubjectHasADeviceId_ThenTheDeviceIdDecides()
     {
         // Arrange
@@ -138,6 +157,37 @@ public class ShellyDeviceDiscovererTests
         // Act & Assert
         Assert.True(ShellyDeviceDiscoverer.IsSameDevice(device, Found()));
         Assert.False(ShellyDeviceDiscoverer.IsSameDevice(device, Found(hostAddress: "192.168.1.42")));
+    }
+
+    [Fact]
+    public void WhenTheStoredDeviceIdIsBlank_ThenTheDeviceIdTheRunningSubjectReadDecides()
+    {
+        // Arrange
+        var device = CreateDevice();
+        device.HostAddress = "192.168.1.99";
+        device.DeviceId = " ";
+        device.DeviceInfo = new ShellyDeviceInfo { Id = "shellyplus1pm-a8032ab12345" };
+
+        // Act & Assert
+        Assert.True(ShellyDeviceDiscoverer.IsSameDevice(device, Found()));
+        Assert.False(ShellyDeviceDiscoverer.IsSameDevice(device, Found(deviceId: "shellyplus1pm-other")));
+    }
+
+    private sealed class AnsweringBrowser(params MulticastDnsService[] services) : IMulticastDnsBrowser
+    {
+        public List<string> ServiceTypes { get; } = [];
+
+        public Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken)
+        {
+            ServiceTypes.Add(serviceType);
+            return Task.FromResult<IReadOnlyList<MulticastDnsService>>(services);
+        }
+    }
+
+    private sealed class EmptySsdpSearch : ISsdpSearch
+    {
+        public Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<SsdpResponse>>([]);
     }
 
     private sealed class TestHttpClientFactory : IHttpClientFactory

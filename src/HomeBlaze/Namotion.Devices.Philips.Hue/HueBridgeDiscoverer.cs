@@ -18,8 +18,9 @@ public sealed class HueBridgeDiscoverer : SubjectDiscoverer<HueBridge, HueDiscov
         {
             if (service.Properties.TryGetValue("bridgeid", out var bridgeId) && !string.IsNullOrWhiteSpace(bridgeId))
             {
-                yield return new HueDiscoveredBridge(
-                    bridgeId.Trim().ToLowerInvariant(), service.Addresses[0].ToString(), service.InstanceName);
+                var normalizedBridgeId = bridgeId.Trim().ToLowerInvariant();
+                var name = string.IsNullOrWhiteSpace(service.InstanceName) ? normalizedBridgeId : service.InstanceName.Trim();
+                yield return new HueDiscoveredBridge(normalizedBridgeId, service.Addresses[0].ToString(), name);
             }
         }
     }

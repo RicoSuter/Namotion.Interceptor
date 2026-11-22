@@ -94,7 +94,7 @@
     private string? _password;
     private int _pollingIntervalSeconds = 15;
     private int _retryIntervalSeconds = 30;
-    private string? _deviceId;
+    private ShellyDiscoveredDevice? _discovered;
 
     private string _originalName = string.Empty;
     private string? _originalHostAddress;
@@ -131,9 +131,11 @@
             // A device picked on the Discover page fills in the form; the originals stay, so the values count as unsaved.
             if (IsCreating && DiscoveryResult is ShellyDiscoveredDevice discovered)
             {
+                _discovered = discovered;
                 _hostAddress = discovered.HostAddress;
-                _deviceId = discovered.DeviceId;
-                if (string.IsNullOrWhiteSpace(_name))
+
+                // Without a user-given name the subject's title falls back to the name the device reports.
+                if (string.IsNullOrWhiteSpace(_name) && discovered.Name != discovered.DeviceId)
                 {
                     _name = discovered.Name;
                 }
@@ -153,10 +155,14 @@
         {
             DeviceSubject.Name = _name;
             DeviceSubject.HostAddress = _hostAddress;
-            if (_deviceId is not null)
+
+            // A host address edited after picking points the subject at another device, so the picked ID is dropped.
+            if (_discovered is not null &&
+                string.Equals(_hostAddress?.Trim(), _discovered.HostAddress, StringComparison.OrdinalIgnoreCase))
             {
-                DeviceSubject.DeviceId = _deviceId;
+                DeviceSubject.DeviceId = _discovered.DeviceId;
             }
+
             DeviceSubject.Password = _password;
             DeviceSubject.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
             DeviceSubject.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);

@@ -7,8 +7,8 @@ namespace Namotion.Devices.Philips.Hue.Tests;
 
 public class HueBridgeDiscovererTests
 {
-    private static MulticastDnsService Announcement(string? bridgeId) => new(
-        "Philips Hue - 1A2B3C",
+    private static MulticastDnsService Announcement(string? bridgeId, string instanceName = "Philips Hue - 1A2B3C") => new(
+        instanceName,
         "001788fffe1a2b3c.local",
         443,
         [IPAddress.Parse("192.168.1.20")],
@@ -36,6 +36,40 @@ public class HueBridgeDiscovererTests
         Assert.Equal("Philips Hue - 1A2B3C", bridge.DisplayName);
         Assert.Same(existing, single.ExistingSubject);
         Assert.Equal([HueBridgeDiscoverer.ServiceType], browser.ServiceTypes);
+    }
+
+    [Fact]
+    public async Task WhenNoSubjectHasTheBridgeId_ThenTheBridgeIsFoundWithoutASubject()
+    {
+        // Arrange
+        var browser = new AnsweringBrowser(Announcement("001788FFFE1A2B3C"));
+        var existing = new HueBridge(NullLogger<HueBridge>.Instance) { BridgeId = "001788fffe999999" };
+        ISubjectDiscoverer discoverer = new HueBridgeDiscoverer();
+        var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, CancellationToken.None);
+
+        // Act
+        var discovered = await discoverer.DiscoverAsync(scan, [existing], CancellationToken.None).ToListAsync();
+
+        // Assert
+        var single = Assert.Single(discovered);
+        Assert.Equal("001788fffe1a2b3c", Assert.IsType<HueDiscoveredBridge>(single.Result).BridgeId);
+        Assert.Null(single.ExistingSubject);
+    }
+
+    [Fact]
+    public async Task WhenTheInstanceNameIsBlank_ThenTheBridgeIdIsTheDisplayName()
+    {
+        // Arrange
+        var browser = new AnsweringBrowser(Announcement("001788FFFE1A2B3C", instanceName: " "));
+        ISubjectDiscoverer discoverer = new HueBridgeDiscoverer();
+        var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, CancellationToken.None);
+
+        // Act
+        var discovered = await discoverer.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
+
+        // Assert
+        var single = Assert.Single(discovered);
+        Assert.Equal("001788fffe1a2b3c", single.Result.DisplayName);
     }
 
     private sealed class AnsweringBrowser(params MulticastDnsService[] services) : IMulticastDnsBrowser
