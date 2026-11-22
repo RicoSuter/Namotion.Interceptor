@@ -395,6 +395,31 @@ public class TeslaVehicleTests
     }
 
     [Fact]
+    public async Task WhenWakeUpRuns_ThenTheVehicleIsBusyAndASecondWakeUpFails()
+    {
+        // Arrange
+        var vehicle = Create();
+        vehicle.ApplyProduct(new TeslaProductDto { Id = vehicle.Id, VehicleId = 2, State = "asleep" });
+        var release = new TaskCompletionSource();
+        vehicle.SetWakeUpHandler((_, _) => release.Task);
+
+        // Act
+        var first = vehicle.WakeUpAsync(CancellationToken.None);
+        var isBusyWhileRunning = vehicle.IsBusy;
+        var isEnabledWhileRunning = vehicle.WakeUp_IsEnabled;
+        var second = await Assert.ThrowsAsync<InvalidOperationException>(() => vehicle.WakeUpAsync(CancellationToken.None));
+        release.SetResult();
+        await first;
+
+        // Assert
+        Assert.True(isBusyWhileRunning);
+        Assert.False(isEnabledWhileRunning);
+        Assert.NotNull(second);
+        Assert.False(vehicle.IsBusy);
+        Assert.True(vehicle.WakeUp_IsEnabled); // still asleep
+    }
+
+    [Fact]
     public void WhenVehicleCharges_ThenItIsActiveAndCannotSleep()
     {
         // Arrange

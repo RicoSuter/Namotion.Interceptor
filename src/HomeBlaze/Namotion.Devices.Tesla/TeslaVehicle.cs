@@ -33,6 +33,9 @@ public partial class TeslaVehicle :
     private readonly TeslaSectionClock _odometerClock = new();
 
     private Func<TeslaVehicle, CancellationToken, Task>? _wakeUp;
+
+    // 1 while a wake up runs; only the caller that set it writes IsBusy.
+    private int _operationRunning;
     private bool _hasWarnedAboutCachedData;
 
     // The last cached data that was parsed; a sleeping vehicle returns the same snapshot with every poll.
@@ -104,6 +107,9 @@ public partial class TeslaVehicle :
 
     /// <summary>The newest section timestamp of the vehicle data or the cached snapshot; the read time when the vehicle data has none.</summary>
     [State(Position = 8)] public partial DateTimeOffset? LastUpdated { get; internal set; }
+
+    /// <summary>True while a wake up of this vehicle runs.</summary>
+    [State(IsDiscrete = true, Position = 9)] public partial bool IsBusy { get; private set; }
 
     // Children
 
@@ -184,14 +190,43 @@ public partial class TeslaVehicle :
     // Reads a field, whose change is not tracked: the account sets the handler before it attaches the vehicle.
     [Derived]
     [PropertyAttribute("WakeUp", KnownAttributes.IsEnabled)]
-    public bool WakeUp_IsEnabled => VehicleState is TeslaVehicleState.Asleep or TeslaVehicleState.Offline && _wakeUp is not null;
+    public bool WakeUp_IsEnabled => !IsBusy && VehicleState is TeslaVehicleState.Asleep or TeslaVehicleState.Offline && _wakeUp is not null;
 
     /// <summary>
     /// Wakes the vehicle, waits until it is online and reads its data. This is the only call that wakes the vehicle.
     /// </summary>
+    /// <exception cref="InvalidOperationException">A wake up of this vehicle already runs.</exception>
     [Operation(Title = "Wake Up", Icon = "Alarm", Description = "Wakes the vehicle so that its data is read. Waking costs battery; the vehicle falls asleep again by itself.")]
-    public Task WakeUpAsync(CancellationToken cancellationToken) =>
-        _wakeUp?.Invoke(this, cancellationToken) ?? Task.CompletedTask;
+    public async Task WakeUpAsync(CancellationToken cancellationToken)
+    {
+        if (_wakeUp is null)
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _operationRunning, 1, 0) != 0)
+        {
+            throw new InvalidOperationException("A wake up of this vehicle already runs.");
+        }
+
+        try
+        {
+            IsBusy = true;
+            await _wakeUp(this, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Cleared before the slot is freed, so that it cannot overwrite the true of the next wake up.
+            try
+            {
+                IsBusy = false;
+            }
+            finally
+            {
+                Volatile.Write(ref _operationRunning, 0);
+            }
+        }
+    }
 
     /// <summary>Sets the handler of <see cref="WakeUpAsync"/>; call it before the vehicle is attached.</summary>
     internal void SetWakeUpHandler(Func<TeslaVehicle, CancellationToken, Task> wakeUp) => _wakeUp = wakeUp;

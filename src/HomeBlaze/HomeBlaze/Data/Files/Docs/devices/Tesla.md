@@ -129,6 +129,7 @@ Every value has one path. The vehicle holds its identity, the odometer and the l
 | `VehicleName` | | Name that is set in the vehicle |
 | `VehicleState` | | `Online`, `Asleep`, `Offline` or `Unknown` |
 | `IsAwake` | | `true` when online, `false` when asleep or offline, `null` when unknown; discrete, so history records every wake and sleep |
+| `IsBusy` | | `true` while a `Wake Up` of the vehicle runs |
 | `IsConnected` | | `true` when online or asleep, `false` when offline: an asleep vehicle is still reachable through Tesla's servers |
 | `CommandSigning` | | Whether the vehicle requires signed commands (`Off`, `Allowed`, `Required`) |
 | `IsInService` | | Whether the vehicle is in service at Tesla |
@@ -232,7 +233,7 @@ The title is the name set in the vehicle, else the display name of the account, 
 
 | Operation | Subject | Description |
 |-----------|---------|-------------|
-| `Wake Up` | `TeslaVehicle` | Wakes the vehicle, waits up to 2 minutes until it is online and reads its data. Enabled only while the vehicle is asleep or offline. |
+| `Wake Up` | `TeslaVehicle` | Wakes the vehicle, waits up to 2 minutes until it is online and reads its data. Enabled only while the vehicle is asleep or offline and no wake up runs; a second call while one runs fails. |
 
 `Wake Up` is the only call that wakes a vehicle. While it waits, polling of the account pauses. Waking costs battery, and the vehicle falls asleep by itself again after the sleep window (see below).
 

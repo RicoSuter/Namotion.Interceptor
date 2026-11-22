@@ -649,6 +649,8 @@ namespace Namotion.Devices.Tesla
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
         [Namotion.Interceptor.Attributes.Derived]
         public bool? IsAwake { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=9)]
+        public bool IsBusy { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public bool IsConnected { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=6)]
