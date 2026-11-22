@@ -426,7 +426,7 @@ public class TeslaAuthenticationTests
     public void WhenCallbackHasAnError_ThenTheErrorIsReported()
     {
         // Act & Assert
-        var exception = Assert.Throws<ArgumentException>(() => TeslaAuthClient.ParseCallbackCode(
+        var exception = Assert.Throws<FormatException>(() => TeslaAuthClient.ParseCallbackCode(
             "tesla://auth/callback?error=access_denied&error_description=User%20canceled&state=xyz", "xyz"));
         Assert.Contains("access_denied", exception.Message);
         Assert.Contains("User canceled", exception.Message);
@@ -436,6 +436,6 @@ public class TeslaAuthenticationTests
     public void WhenCallbackStateDiffers_ThenItIsRejected()
     {
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => TeslaAuthClient.ParseCallbackCode("code=abc&state=other", "xyz"));
+        Assert.Throws<FormatException>(() => TeslaAuthClient.ParseCallbackCode("code=abc&state=other", "xyz"));
     }
 }

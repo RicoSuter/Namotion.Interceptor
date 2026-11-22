@@ -243,12 +243,10 @@
         {
             _errorMessage = rejectedMessage;
         }
-        catch (ArgumentException exception)
+        catch (FormatException exception)
         {
             renewLogin = false;
-            _errorMessage = exception.ParamName is { } parameterName
-                ? exception.Message.Replace($" (Parameter '{parameterName}')", "", StringComparison.Ordinal)
-                : exception.Message;
+            _errorMessage = exception.Message;
         }
         catch (Exception exception)
         {

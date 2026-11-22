@@ -92,7 +92,7 @@ internal sealed class TeslaAuthClient
     /// <summary>
     /// Extracts the code from a pasted callback URL or query string and checks its state.
     /// </summary>
-    /// <exception cref="ArgumentException">The text holds an error from Tesla, has no code or belongs to another login.</exception>
+    /// <exception cref="FormatException">The text holds an error from Tesla, has no code or belongs to another login.</exception>
     public static string ParseCallbackCode(string pasted, string expectedState)
     {
         var query = pasted.Trim();
@@ -112,19 +112,19 @@ internal sealed class TeslaAuthClient
         if (ReadQueryParameter(parameters, "error") is { Length: > 0 } error)
         {
             var description = ReadQueryParameter(parameters, "error_description");
-            throw new ArgumentException(
-                $"Tesla refused the sign in: {error}{(string.IsNullOrEmpty(description) ? "" : $" ({description})")}. Start the sign in again.", nameof(pasted));
+            throw new FormatException(
+                $"Tesla refused the sign in: {error}{(string.IsNullOrEmpty(description) ? "" : $" ({description})")}. Start the sign in again.");
         }
 
         var code = ReadQueryParameter(parameters, "code");
         if (string.IsNullOrEmpty(code))
         {
-            throw new ArgumentException("The pasted text contains no code. Copy the whole tesla://auth/callback?code=... address.", nameof(pasted));
+            throw new FormatException("The pasted text contains no code. Copy the whole tesla://auth/callback?code=... address.");
         }
 
         if (ReadQueryParameter(parameters, "state") != expectedState)
         {
-            throw new ArgumentException("The pasted address belongs to another login. Start the sign in again.", nameof(pasted));
+            throw new FormatException("The pasted address belongs to another login. Start the sign in again.");
         }
 
         return code;

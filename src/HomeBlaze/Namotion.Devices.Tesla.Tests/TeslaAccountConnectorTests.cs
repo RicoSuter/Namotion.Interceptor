@@ -99,7 +99,7 @@ public class TeslaAccountConnectorTests
         var login = TeslaAccountConnector.CreateLogin();
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => TeslaAccountConnector.ConnectWithLoginAsync(
+        await Assert.ThrowsAsync<FormatException>(() => TeslaAccountConnector.ConnectWithLoginAsync(
             httpClient, login, "tesla://auth/callback?code=the-code&state=other", new FakeTimeProvider(Start), CancellationToken.None));
         Assert.Empty(handler.Requests);
     }

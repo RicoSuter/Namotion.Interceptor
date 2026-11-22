@@ -48,7 +48,7 @@ public static class TeslaAccountConnector
     }
 
     /// <summary>Exchanges the code of the pasted callback address of <paramref name="login"/> and lists the vehicles.</summary>
-    /// <exception cref="ArgumentException">The pasted text holds an error from Tesla, has no code or belongs to another login.</exception>
+    /// <exception cref="FormatException">The pasted text holds an error from Tesla, has no code or belongs to another login.</exception>
     /// <exception cref="TeslaReauthenticationRequiredException">Tesla rejected the code.</exception>
     /// <exception cref="TeslaApiException">Tesla failed.</exception>
     public static async Task<TeslaConnection> ConnectWithLoginAsync(TeslaLogin login, string pastedCallback, TimeProvider timeProvider, CancellationToken cancellationToken)
