@@ -90,6 +90,52 @@ public class SubjectDiscoveryServiceTests
     }
 
     [Fact]
+    public async Task WhenADiscovererIgnoresCancellation_ThenTheScanEndsAtTheTimeLimitAndDropsItsLateReports()
+    {
+        // Arrange
+        var timeProvider = new FakeTimeProvider();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var service = CreateService(
+            timeProvider,
+            new LambdaDiscoverer<DiscoveryTestSubject>((_, _) => TestScans.IgnoreCancellation(release.Task, ended, new TestDiscoveryResult("late"))));
+        var results = new ConcurrentQueue<DiscoveredSubject>();
+        var failures = new ConcurrentQueue<Type>();
+        var scan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], results.Enqueue, failures.Enqueue, CancellationToken.None);
+
+        // Act
+        timeProvider.Advance(SubjectDiscoveryService.ScanTimeout);
+        await scan.WaitAsync(TestTimeouts.Default);
+        release.SetResult();
+        await ended.Task.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Empty(results);
+        Assert.Empty(failures);
+    }
+
+    [Fact]
+    public async Task WhenTheCallerCancelsWhileADiscovererIgnoresIt_ThenTheScanIsCanceled()
+    {
+        // Arrange
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var service = CreateService(
+            TimeProvider.System,
+            new LambdaDiscoverer<DiscoveryTestSubject>((_, _) => TestScans.IgnoreCancellation(release.Task, ended, new TestDiscoveryResult("late"))));
+        using var cancellation = new CancellationTokenSource();
+        var scan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], _ => { }, _ => { }, cancellation.Token);
+
+        // Act
+        await cancellation.CancelAsync();
+
+        // Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => scan.WaitAsync(TestTimeouts.Default));
+        release.SetResult();
+        await ended.Task.WaitAsync(TestTimeouts.Default);
+    }
+
+    [Fact]
     public async Task WhenTheCallerCancels_ThenTheScanIsCanceled()
     {
         // Arrange

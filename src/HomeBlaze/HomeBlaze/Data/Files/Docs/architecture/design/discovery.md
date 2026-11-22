@@ -166,7 +166,7 @@ Picking a row calls the existing `SelectType` for the result's type and keeps th
 - An `OperationCanceledException` from a canceled session is neither logged nor shown.
 - The shared services fail soft: no usable adapter or a socket error returns an empty answer and one debug log entry, not an exception.
 - A `Matches` call that throws ends its discoverer like any other exception.
-- A discoverer that never completes is canceled at the session deadline.
+- A discoverer that never completes is canceled at the session deadline. The scan ends then even when the discoverer ignores its cancellation; the abandoned discoverer's later results and failures are dropped, a later exception is still logged, and no callback of `ScanAsync` runs once it has returned.
 - Every string from the network is untrusted. Blazor renders it as text, never as markup.
 
 ## v1 discoverers

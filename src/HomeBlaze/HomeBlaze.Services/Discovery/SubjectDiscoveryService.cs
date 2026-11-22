@@ -56,7 +56,9 @@ public sealed class SubjectDiscoveryService
     /// <paramref name="onFailure"/> with its subject type; the others carry on.
     /// </summary>
     /// <remarks>
-    /// The callbacks run on thread pool threads, concurrently for different discoverers, and must not throw.
+    /// The callbacks run on thread pool threads, one at a time, and must neither block nor throw. None runs once the
+    /// returned task has completed: a discoverer still running then, because it ignores its cancellation, is abandoned
+    /// and what it reports later is dropped.
     /// </remarks>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     public async Task ScanAsync(
@@ -69,16 +71,27 @@ public sealed class SubjectDiscoveryService
         using var timeout = new CancellationTokenSource(ScanTimeout, _timeProvider);
         using var scanCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
 
-        var scan = new DiscoveryScan(_ssdpSearch, _multicastDnsBrowser, scanCancellation.Token);
+        // Read once: a discoverer task can start after the source has been disposed.
+        var scanToken = scanCancellation.Token;
+        var scan = new DiscoveryScan(_ssdpSearch, _multicastDnsBrowser, scanToken);
+        var reporter = new ScanReporter(onResult, onFailure);
         var discoverers = _getDiscoverers().Where(discoverer => subjectTypes.Contains(discoverer.SubjectType));
         try
         {
+            // Bounded by the token as well, so a discoverer that ignores it cannot hold the scan past its time limit.
             await Task.WhenAll(discoverers.Select(discoverer => Task.Run(
-                () => RunAsync(discoverer, scan, existingSubjects, onResult, onFailure, scanCancellation.Token),
-                CancellationToken.None)));
+                    () => RunAsync(discoverer, scan, existingSubjects, reporter, scanToken),
+                    CancellationToken.None)))
+                .WaitAsync(scanToken);
+        }
+        catch (OperationCanceledException) when (scanCancellation.IsCancellationRequested)
+        {
+            // The time limit is a normal end; a cancellation by the caller is thrown below.
         }
         finally
         {
+            reporter.End();
+
             // Ends the queries the discoverers shared through the scan.
             await scanCancellation.CancelAsync();
         }
@@ -90,8 +103,7 @@ public sealed class SubjectDiscoveryService
         ISubjectDiscoverer discoverer,
         DiscoveryScan scan,
         IReadOnlyCollection<IInterceptorSubject> existingSubjects,
-        Action<DiscoveredSubject> onResult,
-        Action<Type> onFailure,
+        ScanReporter reporter,
         CancellationToken cancellationToken)
     {
         try
@@ -100,7 +112,10 @@ public sealed class SubjectDiscoveryService
                 .DiscoverAsync(scan, existingSubjects, cancellationToken)
                 .WithCancellation(cancellationToken))
             {
-                onResult(discovered);
+                if (!reporter.TryReportResult(discovered))
+                {
+                    break;
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -110,7 +125,51 @@ public sealed class SubjectDiscoveryService
         catch (Exception exception)
         {
             _logger.LogWarning(exception, "The subject discoverer {Discoverer} failed.", discoverer.GetType());
-            onFailure(discoverer.SubjectType);
+            reporter.ReportFailure(discoverer.SubjectType);
+        }
+    }
+
+    /// <summary>
+    /// Passes reports to the callbacks of one scan until it has ended.
+    /// </summary>
+    private sealed class ScanReporter(Action<DiscoveredSubject> onResult, Action<Type> onFailure)
+    {
+        // Held while a callback runs, so that no callback is still running once End has returned.
+        private readonly Lock _lock = new();
+        private bool _isEnded;
+
+        /// <returns>False when the scan has ended and the result was dropped.</returns>
+        public bool TryReportResult(DiscoveredSubject discovered)
+        {
+            lock (_lock)
+            {
+                if (_isEnded)
+                {
+                    return false;
+                }
+
+                onResult(discovered);
+                return true;
+            }
+        }
+
+        public void ReportFailure(Type subjectType)
+        {
+            lock (_lock)
+            {
+                if (!_isEnded)
+                {
+                    onFailure(subjectType);
+                }
+            }
+        }
+
+        public void End()
+        {
+            lock (_lock)
+            {
+                _isEnded = true;
+            }
         }
     }
 }

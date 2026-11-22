@@ -66,6 +66,24 @@ internal static class TestScans
         yield break;
     }
 
+    /// <summary>
+    /// Ignores cancellation: waits for <paramref name="release"/>, yields <paramref name="result"/>, and completes
+    /// <paramref name="ended"/> once the consumer stops enumerating or the enumeration ends.
+    /// </summary>
+    public static async IAsyncEnumerable<TestDiscoveryResult> IgnoreCancellation(
+        Task release, TaskCompletionSource ended, TestDiscoveryResult result)
+    {
+        try
+        {
+            await release;
+            yield return result;
+        }
+        finally
+        {
+            ended.TrySetResult();
+        }
+    }
+
     public static DiscoveryScan CreateScan() => new(new FakeSsdpSearch(), new FakeMulticastDnsBrowser(), CancellationToken.None);
 }
 
