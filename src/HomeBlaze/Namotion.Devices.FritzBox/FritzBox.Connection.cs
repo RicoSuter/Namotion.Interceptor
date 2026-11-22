@@ -73,9 +73,11 @@ public partial class FritzBox
 
     /// <summary>
     /// Whether clients can block and allow internet access. True only in debug builds: HomeBlaze has no authentication
-    /// yet, so anyone who can open it could block or unblock any device. Remove this gate once it has authentication.
+    /// yet, so anyone who can open it could block or unblock any device. Fixed once the router is created, so the
+    /// derived <c>*_IsEnabled</c> properties of the clients need no change notification. Remove this gate once
+    /// HomeBlaze has authentication.
     /// </summary>
-    internal bool IsInternetAccessControlAvailable { get; set; } =
+    internal bool IsInternetAccessControlAvailable { get; init; } =
 #if DEBUG
         true;
 #else
@@ -84,8 +86,7 @@ public partial class FritzBox
 
     /// <summary>
     /// Blocks or allows the internet access of a client by the IP address the router currently lists for its MAC
-    /// address. Throws <see cref="InvalidOperationException"/> when <see cref="IsInternetAccessControlAvailable"/> is
-    /// false, while the router is not connected, or when it no longer lists the client or lists it without an IP address.
+    /// address. The exceptions are those of <see cref="FritzBoxClient.BlockInternetAccessAsync"/>.
     /// </summary>
     internal async Task SetInternetAccessBlockedAsync(FritzBoxClient client, bool isBlocked, CancellationToken cancellationToken)
     {

@@ -11,6 +11,7 @@ using Namotion.Devices.FritzBox.Tests.Testing;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit;
@@ -475,6 +476,23 @@ public class FritzBoxLoopTests
         Assert.True(attribute?.RequiresConfirmation);
     }
 
+    [Theory]
+    [InlineData(nameof(FritzBoxClient.BlockInternetAccessAsync), nameof(FritzBoxClient.BlockInternetAccess_IsEnabled))]
+    [InlineData(nameof(FritzBoxClient.AllowInternetAccessAsync), nameof(FritzBoxClient.AllowInternetAccess_IsEnabled))]
+    public void WhenAnInternetAccessOperationIsRegistered_ThenItsEnabledFlagNamesIt(string methodName, string flagName)
+    {
+        // Arrange
+        var operationName = methodName[..^"Async".Length];
+
+        // Act
+        var attribute = typeof(FritzBoxClient).GetProperty(flagName)!.GetCustomAttribute<PropertyAttributeAttribute>();
+
+        // Assert
+        Assert.NotNull(attribute);
+        Assert.Equal(operationName, attribute.PropertyName);
+        Assert.Equal(KnownAttributes.IsEnabled, attribute.AttributeName);
+    }
+
     [Fact]
     public void WhenARouterIsCreated_ThenInternetAccessControlIsAvailableOnlyInDebugBuilds()
     {
@@ -494,8 +512,7 @@ public class FritzBoxLoopTests
     {
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
-        var router = CreateRouter(fake);
-        router.IsInternetAccessControlAvailable = false;
+        var router = CreateRouter(fake, isInternetAccessControlAvailable: false);
         await using var running = await RunAsync(router);
         var laptop = await WaitForClientAsync(router, Snapshots.Laptop);
 
@@ -652,7 +669,8 @@ public class FritzBoxLoopTests
         Assert.Single(logger.Warnings, warning => warning.Contains("linking the clients", StringComparison.Ordinal));
     }
 
-    private static FritzBox CreateRouter(FakeFritzBox fake, string? password = null, string? pin = null, ILogger<FritzBox>? logger = null) =>
+    private static FritzBox CreateRouter(
+        FakeFritzBox fake, string? password = null, string? pin = null, ILogger<FritzBox>? logger = null, bool isInternetAccessControlAvailable = true) =>
         new(logger ?? NullLogger<FritzBox>.Instance)
         {
             HostAddress = "127.0.0.1",
@@ -663,7 +681,7 @@ public class FritzBoxLoopTests
             MinimumInterval = TimeSpan.FromMilliseconds(50),
             PollingInterval = TimeSpan.FromMilliseconds(100),
             RetryInterval = TimeSpan.FromMilliseconds(100),
-            IsInternetAccessControlAvailable = true
+            IsInternetAccessControlAvailable = isInternetAccessControlAvailable
         };
 
     /// <summary>
