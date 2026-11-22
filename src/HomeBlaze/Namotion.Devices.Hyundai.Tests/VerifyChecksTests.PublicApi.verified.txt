@@ -238,10 +238,8 @@ namespace Namotion.Devices.Hyundai
         public HomeBlaze.Abstractions.Common.GeoCoordinate? Location { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string? Manufacturer { get; }
-        [Namotion.Interceptor.Attributes.Derived]
-        public string? Model { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=3)]
-        public string? ModelName { get; }
+        public string? Model { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=2)]
         public string? Nickname { get; }
         [Namotion.Interceptor.Attributes.Derived]

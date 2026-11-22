@@ -28,7 +28,7 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
 
         Vin = info.Vin;
         Nickname = null;
-        ModelName = null;
+        Model = null;
         Protocol = info.Protocol;
         AuxiliaryBatteryLevel = null;
         LastUpdated = null;
@@ -54,8 +54,8 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
     /// <summary>The name of the vehicle in the Bluelink app.</summary>
     [State(Position = 2)] public partial string? Nickname { get; internal set; }
 
-    /// <summary>The model name from the vehicle list, such as KONA.</summary>
-    [State(Position = 3)] public partial string? ModelName { get; internal set; }
+    /// <summary>The model from the vehicle list, such as KONA.</summary>
+    [State(Position = 3)] public partial string? Model { get; internal set; }
 
     [State(IsDiscrete = true, Position = 4)] public partial BluelinkProtocol Protocol { get; internal set; }
 
@@ -89,8 +89,6 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
 
     [Derived] public string? Manufacturer => "Hyundai";
 
-    [Derived] public string? Model => ModelName;
-
     [Derived] public string? ProductCode => null;
 
     [Derived] public string? SerialNumber => Vin;
@@ -99,7 +97,7 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
 
     // Display
 
-    [Derived] public string? Title => Nickname ?? $"Hyundai: {BluelinkValues.VinSuffix(Vin)}";
+    [Derived] public string? Title => Nickname ?? $"{Model ?? "Hyundai"}: {BluelinkValues.VinSuffix(Vin)}";
 
     [Derived] public string IconName => "DirectionsCar";
 
@@ -156,7 +154,7 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
     {
         VehicleId = info.VehicleId;
         Nickname = info.Nickname;
-        ModelName = info.ModelName;
+        Model = info.Model;
         Protocol = info.Protocol;
     }
 

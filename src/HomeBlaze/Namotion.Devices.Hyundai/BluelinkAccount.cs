@@ -80,7 +80,7 @@ public partial class BluelinkAccount : BackgroundService,
 
     // Configuration
 
-    /// <summary>The display name; empty to show "Bluelink: " with the email.</summary>
+    /// <summary>The display name; empty to show "Hyundai: " with the email.</summary>
     [Configuration]
     public partial string Name { get; set; }
 
@@ -163,7 +163,7 @@ public partial class BluelinkAccount : BackgroundService,
                 return Name;
             }
 
-            return !string.IsNullOrEmpty(Email) ? $"Bluelink: {Email}" : "Bluelink";
+            return !string.IsNullOrEmpty(Email) ? $"Hyundai: {Email}" : "Hyundai";
         }
     }
 

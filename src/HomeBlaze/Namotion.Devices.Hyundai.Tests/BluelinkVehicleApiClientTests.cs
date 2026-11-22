@@ -53,7 +53,7 @@ public class BluelinkVehicleApiClientTests
         // Assert
         var vehicle = Assert.Single(vehicles);
         Assert.Null(vehicle.Nickname);
-        Assert.Null(vehicle.ModelName);
+        Assert.Null(vehicle.Model);
     }
 
     [Fact]

@@ -83,6 +83,6 @@ public static class BluelinkAccountConnector
         }
 
         return new BluelinkConnection(email, password, pin, cciTokens.Tokens.Serialize(), deviceId,
-            vehicles.Select(vehicle => new BluelinkVehicleSummary(vehicle.Vin, vehicle.Nickname, vehicle.ModelName, vehicle.Type, vehicle.Protocol)).ToArray());
+            vehicles.Select(vehicle => new BluelinkVehicleSummary(vehicle.Vin, vehicle.Nickname, vehicle.Model, vehicle.Type, vehicle.Protocol)).ToArray());
     }
 }

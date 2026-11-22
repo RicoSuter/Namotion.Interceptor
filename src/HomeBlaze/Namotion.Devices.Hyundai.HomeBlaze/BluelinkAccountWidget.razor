@@ -5,7 +5,7 @@
     <MudStack Spacing="2">
         <MudStack Row="true" AlignItems="AlignItems.Center">
             <MudIcon Icon="@Icons.Material.Filled.DirectionsCar" Class="mr-2" />
-            <MudText Typo="Typo.h6">@(Account?.Title ?? "Bluelink")</MudText>
+            <MudText Typo="Typo.h6">@(Account?.Title ?? "Hyundai")</MudText>
             <MudSpacer />
             <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@GetStatusColor(Account?.Status)">
                 @Account?.Status

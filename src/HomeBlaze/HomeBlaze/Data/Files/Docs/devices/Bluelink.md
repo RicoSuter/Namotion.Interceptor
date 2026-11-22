@@ -32,7 +32,7 @@ A poll, `Refresh` or command that runs while the credentials are replaced either
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `Name` | string | "" | Display name. Empty shows "Bluelink: " with the email, or "Bluelink" without one. |
+| `Name` | string | "" | Display name. Empty shows "Hyundai: " with the email, or "Hyundai" without one. |
 | `Email` | string | "" | Email of the Bluelink account. |
 | `Password` | string | "" | Password (stored as a secret). Used for one automatic sign in when Hyundai rejects a refresh; empty disables it. |
 | `Pin` | string | "" | PIN of the Bluelink app (stored as a secret). Only charging and climate commands of `Ccs2` vehicles use it. |
@@ -119,7 +119,7 @@ Every value has one path. The vehicle holds its identity, the odometer, the loca
 |----------|------|-------------|
 | `Vin`, `SerialNumber` | | Vehicle identification number |
 | `Nickname` | | Name in the Bluelink app |
-| `ModelName`, `Model` | | Model from the vehicle list, such as KONA |
+| `Model` | | Model from the vehicle list, such as KONA |
 | `Manufacturer` | | `Hyundai` |
 | `Protocol` | | `Legacy` (older vehicles, commands without PIN) or `Ccs2` (newer vehicles, charging and climate commands with PIN) |
 | `TotalDrivenDistance` | km | Odometer |
@@ -128,7 +128,7 @@ Every value has one path. The vehicle holds its identity, the odometer, the loca
 | `LastUpdated` | | Time of the stored status; the read time when the status has none |
 | `IsBusy` | | `true` while a `Refresh` or command of this vehicle runs |
 
-The title is the nickname, else "Hyundai: " and the last six characters of the VIN. The icon is green while the vehicle charges.
+The title is the nickname, else the model (or "Hyundai" without one), a colon and the last six characters of the VIN, such as "KONA: 123456". The icon is green while the vehicle charges.
 
 ### Charge
 

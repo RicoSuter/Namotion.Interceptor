@@ -17,10 +17,10 @@ public class BluelinkVehicleTests
 {
     private static readonly DateTimeOffset ReadTime = new(2026, 11, 22, 10, 20, 0, TimeSpan.Zero);
 
-    private static (BluelinkVehicle Vehicle, FakeVehicleCommands Commands) Create(string? nickname = "Kona", IInterceptorSubjectContext? context = null)
+    private static (BluelinkVehicle Vehicle, FakeVehicleCommands Commands) Create(string? nickname = "Kona", IInterceptorSubjectContext? context = null, string? model = "KONA")
     {
         var commands = context is null ? new FakeVehicleCommands() : new FakeVehicleCommands(context);
-        var vehicle = new BluelinkVehicle(commands, new BluelinkVehicleInfo("VEHICLE-1", "TESTVIN0000000001", nickname, "KONA", "EV", BluelinkProtocol.Legacy));
+        var vehicle = new BluelinkVehicle(commands, new BluelinkVehicleInfo("VEHICLE-1", "TESTVIN0000000001", nickname, model, "EV", BluelinkProtocol.Legacy));
         return (vehicle, commands);
     }
 
@@ -80,13 +80,34 @@ public class BluelinkVehicleTests
     }
 
     [Fact]
-    public void WhenNicknameIsMissing_ThenTitleShowsTheVinSuffix()
+    public void WhenNicknameIsMissing_ThenTitleShowsTheModelAndTheVinSuffix()
     {
         // Act
         var (vehicle, _) = Create(nickname: null);
 
         // Assert
+        Assert.Equal("KONA: 000001", vehicle.Title);
+        Assert.Equal("KONA", vehicle.Model);
+    }
+
+    [Fact]
+    public void WhenNicknameAndModelAreMissing_ThenTitleShowsTheBrandAndTheVinSuffix()
+    {
+        // Act
+        var (vehicle, _) = Create(nickname: null, model: null);
+
+        // Assert
         Assert.Equal("Hyundai: 000001", vehicle.Title);
+    }
+
+    [Fact]
+    public void WhenNicknameIsSet_ThenTitleIsTheNickname()
+    {
+        // Act
+        var (vehicle, _) = Create();
+
+        // Assert
+        Assert.Equal("Kona", vehicle.Title);
     }
 
     [Fact]

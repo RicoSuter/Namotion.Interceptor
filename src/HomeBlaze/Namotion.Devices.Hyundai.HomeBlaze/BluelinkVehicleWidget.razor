@@ -11,7 +11,8 @@
             <MudIcon Icon="@Icons.Material.Filled.DirectionsCar" Class="mr-2" />
             <MudStack Spacing="0">
                 <MudText Typo="Typo.h6">@(Vehicle?.Title ?? "Hyundai")</MudText>
-                @if (Vehicle is { ModelName: { } model })
+                @* Without a nickname, the title already starts with the model. *@
+                @if (Vehicle is { Model: { } model, Nickname: not null })
                 {
                     <MudText Typo="Typo.caption">@model</MudText>
                 }
