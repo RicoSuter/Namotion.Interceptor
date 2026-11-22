@@ -66,6 +66,21 @@ public class SonosDiscoveryTests
     }
 
     [Theory]
+    [InlineData("uuid:RINCON_A0000000000601400::" + ZonePlayer, "RINCON_A0000000000601400")]
+    [InlineData("uuid:RINCON_A0000000000601400", "RINCON_A0000000000601400")]
+    [InlineData("uuid:RINCON_::" + ZonePlayer, null)]
+    [InlineData("uuid:2f402f80-da50-11e1-9b23-001788255acc::" + ZonePlayer, null)]
+    [InlineData(null, null)]
+    public void WhenReadingTheSpeakerIdOfAUsn_ThenOnlySonosSpeakersHaveOne(string? usn, string? expected)
+    {
+        // Act
+        var speakerId = SonosDiscovery.GetSpeakerId(usn);
+
+        // Assert
+        Assert.Equal(expected, speakerId);
+    }
+
+    [Theory]
     [InlineData(ZonePlayer, "uuid:RINCON_A0000000000601400::" + ZonePlayer, true, true)]
     [InlineData("upnp:rootdevice", "uuid:RINCON_A0000000000601400::upnp:rootdevice", true, false)]
     [InlineData(ZonePlayer, "uuid:2f402f80-da50-11e1-9b23-001788255acc::" + ZonePlayer, true, false)]
