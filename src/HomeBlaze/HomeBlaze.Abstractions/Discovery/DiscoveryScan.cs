@@ -11,9 +11,9 @@ public sealed class DiscoveryScan
     /// <param name="cancellationToken">Ends the shared queries; canceled when the scan ends.</param>
     public DiscoveryScan(ISsdpSearch ssdpSearch, IMulticastDnsBrowser multicastDnsBrowser, CancellationToken cancellationToken)
     {
-        Ssdp = new SharedSsdpSearch(new SharedQueries<IReadOnlyList<SsdpResponse>>(ssdpSearch.SearchAsync, cancellationToken));
+        Ssdp = new SharedSsdpSearch(new SharedQueries<IReadOnlyList<SsdpResponse>>(ssdpSearch.SearchAsync, cancellationToken, StringComparer.Ordinal));
         MulticastDns = new SharedMulticastDnsBrowser(
-            new SharedQueries<IReadOnlyList<MulticastDnsService>>(multicastDnsBrowser.BrowseAsync, cancellationToken));
+            new SharedQueries<IReadOnlyList<MulticastDnsService>>(multicastDnsBrowser.BrowseAsync, cancellationToken, StringComparer.OrdinalIgnoreCase));
     }
 
     /// <summary>

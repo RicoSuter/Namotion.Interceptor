@@ -27,6 +27,21 @@ public class DiscoveryScanTests
     }
 
     [Fact]
+    public async Task WhenTwoDiscoverersSearchTheSameSsdpTarget_ThenOneSearchIsSent()
+    {
+        // Arrange
+        var search = new FakeSsdpSearch();
+        var scan = new DiscoveryScan(search, new FakeMulticastDnsBrowser(), CancellationToken.None);
+
+        // Act
+        await scan.Ssdp.SearchAsync("urn:schemas-upnp-org:device:fritzbox", CancellationToken.None);
+        await scan.Ssdp.SearchAsync("urn:schemas-upnp-org:device:fritzbox", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, search.CallCount);
+    }
+
+    [Fact]
     public async Task WhenOneCallerStopsWaiting_ThenTheOtherStillGetsTheAnswer()
     {
         // Arrange

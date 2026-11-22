@@ -99,6 +99,6 @@ internal sealed class FakeMulticastDnsBrowser : IMulticastDnsBrowser
     public Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _callCount);
-        return _answer.Task;
+        return _answer.Task.WaitAsync(cancellationToken);
     }
 }

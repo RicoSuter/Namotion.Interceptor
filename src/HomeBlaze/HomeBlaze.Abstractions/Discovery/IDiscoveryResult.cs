@@ -6,7 +6,7 @@ namespace HomeBlaze.Abstractions.Discovery;
 public interface IDiscoveryResult
 {
     /// <summary>
-    /// Identifies the device within the discoverer that found it, the same in every scan.
+    /// Identifies the device within the discoverer that found it, the same in every scan. Keys are compared ordinally, so a discoverer normalizes the case where the identity of the device ignores it.
     /// </summary>
     string Key { get; }
 

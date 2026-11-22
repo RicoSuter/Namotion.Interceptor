@@ -9,10 +9,12 @@ internal sealed class SharedQueries<TAnswer>
 {
     private readonly Func<string, CancellationToken, Task<TAnswer>> _query;
     private readonly CancellationToken _scanCancellationToken;
-    private readonly ConcurrentDictionary<string, Lazy<Task<TAnswer>>> _answers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Lazy<Task<TAnswer>>> _answers;
 
-    public SharedQueries(Func<string, CancellationToken, Task<TAnswer>> query, CancellationToken scanCancellationToken)
+    public SharedQueries(
+        Func<string, CancellationToken, Task<TAnswer>> query, CancellationToken scanCancellationToken, StringComparer comparer)
     {
+        _answers = new ConcurrentDictionary<string, Lazy<Task<TAnswer>>>(comparer);
         _query = query;
         _scanCancellationToken = scanCancellationToken;
     }
