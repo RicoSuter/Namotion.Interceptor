@@ -39,6 +39,7 @@ Implemented in the follow-up pull request, stacked on the first:
 - A shared UDP service for broadcast requests and broadcast announcements
 - Ecowitt (its UDP broadcast request)
 - myStrom (the UDP announcements of its switches)
+- Included items: the speakers of a Sonos household and the repeaters of a FRITZ!Box mesh, shown under their row
 
 Out of scope, with the contract kept compatible:
 
@@ -62,7 +63,12 @@ public interface IDiscoveryResult
 
     /// <summary>A second line for the user, such as the host address, or null.</summary>
     string? Detail { get; }
+
+    /// <summary>What the subject created for the result includes, shown under its row, not selectable.</summary>
+    IReadOnlyList<DiscoveredItem> IncludedItems => [];
 }
+
+public sealed record DiscoveredItem(string DisplayName, string? Detail);
 
 public abstract class SubjectDiscoverer<TSubject, TResult> : ISubjectDiscoverer
     where TSubject : class, IInterceptorSubject
@@ -79,6 +85,7 @@ public sealed record DiscoveredSubject(Type SubjectType, IDiscoveryResult Result
 - A discoverer yields each result as soon as it is known.
 - Duplicate detection belongs to each type. The base class keeps the existing subjects of type `TSubject`, calls `Matches` for each result and yields a `DiscoveredSubject` whose `ExistingSubject` is the first match, or null. The framework prescribes no identity property.
 - Result records are type specific and implement `IDiscoveryResult` themselves. The existing `FritzBoxDiscoveryResult` and `NukiDiscoveredBridge` become results directly.
+- A row is something the user creates. What comes with it, such as the speakers of a Sonos household or the repeaters of a FRITZ!Box mesh, is listed in `IncludedItems`, which defaults to an empty list without allocating. Included items are shown, not created or selected on their own.
 - A discoverer creates no subject. `SubjectFactory.CreateSubject` attaches the subject to the root context, where a hosted subject starts at once, so a subject is only created once the user picks a result.
 
 In `HomeBlaze.Components.Abstractions`:
@@ -149,6 +156,7 @@ Any host on the network can answer, so what one query can make HomeBlaze hold or
 - A UDP exchange reads at most 512 datagrams and yields only those of at most 1024 bytes; longer ones count towards the limit but are skipped, also where the platform cuts them to the buffer instead of failing the receive. A request is at most 1024 bytes and a window at most 30 seconds, and other values throw when the method is called.
 - An mDNS browse reads at most 512 messages per adapter and 256 records per message, keeps at most 4096 records and 256 KB of names and TXT entries, after which further records are dropped, and returns at most 64 instances.
 - `FritzBoxDiscovery` describes at most 32 locations per search, one of them reserved for `fritz.box`, and reads a bounded description from each.
+- The Sonos discoverer reads at most 64 device descriptions per scan, each of at most 64 KB, all within one deadline of 2 seconds.
 
 ## Discover page
 
@@ -159,6 +167,7 @@ The picker page of `SubjectSetupDialog` gets a toggle at the top: All types or D
 - The first visit starts a scan. Scan again cancels the running scan and starts a new one. Results are kept until then.
 - All discoverers run in parallel. Each row shows the icon of the type from `SubjectTypeCatalog`, the result's `DisplayName` and `Detail`, and the type's display name. Rows are ordered by type and then by name.
 - A row whose `ExistingSubject` is set is shown disabled as "already added" and links to that subject.
+- A row with included items has an expander next to it, an icon button with `aria-expanded` and a label such as "Show 10 included items". The row is a container holding the select button, or the "already added" content, and the expander as siblings, because a button inside a button is invalid HTML. The items are collapsed by default and render indented and muted under the row, each as its name and detail, with no control of their own; an "already added" row shows them the same way. Which rows are expanded is kept by subject type and result key, so it survives the re-renders while results stream in, and Scan again collapses them.
 - While the scan runs, the header shows a progress indicator; afterwards it shows the number of devices found.
 - With nothing found, the page says so and points to All types for adding a device by its address. Battery devices that sleep only answer while awake, which the hint mentions.
 - The page always shows a hint that a container on a bridge network receives no multicast and no broadcast, so devices there are added by address or HomeBlaze runs with host networking. A container still has an adapter that claims multicast support, so the case cannot be detected reliably.
@@ -190,15 +199,17 @@ Picking a row opens the configure page for the result's type, as picking the typ
 | `HueBridge` | mDNS `_hue._tcp`, local only | A new record with bridge ID and address, key bridge ID | The persisted `BridgeId`, ignoring case; `HueBridge` itself compares bridge IDs ignoring case as well |
 | `NukiBridge` | The Nuki cloud lookup, which runs when the user first opens the Discover page and on Scan again | `NukiDiscoveredBridge`, key bridge ID | The host address and port |
 | `ShellyDevice` | mDNS `_shelly._tcp` | `ShellyDiscoveredDevice(DeviceId, HostAddress, Application, DisplayName)`, key device ID | The device ID the running subject read from the device, otherwise a new persisted `DeviceId`, otherwise the host address |
-| `SonosSystem` | SSDP `urn:schemas-upnp-org:device:ZonePlayer:1` through the shared `ISsdpSearch` | `SonosDiscoveredHousehold` with `HouseholdId` and `SeedHost` (the speakers stay internal), one per household, key household ID | Any player or satellite RINCON ID the running subject knows, or the host of its `SeedHost`, ignoring case |
+| `SonosSystem` | SSDP `urn:schemas-upnp-org:device:ZonePlayer:1` through the shared `ISsdpSearch`, then the device description of each speaker | `SonosDiscoveredHousehold` with `HouseholdId`, `SeedHost` and the speakers as included items (the speakers themselves stay internal), one per household, key household ID | Any player or satellite RINCON ID the running subject knows, or the host of its `SeedHost`, ignoring case |
 | `EcowittGateway` | The broadcast request of the Ecowitt local API to UDP port 46000, through the shared `IUdpDiscovery` | `EcowittDiscoveredGateway(MacAddress, HostAddress, DeviceName, FirmwareVersion)`, key MAC address | The MAC address the running subject read from the gateway, ignoring case and separators, or the host address, ignoring case: either one matching is enough |
 | `MyStromSwitch` | The announcements myStrom devices broadcast to UDP port 7979 about every 5 seconds, received through the shared `IUdpDiscovery` | `MyStromDiscoveredSwitch(MacAddress, HostAddress, DeviceType)`, key MAC address | The MAC address the running subject read from the switch, ignoring case and separators, or the host address, ignoring case: either one matching is enough |
 
 - A Gen2+ Shelly announces two `_shelly._tcp` instances with the same SRV host, one named by its device ID and one by its user-given name. The discoverer takes the device ID from the SRV host name (without `.local`, lower case) and skips an instance without one, whose name could be the user-given one; it merges the instances into one result and shows the user-given name, or the device ID when there is none. `Application` comes from the `app` TXT record.
 - `FritzBox.Udn` and `ShellyDevice.DeviceId` are new `[Configuration]` properties, written by the component that receives the result. Shelly prefers the device ID the running subject read from the device over the stored one, so a Shelly created before this change is recognized while it is connected, and a stored ID that went stale when the device at the address was replaced does not decide. Subjects do not write their own configuration for discovery.
 - `FritzBoxDiscovery.DiscoverAsync` takes the SSDP search as a parameter, so the Setup component and the discoverer share parsing and description.
+- In a FRITZ!Box mesh, the clients of the repeaters appear under the router, so a repeater is rarely a subject of its own. Discovery cannot see which mesh a repeater belongs to, so when it finds exactly one router, `FritzBoxDiscoverer` lists the repeaters as included items of that router, each with its friendly name or model and its host address, instead of as rows. With several routers or none, each repeater stays a row, and the Setup component explains the mesh when one is picked. `FritzBoxDiscovery.DiscoverAsync` itself still returns the repeaters as results.
 - The Setup components keep their own search for when the type is picked directly. The Hue Setup component keeps the HueApi locator with its network scan fallback.
 - Every Sonos speaker answers the search, satellites included, and names its household in the `X-RINCON-HOUSEHOLD` header. The discoverer skips an answer whose USN does not start with `uuid:RINCON_` or that has no such header, takes the speaker's RINCON ID from the USN, and groups the speakers by household ID. The seed host is that of the speaker with the lowest RINCON ID, so a household gives the same seed in every scan in which that speaker answers. `SonosSystem` has no household setting, so the seed is what pins a new system to the household.
+- The SSDP answer of a speaker carries only IDs, so the Sonos discoverer reads the device description at the LOCATION of each answer, `http://<ip>:1400/xml/device_description.xml` on a speaker, for its `roomName` and `modelName`. Each speaker becomes an included item named by its room, with its model and IP address as detail, ordered by room. The requests run in parallel within one deadline of 2 seconds, bounded by the scan token, and read at most 64 KB each; the parser refuses a document type declaration and nests at most 64 levels, and at most 64 descriptions are read per scan. Only a plain HTTP location without user information is asked, which is on the host the speaker answered from, and an answer that a redirect brought from another address is ignored. On any failure the item falls back to the speaker's RINCON ID and IP address, so the household is still listed.
 - The Ecowitt discoverer broadcasts the request `FF FF 12 00 04 16` (header, command `CMD_BROADCAST`, size, checksum) to port 46000 through `IUdpDiscovery.BroadcastAsync`, which repeats it after 1 second, and listens for 3 seconds. Each gateway answers with a unicast frame that carries its MAC address, IPv4 address, API port and a name such as `GW2000A-WIFIE157 V3.3.3`; the first word is shown as the name and the rest as the firmware version. The discoverer drops a frame whose header, command, size, name length or checksum is wrong; a valid frame is at most 274 bytes long, well within the cap of the service. A gateway also announces the same frame on UDP port 59387, which the discoverer does not listen to, so it binds no fixed port. The broadcast never leaves a Docker bridge network.
 - The myStrom discoverer listens on UDP port 7979 through `IUdpDiscovery.ListenAsync`, which shares the port with concurrent scans and other listeners that use address reuse, for 6 seconds, longer than the announcement interval of about 5 seconds. An announcement is exactly 8 bytes: the MAC address (6), the numeric device type (1) and status flags (1). It carries no IP address, so the host address is the sender of the datagram. The discoverer keeps the types that `MyStromSwitch` supports, 106 (Switch CH v2, `WS2`) and 107 (Switch EU, `WSE`), and drops the others, such as bulbs, buttons, LED strips and motion sensors; the [myStrom REST API documentation](https://api.mystrom.ch) lists the report, relay and temperature requests the subject polls for these two only, so the Switch CH v1 (101) and the Switch Zero (120) are left out. A switch announces no name, so it is shown as `myStrom Switch` with the last six digits of its MAC address, and its type and address as the second line. The discoverer drops any datagram that is not exactly 8 bytes long. A host firewall must allow inbound UDP on port 7979, and the broadcasts never reach a Docker bridge network.
 - `FritzBoxSetupComponent`, `HueBridgeSetupComponent`, `NukiBridgeSetupComponent`, `ShellyDeviceEditComponent`, `SonosSystemEditComponent`, `EcowittGatewayEditComponent` and `MyStromSwitchEditComponent` implement `ISubjectDiscoveryComponent`. The Setup components preselect the result in their lists; the Shelly component fills in the host address and device ID, the Sonos component `SeedHost`, the Ecowitt and myStrom components the host address.
@@ -214,6 +225,8 @@ Not breaking:
 - `HomeBlaze.Components.Abstractions` now references `HomeBlaze.Abstractions`.
 - `HueBridge` matches bridge IDs ignoring case.
 - `FritzBox.Udn` and `ShellyDevice.DeviceId` are new configuration properties; stored subjects without them load unchanged.
+- `IDiscoveryResult.IncludedItems` has a default implementation, so existing results compile unchanged. `FritzBoxDiscoveryResult.IncludedItems` is an init property that defaults to an empty list.
+- `SonosHouseholdDiscoverer` now takes `IHttpClientFactory` in its constructor, which the registry resolves through `ActivatorUtilities`.
 
 ## Testing
 
@@ -224,11 +237,11 @@ Unit tests, without sockets:
 - `DiscoveryScan` shares in-flight queries between discoverers
 - `SubjectDiscoveryService` isolates failing discoverers, honors cancellation and ends at its deadline, driven by a `TimeProvider` the test advances
 - mDNS packet parsing from captured bytes, including name compression, malformed packets and the caps
-- Each discoverer against fake `ISsdpSearch`, `IMulticastDnsBrowser`, `IUdpDiscovery` and HTTP handlers, including its `Matches` rules
+- Each discoverer against fake `ISsdpSearch`, `IMulticastDnsBrowser`, `IUdpDiscovery` and HTTP handlers, including its `Matches` rules, the FRITZ!Box grouping of repeaters and the Sonos descriptions with their timeout, size cap, hostile documents and fallback
 - The argument checks of the UDP service and the broadcast address of a subnet; its socket behavior is verified manually, see below
 
-This repository has no component test framework, so the Discover page keeps its logic in `SubjectDiscoveryList` (ordering, failures), `SubjectNameOptions.SuggestName` (the name) and `SubjectEditPanel.CreateHostedComponentParameters` (passing the result), which unit tests cover. The E2E test covers the page itself.
+This repository has no component test framework, so the Discover page keeps its logic in `SubjectDiscoveryList` (ordering, failures, expanded rows, the expander label), `SubjectNameOptions.SuggestName` (the name) and `SubjectEditPanel.CreateHostedComponentParameters` (passing the result), which unit tests cover. The E2E test covers the page itself.
 
-One E2E test with a fake discoverer: open Discover, pick the result, create, and find the stored subject. The E2E host replaces the SSDP, mDNS and UDP services with empty ones and stubs the Nuki cloud lookup, so a scan there neither searches the network of the machine nor binds its ports, which a fixture test checks.
+Two E2E tests with a fake discoverer: open Discover, pick a result, create, and find the stored subject; and expand a result with included items, on a desktop and a phone viewport, and find them shown and not selectable. The E2E host replaces the SSDP, mDNS and UDP services with empty ones and stubs the Nuki cloud lookup, so a scan there neither searches the network of the machine nor binds its ports, which a fixture test checks.
 
 Manual verification against a real network: the Discover page found a FRITZ!Box with three repeaters, a Hue bridge, a Nuki bridge and several Shelly Gen2 devices, each Shelly once, under its user-given name when it has one. The Sonos discoverer, run against the same network from a console, found one household with the 10 speakers that answered, chose the same seed speaker in repeated scans, and recognized a system whose `SeedHost` named one of them. The Ecowitt discoverer, run from a console, found a GW2000A within 30 ms in each scan and recognized a gateway configured with its address. The myStrom discoverer, run from a console, found all 7 WiFi Switch CH v2 within 5 seconds in each of two scans, also with two scans at once, and yielded nothing, with one debug log entry, while another socket held port 7979 without address reuse. After both moved to the shared UDP service, a console run of both found the GW2000A within 16 ms through the broadcast to `192.168.1.255`, which it answered twice, and all 7 switches in each of two scans, also with two myStrom discoverers at once; the service again yielded nothing, with one debug log entry, while port 7979 was held without address reuse, and rethrew a cancellation by the caller. Docker bridge networking was not tested; the page shows a hint for it.
