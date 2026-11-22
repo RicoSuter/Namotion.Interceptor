@@ -171,6 +171,7 @@ These are critical conventions the implementation MUST follow:
    - Widget component (`{SubjectName}Widget.razor`) -- implements `ISubjectComponent`, compact display
    - Edit component (`{SubjectName}EditComponent.razor`) -- implements `ISubjectEditComponent`, configuration form with local state, dirty tracking, `OnInitialized` (NOT `OnParametersSet`)
    - Setup component (`{SubjectName}SetupComponent.razor`) -- only if initial discovery/registration is needed (e.g., API key pairing). Not needed for simple IP-based devices.
+   - Discoverer (`{SubjectName}Discoverer.cs` in the device library) -- only if the device announces itself (mDNS, SSDP) or a vendor service lists it, as described for the Discoverer deliverable in `.claude/commands/create-homeblaze-library.md`.
 4. **Device documentation** -- `src/HomeBlaze/HomeBlaze/Data/Files/Docs/devices/{Name}.md`
 5. **JSON config** -- `src/HomeBlaze/HomeBlaze/Data/Files/Devices/{Name}.json`
 6. **Solution integration** -- add all projects to `src/Namotion.Interceptor.slnx`

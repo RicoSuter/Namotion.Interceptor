@@ -105,9 +105,9 @@ The Discover page further leaves out results whose type is not creatable in the 
 
 ## Scan session and shared services
 
-`DiscoveryScan` represents one press of Scan and is owned by the Discover page.
+`DiscoveryScan` represents one scan. `SubjectDiscoveryService.ScanAsync` creates and owns it; the Discover page owns the cancellation of the scans it starts.
 
-- Its cancellation token is canceled by Scan again, Back and closing the dialog.
+- A scan is canceled only by Scan again and by closing the dialog, which disposes the page. Back, picking a row and switching to All types leave it running while the page is hidden, so its results are complete when the user returns.
 - Its deadline is 30 seconds, taken from an injected `TimeProvider`. The deadline is a cap, not a wait: the scan ends as soon as every discoverer has completed, normally after 3 to 5 seconds.
 - It exposes the shared services below. Within one session, a query that was already sent returns the same in-flight task, so two discoverers asking for the same question cause one query. SSDP queries are shared by exact search target, mDNS queries by service type ignoring case.
 
@@ -128,11 +128,15 @@ public interface IMulticastDnsBrowser
 - `SsdpResponse` carries the location, unique service name and search target of an answer for exactly the searched target.
 - `MulticastDnsService` carries the instance name, host name, addresses, port and TXT records.
 
-SSDP uses Rssdp, which the FRITZ!Box library already depends on, and searches every IPv4 adapter with a listening window of about 3 seconds.
+SSDP uses Rssdp, which `HomeBlaze.Services` references, and searches every IPv4 adapter with a listening window of about 3 seconds.
 
 mDNS is a minimal implementation of our own, with no package and no reflection. It sends a PTR query for the service type to `224.0.0.251:5353` on each IPv4 adapter, repeats it after 1 and 3 seconds as RFC 6762 recommends, and combines the PTR, SRV, TXT and A records of the answers into `MulticastDnsService`. Queries are sent from an ephemeral port as legacy unicast queries, so devices answer straight back and HomeBlaze does not bind port 5353, which Avahi holds on most Linux hosts. During development, real Shelly Gen2 devices and a Hue bridge answered legacy unicast queries on a Linux host with Avahi running. Binding port 5353 with address reuse remains the documented fallback, and has not been needed so far.
 
-Both services cap the number and size of answers per session, as `FritzBoxDiscovery` caps locations today, because any host on the network can answer.
+Any host on the network can answer, so what one query can make HomeBlaze hold or do is capped:
+
+- An SSDP search returns at most 64 answers for the searched target. The answers Rssdp collects during the window of about 3 seconds are not capped.
+- An mDNS browse reads at most 512 messages per adapter and 256 records per message, keeps at most 4096 records and 256 KB of names and TXT entries, after which further records are dropped, and returns at most 64 instances.
+- `FritzBoxDiscovery` describes at most 32 locations per search, one of them reserved for `fritz.box`, and reads a bounded description from each.
 
 ## Discover page
 
@@ -171,7 +175,7 @@ Picking a row calls the existing `SelectType` for the result's type and keeps th
 |---|---|---|---|
 | `FritzBox` | `FritzBoxDiscovery` through the shared `ISsdpSearch`, plus the `fritz.box` fallback | `FritzBoxDiscoveryResult`, key `Udn` or else host address | A new persisted `Udn` when both sides have one, otherwise the host address |
 | `HueBridge` | mDNS `_hue._tcp`, local only | A new record with bridge ID and address, key bridge ID | The persisted `BridgeId`, ignoring case; `HueBridge` itself compares bridge IDs ignoring case as well |
-| `NukiBridge` | The Nuki cloud lookup, which runs only because the user pressed Scan | `NukiDiscoveredBridge`, key bridge ID | The host address and port. Whether the bridge ID the discovery service returns equals the runtime `ServerId` of a real bridge is still open until the manual verification, and a match on it is added only if they agree |
+| `NukiBridge` | The Nuki cloud lookup, which runs when the user first opens the Discover page and on Scan again | `NukiDiscoveredBridge`, key bridge ID | The host address and port. Whether the bridge ID the discovery service returns equals the runtime `ServerId` of a real bridge is still open until the manual verification, and a match on it is added only if they agree |
 | `ShellyDevice` | mDNS `_shelly._tcp` | `ShellyDiscoveredDevice(DeviceId, HostAddress, Application, Name)`, key device ID | A new persisted `DeviceId`, otherwise the host address |
 
 - A Gen2+ Shelly announces two `_shelly._tcp` instances with the same SRV host, one named by its device ID and one by its user-given name. The discoverer takes the device ID from the SRV host name (without `.local`, lower case), merges the instances into one result and shows the user-given name, or the device ID when there is none. `Application` comes from the `app` TXT record.
@@ -182,9 +186,15 @@ Picking a row calls the existing `SelectType` for the result's type and keeps th
 
 ## Breaking changes
 
-- `FritzBoxDiscovery.DiscoverAsync` takes an `ISsdpSearch`. Migration: resolve the `ISsdpSearch` from dependency injection, as its implementation is internal.
+- `FritzBoxDiscovery.DiscoverAsync(TimeSpan, CancellationToken)` is now `DiscoverAsync(ISsdpSearch, TimeSpan timeout, CancellationToken)`. `timeout` now limits only each description request; the SSDP window is fixed at about 3 seconds. Migration: resolve `ISsdpSearch` from dependency injection (`AddHomeBlazeServices` registers it; the implementation is internal), or pass `DiscoveryScan.Ssdp` inside a discoverer.
+- `Namotion.Devices.FritzBox` no longer depends on Rssdp. Migration: add your own package reference if you used it transitively.
+- `FritzBoxSetupComponent` now injects `ISsdpSearch`. Migration: a host that shows it must call `AddHomeBlazeServices` or `AddHomeBlazeHostServices`.
 
-The new configuration properties are additions; stored subjects without them load unchanged.
+Not breaking:
+
+- `HomeBlaze.Components.Abstractions` now references `HomeBlaze.Abstractions`.
+- `HueBridge` matches bridge IDs ignoring case.
+- `FritzBox.Udn` and `ShellyDevice.DeviceId` are new configuration properties; stored subjects without them load unchanged.
 
 ## Testing
 
