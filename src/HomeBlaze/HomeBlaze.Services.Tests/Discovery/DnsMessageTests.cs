@@ -285,8 +285,46 @@ public class DnsMessageTests
     public void WhenTheQuestionCountIsOverTheLimit_ThenTheMessageIsRejected()
     {
         // Arrange
+        var builder = new DnsMessageBuilder();
+        for (var index = 0; index < 257; index++)
+        {
+            builder.AddQuestion([0]);
+        }
+
+        // Act
+        var isParsed = DnsMessage.TryParse(builder.Build(), out _);
+
+        // Assert
+        Assert.False(isParsed);
+    }
+
+    [Fact]
+    public void WhenTheQuestionCountIsAtTheLimit_ThenTheMessageIsAccepted()
+    {
+        // Arrange
+        var builder = new DnsMessageBuilder();
+        for (var index = 0; index < 256; index++)
+        {
+            builder.AddQuestion([0]);
+        }
+
+        builder.AddAddress("hue.local", "192.168.1.20");
+
+        // Act
+        var isParsed = DnsMessage.TryParse(builder.Build(), out var records);
+
+        // Assert
+        Assert.True(isParsed);
+        Assert.Single(records);
+    }
+
+    [Fact]
+    public void WhenANameIsShortInCharactersButLongerThanTheLimitOnTheWire_ThenTheMessageIsRejected()
+    {
+        // Arrange - 5 labels of 30 two-byte characters are 155 characters and 5 * 61 + 1 = 306 bytes on the wire.
+        var label = new string('\u00e4', 30);
         var message = new DnsMessageBuilder()
-            .WithQuestionCount(257)
+            .AddAddress(string.Join('.', Enumerable.Repeat(label, 5)), "192.168.1.21")
             .Build();
 
         // Act
@@ -294,6 +332,23 @@ public class DnsMessageTests
 
         // Assert
         Assert.False(isParsed);
+    }
+
+    [Fact]
+    public void WhenTheOpcodeIsNotZero_ThenNoRecordsAreRead()
+    {
+        // Arrange
+        var message = new DnsMessageBuilder()
+            .AddAddress("hue.local", "192.168.1.20")
+            .Build();
+        message[2] |= 0x10;
+
+        // Act
+        var isParsed = DnsMessage.TryParse(message, out var records);
+
+        // Assert
+        Assert.True(isParsed);
+        Assert.Empty(records);
     }
 
     [Fact]

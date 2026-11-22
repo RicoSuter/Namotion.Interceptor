@@ -91,7 +91,7 @@ internal static class DnsMessage
         var offset = HeaderLength;
         for (var index = 0; index < questionCount; index++)
         {
-            if (!TrySkipName(message, ref offset) || offset + 4 > message.Length)
+            if (!TryWalkName(message, ref offset, null) || offset + 4 > message.Length)
             {
                 return false;
             }
@@ -202,64 +202,25 @@ internal static class DnsMessage
         return entries;
     }
 
-    /// <summary>
-    /// Moves <paramref name="offset"/> past a name without building it, with the same bounds as <see cref="TryReadName"/>.
-    /// </summary>
-    private static bool TrySkipName(ReadOnlySpan<byte> message, ref int offset)
-    {
-        var position = offset;
-        var hasJumped = false;
-        var jumpCount = 0;
-        var wireLength = 1;
-        while (true)
-        {
-            if (position >= message.Length)
-            {
-                return false;
-            }
-
-            var length = message[position];
-            if (length == 0)
-            {
-                if (!hasJumped)
-                {
-                    offset = position + 1;
-                }
-
-                return true;
-            }
-
-            if ((length & 0xC0) == 0xC0)
-            {
-                if (position + 1 >= message.Length || ++jumpCount > MaximumPointerJumps)
-                {
-                    return false;
-                }
-
-                if (!hasJumped)
-                {
-                    offset = position + 2;
-                    hasJumped = true;
-                }
-
-                position = ((length & 0x3F) << 8) | message[position + 1];
-                continue;
-            }
-
-            wireLength += 1 + length;
-            if ((length & 0xC0) != 0 || position + 1 + length > message.Length || wireLength > MaximumNameLength)
-            {
-                return false;
-            }
-
-            position += 1 + length;
-        }
-    }
-
     private static bool TryReadName(ReadOnlySpan<byte> message, ref int offset, out string name)
     {
-        name = "";
         var builder = new StringBuilder();
+        if (!TryWalkName(message, ref offset, builder))
+        {
+            name = "";
+            return false;
+        }
+
+        name = builder.ToString();
+        return true;
+    }
+
+    /// <summary>
+    /// Walks the name at <paramref name="offset"/> and moves <paramref name="offset"/> past it. The labels are appended
+    /// to <paramref name="builder"/> when it is given, so a name that is only skipped allocates nothing.
+    /// </summary>
+    private static bool TryWalkName(ReadOnlySpan<byte> message, ref int offset, StringBuilder? builder)
+    {
         var position = offset;
         var hasJumped = false;
         var jumpCount = 0;
@@ -279,7 +240,6 @@ internal static class DnsMessage
                     offset = position + 1;
                 }
 
-                name = builder.ToString();
                 return true;
             }
 
@@ -312,12 +272,15 @@ internal static class DnsMessage
                 return false;
             }
 
-            if (builder.Length > 0)
+            if (builder is not null)
             {
-                builder.Append('.');
-            }
+                if (builder.Length > 0)
+                {
+                    builder.Append('.');
+                }
 
-            builder.Append(Encoding.UTF8.GetString(message.Slice(position + 1, length)));
+                builder.Append(Encoding.UTF8.GetString(message.Slice(position + 1, length)));
+            }
 
             position += 1 + length;
         }
