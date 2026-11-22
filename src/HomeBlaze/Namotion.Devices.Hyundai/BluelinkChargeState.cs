@@ -33,21 +33,30 @@ public partial class BluelinkChargeState : IVehicleChargingState, IVehicleChargi
     public string IconName => "EvStation";
 
     [State(Unit = StateUnit.Percent, Position = 1)] public partial decimal? BatteryLevel { get; internal set; }
+    [Category("")]
     [State(IsDiscrete = true, Position = 2)] public partial bool? IsPluggedIn { get; internal set; }
+    [Category("")]
     [State(IsDiscrete = true, Position = 3)] public partial bool? IsCharging { get; internal set; }
+    [Category("")]
     [State(Unit = StateUnit.Watt, Position = 4)] public partial decimal? ChargingPower { get; internal set; }
 
     /// <summary>The charge limit for AC charging.</summary>
+    [Category("")]
     [State(Unit = StateUnit.Percent, Position = 5)] public partial decimal? ChargeLimit { get; internal set; }
 
     /// <summary>The charge limit for DC fast charging.</summary>
     [State(Unit = StateUnit.Percent, Position = 6)] public partial decimal? FastChargeLimit { get; internal set; }
 
+    [Category("")]
     [State(Position = 7)] public partial TimeSpan? RemainingChargingTime { get; internal set; }
+    [Category("")]
     [State(Unit = StateUnit.Kilometer, Position = 8)] public partial decimal? Range { get; internal set; }
 
     /// <summary>Not reported by the Bluelink API; always null.</summary>
-    [Derived] public decimal? MaximumChargingPower => null;
+    [Derived]
+    [Category("")]
+    [State(Unit = StateUnit.Watt, Position = 9)]
+    public decimal? MaximumChargingPower => null;
 
     [Derived]
     [PropertyAttribute("StartCharging", KnownAttributes.IsEnabled)]
@@ -76,7 +85,7 @@ public partial class BluelinkChargeState : IVehicleChargingState, IVehicleChargi
 
     /// <summary>Sets the AC charge limit and keeps the current DC charge limit, because the API always takes both.</summary>
     /// <exception cref="ArgumentOutOfRangeException">The limit is not 0.5 to 1.0 in steps of 0.1.</exception>
-    /// <exception cref="InvalidOperationException">The DC charge limit is not known yet.</exception>
+    /// <exception cref="InvalidOperationException">The DC charge limit is not known yet or is not a setting.</exception>
     public Task SetChargeLimitAsync(decimal chargeLimit, CancellationToken cancellationToken)
     {
         var acPercent = BluelinkValues.ToChargeLimitPercent(chargeLimit, nameof(chargeLimit));
@@ -85,7 +94,17 @@ public partial class BluelinkChargeState : IVehicleChargingState, IVehicleChargi
             throw new InvalidOperationException("The DC charge limit is not known yet; use Set Charge Limits to set both.");
         }
 
-        return _vehicle.Commands.SetChargeLimitsAsync(_vehicle, acPercent, (int)(fastChargeLimit * 100m), cancellationToken);
+        int dcPercent;
+        try
+        {
+            dcPercent = BluelinkValues.ToChargeLimitPercent(fastChargeLimit, nameof(fastChargeLimit));
+        }
+        catch (ArgumentOutOfRangeException exception)
+        {
+            throw new InvalidOperationException("The reported DC charge limit is not a setting; use Set Charge Limits to set both.", exception);
+        }
+
+        return _vehicle.Commands.SetChargeLimitsAsync(_vehicle, acPercent, dcPercent, cancellationToken);
     }
 
     /// <summary>Sets the AC and the DC charge limit.</summary>

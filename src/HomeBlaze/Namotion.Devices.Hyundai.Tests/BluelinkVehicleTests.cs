@@ -1,9 +1,14 @@
+using System.ComponentModel;
 using System.Text.Json;
+using HomeBlaze.Abstractions.Common;
 using HomeBlaze.Abstractions.Devices.Locks;
 using HomeBlaze.Abstractions.Devices.Vehicles;
 using Namotion.Devices.Hyundai.Client;
 using Namotion.Devices.Hyundai.Mapping;
 using Namotion.Devices.Hyundai.Tests.Testing;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Devices.Hyundai.Tests;
 
@@ -90,12 +95,17 @@ public class BluelinkVehicleTests
         var (vehicle, _) = Create();
         IElectricVehicle electricVehicle = vehicle;
 
-        // Act & Assert
-        Assert.Same(vehicle.Charge, electricVehicle.Charge);
-        Assert.Same(vehicle.Climate, electricVehicle.Climate);
-        Assert.Same(vehicle.Body, electricVehicle.Body);
-        Assert.IsAssignableFrom<IVehicleChargingController>(electricVehicle.Charge);
-        Assert.IsAssignableFrom<IVehicleClimateController>(electricVehicle.Climate);
+        // Act
+        var charge = electricVehicle.Charge;
+        var climate = electricVehicle.Climate;
+        var body = electricVehicle.Body;
+
+        // Assert
+        Assert.Same(vehicle.Charge, charge);
+        Assert.Same(vehicle.Climate, climate);
+        Assert.Same(vehicle.Body, body);
+        Assert.IsAssignableFrom<IVehicleChargingController>(charge);
+        Assert.IsAssignableFrom<IVehicleClimateController>(climate);
     }
 
     [Fact]
@@ -154,22 +164,221 @@ public class BluelinkVehicleTests
 
         // Act
         await vehicle.Climate.StartClimateWithDefrostAsync(21m, CancellationToken.None);
-        await vehicle.Climate.StartClimateAsync(21m, CancellationToken.None);
 
         // Assert
-        Assert.Equal(["Climate 21 True", "Climate 21 False"], commands.Calls);
+        Assert.Equal(["Climate 21 True"], commands.Calls);
     }
 
     [Fact]
-    public void WhenAuxiliaryBatteryIsLow_ThenRefreshIsDisabled()
+    public async Task WhenClimateStartsWithoutDefrost_ThenDefrostIsNotRequested()
+    {
+        // Arrange
+        var (vehicle, commands) = Create();
+
+        // Act
+        await vehicle.Climate.StartClimateAsync(21m, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["Climate 21 False"], commands.Calls);
+    }
+
+    [Fact]
+    public async Task WhenClimateStops_ThenTheAccountIsAsked()
+    {
+        // Arrange
+        var (vehicle, commands) = Create();
+
+        // Act
+        await vehicle.Climate.StopClimateAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["Climate stop"], commands.Calls);
+    }
+
+    [Fact]
+    public async Task WhenChargingStarts_ThenTheAccountIsAskedToStart()
+    {
+        // Arrange
+        var (vehicle, commands) = Create();
+
+        // Act
+        await vehicle.Charge.StartChargingAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["Charging True"], commands.Calls);
+    }
+
+    [Fact]
+    public async Task WhenChargingStops_ThenTheAccountIsAskedToStop()
+    {
+        // Arrange
+        var (vehicle, commands) = Create();
+
+        // Act
+        await vehicle.Charge.StopChargingAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["Charging False"], commands.Calls);
+    }
+
+    [Fact]
+    public async Task WhenBothChargeLimitsAreSet_ThenBothAreSentAsPercent()
+    {
+        // Arrange
+        var (vehicle, commands) = Create();
+
+        // Act
+        await vehicle.Charge.SetChargeLimitsAsync(0.8m, 0.9m, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["Limits 80 90"], commands.Calls);
+    }
+
+    [Fact]
+    public async Task WhenReportedFastChargeLimitIsNotASetting_ThenSetChargeLimitThrowsBeforeAnyCall()
+    {
+        // Arrange
+        var (vehicle, commands) = Create();
+        vehicle.ApplyStatus(FixtureStatus() with { FastChargeLimit = 0.75m }, ReadTime);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => vehicle.Charge.SetChargeLimitAsync(0.7m, CancellationToken.None));
+        Assert.Empty(commands.Calls);
+    }
+
+    [Fact]
+    public void WhenAllDoorsAreClosed_ThenNoDoorIsOpen()
     {
         // Arrange
         var (vehicle, _) = Create();
 
         // Act
-        vehicle.ApplyStatus(FixtureStatus() with { AuxiliaryBatteryLevel = 0.5m }, ReadTime);
+        vehicle.ApplyStatus(new BluelinkVehicleStatus
+        {
+            IsFrontLeftDoorOpen = false,
+            IsFrontRightDoorOpen = false,
+            IsRearLeftDoorOpen = false,
+            IsRearRightDoorOpen = false,
+        }, ReadTime);
 
         // Assert
-        Assert.False(vehicle.Refresh_IsEnabled);
+        Assert.False(vehicle.Body.IsAnyDoorOpen);
+    }
+
+    [Fact]
+    public void WhenADoorIsUnknownAndNoneIsOpen_ThenAnyDoorOpenIsUnknown()
+    {
+        // Arrange
+        var (vehicle, _) = Create();
+
+        // Act
+        vehicle.ApplyStatus(new BluelinkVehicleStatus
+        {
+            IsFrontLeftDoorOpen = false,
+            IsFrontRightDoorOpen = null,
+            IsRearLeftDoorOpen = false,
+            IsRearRightDoorOpen = false,
+        }, ReadTime);
+
+        // Assert
+        Assert.Null(vehicle.Body.IsAnyDoorOpen);
+    }
+
+    [Fact]
+    public void WhenADoorIsOpenAndAnotherIsUnknown_ThenAnyDoorOpenIsTrue()
+    {
+        // Arrange
+        var (vehicle, _) = Create();
+
+        // Act
+        vehicle.ApplyStatus(new BluelinkVehicleStatus
+        {
+            IsFrontLeftDoorOpen = null,
+            IsFrontRightDoorOpen = true,
+        }, ReadTime);
+
+        // Assert
+        Assert.True(vehicle.Body.IsAnyDoorOpen);
+    }
+
+    [Fact]
+    public void WhenLocationIsMissing_ThenThePreviousLocationIsKept()
+    {
+        // Arrange
+        var (vehicle, _) = Create();
+        var location = new GeoCoordinate(1.234567, 2.345678);
+        vehicle.ApplyLocation(location);
+
+        // Act
+        vehicle.ApplyLocation(null);
+
+        // Assert
+        Assert.Equal(location, vehicle.Location);
+    }
+
+    [Fact]
+    public void WhenNicknameIsWhitespace_ThenInfoUpdateClearsTheNickname()
+    {
+        // Arrange
+        var (vehicle, _) = Create();
+
+        // Act
+        vehicle.UpdateInfo(new BluelinkVehicleInfo("VEHICLE-1", "TESTVIN0000000001", "  ", "KONA", "EV", BluelinkProtocol.Legacy));
+
+        // Assert
+        Assert.Null(vehicle.Nickname);
+    }
+
+    [Fact]
+    public void WhenStatusWithoutTimeWasApplied_ThenAnOlderTimedStatusIsStillApplied()
+    {
+        // Arrange
+        var (vehicle, _) = Create();
+        vehicle.ApplyStatus(new BluelinkVehicleStatus { BatteryLevel = 0.2m }, ReadTime);
+
+        // Act
+        vehicle.ApplyStatus(new BluelinkVehicleStatus { Time = ReadTime.AddHours(-1), BatteryLevel = 0.3m }, ReadTime);
+
+        // Assert
+        Assert.Equal(0.3m, vehicle.Charge.BatteryLevel);
+    }
+
+    [Fact]
+    public void WhenAccountCapabilityChanges_ThenOperationEnablementIsRaised()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var commands = new TrackedVehicleCommands(context);
+        var vehicle = new BluelinkVehicle(commands, new BluelinkVehicleInfo("VEHICLE-1", "TESTVIN0000000001", "Kona", "KONA", "EV", BluelinkProtocol.Legacy));
+        ((IInterceptorSubject)vehicle).Context.AddFallbackContext(context);
+        Assert.True(vehicle.Charge.StartCharging_IsEnabled);
+        var firedEvents = new List<string>();
+        ((INotifyPropertyChanged)vehicle.Charge).PropertyChanged += (_, arguments) => firedEvents.Add(arguments.PropertyName!);
+
+        // Act
+        commands.CanSend = false;
+
+        // Assert
+        Assert.False(vehicle.Charge.StartCharging_IsEnabled);
+        Assert.Contains(nameof(BluelinkChargeState.StartCharging_IsEnabled), firedEvents);
+    }
+
+    [Fact]
+    public void WhenVehicleIsRegistered_ThenItHasOneChargeChildAndTheCommandsAreNotAttached()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var commands = new TrackedVehicleCommands(context);
+        var vehicle = new BluelinkVehicle(commands, new BluelinkVehicleInfo("VEHICLE-1", "TESTVIN0000000001", "Kona", "KONA", "EV", BluelinkProtocol.Legacy));
+
+        // Act
+        ((IInterceptorSubject)vehicle).Context.AddFallbackContext(context);
+        var registered = vehicle.TryGetRegisteredSubject();
+
+        // Assert
+        Assert.NotNull(registered);
+        var chargeProperty = Assert.Single(registered.Properties, property => property.Name == nameof(BluelinkVehicle.Charge));
+        Assert.Single(chargeProperty.Children);
+        Assert.Empty(commands.TryGetRegisteredSubject()!.Parents);
     }
 }

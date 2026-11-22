@@ -8,7 +8,7 @@ namespace Namotion.Devices.Hyundai;
 /// <summary>A tire of a Bluelink vehicle.</summary>
 [ExcludeFromCreation]
 [InterceptorSubject]
-public partial class BluelinkTire : ITitleProvider
+public partial class BluelinkTire : ITitleProvider, IIconProvider
 {
     internal BluelinkTire(string title)
     {
@@ -18,6 +18,8 @@ public partial class BluelinkTire : ITitleProvider
     }
 
     public string Title { get; }
+
+    public string IconName => "TireRepair";
 
     /// <summary>Whether the vehicle warns about a low pressure of this tire.</summary>
     [State(IsDiscrete = true, Position = 1)] public partial bool? IsPressureLow { get; internal set; }

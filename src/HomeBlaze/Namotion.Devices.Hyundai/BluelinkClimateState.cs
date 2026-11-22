@@ -22,7 +22,6 @@ public partial class BluelinkClimateState : IVehicleClimateState, IVehicleClimat
         TemperatureSetting = null;
         IsDefrostOn = null;
         IsSteeringWheelHeaterOn = null;
-        InsideTemperature = null;
         OutsideTemperature = null;
     }
 
@@ -30,6 +29,7 @@ public partial class BluelinkClimateState : IVehicleClimateState, IVehicleClimat
 
     public string IconName => "Thermostat";
 
+    [Category("")]
     [State(IsDiscrete = true, Position = 1)] public partial bool? IsClimateOn { get; internal set; }
 
     /// <summary>The set temperature, or null while the climate is off.</summary>
@@ -39,8 +39,12 @@ public partial class BluelinkClimateState : IVehicleClimateState, IVehicleClimat
     [State(IsDiscrete = true, Position = 4)] public partial bool? IsSteeringWheelHeaterOn { get; internal set; }
 
     /// <summary>Not reported by the Bluelink API; always null.</summary>
-    [State(Unit = StateUnit.DegreeCelsius, Position = 5)] public partial decimal? InsideTemperature { get; internal set; }
+    [Derived]
+    [Category("")]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 5)]
+    public decimal? InsideTemperature => null;
 
+    [Category("")]
     [State(Unit = StateUnit.DegreeCelsius, Position = 6)] public partial decimal? OutsideTemperature { get; internal set; }
 
     [Derived]

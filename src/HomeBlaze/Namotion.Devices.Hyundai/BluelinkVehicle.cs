@@ -16,6 +16,8 @@ namespace Namotion.Devices.Hyundai;
 [InterceptorSubject]
 public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdatedProvider, ITitleProvider, IIconProvider
 {
+    private DateTimeOffset? _appliedStatusTime;
+
     internal BluelinkVehicle(IBluelinkVehicleCommands commands, BluelinkVehicleInfo info)
     {
         Commands = commands;
@@ -116,12 +118,17 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
         Protocol = info.Protocol;
     }
 
-    /// <summary>Applies a stored status; a status older than the applied one is skipped.</summary>
+    /// <summary>Applies a stored status; a status older than the newest applied status time is skipped. A status without time never blocks a later one.</summary>
     internal void ApplyStatus(BluelinkVehicleStatus status, DateTimeOffset readTime)
     {
-        if (status.Time is { } time && LastUpdated is { } lastUpdated && time < lastUpdated)
+        if (status.Time is { } time)
         {
-            return;
+            if (time < _appliedStatusTime)
+            {
+                return;
+            }
+
+            _appliedStatusTime = time;
         }
 
         LastUpdated = status.Time ?? readTime;
