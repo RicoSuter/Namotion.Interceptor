@@ -42,7 +42,7 @@ public sealed class SecretStore
             var values = new Dictionary<string, string>(_values) { [key] = value };
             var content = JsonSerializer.SerializeToUtf8Bytes(values, SecretStoreJsonContext.Default.DictionaryStringString);
 
-            // Readable by the user HomeBlaze runs as only. Windows has no Unix modes.
+            // Readable by the user HomeBlaze runs as only.
             AtomicFile.WriteAllBytes(Path, content, OperatingSystem.IsWindows() ? null : UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
             // After the write: a value that is not in the file must not be referenced.
@@ -62,6 +62,15 @@ public sealed class SecretStore
         {
             var values = JsonSerializer.Deserialize(File.ReadAllBytes(path), SecretStoreJsonContext.Default.DictionaryStringString)
                 ?? throw new JsonException("The file holds null.");
+
+            foreach (var value in values.Values)
+            {
+                if (value is null)
+                {
+                    throw new JsonException("The file holds a null value.");
+                }
+            }
+
             return new ConcurrentDictionary<string, string>(values);
         }
         catch (JsonException exception)

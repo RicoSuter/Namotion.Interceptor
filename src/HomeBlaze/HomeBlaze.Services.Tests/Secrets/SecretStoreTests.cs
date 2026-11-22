@@ -67,6 +67,7 @@ public class SecretStoreTests : IDisposable
     [InlineData("{")]
     [InlineData("[]")]
     [InlineData("""{ "key": 1 }""")]
+    [InlineData("""{ "key": null }""")]
     [InlineData("null")]
     public void WhenTheFileIsNotAnObjectOfStrings_ThenTheConstructorThrowsAndTheFileStays(string content)
     {
