@@ -29,13 +29,14 @@ public sealed class ShellyDeviceDiscoverer : SubjectDiscoverer<ShellyDevice, She
     internal static IReadOnlyList<ShellyDiscoveredDevice> ToDevices(IReadOnlyList<MulticastDnsService> services)
     {
         // A device announces two instances on the same host, one named by its device ID and one by its user-given
-        // name, so the SRV target (the device ID) identifies the device and the instances are merged.
+        // name, so the SRV target (the device ID) identifies the device and the instances are merged. An instance
+        // without an SRV target is skipped: its name can be the user-given one, which must never become a device ID.
         var devices = new List<ShellyDiscoveredDevice>();
         var indexByDeviceId = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var service in services)
         {
             var deviceId = GetDeviceId(service);
-            if (deviceId.Length == 0)
+            if (deviceId is null)
             {
                 continue;
             }
@@ -89,19 +90,15 @@ public sealed class ShellyDeviceDiscoverer : SubjectDiscoverer<ShellyDevice, She
             : string.Equals(existing.HostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string GetDeviceId(MulticastDnsService service)
+    /// <returns>The device ID from the SRV target, or null when the service has none.</returns>
+    private static string? GetDeviceId(MulticastDnsService service)
     {
-        if (string.IsNullOrWhiteSpace(service.HostName))
-        {
-            return service.InstanceName.Trim().ToLowerInvariant();
-        }
-
-        var hostName = service.HostName.Trim().TrimEnd('.');
-        if (hostName.EndsWith(LocalDomainSuffix, StringComparison.OrdinalIgnoreCase))
+        var hostName = service.HostName?.Trim().TrimEnd('.');
+        if (hostName is not null && hostName.EndsWith(LocalDomainSuffix, StringComparison.OrdinalIgnoreCase))
         {
             hostName = hostName[..^LocalDomainSuffix.Length];
         }
 
-        return hostName.ToLowerInvariant();
+        return string.IsNullOrWhiteSpace(hostName) ? null : hostName.ToLowerInvariant();
     }
 }

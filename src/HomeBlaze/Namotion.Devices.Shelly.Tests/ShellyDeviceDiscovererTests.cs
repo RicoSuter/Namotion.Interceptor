@@ -90,17 +90,20 @@ public class ShellyDeviceDiscovererTests
     }
 
     [Fact]
-    public void WhenAServiceHasNoHostName_ThenTheInstanceNameIsTheDeviceId()
+    public void WhenAServiceHasNoHostName_ThenItIsSkipped()
     {
         // Arrange
-        var service = Service(" ShellyPlus1PM-A8032AB12345 ", hostName: null);
+        var services = new[]
+        {
+            Service("Kitchen", hostName: null),
+            Service("Garage", hostName: " . ", address: "192.168.1.42")
+        };
 
         // Act
-        var devices = ShellyDeviceDiscoverer.ToDevices([service]);
+        var devices = ShellyDeviceDiscoverer.ToDevices(services);
 
         // Assert
-        var device = Assert.Single(devices);
-        Assert.Equal(Found(), device);
+        Assert.Empty(devices);
     }
 
     [Fact]
