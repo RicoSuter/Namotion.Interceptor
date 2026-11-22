@@ -1,9 +1,14 @@
+using System.Net;
+using System.Runtime.ExceptionServices;
+
 namespace Namotion.Devices.Hyundai.Client;
 
 /// <summary>
 /// Caches the CCS access token and refreshes the token set 6 minutes before the CCI or CCS token expires; the server
 /// rejects tokens earlier than their stated lifetime. The rotated set is persisted before the new access token is
-/// handed out. Not thread-safe: call it only while the account lock is held.
+/// handed out. A rejected refresh (a 4xx answer other than 408 and 429) falls back to one sign in with the stored
+/// password; every other failure propagates unchanged for the caller to retry later. Not thread-safe: call it only
+/// while the account lock is held.
 /// </summary>
 internal sealed class BluelinkTokenManager
 {
@@ -20,6 +25,7 @@ internal sealed class BluelinkTokenManager
     private bool _isPersisted = true;
     private string? _accessToken;
     private DateTimeOffset _refreshAt;
+    private DateTimeOffset? _unpersistedAuthenticatedAt;
 
     /// <param name="authClient">The auth client.</param>
     /// <param name="tokens">The stored token set.</param>
@@ -50,7 +56,8 @@ internal sealed class BluelinkTokenManager
     public DateTimeOffset? AuthenticatedAt { get; private set; }
 
     /// <summary>Calls the vehicle API with an access token; after a token expired answer it refreshes once and calls again.</summary>
-    /// <exception cref="BluelinkReauthenticationRequiredException">The tokens and the stored password are rejected.</exception>
+    /// <exception cref="BluelinkReauthenticationRequiredException">The refresh is rejected and no password is stored, or the sign in is rejected.</exception>
+    /// <exception cref="BluelinkApiException">Any other failure, including a token expired answer after the refresh; the caller retries later.</exception>
     public async Task<T> CallAsync<T>(Func<string, Task<T>> call, CancellationToken cancellationToken)
     {
         var accessToken = await GetAccessTokenAsync(cancellationToken);
@@ -64,14 +71,7 @@ internal sealed class BluelinkTokenManager
         }
 
         accessToken = await GetAccessTokenAsync(cancellationToken);
-        try
-        {
-            return await call(accessToken);
-        }
-        catch (BluelinkApiException exception) when (exception.IsTokenExpired)
-        {
-            throw new BluelinkReauthenticationRequiredException("Hyundai rejected the refreshed access token.");
-        }
+        return await call(accessToken);
     }
 
     /// <summary>Calls the vehicle API without a result.</summary>
@@ -101,6 +101,9 @@ internal sealed class BluelinkTokenManager
         _tokens = cciTokens.Tokens;
         _isPersisted = false;
         _accessToken = null;
+        _unpersistedAuthenticatedAt = null;
+
+        ExceptionDispatchInfo? exchangeFailure = null;
         try
         {
             var ccsToken = await _authClient.ExchangeCcsAsync(_tokens, _deviceId, CancellationToken.None);
@@ -108,14 +111,24 @@ internal sealed class BluelinkTokenManager
             var refreshAt = Min(now + cciTokens.ExpiresIn, ccsToken.ExpiresAt) - RefreshAhead;
             _refreshAt = refreshAt > now + MinimumLifetime ? refreshAt : now + MinimumLifetime;
             _accessToken = ccsToken.AccessToken;
-            AuthenticatedAt = now;
+            _unpersistedAuthenticatedAt = now;
         }
-        finally
+        catch (Exception exception)
+        {
+            exchangeFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+
+        try
         {
             await PersistAsync();
         }
+        catch (Exception) when (exchangeFailure is not null)
+        {
+            // The exchange failure is the one reported; the next call persists again before it refreshes.
+        }
 
-        return _accessToken;
+        exchangeFailure?.Throw();
+        return _accessToken!;
     }
 
     private async Task<BluelinkCciTokens> RefreshOrLoginAsync()
@@ -124,7 +137,7 @@ internal sealed class BluelinkTokenManager
         {
             return await _authClient.RefreshAsync(_tokens, _deviceId, CancellationToken.None);
         }
-        catch (BluelinkApiException exception) when (!exception.IsFingerprintRejected)
+        catch (BluelinkApiException exception) when (IsRefreshRejected(exception))
         {
             if (_login is null)
             {
@@ -135,10 +148,20 @@ internal sealed class BluelinkTokenManager
         }
     }
 
+    private static bool IsRefreshRejected(BluelinkApiException exception) =>
+        !exception.IsFingerprintRejected &&
+        exception.StatusCode is >= HttpStatusCode.BadRequest and < HttpStatusCode.InternalServerError
+            and not HttpStatusCode.RequestTimeout and not HttpStatusCode.TooManyRequests;
+
     private async Task PersistAsync()
     {
         await _persistTokens(_tokens);
         _isPersisted = true;
+        if (_unpersistedAuthenticatedAt is { } authenticatedAt)
+        {
+            AuthenticatedAt = authenticatedAt;
+            _unpersistedAuthenticatedAt = null;
+        }
     }
 
     private static DateTimeOffset Min(DateTimeOffset first, DateTimeOffset second) => first < second ? first : second;

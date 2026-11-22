@@ -110,6 +110,7 @@ public class BluelinkTokenManagerTests
         Assert.Equal("ccs-1", accessToken);
         Assert.Equal(1, harness.Handler.Count(BluelinkResponses.RefreshPath));
         Assert.Equal([BluelinkResponses.TokenSet(1)], harness.Persisted);
+        Assert.Equal(Now, manager.AuthenticatedAt);
     }
 
     [Fact]
@@ -132,6 +133,7 @@ public class BluelinkTokenManagerTests
         // Assert
         Assert.Equal("ccs-5", accessToken);
         Assert.Equal(1, harness.LoginCount);
+        Assert.Equal(1, harness.Handler.Count(BluelinkResponses.RefreshPath));
         Assert.Equal([BluelinkResponses.TokenSet(5)], harness.Persisted);
     }
 
@@ -195,16 +197,169 @@ public class BluelinkTokenManagerTests
     }
 
     [Fact]
-    public async Task WhenRefreshedTokenIsAlsoRejected_ThenReauthenticationIsRequired()
+    public async Task WhenRefreshedTokenIsAlsoReportedExpired_ThenTheErrorIsRethrown()
+    {
+        // Arrange
+        var harness = new Harness();
+        harness.Handler.Respond(BluelinkResponses.RefreshPath, HttpStatusCode.OK, BluelinkResponses.Tokens(1))
+            .Respond(BluelinkResponses.RefreshPath, HttpStatusCode.OK, BluelinkResponses.Tokens(2))
+            .Respond(BluelinkResponses.ExchangePath, HttpStatusCode.OK, BluelinkResponses.Ccs(1));
+        var manager = harness.Create();
+
+        // Act
+        var exception = await Assert.ThrowsAsync<BluelinkApiException>(() => manager.CallAsync<string>(
+            _ => throw new BluelinkApiException(HttpStatusCode.OK, "7501", null), CancellationToken.None));
+
+        // Assert
+        Assert.True(exception.IsTokenExpired);
+        Assert.Equal(2, harness.Handler.Count(BluelinkResponses.RefreshPath));
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.RequestTimeout)]
+    public async Task WhenRefreshFailsTransiently_ThenTheErrorIsRethrownWithoutLogin(HttpStatusCode statusCode)
+    {
+        // Arrange
+        var harness = new Harness();
+        harness.Login = _ =>
+        {
+            harness.LoginCount++;
+            return Task.FromResult(new BluelinkCciTokens(BluelinkResponses.TokenSet(5), TimeSpan.FromSeconds(3599)));
+        };
+        harness.Handler.Respond(BluelinkResponses.RefreshPath, statusCode, "{}");
+        var manager = harness.Create();
+
+        // Act
+        var exception = await Assert.ThrowsAsync<BluelinkApiException>(() => Echo(manager));
+
+        // Assert
+        Assert.Equal(statusCode, exception.StatusCode);
+        Assert.Equal(0, harness.LoginCount);
+        Assert.Empty(harness.Persisted);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    public async Task WhenRefreshFailsTransientlyWithoutPassword_ThenNoReauthenticationIsRequired(HttpStatusCode statusCode)
+    {
+        // Arrange
+        var harness = new Harness();
+        harness.Handler.Respond(BluelinkResponses.RefreshPath, statusCode, "{}");
+        var manager = harness.Create();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<BluelinkApiException>(() => Echo(manager));
+    }
+
+    [Fact]
+    public async Task WhenLoginIsRejected_ThenReauthenticationIsRequired()
+    {
+        // Arrange
+        var harness = new Harness
+        {
+            Login = _ => throw new BluelinkReauthenticationRequiredException("rejected")
+        };
+        harness.Handler.Respond(BluelinkResponses.RefreshPath, HttpStatusCode.BadRequest, BluelinkResponses.CciError(4111));
+        var manager = harness.Create();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<BluelinkReauthenticationRequiredException>(() => Echo(manager));
+    }
+
+    [Fact]
+    public async Task WhenExchangeFails_ThenTheRotatedSetIsPersistedAndUsedByTheNextRefresh()
+    {
+        // Arrange
+        var harness = new Harness();
+        harness.Handler.Respond(BluelinkResponses.RefreshPath, HttpStatusCode.OK, BluelinkResponses.Tokens(1))
+            .Respond(BluelinkResponses.RefreshPath, HttpStatusCode.OK, BluelinkResponses.Tokens(2))
+            .Respond(BluelinkResponses.ExchangePath, HttpStatusCode.InternalServerError, "{}")
+            .Respond(BluelinkResponses.ExchangePath, HttpStatusCode.OK, BluelinkResponses.Ccs(2));
+        var manager = harness.Create();
+        await Assert.ThrowsAsync<BluelinkApiException>(() => Echo(manager));
+
+        // Act
+        var accessToken = await Echo(manager);
+
+        // Assert
+        Assert.Equal("ccs-2", accessToken);
+        Assert.Equal([BluelinkResponses.TokenSet(1), BluelinkResponses.TokenSet(2)], harness.Persisted);
+        var refreshRequests = harness.Handler.Requests.Where(request => request.Uri.AbsolutePath == BluelinkResponses.RefreshPath).ToArray();
+        Assert.Contains("refresh-1", refreshRequests[1].Body);
+    }
+
+    [Fact]
+    public async Task WhenExchangeAndPersistingFail_ThenTheExchangeErrorIsRethrown()
+    {
+        // Arrange
+        var harness = new Harness { PersistFailure = new IOException("disk full") };
+        harness.Handler.Respond(BluelinkResponses.RefreshPath, HttpStatusCode.OK, BluelinkResponses.Tokens(1))
+            .Respond(BluelinkResponses.ExchangePath, HttpStatusCode.InternalServerError, "{}");
+        var manager = harness.Create();
+
+        // Act
+        var exception = await Assert.ThrowsAsync<BluelinkApiException>(() => Echo(manager));
+
+        // Assert
+        Assert.Equal(HttpStatusCode.InternalServerError, exception.StatusCode);
+        Assert.Null(manager.AuthenticatedAt);
+    }
+
+    [Fact]
+    public async Task WhenCcsTokenExpiresBeforeCciToken_ThenItDrivesTheRefresh()
+    {
+        // Arrange
+        var harness = new Harness();
+        harness.Handler.Respond(BluelinkResponses.RefreshPath, HttpStatusCode.OK, BluelinkResponses.Tokens(1))
+            .Respond(BluelinkResponses.RefreshPath, HttpStatusCode.OK, BluelinkResponses.Tokens(2))
+            .Respond(BluelinkResponses.ExchangePath, HttpStatusCode.OK, BluelinkResponses.Ccs(1, expiresTime: 900));
+        var manager = harness.Create();
+        await Echo(manager);
+        harness.Time.Advance(TimeSpan.FromSeconds(900 - 360 - 1));
+        await Echo(manager);
+        Assert.Equal(1, harness.Handler.Count(BluelinkResponses.RefreshPath));
+
+        // Act
+        harness.Time.Advance(TimeSpan.FromSeconds(1));
+        await Echo(manager);
+
+        // Assert
+        Assert.Equal(2, harness.Handler.Count(BluelinkResponses.RefreshPath));
+    }
+
+    [Fact]
+    public async Task WhenAccessTokenIsJustOutsideSixMinutesOfExpiry_ThenNoRefreshHappens()
     {
         // Arrange
         var harness = new Harness();
         harness.Handler.Respond(BluelinkResponses.RefreshPath, HttpStatusCode.OK, BluelinkResponses.Tokens(1))
             .Respond(BluelinkResponses.ExchangePath, HttpStatusCode.OK, BluelinkResponses.Ccs(1));
         var manager = harness.Create();
+        await Echo(manager);
+
+        // Act
+        harness.Time.Advance(TimeSpan.FromSeconds(3599 - 360 - 1));
+        await Echo(manager);
+
+        // Assert
+        Assert.Equal(1, harness.Handler.Count(BluelinkResponses.RefreshPath));
+    }
+
+    [Fact]
+    public async Task WhenTokenIsCanceledBeforeTheCall_ThenNoRefreshIsStarted()
+    {
+        // Arrange
+        var harness = new Harness();
+        harness.Handler.Respond(BluelinkResponses.RefreshPath, HttpStatusCode.OK, BluelinkResponses.Tokens(1));
+        var manager = harness.Create();
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
 
         // Act & Assert
-        await Assert.ThrowsAsync<BluelinkReauthenticationRequiredException>(() => manager.CallAsync<string>(
-            _ => throw new BluelinkApiException(HttpStatusCode.OK, "7501", null), CancellationToken.None));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => manager.CallAsync(accessToken => Task.FromResult(accessToken), cancellation.Token));
+        Assert.Empty(harness.Handler.Requests);
     }
 }
