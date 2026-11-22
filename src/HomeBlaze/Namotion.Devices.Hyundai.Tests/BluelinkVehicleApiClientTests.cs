@@ -13,6 +13,9 @@ public class BluelinkVehicleApiClientTests
     private static readonly BluelinkVehicleRequest LegacyRequest = new("ccs-1", "device-1", "VEHICLE-1", BluelinkProtocol.Legacy);
     private static readonly BluelinkVehicleRequest Ccs2Request = new("ccs-1", "device-1", "VEHICLE-2", BluelinkProtocol.Ccs2);
 
+    private static (BluelinkVehicleApiClient Client, FakeHttpMessageHandler Handler, BluelinkRequestBudget Budget) Create(string path, HttpStatusCode statusCode, string body) =>
+        Create(new FakeHttpMessageHandler().Respond(path, statusCode, body));
+
     private static (BluelinkVehicleApiClient Client, FakeHttpMessageHandler Handler, BluelinkRequestBudget Budget) Create(FakeHttpMessageHandler handler, int limit = 100)
     {
         var time = new FakeTimeProvider(Now);
@@ -24,7 +27,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenVehiclesAreListed_ThenTypeAndProtocolAreRead()
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, FixtureLoader.Load("vehicles.json")));
+        var (client, _, _) = Create(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, FixtureLoader.Load("vehicles.json"));
 
         // Act
         var vehicles = await client.GetVehiclesAsync("ccs-1", "device-1", CancellationToken.None);
@@ -40,8 +43,8 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenNicknameAndModelAreBlank_ThenTheyAreNull()
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, BluelinkResponses.Success(
-            """{"vehicles":[{"vin":"TESTVIN0000000001","vehicleId":"VEHICLE-1","vehicleName":"  ","type":"EV","nickname":" ","ccuCCS2ProtocolSupport":0}]}""")));
+        var (client, _, _) = Create(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, BluelinkResponses.Success(
+            """{"vehicles":[{"vin":"TESTVIN0000000001","vehicleId":"VEHICLE-1","vehicleName":"  ","type":"EV","nickname":" ","ccuCCS2ProtocolSupport":0}]}"""));
 
         // Act
         var vehicles = await client.GetVehiclesAsync("ccs-1", "device-1", CancellationToken.None);
@@ -56,7 +59,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenRequestIsSent_ThenStampAndServiceHeadersAreSetAndCounted()
     {
         // Arrange
-        var (client, handler, budget) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, FixtureLoader.Load("vehicles.json")));
+        var (client, handler, budget) = Create(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, FixtureLoader.Load("vehicles.json"));
 
         // Act
         await client.GetVehiclesAsync("ccs-1", "device-1", CancellationToken.None);
@@ -76,7 +79,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenRetCodeIsFailure_ThenExceptionCarriesTheResCode()
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, BluelinkResponses.Failure("5091", "Exceeds number of requests")));
+        var (client, _, _) = Create(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, BluelinkResponses.Failure("5091", "Exceeds number of requests"));
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkApiException>(() => client.GetVehiclesAsync("ccs-1", "device-1", CancellationToken.None));
@@ -90,7 +93,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenErrorSaysKeyNotAuthorized_ThenTokenIsExpired()
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.Unauthorized, """{"error":"Key not authorized: Token is expired"}"""));
+        var (client, _, _) = Create(BluelinkResponses.VehiclesPath, HttpStatusCode.Unauthorized, """{"error":"Key not authorized: Token is expired"}""");
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkApiException>(() => client.GetVehiclesAsync("ccs-1", "device-1", CancellationToken.None));
@@ -114,8 +117,8 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenStoredStatusIsRead_ThenVehicleStateIsReturned()
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.StatusPath("VEHICLE-1"), HttpStatusCode.OK,
-            BluelinkResponses.Success("""{"state":{"Vehicle":{"Drivetrain":{"Odometer":16773.9}}}}""")));
+        var (client, _, _) = Create(BluelinkResponses.StatusPath("VEHICLE-1"), HttpStatusCode.OK,
+            BluelinkResponses.Success("""{"state":{"Vehicle":{"Drivetrain":{"Odometer":16773.9}}}}"""));
 
         // Act
         var state = await client.GetStoredStatusAsync(LegacyRequest, CancellationToken.None);
@@ -128,7 +131,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenParkLocationIsNested_ThenCoordinateIsRead()
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.ParkLocationPath("VEHICLE-1"), HttpStatusCode.OK, FixtureLoader.Load("location-park.json")));
+        var (client, _, _) = Create(BluelinkResponses.ParkLocationPath("VEHICLE-1"), HttpStatusCode.OK, FixtureLoader.Load("location-park.json"));
 
         // Act
         var location = await client.GetParkLocationAsync(LegacyRequest, CancellationToken.None);
@@ -142,7 +145,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenParkLocationIsReadForCcs2_ThenProtocolHeaderIsZero()
     {
         // Arrange
-        var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.ParkLocationPath("VEHICLE-2"), HttpStatusCode.OK, FixtureLoader.Load("location-park.json")));
+        var (client, handler, _) = Create(BluelinkResponses.ParkLocationPath("VEHICLE-2"), HttpStatusCode.OK, FixtureLoader.Load("location-park.json"));
 
         // Act
         await client.GetParkLocationAsync(Ccs2Request, CancellationToken.None);
@@ -155,7 +158,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenLegacyChargingStarts_ThenActionAndDeviceIdAreSentWithTheAccessToken()
     {
         // Arrange
-        var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.LegacyChargePath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-7")));
+        var (client, handler, _) = Create(BluelinkResponses.LegacyChargePath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-7"));
 
         // Act
         var messageId = await client.SetChargingAsync(LegacyRequest, start: true, controlToken: null, CancellationToken.None);
@@ -171,7 +174,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenCcs2ChargingStops_ThenCommandIsSentWithTheControlToken()
     {
         // Arrange
-        var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.Ccs2ChargePath("VEHICLE-2"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-8")));
+        var (client, handler, _) = Create(BluelinkResponses.Ccs2ChargePath("VEHICLE-2"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-8"));
 
         // Act
         await client.SetChargingAsync(Ccs2Request, start: false, controlToken: "control-1", CancellationToken.None);
@@ -188,7 +191,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenLegacyClimateStarts_ThenTemperatureCodeAndDurationAreSent()
     {
         // Arrange
-        var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.LegacyTemperaturePath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-9")));
+        var (client, handler, _) = Create(BluelinkResponses.LegacyTemperaturePath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-9"));
 
         // Act
         await client.StartClimateAsync(LegacyRequest, 21m, defrost: true, 10, controlToken: null, CancellationToken.None);
@@ -201,7 +204,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenCcs2ClimateStarts_ThenTemperatureIsSentAsNumber()
     {
         // Arrange
-        var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.Ccs2TemperaturePath("VEHICLE-2"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-10")));
+        var (client, handler, _) = Create(BluelinkResponses.Ccs2TemperaturePath("VEHICLE-2"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-10"));
 
         // Act
         await client.StartClimateAsync(Ccs2Request, 21.5m, defrost: false, 10, controlToken: "control-1", CancellationToken.None);
@@ -219,7 +222,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenChargeTargetsAreSet_ThenDcAndAcAreSent()
     {
         // Arrange
-        var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.ChargeTargetPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-11")));
+        var (client, handler, _) = Create(BluelinkResponses.ChargeTargetPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-11"));
 
         // Act
         await client.SetChargeTargetsAsync(LegacyRequest, acPercent: 80, dcPercent: 90, CancellationToken.None);
@@ -236,7 +239,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenRecordMatchesTheMessage_ThenItsResultIsRead(string? result, BluelinkCommandResult expected)
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.RecordsPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Records("MSG-7", result)));
+        var (client, _, _) = Create(BluelinkResponses.RecordsPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Records("MSG-7", result));
 
         // Act
         var actual = await client.GetCommandResultAsync(LegacyRequest, "MSG-7", CancellationToken.None);
@@ -249,7 +252,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenPinIsAccepted_ThenControlTokenAndExpiryAreReturned()
     {
         // Arrange
-        var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.PinPath, HttpStatusCode.OK, """{"controlToken":"control-1","expiresTime":600}"""));
+        var (client, handler, _) = Create(BluelinkResponses.PinPath, HttpStatusCode.OK, """{"controlToken":"control-1","expiresTime":600}""");
 
         // Act
         var token = await client.GetControlTokenAsync("ccs-1", "device-1", "1234", CancellationToken.None);
@@ -266,7 +269,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenPinIsRejected_ThenExceptionSaysSo()
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.PinPath, HttpStatusCode.BadRequest, """{"errId":"x","errCode":"4003","errMsg":"invalid pin"}"""));
+        var (client, _, _) = Create(BluelinkResponses.PinPath, HttpStatusCode.BadRequest, """{"errId":"x","errCode":"4003","errMsg":"invalid pin"}""");
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkPinRejectedException>(() => client.GetControlTokenAsync("ccs-1", "device-1", "0000", CancellationToken.None));
@@ -280,7 +283,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenPinCallSaysKeyNotAuthorized_ThenTokenIsExpiredAndPinIsNotRejected()
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.PinPath, HttpStatusCode.Unauthorized, """{"error":"Key not authorized: Token is expired"}"""));
+        var (client, _, _) = Create(BluelinkResponses.PinPath, HttpStatusCode.Unauthorized, """{"error":"Key not authorized: Token is expired"}""");
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkApiException>(() => client.GetControlTokenAsync("ccs-1", "device-1", "1234", CancellationToken.None));
@@ -294,7 +297,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenPinCallFailsWithServerErrorAndNoJson_ThenItIsNotAPinRejection()
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.PinPath, HttpStatusCode.InternalServerError, "oops"));
+        var (client, _, _) = Create(BluelinkResponses.PinPath, HttpStatusCode.InternalServerError, "oops");
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkApiException>(() => client.GetControlTokenAsync("ccs-1", "device-1", "1234", CancellationToken.None));
@@ -308,7 +311,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenPinCallReturnsFailureEnvelope_ThenResCodeIsCarriedAndPinIsNotRejected()
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.PinPath, HttpStatusCode.BadRequest, BluelinkResponses.Failure("5091", "limit")));
+        var (client, _, _) = Create(BluelinkResponses.PinPath, HttpStatusCode.BadRequest, BluelinkResponses.Failure("5091", "limit"));
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkApiException>(() => client.GetControlTokenAsync("ccs-1", "device-1", "1234", CancellationToken.None));
@@ -322,7 +325,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenPinCallReturnsEmptyObjectWithSuccessStatus_ThenItThrowsWithoutPinRejection()
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.PinPath, HttpStatusCode.OK, "{}"));
+        var (client, _, _) = Create(BluelinkResponses.PinPath, HttpStatusCode.OK, "{}");
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkApiException>(() => client.GetControlTokenAsync("ccs-1", "device-1", "1234", CancellationToken.None));
@@ -341,7 +344,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenExpiresTimeIsMissingOrOutOfRange_ThenLifetimeIsClamped(string body, int expectedSeconds)
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.PinPath, HttpStatusCode.OK, body));
+        var (client, _, _) = Create(BluelinkResponses.PinPath, HttpStatusCode.OK, body);
 
         // Act
         var token = await client.GetControlTokenAsync("ccs-1", "device-1", "1234", CancellationToken.None);
@@ -354,7 +357,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenPinIsExchanged_ThenTokenQueryIsEmptyAndCallIsCounted()
     {
         // Arrange
-        var (client, handler, budget) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.PinPath, HttpStatusCode.OK, """{"controlToken":"control-1","expiresTime":600}"""));
+        var (client, handler, budget) = Create(BluelinkResponses.PinPath, HttpStatusCode.OK, """{"controlToken":"control-1","expiresTime":600}""");
 
         // Act
         await client.GetControlTokenAsync("ccs-1", "device-1", "1234", CancellationToken.None);
@@ -368,7 +371,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenVehiclesAreListed_ThenRequestGoesToTheVehicleApiHostAndPort()
     {
         // Arrange
-        var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, FixtureLoader.Load("vehicles.json")));
+        var (client, handler, _) = Create(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, FixtureLoader.Load("vehicles.json"));
 
         // Act
         await client.GetVehiclesAsync("ccs-1", "device-1", CancellationToken.None);
@@ -381,7 +384,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenResponseIsNotJson_ThenExceptionIsThrown()
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, "<html>"));
+        var (client, _, _) = Create(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, "<html>");
 
         // Act & Assert
         await Assert.ThrowsAsync<BluelinkApiException>(() => client.GetVehiclesAsync("ccs-1", "device-1", CancellationToken.None));
@@ -391,7 +394,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenStatusIsServerErrorWithSuccessRetCode_ThenExceptionIsThrown()
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.InternalServerError, BluelinkResponses.Success()));
+        var (client, _, _) = Create(BluelinkResponses.VehiclesPath, HttpStatusCode.InternalServerError, BluelinkResponses.Success());
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkApiException>(() => client.GetVehiclesAsync("ccs-1", "device-1", CancellationToken.None));
@@ -417,7 +420,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenNoRecordMatchesTheMessage_ThenResultIsPending()
     {
         // Arrange
-        var (client, _, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.RecordsPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Records("MSG-7", "success")));
+        var (client, _, _) = Create(BluelinkResponses.RecordsPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Records("MSG-7", "success"));
 
         // Act
         var actual = await client.GetCommandResultAsync(LegacyRequest, "MSG-OTHER", CancellationToken.None);
@@ -430,7 +433,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenLegacyStatusIsRequested_ThenTheStatusPathIsCalled()
     {
         // Arrange
-        var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Success()));
+        var (client, handler, _) = Create(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Success());
 
         // Act
         await client.RequestStatusAsync(LegacyRequest, CancellationToken.None);
@@ -443,7 +446,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenCcs2StatusIsRequested_ThenTheCarStatusPathIsCalled()
     {
         // Arrange
-        var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.Ccs2StatusRequestPath("VEHICLE-2"), HttpStatusCode.OK, BluelinkResponses.Success()));
+        var (client, handler, _) = Create(BluelinkResponses.Ccs2StatusRequestPath("VEHICLE-2"), HttpStatusCode.OK, BluelinkResponses.Success());
 
         // Act
         await client.RequestStatusAsync(Ccs2Request, CancellationToken.None);
@@ -458,7 +461,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenLegacyClimateStops_ThenTheStopPayloadIsSent()
     {
         // Arrange
-        var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.LegacyTemperaturePath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-12")));
+        var (client, handler, _) = Create(BluelinkResponses.LegacyTemperaturePath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-12"));
 
         // Act
         var messageId = await client.StopClimateAsync(LegacyRequest, controlToken: null, CancellationToken.None);
@@ -472,7 +475,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenCcs2ClimateStops_ThenCommandIsSentWithTheControlToken()
     {
         // Arrange
-        var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.Ccs2TemperaturePath("VEHICLE-2"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-13")));
+        var (client, handler, _) = Create(BluelinkResponses.Ccs2TemperaturePath("VEHICLE-2"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-13"));
 
         // Act
         await client.StopClimateAsync(Ccs2Request, controlToken: "control-1", CancellationToken.None);
@@ -515,7 +518,7 @@ public class BluelinkVehicleApiClientTests
     public async Task WhenDeviceIsRegistered_ThenTheDeviceIdIsReturnedWithoutAccessToken()
     {
         // Arrange
-        var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.RegisterPath, HttpStatusCode.OK, BluelinkResponses.Success("""{"deviceId":"device-9"}""")));
+        var (client, handler, _) = Create(BluelinkResponses.RegisterPath, HttpStatusCode.OK, BluelinkResponses.Success("""{"deviceId":"device-9"}"""));
 
         // Act
         var deviceId = await client.RegisterDeviceAsync(CancellationToken.None);

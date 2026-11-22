@@ -89,7 +89,7 @@ public class BluelinkAccountAuthenticationTests
 
         // Act
         account.Password = "password-1";
-        TestAccount.RespondLogin(handler, 5)
+        LoginFixture.Respond(handler, tokenGeneration: 5)
             .Respond(BluelinkResponses.ExchangePath, HttpStatusCode.OK, BluelinkResponses.Ccs(5))
             .Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, BluelinkResponses.Success("""{"vehicles":[]}"""));
         var delay = await account.RunIterationAsync(CancellationToken.None);
@@ -107,7 +107,7 @@ public class BluelinkAccountAuthenticationTests
     public async Task WhenPasswordIsClearedAndRefreshIsRejected_ThenReauthenticationIsRequiredWithoutSignIn()
     {
         // Arrange
-        var handler = TestAccount.RespondLogin(new FakeHttpMessageHandler(), 5)
+        var handler = LoginFixture.Respond(new FakeHttpMessageHandler(), tokenGeneration: 5)
             .Respond(BluelinkResponses.RefreshPath, HttpStatusCode.BadRequest, BluelinkResponses.CciError(4111));
         var (account, _, _) = TestAccount.Create(handler, password: "password-1");
 

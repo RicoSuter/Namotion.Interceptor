@@ -7,16 +7,10 @@ namespace Namotion.Devices.Hyundai.Tests;
 
 public class BluelinkAccountConnectorTests
 {
-    private static FakeHttpMessageHandler CreateHandler()
-    {
-        var handler = new FakeHttpMessageHandler()
-            .Respond(BluelinkResponses.RegisterPath, HttpStatusCode.OK, BluelinkResponses.Success("""{"deviceId":"device-1"}"""))
-            .Respond(BluelinkResponses.ExchangePath, HttpStatusCode.OK, BluelinkResponses.Ccs(1))
-            .Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, FixtureLoader.Load("vehicles.json"));
-        // Only the public part of the key reaches the certs answer, so the key itself is not needed afterwards.
-        LoginFixture.Respond(handler).Dispose();
-        return handler;
-    }
+    private static FakeHttpMessageHandler CreateHandler() => LoginFixture.Respond(new FakeHttpMessageHandler())
+        .Respond(BluelinkResponses.RegisterPath, HttpStatusCode.OK, BluelinkResponses.Success("""{"deviceId":"device-1"}"""))
+        .Respond(BluelinkResponses.ExchangePath, HttpStatusCode.OK, BluelinkResponses.Ccs(1))
+        .Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, FixtureLoader.Load("vehicles.json"));
 
     private static Task<BluelinkConnection> ConnectAsync(FakeHttpMessageHandler handler, string pin = "") =>
         BluelinkAccountConnector.ConnectAsync(new HttpClient(handler), " user@example.invalid ", "password-1", pin, new FakeTimeProvider(), CancellationToken.None);

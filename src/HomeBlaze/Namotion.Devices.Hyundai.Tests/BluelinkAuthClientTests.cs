@@ -11,11 +11,8 @@ public class BluelinkAuthClientTests
 {
     private static readonly DateTimeOffset Now = DateTimeOffset.FromUnixTimeSeconds(1700000000);
 
-    private static (FakeHttpMessageHandler Handler, RSA Key) CreateLoginHandler(string signInLocation, string? modulusOverride = null)
-    {
-        var handler = new FakeHttpMessageHandler();
-        return (handler, LoginFixture.Respond(handler, signInLocation, modulusOverride));
-    }
+    private static FakeHttpMessageHandler CreateLoginHandler(string signInLocation = LoginFixture.SuccessLocation, string? modulusOverride = null) =>
+        LoginFixture.Respond(new FakeHttpMessageHandler(), signInLocation, modulusOverride);
 
     private static Task<BluelinkCciTokens> LoginAsync(FakeHttpMessageHandler handler, string password = "password-1") =>
         CreateClient(handler).LoginAsync("user@example.invalid", password, "device-1", CancellationToken.None);
@@ -26,11 +23,11 @@ public class BluelinkAuthClientTests
     public async Task WhenLoginSucceeds_ThenTokensAreReturnedAndThePasswordIsEncrypted()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(LoginFixture.SuccessLocation);
-        using var _ = key;
+        var handler = new FakeHttpMessageHandler();
+        using var key = LoginFixture.RespondWithKey(handler);
 
         // Act
-        var result = await CreateClient(handler).LoginAsync("user@example.invalid", "password-1", "device-1", CancellationToken.None);
+        var result = await LoginAsync(handler);
 
         // Assert
         Assert.Equal(BluelinkResponses.TokenSet(1), result.Tokens);
@@ -53,12 +50,10 @@ public class BluelinkAuthClientTests
     public async Task WhenSignInReturnsToAuthorize_ThenReauthenticationIsRequired()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler("https://idpconnect-eu.hyundai.com/auth/api/v2/user/oauth2/authorize?state=ccsp");
-        using var _ = key;
+        var handler = CreateLoginHandler("https://idpconnect-eu.hyundai.com/auth/api/v2/user/oauth2/authorize?state=ccsp");
 
         // Act
-        var exception = await Assert.ThrowsAsync<BluelinkReauthenticationRequiredException>(() =>
-            CreateClient(handler).LoginAsync("user@example.invalid", "wrong", "device-1", CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<BluelinkReauthenticationRequiredException>(() => LoginAsync(handler, "wrong"));
 
         // Assert
         Assert.Contains("email or password", exception.Message, StringComparison.Ordinal);
@@ -68,12 +63,10 @@ public class BluelinkAuthClientTests
     public async Task WhenSignInAsksForConsent_ThenMessageAsksToAcceptTheTerms()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler("https://idpconnect-eu.hyundai.com/web/v1/user/authorization?state=ccsp");
-        using var _ = key;
+        var handler = CreateLoginHandler("https://idpconnect-eu.hyundai.com/web/v1/user/authorization?state=ccsp");
 
         // Act
-        var exception = await Assert.ThrowsAsync<BluelinkReauthenticationRequiredException>(() =>
-            CreateClient(handler).LoginAsync("user@example.invalid", "password-1", "device-1", CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<BluelinkReauthenticationRequiredException>(() => LoginAsync(handler));
 
         // Assert
         Assert.Equal("Accept the new terms once in the Bluelink app.", exception.Message);
@@ -83,12 +76,10 @@ public class BluelinkAuthClientTests
     public async Task WhenTheRsaKeyIsMalformed_ThenLoginThrowsApiExceptionWithoutSigningIn()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(LoginFixture.SuccessLocation, modulusOverride: "!!!");
-        using var _ = key;
+        var handler = CreateLoginHandler(modulusOverride: "!!!");
 
         // Act
-        var exception = await Assert.ThrowsAsync<BluelinkApiException>(() =>
-            CreateClient(handler).LoginAsync("user@example.invalid", "password-1", "device-1", CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<BluelinkApiException>(() => LoginAsync(handler));
 
         // Assert
         Assert.Equal("Bluelink returned 200: The login returned no usable RSA key.", exception.Message);
@@ -99,12 +90,10 @@ public class BluelinkAuthClientTests
     public async Task WhenTheRsaKeyIsTooSmallForThePassword_ThenLoginThrowsApiException()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(LoginFixture.SuccessLocation, modulusOverride: "AQAB");
-        using var _ = key;
+        var handler = CreateLoginHandler(modulusOverride: "AQAB");
 
         // Act
-        var exception = await Assert.ThrowsAsync<BluelinkApiException>(() =>
-            CreateClient(handler).LoginAsync("user@example.invalid", "password-1", "device-1", CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<BluelinkApiException>(() => LoginAsync(handler));
 
         // Assert
         Assert.Equal(0, handler.Count(BluelinkResponses.SignInPath));
@@ -115,8 +104,7 @@ public class BluelinkAuthClientTests
     public async Task WhenTheRsaKeyHasAnEmptyModulus_ThenLoginThrowsApiException()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(LoginFixture.SuccessLocation, modulusOverride: "");
-        using var _ = key;
+        var handler = CreateLoginHandler(modulusOverride: "");
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkApiException>(() => LoginAsync(handler));
@@ -130,8 +118,7 @@ public class BluelinkAuthClientTests
     public async Task WhenTheCertsAnswerIsNotSuccessful_ThenLoginThrowsApiException()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(LoginFixture.SuccessLocation);
-        using var _ = key;
+        var handler = CreateLoginHandler();
         handler.Reset(BluelinkResponses.CertsPath).Respond(BluelinkResponses.CertsPath, HttpStatusCode.ServiceUnavailable, "{}");
 
         // Act
@@ -146,8 +133,7 @@ public class BluelinkAuthClientTests
     public async Task WhenTheCertsAnswerHasNoKey_ThenLoginThrowsApiException()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(LoginFixture.SuccessLocation);
-        using var _ = key;
+        var handler = CreateLoginHandler();
         handler.Reset(BluelinkResponses.CertsPath).Respond(BluelinkResponses.CertsPath, HttpStatusCode.OK, "{}");
 
         // Act
@@ -161,8 +147,7 @@ public class BluelinkAuthClientTests
     public async Task WhenTheAuthorizeAnswerSaysAbusing_ThenLoginThrowsApiException()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(LoginFixture.SuccessLocation);
-        using var _ = key;
+        var handler = CreateLoginHandler();
         handler.Reset(BluelinkResponses.AuthorizePath).Respond(BluelinkResponses.AuthorizePath, HttpStatusCode.OK, "<html>Abusing request</html>");
 
         // Act
@@ -177,8 +162,7 @@ public class BluelinkAuthClientTests
     public async Task WhenTheAuthorizeRedirectEndsOnAnErrorAddress_ThenLoginThrowsApiException()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(LoginFixture.SuccessLocation);
-        using var _ = key;
+        var handler = CreateLoginHandler();
         handler.Reset(BluelinkResponses.AuthorizePath).Respond(BluelinkResponses.AuthorizePath, HttpStatusCode.Found, "", ("Location", "/error?status=400"));
         handler.Respond("/error", HttpStatusCode.OK, "<html>error</html>");
 
@@ -193,8 +177,7 @@ public class BluelinkAuthClientTests
     public async Task WhenTheAuthorizeRedirectIsRelative_ThenItIsFollowedWithTheCookiesOfEveryHop()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(LoginFixture.SuccessLocation);
-        using var _ = key;
+        var handler = CreateLoginHandler();
         handler.Reset(BluelinkResponses.AuthorizePath).Respond(BluelinkResponses.AuthorizePath, HttpStatusCode.Found, "", ("Location", "/step-2"), ("Set-Cookie", "first=1; Path=/"));
         handler.Respond("/step-2", HttpStatusCode.OK, "<html>login</html>", ("Set-Cookie", "second=2; Path=/"));
 
@@ -212,8 +195,7 @@ public class BluelinkAuthClientTests
     public async Task WhenTheAuthorizeRedirectsTooOften_ThenLoginThrowsApiException()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(LoginFixture.SuccessLocation);
-        using var _ = key;
+        var handler = CreateLoginHandler();
         handler.Reset(BluelinkResponses.AuthorizePath).Respond(BluelinkResponses.AuthorizePath, HttpStatusCode.Found, "", ("Location", BluelinkResponses.AuthorizePath));
 
         // Act
@@ -228,8 +210,7 @@ public class BluelinkAuthClientTests
     public async Task WhenLoginRuns_ThenTheLoginUserAgentIsSentToAuthorizeCertsAndSignIn()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(LoginFixture.SuccessLocation);
-        using var _ = key;
+        var handler = CreateLoginHandler();
 
         // Act
         await LoginAsync(handler);
@@ -250,8 +231,7 @@ public class BluelinkAuthClientTests
     public async Task WhenSignInReportsInvalidCredentials_ThenReauthenticationAsksForEmailAndPassword(string location)
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(location);
-        using var _ = key;
+        var handler = CreateLoginHandler(location);
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkReauthenticationRequiredException>(() => LoginAsync(handler));
@@ -264,8 +244,7 @@ public class BluelinkAuthClientTests
     public async Task WhenSignInReportsAnotherError_ThenTheDescriptionIsPartOfTheMessage()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler("https://oneapp.hyundai.com/redirect?error=x&error_description=account+locked");
-        using var _ = key;
+        var handler = CreateLoginHandler("https://oneapp.hyundai.com/redirect?error=x&error_description=account+locked");
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkReauthenticationRequiredException>(() => LoginAsync(handler));
@@ -280,8 +259,7 @@ public class BluelinkAuthClientTests
     public async Task WhenSignInReportsAnErrorWithoutDescription_ThenTheDescriptionIsUnknown(string location)
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(location);
-        using var _ = key;
+        var handler = CreateLoginHandler(location);
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkReauthenticationRequiredException>(() => LoginAsync(handler));
@@ -294,8 +272,7 @@ public class BluelinkAuthClientTests
     public async Task WhenSignInReportsALongDescription_ThenItIsTruncatedTo200Characters()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler("https://oneapp.hyundai.com/redirect?error=x&error_description=" + new string('a', 500));
-        using var _ = key;
+        var handler = CreateLoginHandler("https://oneapp.hyundai.com/redirect?error=x&error_description=" + new string('a', 500));
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkReauthenticationRequiredException>(() => LoginAsync(handler));
@@ -308,8 +285,7 @@ public class BluelinkAuthClientTests
     public async Task WhenSignInReturnsToAuthorizeWithAnEmptyError_ThenTheErrorIsIgnored()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler("https://idpconnect-eu.hyundai.com/auth/api/v2/user/oauth2/authorize?error=");
-        using var _ = key;
+        var handler = CreateLoginHandler("https://idpconnect-eu.hyundai.com/auth/api/v2/user/oauth2/authorize?error=");
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkReauthenticationRequiredException>(() => LoginAsync(handler));
@@ -322,8 +298,7 @@ public class BluelinkAuthClientTests
     public async Task WhenTheCredentialsAreRejectedForALongPassword_ThenMessageHintsAtTheFirst20Characters()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler("https://idpconnect-eu.hyundai.com/auth/api/v2/user/oauth2/authorize?state=ccsp");
-        using var _ = key;
+        var handler = CreateLoginHandler("https://idpconnect-eu.hyundai.com/auth/api/v2/user/oauth2/authorize?state=ccsp");
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkReauthenticationRequiredException>(() => LoginAsync(handler, new string('x', 21)));
@@ -336,8 +311,7 @@ public class BluelinkAuthClientTests
     public async Task WhenSignInRedirectsToAnUnexpectedAddress_ThenLoginThrowsApiException()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler("https://example.invalid/other");
-        using var _ = key;
+        var handler = CreateLoginHandler("https://example.invalid/other");
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkApiException>(() => LoginAsync(handler));
@@ -350,8 +324,7 @@ public class BluelinkAuthClientTests
     public async Task WhenSignInAnswersWithAClientError_ThenReauthenticationIsRequiredAndNothingIsRetried()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(LoginFixture.SuccessLocation);
-        using var _ = key;
+        var handler = CreateLoginHandler();
         handler.Reset(BluelinkResponses.SignInPath).Respond(BluelinkResponses.SignInPath, HttpStatusCode.BadRequest, "{}");
 
         // Act
@@ -366,8 +339,7 @@ public class BluelinkAuthClientTests
     public async Task WhenSignInAnswersWithAServerError_ThenLoginThrowsApiException()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(LoginFixture.SuccessLocation);
-        using var _ = key;
+        var handler = CreateLoginHandler();
         handler.Reset(BluelinkResponses.SignInPath).Respond(BluelinkResponses.SignInPath, HttpStatusCode.InternalServerError, "{}");
 
         // Act
@@ -381,8 +353,7 @@ public class BluelinkAuthClientTests
     public async Task WhenTheTokenResponseHasNoRefreshToken_ThenLoginThrowsApiException()
     {
         // Arrange
-        var (handler, key) = CreateLoginHandler(LoginFixture.SuccessLocation);
-        using var _ = key;
+        var handler = CreateLoginHandler();
         handler.Reset(BluelinkResponses.TokenPath).Respond(BluelinkResponses.TokenPath, HttpStatusCode.OK, """{"accessToken":"cci-access-1"}""");
 
         // Act

@@ -21,13 +21,6 @@ internal static class TestAccount
         .Respond(BluelinkResponses.ParkLocationPath("VEHICLE-1"), HttpStatusCode.OK, FixtureLoader.Load("location-park.json"))
         .Respond(BluelinkResponses.ParkLocationPath("VEHICLE-2"), HttpStatusCode.OK, FixtureLoader.Load("location-park.json"));
 
-    /// <summary>Adds the answers of a successful sign in that returns the token set of the generation.</summary>
-    public static FakeHttpMessageHandler RespondLogin(FakeHttpMessageHandler handler, int generation)
-    {
-        using var key = LoginFixture.Respond(handler, tokenGeneration: generation);
-        return handler;
-    }
-
     public static (BluelinkAccount Account, FakeHttpMessageHandler Handler, FakeTimeProvider Time) Create(
         FakeHttpMessageHandler? handler = null, string password = "", string pin = "")
     {
