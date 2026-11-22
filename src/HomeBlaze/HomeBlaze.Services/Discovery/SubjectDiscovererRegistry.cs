@@ -75,10 +75,7 @@ public sealed class SubjectDiscovererRegistry
 
     private bool AcceptsDiscoveryResults(Type subjectType)
     {
-        // The create dialog shows the Setup component, or the Edit component when there is none.
-        var registration =
-            _componentRegistry.GetComponent(subjectType, SubjectComponentType.Setup) ??
-            _componentRegistry.GetComponent(subjectType, SubjectComponentType.Edit);
+        var registration = _componentRegistry.GetEditorComponent(subjectType, isCreating: true);
 
         return registration is { TakesDiscoveryResults: true };
     }

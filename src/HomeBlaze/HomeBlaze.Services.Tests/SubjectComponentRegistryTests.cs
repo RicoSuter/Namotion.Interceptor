@@ -163,6 +163,28 @@ public class SubjectComponentRegistryTests
         Assert.True(registry.HasComponent(typeof(TestPageSubject), SubjectComponentType.Page));
     }
 
+    [Theory]
+    [InlineData(typeof(TestSetupSubject), true, typeof(TestSetupSetupComponent))]
+    [InlineData(typeof(TestSetupSubject), false, typeof(TestSetupEditComponent))]
+    [InlineData(typeof(TestSubject), true, typeof(TestEditComponent))]
+    [InlineData(typeof(TestSubject), false, typeof(TestEditComponent))]
+    [InlineData(typeof(TestSetupOnlySubject), true, typeof(TestSetupOnlySetupComponent))]
+    [InlineData(typeof(TestSetupOnlySubject), false, null)]
+    [InlineData(typeof(TestPageSubject), true, null)]
+    [InlineData(typeof(TestPageSubject), false, null)]
+    public void WhenEditorComponentIsRequested_ThenSetupIsPreferredOnlyWhenCreating(
+        Type subjectType, bool isCreating, Type? expectedComponentType)
+    {
+        // Arrange
+        var registry = CreateRegistryWithScanning();
+
+        // Act
+        var registration = registry.GetEditorComponent(subjectType, isCreating);
+
+        // Assert
+        Assert.Equal(expectedComponentType, registration?.ComponentType);
+    }
+
     [Fact]
     public void ScanAssemblies_FindsMultipleAttributes()
     {
@@ -205,6 +227,19 @@ public class SubjectComponentRegistryTests
 
     [SubjectComponent(SubjectComponentType.Edit, typeof(TestBaseSubject))]
     public class TestBaseEditComponent { }
+
+    public class TestSetupSubject { }
+
+    [SubjectComponent(SubjectComponentType.Setup, typeof(TestSetupSubject))]
+    public class TestSetupSetupComponent { }
+
+    [SubjectComponent(SubjectComponentType.Edit, typeof(TestSetupSubject))]
+    public class TestSetupEditComponent { }
+
+    public class TestSetupOnlySubject { }
+
+    [SubjectComponent(SubjectComponentType.Setup, typeof(TestSetupOnlySubject))]
+    public class TestSetupOnlySetupComponent { }
 
     public class TestPageSubject { }
 

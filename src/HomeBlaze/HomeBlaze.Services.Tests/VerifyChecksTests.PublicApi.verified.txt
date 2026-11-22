@@ -296,6 +296,7 @@ namespace HomeBlaze.Services.Components
         public System.Collections.Generic.IReadOnlyCollection<HomeBlaze.Services.Components.SubjectComponentRegistration> GetAllComponents() { }
         public HomeBlaze.Services.Components.SubjectComponentRegistration? GetComponent(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type, string? name = null) { }
         public System.Collections.Generic.IEnumerable<HomeBlaze.Services.Components.SubjectComponentRegistration> GetComponents(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type) { }
+        public HomeBlaze.Services.Components.SubjectComponentRegistration? GetEditorComponent(System.Type subjectType, bool isCreating) { }
         public bool HasComponent(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type, string? name = null) { }
     }
 }

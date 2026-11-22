@@ -100,13 +100,7 @@
                 return null;
             }
 
-            var subjectType = Subject.GetType();
-            if (IsCreating && ComponentRegistry.HasComponent(subjectType, SubjectComponentType.Setup))
-            {
-                return SubjectComponentType.Setup;
-            }
-
-            return ComponentRegistry.HasComponent(subjectType, SubjectComponentType.Edit) ? SubjectComponentType.Edit : null;
+            return ComponentRegistry.GetEditorComponent(Subject.GetType(), IsCreating)?.Type;
         }
     }
 

@@ -78,6 +78,17 @@ public class SubjectComponentRegistry
     }
 
     /// <summary>
+    /// Gets the component the create or edit dialog shows for a subject type: the Setup component when
+    /// <paramref name="isCreating"/> is true and one is registered, otherwise the Edit component. Returns null when
+    /// there is neither, in which case the dialog shows the generated properties editor.
+    /// </summary>
+    public SubjectComponentRegistration? GetEditorComponent(Type subjectType, bool isCreating)
+    {
+        return (isCreating ? GetComponent(subjectType, SubjectComponentType.Setup) : null) ??
+               GetComponent(subjectType, SubjectComponentType.Edit);
+    }
+
+    /// <summary>
     /// Gets all registered components.
     /// </summary>
     public IReadOnlyCollection<SubjectComponentRegistration> GetAllComponents()
