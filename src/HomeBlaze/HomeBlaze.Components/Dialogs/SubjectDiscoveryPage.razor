@@ -232,6 +232,15 @@
         });
     }
 
+    /// <summary>
+    /// Shows the found device as added, with <paramref name="subject"/> as the subject that represents it, without a
+    /// new scan, the next time the page is shown. A running scan carries on.
+    /// </summary>
+    internal void MarkAdded(DiscoveredSubject discovered, IInterceptorSubject subject)
+    {
+        _list.MarkAdded(discovered, subject);
+    }
+
     private string GetFoundText()
     {
         var count = _list.Rows.Count;

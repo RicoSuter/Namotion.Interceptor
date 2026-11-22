@@ -6,19 +6,37 @@ namespace HomeBlaze.Storage.Tests;
 
 public class SubjectCreatorExtensionsTests
 {
+    /// <summary>
+    /// A setup service whose prompt creates the results in order, each passed to the callback while it is open.
+    /// </summary>
+    private static Mock<ISubjectSetupService> CreateSetupService(params CreateSubjectResult[] results)
+    {
+        var subjectSetupService = new Mock<ISubjectSetupService>();
+        subjectSetupService
+            .Setup(service => service.CreateSubjectsAsync(
+                It.IsAny<IStorageContainer>(),
+                It.IsAny<Func<CreateSubjectResult, CancellationToken, Task>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (IStorageContainer _, Func<CreateSubjectResult, CancellationToken, Task> addSubjectAsync, CancellationToken cancellationToken) =>
+            {
+                foreach (var result in results)
+                {
+                    await addSubjectAsync(result, cancellationToken);
+                }
+            });
+
+        return subjectSetupService;
+    }
+
     [Fact]
-    public async Task WhenTheDialogIsCancelled_ThenNoSubjectIsAdded()
+    public async Task WhenTheDialogIsCanceled_ThenNoSubjectIsAdded()
     {
         // Arrange
-        var subjectSetupService = new Mock<ISubjectSetupService>();
+        var subjectSetupService = CreateSetupService();
         var storage = new Mock<IStorageContainer>();
 
-        subjectSetupService
-            .Setup(service => service.CreateSubjectAsync(It.IsAny<IStorageContainer>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((CreateSubjectResult?)null);
-
         // Act
-        await subjectSetupService.Object.CreateSubjectAndAddToStorageAsync(storage.Object, CancellationToken.None);
+        await subjectSetupService.Object.CreateSubjectsAndAddToStorageAsync(storage.Object, CancellationToken.None);
 
         // Assert
         storage.Verify(
@@ -27,23 +45,25 @@ public class SubjectCreatorExtensionsTests
     }
 
     [Fact]
-    public async Task WhenASubjectIsCreated_ThenItIsAddedWithTheJsonExtension()
+    public async Task WhenSeveralSubjectsAreCreatedInOnePrompt_ThenEachIsAdded()
     {
         // Arrange
-        var subjectSetupService = new Mock<ISubjectSetupService>();
+        var first = new Mock<IInterceptorSubject>();
+        var second = new Mock<IInterceptorSubject>();
+        var subjectSetupService = CreateSetupService(
+            new CreateSubjectResult(first.Object, "First"),
+            new CreateSubjectResult(second.Object, "Second"));
         var storage = new Mock<IStorageContainer>();
-        var subject = new Mock<IInterceptorSubject>();
-
-        subjectSetupService
-            .Setup(service => service.CreateSubjectAsync(It.IsAny<IStorageContainer>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new CreateSubjectResult(subject.Object, "MySubject"));
 
         // Act
-        await subjectSetupService.Object.CreateSubjectAndAddToStorageAsync(storage.Object, CancellationToken.None);
+        await subjectSetupService.Object.CreateSubjectsAndAddToStorageAsync(storage.Object, CancellationToken.None);
 
         // Assert
         storage.Verify(
-            container => container.AddSubjectAsync("MySubject.json", subject.Object, It.IsAny<CancellationToken>()),
+            container => container.AddSubjectAsync("First.json", first.Object, It.IsAny<CancellationToken>()),
+            Times.Once);
+        storage.Verify(
+            container => container.AddSubjectAsync("Second.json", second.Object, It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -51,16 +71,12 @@ public class SubjectCreatorExtensionsTests
     public async Task WhenTheResultHasNoName_ThenNoSubjectIsAdded()
     {
         // Arrange
-        var subjectSetupService = new Mock<ISubjectSetupService>();
-        var storage = new Mock<IStorageContainer>();
         var subject = new Mock<IInterceptorSubject>();
-
-        subjectSetupService
-            .Setup(service => service.CreateSubjectAsync(It.IsAny<IStorageContainer>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new CreateSubjectResult(subject.Object, null));
+        var subjectSetupService = CreateSetupService(new CreateSubjectResult(subject.Object, null));
+        var storage = new Mock<IStorageContainer>();
 
         // Act
-        await subjectSetupService.Object.CreateSubjectAndAddToStorageAsync(storage.Object, CancellationToken.None);
+        await subjectSetupService.Object.CreateSubjectsAndAddToStorageAsync(storage.Object, CancellationToken.None);
 
         // Assert
         storage.Verify(
@@ -72,21 +88,20 @@ public class SubjectCreatorExtensionsTests
     public async Task WhenCreating_ThenTargetContainerAndCancellationTokenArePassedOn()
     {
         // Arrange
-        var subjectSetupService = new Mock<ISubjectSetupService>();
-        var storage = new Mock<IStorageContainer>();
         var subject = new Mock<IInterceptorSubject>();
+        var subjectSetupService = CreateSetupService(new CreateSubjectResult(subject.Object, "Test"));
+        var storage = new Mock<IStorageContainer>();
         using var cancellationTokenSource = new CancellationTokenSource();
 
-        subjectSetupService
-            .Setup(service => service.CreateSubjectAsync(It.IsAny<IStorageContainer>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new CreateSubjectResult(subject.Object, "Test"));
-
         // Act
-        await subjectSetupService.Object.CreateSubjectAndAddToStorageAsync(storage.Object, cancellationTokenSource.Token);
+        await subjectSetupService.Object.CreateSubjectsAndAddToStorageAsync(storage.Object, cancellationTokenSource.Token);
 
         // Assert
         subjectSetupService.Verify(
-            service => service.CreateSubjectAsync(storage.Object, cancellationTokenSource.Token),
+            service => service.CreateSubjectsAsync(
+                storage.Object,
+                It.IsAny<Func<CreateSubjectResult, CancellationToken, Task>>(),
+                cancellationTokenSource.Token),
             Times.Once);
         storage.Verify(
             container => container.AddSubjectAsync("Test.json", subject.Object, cancellationTokenSource.Token),
