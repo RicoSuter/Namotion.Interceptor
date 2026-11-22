@@ -89,7 +89,16 @@ public partial class BluelinkAccount
             return pause;
         }
 
-        return await PollOnceAsync(stoppingToken) ? GetNextPollDelay() : _budget.TimeUntilReset;
+        var day = _timeProvider.GetLocalNow().Date;
+        if (await PollOnceAsync(stoppingToken))
+        {
+            return GetNextPollDelay();
+        }
+
+        // Read before the day: when midnight passed after the check, the new day has requests again, and the time until
+        // the next reset would wait a whole day.
+        var timeUntilReset = _budget.TimeUntilReset;
+        return _timeProvider.GetLocalNow().Date == day ? timeUntilReset : TimeSpan.Zero;
     }
 
     private bool HasCredentials => !string.IsNullOrWhiteSpace(Email) && !string.IsNullOrWhiteSpace(Tokens);
@@ -282,7 +291,7 @@ public partial class BluelinkAccount
                 StatusMessage = $"Hyundai's request limit was reached; polling resumes at {(_timeProvider.GetLocalNow() + RateLimitPause).ToString("HH:mm", CultureInfo.InvariantCulture)}.";
                 break;
 
-            case BluelinkRequestLimitException:
+            case BluelinkRequestLimitException { IsLimitReached: true }:
                 // No pause: the next iteration waits until midnight, unless the limit was raised meanwhile.
                 Status = ServiceStatus.Error;
                 StatusMessage = BluelinkRequestLimitException.LimitMessage;

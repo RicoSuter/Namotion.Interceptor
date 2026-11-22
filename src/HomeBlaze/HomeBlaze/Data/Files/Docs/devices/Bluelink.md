@@ -199,8 +199,9 @@ The stored status changes only when the vehicle uploads it, for example when the
 
 Hyundai blocks an account that makes too many calls in a day (about 200, not documented), for up to a day, and then the official app fails too. The account therefore counts its calls to the vehicle API in `RequestsToday`, per local day:
 
-- Polling pauses once a poll would leave fewer than 13 calls, the most a command may need, so that every command and `Refresh` that starts can finish, and continues after midnight.
+- Polling pauses once a poll would leave fewer than 13 calls, the most a command may need, so that every command and `Refresh` that starts can finish, and continues after midnight. A poll therefore needs 13 calls plus 2 per vehicle left, and 1 more when the vehicle list is due: 17 or 18 for two vehicles. A very low `DailyRequestLimit` with several vehicles stops polling early in the day, or before the first status read.
 - `Refresh` and commands fail before any call when fewer calls are left than they may need. The error reads "Too few requests are left today for this operation.", and the status of the account does not change.
+- Two cases are not covered: a call answered with an expired token is repeated after the token refresh and costs one more call, and a `DailyRequestLimit` lowered while an operation runs can stop it mid-way.
 - At `DailyRequestLimit`, polling, `Refresh` and commands stop, and both the status message and the error of a refused command read "Daily request limit reached." They continue after midnight, or at once when the limit is raised.
 - When Hyundai reports its limit (5091), polling, `Refresh` and commands pause for 2 hours; meanwhile `Refresh` and commands fail before any call.
 - Setup calls and authentication calls are not counted; a device registration by a poll and the PIN exchange of a command are. The counter starts at 0 after a restart.

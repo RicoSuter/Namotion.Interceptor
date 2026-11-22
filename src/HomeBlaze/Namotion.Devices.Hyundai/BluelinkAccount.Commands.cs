@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Hyundai.Client;
 using Namotion.Devices.Hyundai.Mapping;
@@ -9,7 +10,8 @@ public partial class BluelinkAccount
     private const int CommandResultAttempts = 9;
 
     // The most vehicle API calls of each operation. An operation fails before any call when fewer are left, so that a
-    // started one never runs out of requests mid-way.
+    // started one never runs out of requests mid-way. Not covered: a retry after a token expired answer costs one more
+    // call, and a DailyRequestLimit lowered while an operation runs.
     private const int ReadVehicleCost = 2; // stored status and parking location
     private const int RefreshCost = 1 + ReadVehicleCost;
     private const int CommandCost = 1 + CommandResultAttempts + ReadVehicleCost;
@@ -120,8 +122,9 @@ public partial class BluelinkAccount
             {
                 await ReadVehicleAsync(tokenManager, vehicle, cancellationToken);
             }
-            catch (Exception exception) when (!IsAccountFailure(exception, cancellationToken))
+            catch (Exception exception) when (exception is BluelinkRequestLimitException || !IsAccountFailure(exception, cancellationToken))
             {
+                // A reached limit is reported by the next poll.
                 _logger.LogWarning(exception, "The Bluelink vehicle {Vin} executed the command {Operation}, but reading its status afterwards failed.", vehicle.Vin, operation);
             }
         }, cancellationToken);
@@ -156,8 +159,9 @@ public partial class BluelinkAccount
     /// checks is logged, unless it is the caller's cancellation or a failure of the whole account.
     /// </summary>
     /// <exception cref="BluelinkRequestLimitException">
-    /// The daily request limit is reached, or fewer requests than <paramref name="cost"/> are left, which leaves the
-    /// account status unchanged; nothing was sent.
+    /// The daily request limit is reached, which sets the account status to <see cref="ServiceStatus.Error"/>; or fewer
+    /// requests are left than <paramref name="cost"/> plus a device registration when no device ID is stored, which
+    /// leaves the account status unchanged. Nothing was sent.
     /// </exception>
     private async Task RunLockedAsync(BluelinkVehicle vehicle, string operation, int cost, Func<BluelinkTokenManager, Task> action, CancellationToken cancellationToken)
     {

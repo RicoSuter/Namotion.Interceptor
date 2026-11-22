@@ -50,6 +50,7 @@ internal sealed class TestTimeProvider(DateTimeOffset start) : FakeTimeProvider(
     private sealed class PendingTimer(TestTimeProvider owner) : ITimer
     {
         private TimeSpan _period;
+        private bool _isDisposed;
 
         public ITimer Inner { get; set; } = null!;
 
@@ -62,6 +63,11 @@ internal sealed class TestTimeProvider(DateTimeOffset start) : FakeTimeProvider(
         {
             lock (owner._lock)
             {
+                if (_isDisposed)
+                {
+                    return;
+                }
+
                 Duration = dueTime;
                 _period = period;
                 DueAt = dueTime == Timeout.InfiniteTimeSpan ? null : owner.GetUtcNow() + dueTime;
@@ -87,7 +93,7 @@ internal sealed class TestTimeProvider(DateTimeOffset start) : FakeTimeProvider(
                 }
                 else
                 {
-                    DueAt = owner.GetUtcNow() + _period;
+                    DueAt = (DueAt ?? owner.GetUtcNow()) + _period;
                 }
             }
         }
@@ -114,6 +120,7 @@ internal sealed class TestTimeProvider(DateTimeOffset start) : FakeTimeProvider(
         {
             lock (owner._lock)
             {
+                _isDisposed = true;
                 DueAt = null;
                 owner._timers.Remove(this);
             }

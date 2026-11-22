@@ -143,6 +143,36 @@ public class BluelinkAccountCommandTests
     }
 
     [Fact]
+    public async Task WhenTheLimitIsReachedBeforeTheStatusReadOfAConfirmedCommand_ThenTheCommandSucceedsAndAWarningIsLogged()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var (account, handler, time) = await CreatePolledAsync(logger: logger);
+        var heldResult = TestAccount.CreateHeldResponse();
+        handler.Respond(BluelinkResponses.LegacyChargePath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-7"))
+            .RespondAfter(BluelinkResponses.RecordsPath("VEHICLE-1"), heldResult.Task);
+        var command = account.Vehicles[Kona].Charge.StartChargingAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() =>
+        {
+            time.AdvanceToNextTimer(TimeSpan.FromSeconds(30));
+            return handler.Count(BluelinkResponses.RecordsPath("VEHICLE-1")) == 1;
+        });
+        account.DailyRequestLimit = account.RequestsToday;
+        var warningCount = logger.Warnings.Count;
+
+        // Act
+        heldResult.SetResult(TestAccount.CreateResponse(HttpStatusCode.OK, BluelinkResponses.Records("MSG-7", "success")));
+        await command;
+
+        // Assert
+        Assert.Equal($"The Bluelink vehicle {Kona} executed the command StartCharging, but reading its status afterwards failed.",
+            Assert.Single(logger.Warnings.Skip(warningCount)));
+        Assert.Equal(1, handler.Count(BluelinkResponses.StatusPath("VEHICLE-1")));
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.Null(account.StatusMessage);
+    }
+
+    [Fact]
     public async Task WhenRefreshFails_ThenOneWarningIsLogged()
     {
         // Arrange
