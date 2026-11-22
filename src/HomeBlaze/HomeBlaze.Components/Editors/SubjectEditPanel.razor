@@ -23,7 +23,7 @@
             <SubjectComponent @key="Subject"
                               Subject="@Subject"
                               Type="hostedComponentType"
-                              AdditionalParameters="@GetHostedComponentParameters()"
+                              AdditionalParameters="@GetHostedComponentParameters(hostedComponentType)"
                               ComponentInstance="_subjectComponent"
                               ComponentInstanceChanged="OnSubjectComponentRendered" />
         }
@@ -51,7 +51,7 @@
 
     /// <summary>
     /// Gets or sets extra parameters for the hosted edit or setup component, or null for none. The panel's own
-    /// <c>IsCreating</c> entry takes precedence over one of the same name.
+    /// <c>IsCreating</c> and <c>DiscoveryResult</c> entries take precedence over ones of the same name.
     /// </summary>
     /// <remarks>
     /// Every entry must name a parameter the hosted component declares, as Blazor throws for an unknown one, and is
@@ -110,9 +110,9 @@
         }
     }
 
-    private Dictionary<string, object?> GetHostedComponentParameters()
+    private Dictionary<string, object?> GetHostedComponentParameters(SubjectComponentType componentType)
     {
-        var discoveryResult = GetAcceptedDiscoveryResult();
+        var discoveryResult = GetAcceptedDiscoveryResult(componentType);
         if (EditorParameters is null && discoveryResult is null)
         {
             return CreateHostedComponentParameters(IsCreating, null);
@@ -132,18 +132,16 @@
         return _mergedParameters;
     }
 
-    private IDiscoveryResult? GetAcceptedDiscoveryResult()
+    private IDiscoveryResult? GetAcceptedDiscoveryResult(SubjectComponentType componentType)
     {
         // Blazor throws for a parameter the hosted component does not declare.
-        if (DiscoveryResult is null || Subject is null || HostedComponentType is not { } componentType)
+        if (DiscoveryResult is null || Subject is null)
         {
             return null;
         }
 
         var registration = ComponentRegistry.GetComponent(Subject.GetType(), componentType);
-        return registration is not null && typeof(ISubjectDiscoveryComponent).IsAssignableFrom(registration.ComponentType)
-            ? DiscoveryResult
-            : null;
+        return registration is { TakesDiscoveryResults: true } ? DiscoveryResult : null;
     }
 
     /// <summary>

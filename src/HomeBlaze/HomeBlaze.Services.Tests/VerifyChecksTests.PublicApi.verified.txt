@@ -287,6 +287,7 @@ namespace HomeBlaze.Services.Components
         public System.Type ComponentType { get; init; }
         public string? Name { get; init; }
         public System.Type SubjectType { get; init; }
+        public bool TakesDiscoveryResults { get; }
         public HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType Type { get; init; }
     }
     public class SubjectComponentRegistry

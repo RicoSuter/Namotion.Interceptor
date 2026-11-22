@@ -95,6 +95,6 @@ public sealed class SubjectDiscovererRegistry
             _componentRegistry.GetComponent(subjectType, SubjectComponentType.Setup) ??
             _componentRegistry.GetComponent(subjectType, SubjectComponentType.Edit);
 
-        return registration is not null && typeof(ISubjectDiscoveryComponent).IsAssignableFrom(registration.ComponentType);
+        return registration is { TakesDiscoveryResults: true };
     }
 }

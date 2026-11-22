@@ -21,11 +21,39 @@ public class SubjectDiscoveryListTests
 
         // Act
         list.Add(Found(Shelly, "shellyplus1pm-b"), Shelly);
-        list.Add(Found(Hue, "Bridge"), Hue);
+        list.Add(Found(Hue, "Zeta"), Hue);
         list.Add(Found(Shelly, "shellyplus1pm-a"), Shelly);
 
         // Assert
-        Assert.Equal(["Bridge", "shellyplus1pm-a", "shellyplus1pm-b"], list.Rows.Select(row => row.Discovered.Result.DisplayName));
+        Assert.Equal(["Zeta", "shellyplus1pm-a", "shellyplus1pm-b"], list.Rows.Select(row => row.Discovered.Result.DisplayName));
+    }
+
+    [Fact]
+    public void WhenNamesDifferOnlyInCaseOrKey_ThenTheOrderIsTheSameForAnyArrivalOrder()
+    {
+        // Arrange
+        var upperCase = Found(Hue, "BRIDGE");
+        var lowerCase = Found(Hue, "bridge");
+        var firstKey = new DiscoveredSubject(Hue.Type, new FoundDevice("Same", "a"), null);
+        var secondKey = new DiscoveredSubject(Hue.Type, new FoundDevice("Same", "b"), null);
+        var first = new SubjectDiscoveryList();
+        var second = new SubjectDiscoveryList();
+
+        // Act
+        foreach (var discovered in new[] { upperCase, lowerCase, secondKey, firstKey })
+        {
+            first.Add(discovered, Hue);
+        }
+
+        foreach (var discovered in new[] { firstKey, secondKey, lowerCase, upperCase })
+        {
+            second.Add(discovered, Hue);
+        }
+
+        // Assert
+        Assert.Equal(first.Rows.Select(row => row.Discovered.Result.Key), second.Rows.Select(row => row.Discovered.Result.Key));
+        Assert.Equal(["a", "b"], first.Rows.Select(row => row.Discovered.Result.Key).Where(key => key is "a" or "b"));
+        Assert.Equal(["BRIDGE", "bridge"], first.Rows.Select(row => row.Discovered.Result.Key).Where(key => key.Equals("bridge", StringComparison.OrdinalIgnoreCase)));
     }
 
     [Fact]
@@ -57,9 +85,9 @@ public class SubjectDiscoveryListTests
         Assert.Empty(list.Failures);
     }
 
-    private sealed record FoundDevice(string DisplayName) : IDiscoveryResult
+    private sealed record FoundDevice(string DisplayName, string? KeyOverride = null) : IDiscoveryResult
     {
-        public string Key => DisplayName;
+        public string Key => KeyOverride ?? DisplayName;
 
         public string? Detail => null;
     }

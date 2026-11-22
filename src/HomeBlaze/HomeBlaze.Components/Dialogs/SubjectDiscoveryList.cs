@@ -50,9 +50,15 @@ internal sealed class SubjectDiscoveryList
         }
 
         var byName = StringComparer.OrdinalIgnoreCase.Compare(first.Discovered.Result.DisplayName, second.Discovered.Result.DisplayName);
-        return byName != 0
-            ? byName
-            : StringComparer.Ordinal.Compare(first.Discovered.Result.Key, second.Discovered.Result.Key);
+        if (byName != 0)
+        {
+            return byName;
+        }
+
+        var byKey = StringComparer.Ordinal.Compare(first.Discovered.Result.Key, second.Discovered.Result.Key);
+        return byKey != 0
+            ? byKey
+            : StringComparer.Ordinal.Compare(first.Descriptor.Type.FullName, second.Descriptor.Type.FullName);
     }
 }
 

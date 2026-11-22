@@ -64,6 +64,27 @@ public class SubjectEditPanelParametersTests
         Assert.True((bool)parameters["IsCreating"]!);
     }
 
+    [Fact]
+    public void WhenEditorParametersAndADiscoveryResultAreGiven_ThenBothAreMergedAndThePanelResultWins()
+    {
+        // Arrange
+        var result = new FoundDevice();
+        var editorParameters = new Dictionary<string, object?>
+        {
+            ["InitialRuleKey"] = "rule-1",
+            ["DiscoveryResult"] = new FoundDevice()
+        };
+
+        // Act
+        var parameters = SubjectEditPanel.CreateHostedComponentParameters(true, editorParameters, result);
+
+        // Assert
+        Assert.Equal(3, parameters.Count);
+        Assert.Equal("rule-1", parameters["InitialRuleKey"]);
+        Assert.Same(result, parameters["DiscoveryResult"]);
+        Assert.True((bool)parameters["IsCreating"]!);
+    }
+
     private sealed class FoundDevice : IDiscoveryResult
     {
         public string Key => "device";
