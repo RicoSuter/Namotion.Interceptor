@@ -15,6 +15,10 @@ The Nuki integration reads and controls Nuki smart locks and Nuki Openers throug
 
 The setup reads the token from the bridge and picks the token mode: `Encrypted` when the bridge accepts it, `Plain` for a software bridge. When it cannot confirm the mode, it shows a warning that says what to check. See [Security](#security).
 
+## Discovery
+
+The Discover page of the create dialog asks the Nuki discovery service, which lists the bridges seen from your public IP address. It only does so when you open the Discover page. A bridge that is already added is recognized by its host address and port.
+
 ## Configuration
 
 | Property | Type | Default | Description |

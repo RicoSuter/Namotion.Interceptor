@@ -14,7 +14,7 @@ status: Planned
 
 **Tech Stack:** .NET 10, C# 14, Blazor with MudBlazor 9, xUnit, Playwright, Rssdp (SSDP), an own minimal mDNS client.
 
-**Spec:** [Subject Discovery](subject-discovery.md). Read it first.
+**Spec:** [Subject Discovery](../architecture/design/discovery.md). Read it first.
 
 **Conventions for every task** (from `AGENTS.md`):
 

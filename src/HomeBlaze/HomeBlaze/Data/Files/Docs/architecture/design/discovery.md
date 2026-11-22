@@ -1,7 +1,7 @@
 ---
 title: Subject Discovery
 navTitle: Discovery
-status: Planned
+status: Implemented
 ---
 
 # Subject Discovery
@@ -10,7 +10,7 @@ status: Planned
 
 Hub subjects already create their children on their own: a `HueBridge` its lights, a `ShellyDevice` its components, a `SonosSystem` its players, an `EcowittGateway` its sensors and a `NukiBridge` its locks. What is missing is the entry point. To add a device, a user must know which subject type it needs, pick that type in the create dialog, and only then does its Setup component search the network (`FritzBoxSetupComponent`, `HueBridgeSetupComponent`, `NukiBridgeSetupComponent`).
 
-This plan turns that around: the user asks HomeBlaze to search, sees the devices it found, and picks one. The type follows from the device.
+Discovery turns that around: the user asks HomeBlaze to search, sees the devices it found, and picks one. The type follows from the device.
 
 ## Prior art
 
@@ -22,11 +22,11 @@ This plan turns that around: the user asks HomeBlaze to search, sees the devices
 
 Common lessons: shared listeners instead of one socket per integration, a stable identity per device, a found device that hands off to the normal setup flow already filled in, and an Ignore that is remembered.
 
-## Scope
+## Scope and follow-ups
 
-This plan covers an on-demand Discover page in the create dialog, with a contract designed so a later background inbox reuses it unchanged.
+This design covers an on-demand Discover page in the create dialog, with a contract designed so a later background inbox reuses it unchanged.
 
-In scope (one pull request):
+Implemented (one pull request):
 
 - The discovery contract, registry and scan session
 - Shared SSDP and mDNS services
@@ -96,10 +96,10 @@ A Setup or Edit component implements it with a `[Parameter]` property and casts 
 
 `SubjectDiscovererRegistry` in `HomeBlaze.Services` scans `TypeProvider.Types` for non-abstract `ISubjectDiscoverer` types, as `SubjectComponentRegistry` does for components, so plugins provide discoverers without extra registration. It creates them through DI with `ActivatorUtilities`, so a constructor can ask for `IHttpClientFactory` or `ILogger<T>`.
 
-It leaves out, with one logged error at startup and without blocking the app:
+It leaves out, with one logged error each, written the first time the create dialog asks for discoverers rather than at startup, and without blocking the app:
 
 - A discoverer that cannot be constructed
-- A discoverer whose subject type has no Setup or Edit component implementing `ISubjectDiscoveryComponent`, because a picked result would otherwise open a page that ignores it
+- A discoverer whose subject type has no Setup or Edit component implementing `ISubjectDiscoveryComponent` (`SubjectComponentRegistration.TakesDiscoveryResults`), because a picked result would otherwise open a page that ignores it
 
 The Discover page further leaves out results whose type is not creatable in the dialog, as `SubjectTypeCatalog.GetCreatableTypes` decides (excluded from creation, or single instance and already present).
 
@@ -109,7 +109,7 @@ The Discover page further leaves out results whose type is not creatable in the 
 
 - Its cancellation token is canceled by Scan again, Back and closing the dialog.
 - Its deadline is 30 seconds, taken from an injected `TimeProvider`. The deadline is a cap, not a wait: the scan ends as soon as every discoverer has completed, normally after 3 to 5 seconds.
-- It exposes the shared services below. Within one session, a query that was already sent returns the same in-flight task, so two discoverers asking for the same search target or service type cause one query.
+- It exposes the shared services below. Within one session, a query that was already sent returns the same in-flight task, so two discoverers asking for the same question cause one query. SSDP queries are shared by exact search target, mDNS queries by service type ignoring case.
 
 In `HomeBlaze.Abstractions/Discovery`, implemented in `HomeBlaze.Services`:
 
@@ -130,7 +130,7 @@ public interface IMulticastDnsBrowser
 
 SSDP uses Rssdp, which the FRITZ!Box library already depends on, and searches every IPv4 adapter with a listening window of about 3 seconds.
 
-mDNS is a minimal implementation of our own, with no package and no reflection. It sends a PTR query for the service type to `224.0.0.251:5353` on each IPv4 adapter, repeats it after 1 and 3 seconds as RFC 6762 recommends, and combines the PTR, SRV, TXT and A records of the answers into `MulticastDnsService`. Queries are sent from an ephemeral port as legacy unicast queries, so devices answer straight back and HomeBlaze does not bind port 5353, which Avahi holds on most Linux hosts. Whether Shelly devices answer legacy unicast queries is checked against real hardware first; if they do not, the browser binds port 5353 with address reuse instead.
+mDNS is a minimal implementation of our own, with no package and no reflection. It sends a PTR query for the service type to `224.0.0.251:5353` on each IPv4 adapter, repeats it after 1 and 3 seconds as RFC 6762 recommends, and combines the PTR, SRV, TXT and A records of the answers into `MulticastDnsService`. Queries are sent from an ephemeral port as legacy unicast queries, so devices answer straight back and HomeBlaze does not bind port 5353, which Avahi holds on most Linux hosts. During development, real Shelly Gen2 devices and a Hue bridge answered legacy unicast queries on a Linux host with Avahi running. Binding port 5353 with address reuse remains the documented fallback, and has not been needed so far.
 
 Both services cap the number and size of answers per session, as `FritzBoxDiscovery` caps locations today, because any host on the network can answer.
 
@@ -151,7 +151,7 @@ The picker page of `SubjectSetupDialog` gets a toggle at the top: All types or D
 
 Picking a row calls the existing `SelectType` for the result's type and keeps the `DiscoveredSubject`.
 
-- `SubjectEditPanel` passes `["DiscoveryResult"] = result` through `EditorParameters` when the hosted component implements `ISubjectDiscoveryComponent`, and never otherwise, because `DynamicComponent` rejects a parameter the component does not declare.
+- `SubjectEditPanel` has a dedicated `DiscoveryResult` parameter, not an `EditorParameters` entry. It passes the result on as the `DiscoveryResult` parameter of the hosted component only when `SubjectComponentRegistration.TakesDiscoveryResults` is true for that component, and never otherwise, because `DynamicComponent` rejects a parameter the component does not declare. That property is the one place that decides whether a component takes results, and the registry uses it as well.
 - The name field suggests the result's `DisplayName` when that is a valid, unused name, and the type's usual suggestion otherwise. A name the user typed is kept.
 - Back returns to the page the type was picked on and discards the created subject, as today.
 - Validation, Create, `BeforeSave` and persisting are unchanged.
@@ -171,9 +171,10 @@ Picking a row calls the existing `SelectType` for the result's type and keeps th
 |---|---|---|---|
 | `FritzBox` | `FritzBoxDiscovery` through the shared `ISsdpSearch`, plus the `fritz.box` fallback | `FritzBoxDiscoveryResult`, key `Udn` or else host address | A new persisted `Udn` when both sides have one, otherwise the host address |
 | `HueBridge` | mDNS `_hue._tcp`, local only | A new record with bridge ID and address, key bridge ID | The persisted `BridgeId`, ignoring case; `HueBridge` itself compares bridge IDs ignoring case as well |
-| `NukiBridge` | The Nuki cloud lookup, which runs only because the user pressed Scan | `NukiDiscoveredBridge`, key bridge ID | The host address and port. The bridge ID the discovery service returns is compared with the runtime `ServerId` of a real bridge during manual verification, and a match on it is added only if they agree |
-| `ShellyDevice` | mDNS `_shelly._tcp`; the TXT records carry the device ID, model and generation | A new record with device ID, model and address, key device ID | A new persisted `DeviceId`, otherwise the host address |
+| `NukiBridge` | The Nuki cloud lookup, which runs only because the user pressed Scan | `NukiDiscoveredBridge`, key bridge ID | The host address and port. Whether the bridge ID the discovery service returns equals the runtime `ServerId` of a real bridge is still open until the manual verification, and a match on it is added only if they agree |
+| `ShellyDevice` | mDNS `_shelly._tcp` | `ShellyDiscoveredDevice(DeviceId, HostAddress, Application, Name)`, key device ID | A new persisted `DeviceId`, otherwise the host address |
 
+- A Gen2+ Shelly announces two `_shelly._tcp` instances with the same SRV host, one named by its device ID and one by its user-given name. The discoverer takes the device ID from the SRV host name (without `.local`, lower case), merges the instances into one result and shows the user-given name, or the device ID when there is none. `Application` comes from the `app` TXT record.
 - `FritzBox.Udn` and `ShellyDevice.DeviceId` are new `[Configuration]` properties, written by the component that receives the result. Shelly also matches on the device ID the running subject read from the device, so a Shelly created before this change is recognized while it is connected. Subjects do not write their own configuration for discovery.
 - `FritzBoxDiscovery.DiscoverAsync` takes the SSDP search as a parameter, so the Setup component and the discoverer share parsing and description.
 - The Setup components keep their own search for when the type is picked directly. The Hue Setup component keeps the HueApi locator with its network scan fallback.
@@ -181,7 +182,7 @@ Picking a row calls the existing `SelectType` for the result's type and keeps th
 
 ## Breaking changes
 
-- `FritzBoxDiscovery.DiscoverAsync` takes an `ISsdpSearch`. Migration: pass the built-in implementation.
+- `FritzBoxDiscovery.DiscoverAsync` takes an `ISsdpSearch`. Migration: resolve the `ISsdpSearch` from dependency injection, as its implementation is internal.
 
 The new configuration properties are additions; stored subjects without them load unchanged.
 
@@ -199,10 +200,4 @@ This repository has no component test framework, so the Discover page keeps its 
 
 One E2E test with a fake discoverer: open Discover, pick the result, create, and find the stored subject.
 
-Manual verification before the pull request is finalized, agreed while planning: a real Shelly (which also settles the legacy unicast question), FRITZ!Box, Hue bridge and Nuki bridge, run directly and under Docker bridge networking.
-
-## Documentation
-
-- `architecture/design/discovery.md` becomes the canonical description once implemented, and this plan is removed or marked implemented.
-- The device pages of FRITZ!Box, Hue, Nuki and Shelly each state how the device is discovered and matched.
-- The `create-homeblaze-library` command (`.claude/commands/create-homeblaze-library.md`) describes writing a discoverer.
+Manual verification before the pull request is finalized, agreed while planning: a real Shelly, FRITZ!Box, Hue bridge and Nuki bridge, run directly and under Docker bridge networking. Legacy unicast mDNS is confirmed against real Shelly and Hue devices (see above). Docker bridge networking and the Nuki bridge ID question are still open until that verification has run.

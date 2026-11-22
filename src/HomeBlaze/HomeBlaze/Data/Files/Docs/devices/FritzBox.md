@@ -23,6 +23,10 @@ Connects to an AVM FRITZ!Box router over its documented local TR-064 interface, 
 
 The router's certificate key is pinned on first connection; see [Certificate Trust](#certificate-trust) for how it is trusted and how to accept a new one.
 
+## Discovery
+
+The Discover page of the create dialog finds FRITZ!Box routers and repeaters over SSDP and at `fritz.box`. A router that is already added is recognized by its unique device name, or by its host address when it was added without discovery.
+
 ## Configuration
 
 | Property | Type | Default | Description |
