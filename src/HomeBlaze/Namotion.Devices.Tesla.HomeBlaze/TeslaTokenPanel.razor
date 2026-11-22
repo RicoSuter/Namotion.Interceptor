@@ -48,6 +48,9 @@
     }
     else
     {
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+            Unofficial integration, not affiliated with Tesla. It may violate Tesla's terms of use and can stop working when Tesla changes its API.
+        </MudAlert>
         <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" TabPanelsClass="pa-4" @bind-ActivePanelIndex="_tabIndex">
             <MudTabPanel Text="Refresh token">
                 <MudStack Spacing="3">

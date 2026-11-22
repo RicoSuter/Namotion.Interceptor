@@ -5,6 +5,8 @@ icon: DirectionsCar
 
 # Tesla
 
+> **Unofficial:** This integration uses Tesla's unofficial Owner API with the app identity that community tools use. It is not affiliated with or endorsed by Tesla, using it may violate Tesla's terms of use, and Tesla can block it at any time. Use it at your own risk.
+
 The Tesla integration reads all Tesla vehicles of an account through the unofficial Tesla Owner API: charging, battery, climate, location, doors and windows, tires, media, software updates and the vehicle specification. It is read only: the only call that changes anything is the `Wake Up` operation. It never wakes a vehicle on its own and is built so that polling does not keep a vehicle awake, because both drain the battery. It needs no Tesla developer application and no subscription, only a refresh token of your Tesla account. See [Known Limitations](#known-limitations) for what it cannot do.
 
 ## Setup
