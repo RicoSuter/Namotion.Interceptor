@@ -26,10 +26,10 @@ internal static class BluelinkJson
     public static JsonElement? Find(this JsonElement element, string path)
     {
         var current = element;
-        var remaining = path.AsSpan();
-        foreach (var range in remaining.Split('.'))
+        var pathSpan = path.AsSpan();
+        foreach (var range in pathSpan.Split('.'))
         {
-            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(remaining[range], out current))
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(pathSpan[range], out current))
             {
                 return null;
             }

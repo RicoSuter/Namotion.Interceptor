@@ -21,11 +21,11 @@ public partial class BluelinkAccount
         CanSendRequests && (protocol == BluelinkProtocol.Legacy || !string.IsNullOrEmpty(Pin));
 
     bool IBluelinkVehicleCommands.CanRefresh(decimal? auxiliaryBatteryLevel) =>
-        CanSendRequests && auxiliaryBatteryLevel >= MinimumAuxiliaryBatteryLevel;
+        CanSendRequests && IsAuxiliaryBatteryAtMinimum(auxiliaryBatteryLevel);
 
     async Task IBluelinkVehicleCommands.RefreshAsync(BluelinkVehicle vehicle, CancellationToken cancellationToken)
     {
-        if (vehicle.AuxiliaryBatteryLevel is not { } level || level < MinimumAuxiliaryBatteryLevel)
+        if (!IsAuxiliaryBatteryAtMinimum(vehicle.AuxiliaryBatteryLevel))
         {
             throw new InvalidOperationException("Refresh is refused while the 12 V battery is below the minimum level or unknown.");
         }
@@ -42,6 +42,8 @@ public partial class BluelinkAccount
             await ReadVehicleAsync(tokenManager, vehicle, cancellationToken);
         }, cancellationToken);
     }
+
+    private bool IsAuxiliaryBatteryAtMinimum(decimal? level) => level >= MinimumAuxiliaryBatteryLevel;
 
     Task IBluelinkVehicleCommands.SetChargingAsync(BluelinkVehicle vehicle, bool start, CancellationToken cancellationToken) =>
         RunCommandAsync(vehicle, needsPin: true,

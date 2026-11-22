@@ -23,16 +23,7 @@ internal static class BluelinkVehicleApiResponses
             return new BluelinkCcsToken(controlToken, now + TimeSpan.FromSeconds((double)seconds));
         }
 
-        if (root.GetString("error") is { } error)
-        {
-            throw new BluelinkApiException(statusCode, null, error);
-        }
-
-        if (root.GetString("retCode") == "F")
-        {
-            throw new BluelinkApiException(statusCode, root.GetString("resCode"), root.GetString("resMsg"));
-        }
-
+        ThrowIfFailed(statusCode, root, isHttpFailure: false);
         throw (int)statusCode is >= 400 and <= 499
             ? new BluelinkPinRejectedException(statusCode, root.GetString("errCode") ?? root.GetString("resCode"))
             : new BluelinkApiException(statusCode, null, noTokenMessage);
@@ -43,17 +34,23 @@ internal static class BluelinkVehicleApiResponses
     {
         using var document = Parse(statusCode, text, "The response is not JSON.");
         var root = document.RootElement;
+        ThrowIfFailed(statusCode, root, isHttpFailure: (int)statusCode is < 200 or > 299);
+        return root.Clone();
+    }
+
+    /// <summary>Throws for an <c>error</c> answer, a <c>retCode</c> of <c>F</c>, or any answer when <paramref name="isHttpFailure"/> is set.</summary>
+    private static void ThrowIfFailed(HttpStatusCode statusCode, JsonElement root, bool isHttpFailure)
+    {
         if (root.GetString("error") is { } error)
         {
             throw new BluelinkApiException(statusCode, null, error);
         }
 
-        if (root.GetString("retCode") == "F" || (int)statusCode is < 200 or > 299)
+        if (isHttpFailure || root.GetString("retCode") == "F")
         {
+            // resMsg holds the result object on success, so only a string is a message.
             throw new BluelinkApiException(statusCode, root.GetString("resCode"), root.Find("resMsg") is { ValueKind: JsonValueKind.String } resMsg ? resMsg.GetString() : null);
         }
-
-        return root.Clone();
     }
 
     private static JsonDocument Parse(HttpStatusCode statusCode, string text, string notJsonMessage)
