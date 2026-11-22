@@ -70,13 +70,19 @@ internal static class DnsMessage
             return false;
         }
 
-        // Queries of other hosts to the same group carry no answers.
-        if ((message[2] & 0x80) == 0)
+        // Queries of other hosts to the same group carry no answers, and RFC 6762 18.3 and 18.11 say to ignore
+        // a message with a non-zero opcode or response code.
+        if ((message[2] & 0xF8) != 0x80 || (message[3] & 0x0F) != 0)
         {
             return true;
         }
 
         var questionCount = BinaryPrimitives.ReadUInt16BigEndian(message[4..]);
+        if (questionCount > MaximumRecords)
+        {
+            return false;
+        }
+
         var recordCount =
             BinaryPrimitives.ReadUInt16BigEndian(message[6..]) +
             BinaryPrimitives.ReadUInt16BigEndian(message[8..]) +
@@ -85,7 +91,7 @@ internal static class DnsMessage
         var offset = HeaderLength;
         for (var index = 0; index < questionCount; index++)
         {
-            if (!TryReadName(message, ref offset, out _) || offset + 4 > message.Length)
+            if (!TrySkipName(message, ref offset) || offset + 4 > message.Length)
             {
                 return false;
             }
@@ -101,6 +107,7 @@ internal static class DnsMessage
             }
 
             var type = BinaryPrimitives.ReadUInt16BigEndian(message[offset..]);
+            var timeToLive = BinaryPrimitives.ReadUInt32BigEndian(message[(offset + 4)..]);
             var dataLength = BinaryPrimitives.ReadUInt16BigEndian(message[(offset + 8)..]);
             var dataOffset = offset + 10;
             if (dataOffset + dataLength > message.Length)
@@ -109,6 +116,13 @@ internal static class DnsMessage
             }
 
             offset = dataOffset + dataLength;
+
+            // A record with a time to live of zero says the service is gone (RFC 6762 10.1).
+            if (timeToLive == 0)
+            {
+                continue;
+            }
+
             if (!TryReadRecord(message, name, type, dataOffset, dataLength, records))
             {
                 return false;
@@ -127,7 +141,7 @@ internal static class DnsMessage
             {
                 // Names in the data may point anywhere in the message, so they are read from the whole message.
                 var targetOffset = dataOffset;
-                if (!TryReadName(message, ref targetOffset, out var target))
+                if (!TryReadName(message, ref targetOffset, out var target) || targetOffset > dataOffset + dataLength)
                 {
                     return false;
                 }
@@ -144,7 +158,7 @@ internal static class DnsMessage
 
                 var port = BinaryPrimitives.ReadUInt16BigEndian(message[(dataOffset + 4)..]);
                 var targetOffset = dataOffset + 6;
-                if (!TryReadName(message, ref targetOffset, out var target))
+                if (!TryReadName(message, ref targetOffset, out var target) || targetOffset > dataOffset + dataLength)
                 {
                     return false;
                 }
@@ -188,6 +202,60 @@ internal static class DnsMessage
         return entries;
     }
 
+    /// <summary>
+    /// Moves <paramref name="offset"/> past a name without building it, with the same bounds as <see cref="TryReadName"/>.
+    /// </summary>
+    private static bool TrySkipName(ReadOnlySpan<byte> message, ref int offset)
+    {
+        var position = offset;
+        var hasJumped = false;
+        var jumpCount = 0;
+        var wireLength = 1;
+        while (true)
+        {
+            if (position >= message.Length)
+            {
+                return false;
+            }
+
+            var length = message[position];
+            if (length == 0)
+            {
+                if (!hasJumped)
+                {
+                    offset = position + 1;
+                }
+
+                return true;
+            }
+
+            if ((length & 0xC0) == 0xC0)
+            {
+                if (position + 1 >= message.Length || ++jumpCount > MaximumPointerJumps)
+                {
+                    return false;
+                }
+
+                if (!hasJumped)
+                {
+                    offset = position + 2;
+                    hasJumped = true;
+                }
+
+                position = ((length & 0x3F) << 8) | message[position + 1];
+                continue;
+            }
+
+            wireLength += 1 + length;
+            if ((length & 0xC0) != 0 || position + 1 + length > message.Length || wireLength > MaximumNameLength)
+            {
+                return false;
+            }
+
+            position += 1 + length;
+        }
+    }
+
     private static bool TryReadName(ReadOnlySpan<byte> message, ref int offset, out string name)
     {
         name = "";
@@ -195,6 +263,7 @@ internal static class DnsMessage
         var position = offset;
         var hasJumped = false;
         var jumpCount = 0;
+        var wireLength = 1;
         while (true)
         {
             if (position >= message.Length)
@@ -236,16 +305,19 @@ internal static class DnsMessage
                 return false;
             }
 
+            // The wire length counts the labels of every jump plus the root label, before any label is decoded.
+            wireLength += 1 + length;
+            if (wireLength > MaximumNameLength)
+            {
+                return false;
+            }
+
             if (builder.Length > 0)
             {
                 builder.Append('.');
             }
 
             builder.Append(Encoding.UTF8.GetString(message.Slice(position + 1, length)));
-            if (builder.Length > MaximumNameLength)
-            {
-                return false;
-            }
 
             position += 1 + length;
         }

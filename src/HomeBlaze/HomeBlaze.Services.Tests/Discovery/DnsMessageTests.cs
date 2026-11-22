@@ -105,4 +105,245 @@ public class DnsMessageTests
         // Assert
         Assert.False(isParsed);
     }
+
+    [Fact]
+    public void WhenAResponseHoldsAQuestion_ThenTheRecordsAfterItAreRead()
+    {
+        // Arrange
+        var message = new DnsMessageBuilder()
+            .AddQuestion(DnsMessageBuilder.EncodeName("_hue._tcp.local"))
+            .AddAddress("hue.local", "192.168.1.20")
+            .Build();
+
+        // Act
+        var isParsed = DnsMessage.TryParse(message, out var records);
+
+        // Assert
+        Assert.True(isParsed);
+        Assert.Equal(new AddressRecord("hue.local", IPAddress.Parse("192.168.1.20")), Assert.Single(records));
+    }
+
+    [Fact]
+    public void WhenARecordIsInTheAdditionalSection_ThenItIsRead()
+    {
+        // Arrange
+        var message = new DnsMessageBuilder()
+            .AddPointer("_hue._tcp.local", "Bridge._hue._tcp.local")
+            .InAdditionalSection()
+            .AddAddress("hue.local", "192.168.1.20")
+            .Build();
+
+        // Act
+        var isParsed = DnsMessage.TryParse(message, out var records);
+
+        // Assert
+        Assert.True(isParsed);
+        Assert.Equal(2, records.Count);
+        Assert.Equal(new AddressRecord("hue.local", IPAddress.Parse("192.168.1.20")), records[1]);
+    }
+
+    [Fact]
+    public void WhenTheMessageIsShorterThanTheHeader_ThenItIsRejected()
+    {
+        // Act
+        var isParsed = DnsMessage.TryParse(new byte[11], out var records);
+
+        // Assert
+        Assert.False(isParsed);
+        Assert.Empty(records);
+    }
+
+    [Theory]
+    [InlineData(0x40)]
+    [InlineData(0x80)]
+    public void WhenALabelUsesAReservedLengthType_ThenTheMessageIsRejected(byte lengthByte)
+    {
+        // Arrange
+        var message = new DnsMessageBuilder()
+            .AddRecord([lengthByte, (byte)'a', 0], DnsMessage.AddressType, [192, 168, 1, 21])
+            .Build();
+
+        // Act
+        var isParsed = DnsMessage.TryParse(message, out _);
+
+        // Assert
+        Assert.False(isParsed);
+    }
+
+    [Fact]
+    public void WhenANamePointsPastTheEndOfTheMessage_ThenTheMessageIsRejected()
+    {
+        // Arrange
+        var message = new DnsMessageBuilder()
+            .AddRecord([0xC3, 0xE8], DnsMessage.AddressType, [192, 168, 1, 21])
+            .Build();
+
+        // Act
+        var isParsed = DnsMessage.TryParse(message, out _);
+
+        // Assert
+        Assert.False(isParsed);
+    }
+
+    [Fact]
+    public void WhenTwoNamesPointToEachOther_ThenTheMessageIsRejected()
+    {
+        // Arrange - the record name at offset 12 points to offset 14, which points back to offset 12.
+        var message = new DnsMessageBuilder()
+            .AddRecord([0xC0, 0x0E, 0xC0, 0x0C], DnsMessage.AddressType, [192, 168, 1, 21])
+            .Build();
+
+        // Act
+        var isParsed = DnsMessage.TryParse(message, out _);
+
+        // Assert
+        Assert.False(isParsed);
+    }
+
+    [Fact]
+    public void WhenAQuestionNameIsALoop_ThenTheMessageIsRejected()
+    {
+        // Arrange
+        var message = new DnsMessageBuilder()
+            .AddQuestion([0xC0, 0x0C])
+            .Build();
+
+        // Act
+        var isParsed = DnsMessage.TryParse(message, out _);
+
+        // Assert
+        Assert.False(isParsed);
+    }
+
+    [Fact]
+    public void WhenANameIsLongerThanTheLimitOnTheWire_ThenTheMessageIsRejected()
+    {
+        // Arrange
+        var label = new string('a', 63);
+        var message = new DnsMessageBuilder()
+            .AddAddress(string.Join('.', Enumerable.Repeat(label, 5)), "192.168.1.21")
+            .Build();
+
+        // Act
+        var isParsed = DnsMessage.TryParse(message, out _);
+
+        // Assert
+        Assert.False(isParsed);
+    }
+
+    [Fact]
+    public void WhenAQuestionNameIsLongerThanTheLimitOnTheWire_ThenTheMessageIsRejected()
+    {
+        // Arrange
+        var label = new string('a', 63);
+        var message = new DnsMessageBuilder()
+            .AddQuestion(DnsMessageBuilder.EncodeName(string.Join('.', Enumerable.Repeat(label, 5))))
+            .Build();
+
+        // Act
+        var isParsed = DnsMessage.TryParse(message, out _);
+
+        // Assert
+        Assert.False(isParsed);
+    }
+
+    [Fact]
+    public void WhenTheMessageHoldsMoreRecordsThanTheLimit_ThenOnlyTheFirstOnesAreRead()
+    {
+        // Arrange
+        var builder = new DnsMessageBuilder();
+        for (var index = 0; index < 300; index++)
+        {
+            builder.AddAddress($"host{index}.local", "192.168.1.21");
+        }
+
+        // Act
+        var isParsed = DnsMessage.TryParse(builder.Build(), out var records);
+
+        // Assert
+        Assert.True(isParsed);
+        Assert.Equal(256, records.Count);
+        Assert.Equal("host255.local", records[^1].Name);
+    }
+
+    [Fact]
+    public void WhenAServiceRecordIsTooShort_ThenTheMessageIsRejected()
+    {
+        // Arrange
+        var message = new DnsMessageBuilder()
+            .AddRecord(DnsMessageBuilder.EncodeName("Bridge._hue._tcp.local"), DnsMessage.ServiceType, new byte[6])
+            .Build();
+
+        // Act
+        var isParsed = DnsMessage.TryParse(message, out _);
+
+        // Assert
+        Assert.False(isParsed);
+    }
+
+    [Fact]
+    public void WhenTheQuestionCountIsOverTheLimit_ThenTheMessageIsRejected()
+    {
+        // Arrange
+        var message = new DnsMessageBuilder()
+            .WithQuestionCount(257)
+            .Build();
+
+        // Act
+        var isParsed = DnsMessage.TryParse(message, out _);
+
+        // Assert
+        Assert.False(isParsed);
+    }
+
+    [Fact]
+    public void WhenTheResponseCodeIsNotZero_ThenNoRecordsAreRead()
+    {
+        // Arrange
+        var message = new DnsMessageBuilder()
+            .WithResponseCode(2)
+            .AddAddress("hue.local", "192.168.1.20")
+            .Build();
+
+        // Act
+        var isParsed = DnsMessage.TryParse(message, out var records);
+
+        // Assert
+        Assert.True(isParsed);
+        Assert.Empty(records);
+    }
+
+    [Fact]
+    public void WhenARecordHasATimeToLiveOfZero_ThenItIsSkipped()
+    {
+        // Arrange
+        var message = new DnsMessageBuilder()
+            .AddRecord(DnsMessageBuilder.EncodeName("gone.local"), DnsMessage.AddressType, [192, 168, 1, 20], timeToLive: 0)
+            .AddAddress("hue.local", "192.168.1.21")
+            .Build();
+
+        // Act
+        var isParsed = DnsMessage.TryParse(message, out var records);
+
+        // Assert
+        Assert.True(isParsed);
+        Assert.Equal(new AddressRecord("hue.local", IPAddress.Parse("192.168.1.21")), Assert.Single(records));
+    }
+
+    [Fact]
+    public void WhenAPointerTargetRunsPastItsRecordData_ThenTheMessageIsRejected()
+    {
+        // Arrange - the data is the single byte 0xC0, which with the first byte of the next record's name (12) forms a
+        // valid pointer to the first name, so the target is only found by reading past the data.
+        var message = new DnsMessageBuilder()
+            .AddRecord(DnsMessageBuilder.EncodeName("_hue._tcp.local"), DnsMessage.PointerType, [0xC0])
+            .AddRecord(DnsMessageBuilder.EncodeName("abcdefghijkl.local"), DnsMessage.AddressType, [192, 168, 1, 21])
+            .Build();
+
+        // Act
+        var isParsed = DnsMessage.TryParse(message, out _);
+
+        // Assert
+        Assert.False(isParsed);
+    }
 }
