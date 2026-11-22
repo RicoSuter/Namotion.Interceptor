@@ -1725,6 +1725,7 @@ namespace HomeBlaze.Components.Dialogs
         public System.Func<string, string?>? Rule { get; init; }
         public string Suffix { get; init; }
         public string SuggestName(System.Type type) { }
+        public string SuggestName(string preferredName, System.Type type) { }
         public string? Validate(string? name) { }
     }
     public class SubjectSetupDialog : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
@@ -1795,6 +1796,8 @@ namespace HomeBlaze.Components.Editors
     public class SubjectEditPanel : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
     {
         public SubjectEditPanel() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Abstractions.Discovery.IDiscoveryResult? DiscoveryResult { get; set; }
         public HomeBlaze.Components.Abstractions.ISubjectComponent? EditComponent { get; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyDictionary<string, object?>? EditorParameters { get; set; }
