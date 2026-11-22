@@ -13,11 +13,15 @@ public class BlazorSubjectSetupService : ISubjectSetupService
         _dialogService = dialogService;
     }
 
-    public Task<CreateSubjectResult?> CreateSubjectAsync(IStorageContainer target, CancellationToken cancellationToken)
+    public Task CreateSubjectsAsync(
+        IStorageContainer target,
+        Func<CreateSubjectResult, CancellationToken, Task> addSubjectAsync,
+        CancellationToken cancellationToken)
     {
         return SubjectSetupDialog.ShowAsync(_dialogService, new SubjectSetupOptions
         {
-            NameField = new SubjectNameOptions("File name", FileExtensions.Json, target.ChildNames)
+            NameField = new SubjectNameOptions("File name", FileExtensions.Json, target.ChildNames),
+            OnCreatedAsync = (result, _) => addSubjectAsync(result, cancellationToken)
         });
     }
 }

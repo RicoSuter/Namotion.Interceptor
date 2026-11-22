@@ -1,6 +1,8 @@
 using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Components.Dialogs;
 using HomeBlaze.Services;
+using Moq;
+using Namotion.Interceptor;
 using Xunit;
 
 namespace HomeBlaze.Components.Tests;
@@ -10,8 +12,11 @@ public class SubjectDiscoveryListTests
     private static readonly SubjectTypeDescriptor Hue = new(typeof(string), "Hue Bridge", null, "Lighting", "Hub");
     private static readonly SubjectTypeDescriptor Shelly = new(typeof(int), "Shelly device", null, "Switches", "Power");
 
-    private static DiscoveredSubject Found(SubjectTypeDescriptor descriptor, string name) =>
-        new(descriptor.Type, new FoundDevice(name), null);
+    private static DiscoveredSubject Found(SubjectTypeDescriptor descriptor, string name, IInterceptorSubject? existingSubject = null) =>
+        new(descriptor.Type, new FoundDevice(name), existingSubject);
+
+    private static IEnumerable<string> Names(SubjectDiscoveryList list) =>
+        list.Rows.Select(row => row.Discovered.Result.DisplayName);
 
     [Fact]
     public void WhenResultsArriveInAnyOrder_ThenRowsAreOrderedByTypeAndThenName()
@@ -23,9 +28,61 @@ public class SubjectDiscoveryListTests
         list.Add(Found(Shelly, "shellyplus1pm-b"), Shelly);
         list.Add(Found(Hue, "Zeta"), Hue);
         list.Add(Found(Shelly, "shellyplus1pm-a"), Shelly);
+        list.Add(Found(Hue, "Hue Bridge"), Hue);
 
         // Assert
-        Assert.Equal(["Zeta", "shellyplus1pm-a", "shellyplus1pm-b"], list.Rows.Select(row => row.Discovered.Result.DisplayName));
+        Assert.Equal(["Hue Bridge", "Zeta", "shellyplus1pm-a", "shellyplus1pm-b"], Names(list));
+    }
+
+    [Fact]
+    public void WhenSomeDevicesAreAlreadyAdded_ThenTheyAreListedAfterTheOthers()
+    {
+        // Arrange
+        var list = new SubjectDiscoveryList();
+        var existingSubject = Mock.Of<IInterceptorSubject>();
+
+        // Act
+        list.Add(Found(Hue, "Alpha", existingSubject), Hue);
+        list.Add(Found(Shelly, "Delta"), Shelly);
+        list.Add(Found(Shelly, "Beta", existingSubject), Shelly);
+        list.Add(Found(Hue, "Gamma"), Hue);
+
+        // Assert
+        Assert.Equal(["Gamma", "Delta", "Alpha", "Beta"], Names(list));
+    }
+
+    [Fact]
+    public void WhenARowIsMarkedAdded_ThenItHasTheSubjectAndMovesAfterTheRowsNotAdded()
+    {
+        // Arrange
+        var list = new SubjectDiscoveryList();
+        var existingSubject = Mock.Of<IInterceptorSubject>();
+        var createdSubject = Mock.Of<IInterceptorSubject>();
+        list.Add(Found(Hue, "Alpha"), Hue);
+        list.Add(Found(Shelly, "Beta"), Shelly);
+        list.Add(Found(Shelly, "Zeta", existingSubject), Shelly);
+        list.Add(Found(Hue, "Gamma"), Hue);
+
+        // Act
+        list.MarkAdded(Found(Hue, "Alpha"), createdSubject);
+
+        // Assert
+        Assert.Equal(["Gamma", "Beta", "Alpha", "Zeta"], Names(list));
+        Assert.Same(createdSubject, list.Rows[2].Discovered.ExistingSubject);
+    }
+
+    [Fact]
+    public void WhenNoRowHasTheTypeAndKey_ThenMarkAddedChangesNothing()
+    {
+        // Arrange
+        var list = new SubjectDiscoveryList();
+        list.Add(Found(Hue, "Alpha"), Hue);
+
+        // Act
+        list.MarkAdded(Found(Shelly, "Alpha"), Mock.Of<IInterceptorSubject>());
+
+        // Assert
+        Assert.Null(Assert.Single(list.Rows).Discovered.ExistingSubject);
     }
 
     [Fact]

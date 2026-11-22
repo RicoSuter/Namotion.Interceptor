@@ -1,12 +1,13 @@
 using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Services;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Components.Dialogs;
 
 /// <summary>
-/// The rows of the Discover page, ordered by type and then by name so the list moves little while results arrive, a
-/// line for each discoverer that failed, and which rows show their included items. Not thread-safe: the page changes
-/// it on the renderer's dispatcher.
+/// The rows of the Discover page, the devices that are not added yet first and each part ordered by type and then by
+/// name so the list moves little while results arrive, a line for each discoverer that failed, and which rows show
+/// their included items. Not thread-safe: the page changes it on the renderer's dispatcher.
 /// </summary>
 internal sealed class SubjectDiscoveryList
 {
@@ -22,9 +23,27 @@ internal sealed class SubjectDiscoveryList
 
     public void Add(DiscoveredSubject discovered, SubjectTypeDescriptor descriptor)
     {
-        var row = new SubjectDiscoveryRow(discovered, descriptor);
-        var index = _rows.BinarySearch(row, RowComparer);
-        _rows.Insert(index < 0 ? ~index : index, row);
+        Insert(new SubjectDiscoveryRow(discovered, descriptor));
+    }
+
+    /// <summary>
+    /// Marks the row of the device, found by its subject type and key, as added, with <paramref name="existingSubject"/>
+    /// as the subject that represents it, and moves it to its place among the added devices. Does nothing when the
+    /// list has no such row.
+    /// </summary>
+    public void MarkAdded(DiscoveredSubject discovered, IInterceptorSubject existingSubject)
+    {
+        var index = _rows.FindIndex(row =>
+            row.Discovered.SubjectType == discovered.SubjectType &&
+            string.Equals(row.Discovered.Result.Key, discovered.Result.Key, StringComparison.Ordinal));
+        if (index < 0)
+        {
+            return;
+        }
+
+        var row = _rows[index];
+        _rows.RemoveAt(index);
+        Insert(row with { Discovered = row.Discovered with { ExistingSubject = existingSubject } });
     }
 
     public void AddFailure(SubjectTypeDescriptor descriptor)
@@ -64,8 +83,20 @@ internal sealed class SubjectDiscoveryList
         return itemCount == 1 ? $"{action} 1 included item" : $"{action} {itemCount} included items";
     }
 
+    private void Insert(SubjectDiscoveryRow row)
+    {
+        var index = _rows.BinarySearch(row, RowComparer);
+        _rows.Insert(index < 0 ? ~index : index, row);
+    }
+
     private static int CompareRows(SubjectDiscoveryRow first, SubjectDiscoveryRow second)
     {
+        var byExisting = (first.Discovered.ExistingSubject is not null).CompareTo(second.Discovered.ExistingSubject is not null);
+        if (byExisting != 0)
+        {
+            return byExisting;
+        }
+
         var byType = StringComparer.OrdinalIgnoreCase.Compare(first.Descriptor.DisplayName, second.Descriptor.DisplayName);
         if (byType != 0)
         {
