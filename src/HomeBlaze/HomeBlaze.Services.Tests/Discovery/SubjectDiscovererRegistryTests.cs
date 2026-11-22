@@ -4,6 +4,7 @@ using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Services.Components;
 using HomeBlaze.Services.Discovery;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -13,14 +14,18 @@ namespace HomeBlaze.Services.Tests.Discovery;
 
 public class SubjectDiscovererRegistryTests
 {
-    private static (SubjectDiscovererRegistry Registry, TypeProvider TypeProvider) CreateRegistry(params Type[] types)
+    private static (SubjectDiscovererRegistry Registry, TypeProvider TypeProvider) CreateRegistry(params Type[] types) =>
+        CreateRegistry(NullLogger<SubjectDiscovererRegistry>.Instance, types);
+
+    private static (SubjectDiscovererRegistry Registry, TypeProvider TypeProvider) CreateRegistry(
+        ILogger<SubjectDiscovererRegistry> logger, params Type[] types)
     {
         var typeProvider = new TypeProvider();
         typeProvider.AddTypes([typeof(DiscoveryTestSetupComponent), typeof(OtherDiscoveryTestEditComponent),
             typeof(SplitDiscoveryTestSetupComponent), typeof(SplitDiscoveryTestEditComponent), typeof(EditOnlyDiscoveryTestEditComponent), .. types]);
         var serviceProvider = new ServiceCollection().AddSingleton<TestDependency>().BuildServiceProvider();
         var registry = new SubjectDiscovererRegistry(
-            typeProvider, new SubjectComponentRegistry(typeProvider), serviceProvider, NullLogger<SubjectDiscovererRegistry>.Instance);
+            typeProvider, new SubjectComponentRegistry(typeProvider), serviceProvider, logger);
         return (registry, typeProvider);
     }
 
@@ -61,6 +66,23 @@ public class SubjectDiscovererRegistryTests
 
         // Assert
         Assert.IsType<AcceptedTestDiscoverer>(Assert.Single(discoverers));
+    }
+
+    [Fact]
+    public void WhenTwoDiscoverersFindTheSameSubjectType_ThenTheFirstByFullNameIsUsedAndTheOtherIsLogged()
+    {
+        // Arrange - listed in the other order, so the load order does not decide.
+        var logger = new RecordingLogger();
+        var (registry, _) = CreateRegistry(logger, typeof(InjectedTestDiscoverer), typeof(AcceptedTestDiscoverer));
+
+        // Act
+        var discoverers = registry.GetDiscoverers();
+
+        // Assert
+        Assert.IsType<AcceptedTestDiscoverer>(Assert.Single(discoverers));
+        var error = Assert.Single(logger.Errors);
+        Assert.Contains(nameof(InjectedTestDiscoverer), error, StringComparison.Ordinal);
+        Assert.Contains(nameof(AcceptedTestDiscoverer), error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -116,6 +138,23 @@ public class SubjectDiscovererRegistryTests
         // Assert
         Assert.Same(first, second);
         Assert.IsType<AcceptedTestDiscoverer>(Assert.Single(second));
+    }
+
+    private sealed class RecordingLogger : ILogger<SubjectDiscovererRegistry>
+    {
+        public List<string> Errors { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Error)
+            {
+                Errors.Add(formatter(state, exception));
+            }
+        }
     }
 }
 

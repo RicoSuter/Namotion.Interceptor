@@ -30,8 +30,9 @@ public sealed class SubjectDiscovererRegistry
 
     /// <summary>
     /// Gets one instance of every non-abstract <see cref="ISubjectDiscoverer"/> type whose subject type has a Setup or
-    /// Edit component that implements <see cref="ISubjectDiscoveryComponent"/>. A discoverer that cannot be created,
-    /// or has no such component, is left out and logged as an error.
+    /// Edit component that implements <see cref="ISubjectDiscoveryComponent"/>, at most one per subject type. A
+    /// discoverer that cannot be created, has no such component, or finds a subject type that a discoverer earlier in
+    /// the ordinal order of the full type names already finds, is left out and logged as an error.
     /// </summary>
     /// <remarks>
     /// The discoverers are created once, on the first call, from the types loaded then; types added later are not
@@ -41,13 +42,15 @@ public sealed class SubjectDiscovererRegistry
 
     private ISubjectDiscoverer[] CreateDiscoverers(IReadOnlyCollection<Type> types)
     {
+        // Ordered, so that which of two discoverers for one subject type is used does not depend on the load order.
+        var discovererTypes = types
+            .Where(type => !type.IsAbstract && !type.IsGenericTypeDefinition && typeof(ISubjectDiscoverer).IsAssignableFrom(type))
+            .OrderBy(type => type.FullName, StringComparer.Ordinal);
+
         var discoverers = new List<ISubjectDiscoverer>();
-        foreach (var type in types)
+        var discoverersBySubjectType = new Dictionary<Type, Type>();
+        foreach (var type in discovererTypes)
         {
-            if (type.IsAbstract || type.IsGenericTypeDefinition || !typeof(ISubjectDiscoverer).IsAssignableFrom(type))
-            {
-                continue;
-            }
 
             try
             {
@@ -57,6 +60,15 @@ public sealed class SubjectDiscovererRegistry
                     _logger.LogError(
                         "The subject discoverer {Discoverer} is not used: {SubjectType} has no Setup or Edit component that implements {Interface}.",
                         type, discoverer.SubjectType, nameof(ISubjectDiscoveryComponent));
+                    continue;
+                }
+
+                // The Discover page tells results apart by subject type and key, which is unique within one discoverer.
+                if (!discoverersBySubjectType.TryAdd(discoverer.SubjectType, type))
+                {
+                    _logger.LogError(
+                        "The subject discoverer {Discoverer} is not used: {SubjectType} already has the discoverer {UsedDiscoverer}.",
+                        type, discoverer.SubjectType, discoverersBySubjectType[discoverer.SubjectType]);
                     continue;
                 }
 
