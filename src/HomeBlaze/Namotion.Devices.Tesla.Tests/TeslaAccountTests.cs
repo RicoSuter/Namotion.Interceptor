@@ -63,6 +63,34 @@ public class TeslaAccountTests
     }
 
     [Fact]
+    public async Task WhenPollSucceeds_ThenIconIsGreen()
+    {
+        // Arrange
+        var (account, _, _) = Create();
+
+        // Act
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Success", account.IconColor);
+    }
+
+    [Fact]
+    public async Task WhenPollFails_ThenIconIsRed()
+    {
+        // Arrange
+        var (account, _, _) = Create(new FakeHttpMessageHandler()
+            .Respond(TokenPath, HttpStatusCode.OK, TokenJson)
+            .Respond(ProductsPath, HttpStatusCode.InternalServerError, "{}"));
+
+        // Act
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Error", account.IconColor);
+    }
+
+    [Fact]
     public void WhenNameIsEmpty_ThenTitleShowsTheAccountEmail()
     {
         // Arrange

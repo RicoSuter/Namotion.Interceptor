@@ -152,7 +152,12 @@ public partial class TeslaAccount : BackgroundService,
     public string IconName => "DirectionsCar";
 
     [Derived]
-    public string? IconColor => Status == ServiceStatus.Error ? "Error" : null;
+    public string? IconColor => Status switch
+    {
+        ServiceStatus.Running when IsAuthenticated => "Success",
+        ServiceStatus.Error => "Error",
+        _ => null
+    };
 
     private TeslaPollingSettings PollingSettings => new(ActivePollingInterval, IdlePollingInterval, IdleTimeout, SleepWindow);
 
