@@ -272,7 +272,7 @@ public class TeslaAccountTests
     }
 
     [Fact]
-    public async Task WhenReadingVehicleIsUnauthorizedAfterARefresh_ThenOnlyTheVehicleFailsAndReauthenticationIsNotRequired()
+    public async Task WhenAVehicleKeepsRejectingTheAccessToken_ThenTheTokenIsNotRefreshedForItAndReauthenticationIsNotRequired()
     {
         // Arrange
         var handler = new FakeHttpMessageHandler()
@@ -280,13 +280,18 @@ public class TeslaAccountTests
             .Respond(TokenPath, HttpStatusCode.OK, """{"access_token":"access-2","refresh_token":"refresh-3","expires_in":28800}""")
             .Respond(ProductsPath, HttpStatusCode.OK, FixtureLoader.Load("products.json"))
             .Respond(VehicleDataPath, HttpStatusCode.Unauthorized, """{"error":"unauthorized"}""");
-        var (account, _, _) = Create(handler);
+        var (account, _, time) = Create(handler);
 
         // Act
-        await account.PollOnceAsync(CancellationToken.None);
+        for (var poll = 0; poll < 3; poll++)
+        {
+            await account.PollOnceAsync(CancellationToken.None);
+            time.Advance(TimeSpan.FromMinutes(5));
+        }
 
         // Assert
-        Assert.Equal(2, CountRequests(handler, TokenPath));
+        Assert.Equal(3, CountRequests(handler, VehicleDataPath));
+        Assert.Equal(1, CountRequests(handler, TokenPath));
         Assert.False(account.IsReauthenticationRequired);
         Assert.True(account.IsAuthenticated);
         Assert.Equal(ServiceStatus.Running, account.Status);

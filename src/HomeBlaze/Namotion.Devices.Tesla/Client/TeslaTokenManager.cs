@@ -59,9 +59,23 @@ internal sealed class TeslaTokenManager
     /// </summary>
     /// <exception cref="TeslaReauthenticationRequiredException">Tesla rejected the refresh token.</exception>
     /// <exception cref="TeslaApiException">The call failed, also with a 401 after the refresh.</exception>
-    public async Task<T> CallAsync<T>(Func<string, Task<T>> call, CancellationToken cancellationToken)
+    public Task<T> CallAsync<T>(Func<string, Task<T>> call, CancellationToken cancellationToken) =>
+        CallAsync(call, refreshOnUnauthorized: true, cancellationToken);
+
+    /// <summary>
+    /// Calls the API with an access token. With <paramref name="refreshOnUnauthorized"/>, a 401 refreshes the token once
+    /// and calls again; without, a 401 is thrown as it is, for a call whose access token another call just accepted.
+    /// </summary>
+    /// <exception cref="TeslaReauthenticationRequiredException">Tesla rejected the refresh token.</exception>
+    /// <exception cref="TeslaApiException">The call failed.</exception>
+    public async Task<T> CallAsync<T>(Func<string, Task<T>> call, bool refreshOnUnauthorized, CancellationToken cancellationToken)
     {
         var accessToken = await GetAccessTokenAsync(null, cancellationToken);
+        if (!refreshOnUnauthorized)
+        {
+            return await call(accessToken);
+        }
+
         try
         {
             return await call(accessToken);

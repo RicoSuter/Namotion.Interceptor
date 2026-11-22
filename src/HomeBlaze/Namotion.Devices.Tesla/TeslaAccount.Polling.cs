@@ -268,7 +268,9 @@ public partial class TeslaAccount
         try
         {
             _logger.LogDebug("Reading Tesla vehicle {Vin} (active: {IsActive}).", vehicle.Vin, vehicle.IsActive);
-            if (!await ReadVehicleAsync(tokenManager, vehicle, cancellationToken))
+            // The vehicle list accepted the access token moments ago, so a 401 concerns this vehicle only. Refreshing for it
+            // would rotate and save the refresh token on every read while the vehicle keeps rejecting it.
+            if (!await ReadVehicleAsync(tokenManager, vehicle, refreshOnUnauthorized: false, cancellationToken))
             {
                 _logger.LogDebug("Tesla vehicle {Vin} fell asleep before it was read.", vehicle.Vin);
                 vehicle.VehicleState = TeslaVehicleState.Asleep;
@@ -291,10 +293,10 @@ public partial class TeslaAccount
 
     /// <summary>Reads the data of a vehicle and applies it.</summary>
     /// <returns>False when the vehicle is asleep or offline.</returns>
-    private async Task<bool> ReadVehicleAsync(TeslaTokenManager tokenManager, TeslaVehicle vehicle, CancellationToken cancellationToken)
+    private async Task<bool> ReadVehicleAsync(TeslaTokenManager tokenManager, TeslaVehicle vehicle, bool refreshOnUnauthorized, CancellationToken cancellationToken)
     {
         var data = await tokenManager.CallAsync(
-            accessToken => _apiClient.GetVehicleDataAsync(accessToken, vehicle.Id, cancellationToken), cancellationToken);
+            accessToken => _apiClient.GetVehicleDataAsync(accessToken, vehicle.Id, cancellationToken), refreshOnUnauthorized, cancellationToken);
         if (data is null)
         {
             return false;
@@ -352,7 +354,7 @@ public partial class TeslaAccount
             var deadline = _timeProvider.GetUtcNow() + WakeUpTimeout;
             while (true)
             {
-                if (await ReadVehicleAsync(tokenManager, vehicle, cancellationToken))
+                if (await ReadVehicleAsync(tokenManager, vehicle, refreshOnUnauthorized: true, cancellationToken))
                 {
                     var policy = GetPollingPolicy(vehicle);
                     policy.OnActivityObserved();
