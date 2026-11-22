@@ -54,7 +54,7 @@ public abstract class SubjectDiscoverer<TSubject, TResult> : ISubjectDiscoverer
     /// Scans and yields each device as soon as it is known. A device may be yielded more than once.
     /// </summary>
     /// <param name="scan">The scan, whose shared services answer each query once.</param>
-    /// <param name="cancellationToken">Canceled when the user leaves the page or the scan reaches its time limit.</param>
+    /// <param name="cancellationToken">Canceled when the scan is canceled or reaches its time limit.</param>
     protected abstract IAsyncEnumerable<TResult> DiscoverAsync(DiscoveryScan scan, CancellationToken cancellationToken);
 
     /// <summary>

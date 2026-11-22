@@ -70,16 +70,17 @@ internal sealed class MulticastDnsServiceCollector
                 pointer.Target.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
             .DistinctBy(entry => ((PointerRecord)entry.Record).Target, StringComparer.OrdinalIgnoreCase)
             .Take(MaximumServices);
+        var dnsRecords = records.Select(entry => entry.Record);
 
         var services = new List<MulticastDnsService>();
         foreach (var (record, sender) in instances)
         {
             var instanceName = ((PointerRecord)record).Target;
-            var service = records.Select(entry => entry.Record).OfType<ServiceRecord>()
+            var service = dnsRecords.OfType<ServiceRecord>()
                 .FirstOrDefault(candidate => IsName(candidate.Name, instanceName));
 
             var properties = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var entry in records.Select(item => item.Record).OfType<TextRecord>()
+            foreach (var entry in dnsRecords.OfType<TextRecord>()
                 .Where(text => IsName(text.Name, instanceName))
                 .SelectMany(text => text.Entries))
             {
@@ -95,7 +96,7 @@ internal sealed class MulticastDnsServiceCollector
 
             IPAddress[] addresses = service is null
                 ? []
-                : records.Select(entry => entry.Record).OfType<AddressRecord>()
+                : dnsRecords.OfType<AddressRecord>()
                     .Where(address => IsName(address.Name, service.Target))
                     .Select(address => address.Address)
                     .Distinct()

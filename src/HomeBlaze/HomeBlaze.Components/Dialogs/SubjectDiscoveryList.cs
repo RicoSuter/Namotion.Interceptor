@@ -36,13 +36,8 @@ internal sealed class SubjectDiscoveryList
         _failures.Clear();
     }
 
-    private static int CompareRows(SubjectDiscoveryRow? first, SubjectDiscoveryRow? second)
+    private static int CompareRows(SubjectDiscoveryRow first, SubjectDiscoveryRow second)
     {
-        if (first is null || second is null)
-        {
-            return first is null ? (second is null ? 0 : -1) : 1;
-        }
-
         var byType = StringComparer.OrdinalIgnoreCase.Compare(first.Descriptor.DisplayName, second.Descriptor.DisplayName);
         if (byType != 0)
         {

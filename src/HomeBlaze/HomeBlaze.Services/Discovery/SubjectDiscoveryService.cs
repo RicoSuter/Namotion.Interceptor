@@ -12,7 +12,7 @@ public sealed class SubjectDiscoveryService
     /// <summary>
     /// The longest a scan runs. It ends earlier once every discoverer has completed.
     /// </summary>
-    public static readonly TimeSpan ScanTimeout = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan ScanTimeout = TimeSpan.FromSeconds(30);
 
     private readonly Func<IReadOnlyList<ISubjectDiscoverer>> _getDiscoverers;
     private readonly ISsdpSearch _ssdpSearch;

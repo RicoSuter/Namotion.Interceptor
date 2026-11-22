@@ -507,7 +507,6 @@ namespace HomeBlaze.Services.Discovery
     }
     public sealed class SubjectDiscoveryService
     {
-        public static readonly System.TimeSpan ScanTimeout;
         public SubjectDiscoveryService(HomeBlaze.Services.Discovery.SubjectDiscovererRegistry registry, HomeBlaze.Abstractions.Discovery.ISsdpSearch ssdpSearch, HomeBlaze.Abstractions.Discovery.IMulticastDnsBrowser multicastDnsBrowser, System.TimeProvider timeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Services.Discovery.SubjectDiscoveryService> logger) { }
         public bool HasDiscoverers(System.Collections.Generic.IReadOnlyCollection<System.Type> subjectTypes) { }
         public System.Threading.Tasks.Task ScanAsync(System.Collections.Generic.IReadOnlyCollection<System.Type> subjectTypes, System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.IInterceptorSubject> existingSubjects, System.Action<HomeBlaze.Abstractions.Discovery.DiscoveredSubject> onResult, System.Action<System.Type> onFailure, System.Threading.CancellationToken cancellationToken) { }
