@@ -1,0 +1,39 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(BluelinkAccount))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.DirectionsCar" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(Account?.Title ?? "Bluelink")</MudText>
+            <MudSpacer />
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@GetStatusColor(Account?.Status)">
+                @Account?.Status
+            </MudChip>
+        </MudStack>
+        <MudText Typo="Typo.body2">@(Account?.Vehicles.Count ?? 0) vehicle(s), @(Account?.RequestsToday ?? 0) of @(Account?.DailyRequestLimit ?? 0) requests today</MudText>
+        @if (Account is { IsReauthenticationRequired: true })
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">Re-authentication required: replace the credentials in the settings.</MudAlert>
+        }
+        else if (Account?.StatusMessage is { } message)
+        {
+            <MudText Typo="Typo.caption">@message</MudText>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private BluelinkAccount? Account => Subject as BluelinkAccount;
+
+    private static Color GetStatusColor(global::HomeBlaze.Abstractions.ServiceStatus? status) => status switch
+    {
+        global::HomeBlaze.Abstractions.ServiceStatus.Running => Color.Success,
+        global::HomeBlaze.Abstractions.ServiceStatus.Unavailable => Color.Warning,
+        global::HomeBlaze.Abstractions.ServiceStatus.Error => Color.Error,
+        _ => Color.Default
+    };
+}

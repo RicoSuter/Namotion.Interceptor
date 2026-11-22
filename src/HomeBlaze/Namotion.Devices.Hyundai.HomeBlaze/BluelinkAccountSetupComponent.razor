@@ -1,0 +1,50 @@
+@attribute [SubjectComponent(SubjectComponentType.Setup, typeof(BluelinkAccount))]
+@implements ISubjectEditComponent
+
+<BluelinkCredentialsPanel OnConnected="OnConnected" OnReset="OnReset" />
+
+@code {
+    private BluelinkConnection? _connection;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private BluelinkAccount? Account => Subject as BluelinkAccount;
+
+    public bool IsValid => _connection is not null;
+
+    public bool IsDirty => _connection is not null;
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    private void OnConnected(BluelinkConnection connection)
+    {
+        _connection = connection;
+        IsValidChanged?.Invoke(true);
+        IsDirtyChanged?.Invoke(true);
+    }
+
+    private void OnReset()
+    {
+        _connection = null;
+        IsValidChanged?.Invoke(false);
+        IsDirtyChanged?.Invoke(false);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Account is not null && _connection is not null)
+        {
+            // The name stays empty, so that the title shows the email of the account.
+            Account.ReplaceCredentials(_connection);
+            _connection = null;
+        }
+
+        return Task.CompletedTask;
+    }
+}
