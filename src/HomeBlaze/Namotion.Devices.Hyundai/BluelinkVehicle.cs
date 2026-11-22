@@ -111,7 +111,7 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
 
     /// <summary>Asks the vehicle to upload its status, then reads it. Reaches the vehicle and costs 12 V battery.</summary>
     [Operation(Title = "Refresh", Icon = "Refresh", RequiresConfirmation = true,
-        Description = "Asks the vehicle to upload its status. Reaches the vehicle and costs 12 V battery, so use it rarely. Refused while the 12 V battery is low.")]
+        Description = "Asks the vehicle to upload its status. Reaches the vehicle and costs 12 V battery, so use it rarely. Refused while the 12 V battery is low or its level is unknown.")]
     public Task RefreshAsync(CancellationToken cancellationToken) => Commands.RefreshAsync(this, cancellationToken);
 
     /// <summary>Marks the vehicle busy unless another operation of it runs; a true result must be paired with <see cref="EndOperation"/>.</summary>

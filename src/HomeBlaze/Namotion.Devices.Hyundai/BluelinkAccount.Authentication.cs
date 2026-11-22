@@ -132,8 +132,9 @@ public partial class BluelinkAccount
     }
 
     /// <summary>
-    /// Stores rotated tokens in the configuration before the token manager hands out the new access token. A failed
-    /// write throws, so that the manager retries only the write with the next call.
+    /// Stores rotated tokens in the configuration before the token manager hands out the new access token. A failing
+    /// writer throws, so that the manager retries only the write with the next call; a writer that did not save marks
+    /// the account unsaved, so that the next poll retries it.
     /// </summary>
     private async Task PersistTokensAsync(BluelinkTokenManager tokenManager, BluelinkTokenSet tokens)
     {

@@ -95,7 +95,8 @@ public partial class BluelinkAccount
 
     /// <summary>
     /// Sends a command, waits for its result in the notification records and reads the stored status once. A CCS2
-    /// command that needs the PIN fails before any call when no PIN is stored.
+    /// command that needs the PIN fails before any call when no PIN is stored. Once the vehicle confirmed the command,
+    /// a failing status read is logged and does not fail the command, unless it concerns the whole account.
     /// </summary>
     private async Task RunCommandAsync(BluelinkVehicle vehicle, string operation, bool needsPin, Func<BluelinkVehicleRequest, string?, Task<string>> send, CancellationToken cancellationToken)
     {
@@ -115,7 +116,14 @@ public partial class BluelinkAccount
             }, cancellationToken);
 
             await WaitForCommandResultAsync(tokenManager, vehicle, messageId, cancellationToken);
-            await ReadVehicleAsync(tokenManager, vehicle, cancellationToken);
+            try
+            {
+                await ReadVehicleAsync(tokenManager, vehicle, cancellationToken);
+            }
+            catch (Exception exception) when (!IsAccountFailure(exception, cancellationToken))
+            {
+                _logger.LogWarning(exception, "The Bluelink vehicle {Vin} executed the command {Operation}, but reading its status afterwards failed.", vehicle.Vin, operation);
+            }
         }, cancellationToken);
     }
 

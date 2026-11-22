@@ -9,7 +9,7 @@ namespace Namotion.Devices.Hyundai;
 public sealed record BluelinkVehicleSummary(string Vin, string? Nickname, string? Model, string? Type, BluelinkProtocol Protocol)
 {
     /// <summary>Whether the integration supports the vehicle; only battery electric vehicles are supported.</summary>
-    public bool IsSupported => Type == "EV";
+    public bool IsSupported => Type == BluelinkVehicleInfo.ElectricType;
 
     /// <summary>The last six characters of the VIN.</summary>
     public string VinSuffix => BluelinkValues.VinSuffix(Vin);

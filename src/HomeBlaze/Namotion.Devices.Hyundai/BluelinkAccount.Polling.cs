@@ -238,7 +238,8 @@ public partial class BluelinkAccount
             var location = await tokenManager.CallAsync(accessToken => _apiClient.GetParkLocationAsync(CreateRequest(tokenManager, accessToken, vehicle), cancellationToken), cancellationToken);
             vehicle.ApplyLocation(location);
         }
-        catch (Exception exception) when (exception is BluelinkApiException or TimeoutException or HttpRequestException && !IsAccountFailure(exception, cancellationToken))
+        catch (Exception exception) when (exception is BluelinkRequestLimitException ||
+            exception is BluelinkApiException or TimeoutException or HttpRequestException && !IsAccountFailure(exception, cancellationToken))
         {
             // Best effort: some accounts answer the parking location with an error, and the status was already applied.
             _logger.LogDebug(exception, "Reading the parking location of the Bluelink vehicle {Vin} failed.", vehicle.Vin);

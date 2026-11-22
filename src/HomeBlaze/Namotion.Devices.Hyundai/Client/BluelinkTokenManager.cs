@@ -6,9 +6,9 @@ namespace Namotion.Devices.Hyundai.Client;
 /// <summary>
 /// Caches the CCS access token and refreshes the token set 6 minutes before the CCI or CCS token expires; the server
 /// rejects tokens earlier than their stated lifetime. The rotated set is persisted before the new access token is
-/// handed out. A rejected refresh (a 4xx answer other than 408 and 429) falls back to one sign in through the login
-/// delegate; every other failure propagates unchanged for the caller to retry later. Not thread-safe: call it only
-/// while the account lock is held.
+/// handed out. A rejected refresh (a 4xx answer other than 408, 429 and a rejected app fingerprint, 9035 to 9037) falls
+/// back to one sign in through the login delegate; every other failure propagates unchanged for the caller to retry
+/// later. Not thread-safe: call it only while the account lock is held.
 /// </summary>
 internal sealed class BluelinkTokenManager
 {

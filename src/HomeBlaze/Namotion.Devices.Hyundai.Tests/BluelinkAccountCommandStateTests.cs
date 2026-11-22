@@ -163,6 +163,29 @@ public class BluelinkAccountCommandStateTests
     }
 
     [Fact]
+    public async Task WhenTheAccountIsDisposedDuringARefresh_ThenTheRefreshCompletesBeforeTheClientIsDisposed()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        var heldResponse = TestAccount.CreateHeldResponse();
+        handler.RespondAfter(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1"), heldResponse.Task);
+        var refresh = account.Vehicles[Kona].RefreshAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Count(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1")) == 1);
+
+        // Act
+        account.Dispose();
+        heldResponse.SetResult(TestAccount.CreateResponse(HttpStatusCode.OK, BluelinkResponses.Success()));
+        await refresh;
+
+        // Assert (the next poll runs after the deferred disposal)
+        Assert.Equal(2, handler.Count(BluelinkResponses.StatusPath("VEHICLE-1")));
+        await account.PollOnceAsync(CancellationToken.None);
+        Assert.Contains("disposed", account.StatusMessage, StringComparison.Ordinal);
+        Assert.Equal(2, handler.Count(BluelinkResponses.StatusPath("VEHICLE-1")));
+    }
+
+    [Fact]
     public async Task WhenRefreshIsAskedWithALowAuxiliaryBattery_ThenItThrowsBeforeAnyRequest()
     {
         // Arrange

@@ -100,7 +100,7 @@ public partial class BluelinkAccount : BackgroundService,
     [Configuration(IsSecret = true)]
     public partial string Tokens { get; set; }
 
-    /// <summary>The device ID registered at setup.</summary>
+    /// <summary>The device ID registered at setup, or again by a poll or command after Hyundai answered 4002.</summary>
     [Configuration]
     public partial string DeviceId { get; set; }
 
@@ -209,10 +209,26 @@ public partial class BluelinkAccount : BackgroundService,
         }
     }
 
+    /// <summary>Stops polling; a poll, refresh or command in progress keeps the HTTP client until it completes.</summary>
     public override void Dispose()
     {
         // _lock is not disposed: it never creates a wait handle, and a command still running releases it afterwards.
         base.Dispose();
-        _httpClient.Dispose();
+        _ = DisposeHttpClientWhenIdleAsync();
+    }
+
+    // Completes synchronously when _lock is free. Otherwise the holder may be refreshing the tokens, and a client
+    // disposed after Hyundai rotated them would lose the rotated set, so the client is disposed once _lock is released.
+    private async Task DisposeHttpClientWhenIdleAsync()
+    {
+        await _lock.WaitAsync(CancellationToken.None);
+        try
+        {
+            _httpClient.Dispose();
+        }
+        finally
+        {
+            _lock.Release();
+        }
     }
 }

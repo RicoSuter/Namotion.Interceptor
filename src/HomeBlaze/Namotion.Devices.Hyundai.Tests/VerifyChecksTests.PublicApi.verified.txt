@@ -265,7 +265,8 @@ namespace Namotion.Devices.Hyundai
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Asks the vehicle to upload its status. Reaches the vehicle and costs 12 V battery" +
-            ", so use it rarely. Refused while the 12 V battery is low.", Icon="Refresh", RequiresConfirmation=true, Title="Refresh")]
+            ", so use it rarely. Refused while the 12 V battery is low or its level is unknow" +
+            "n.", Icon="Refresh", RequiresConfirmation=true, Title="Refresh")]
         public System.Threading.Tasks.Task RefreshAsync(System.Threading.CancellationToken cancellationToken) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }

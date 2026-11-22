@@ -21,8 +21,11 @@ internal readonly record struct BluelinkVehicleRequest(string AccessToken, strin
 /// <summary>A vehicle of the vehicle list; a blank nickname or model is null.</summary>
 internal sealed record BluelinkVehicleInfo(string VehicleId, string Vin, string? Nickname, string? Model, string? Type, BluelinkProtocol Protocol)
 {
-    /// <summary>Whether the vehicle is a battery electric vehicle, the only type the integration supports.</summary>
-    public bool IsElectric => Type == "EV";
+    /// <summary>The type of a battery electric vehicle, the only type the integration supports.</summary>
+    public const string ElectricType = "EV";
+
+    /// <summary>Whether the vehicle is a battery electric vehicle.</summary>
+    public bool IsElectric => Type == ElectricType;
 }
 
 /// <summary>

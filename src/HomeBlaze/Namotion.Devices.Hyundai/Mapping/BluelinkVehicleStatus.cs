@@ -7,8 +7,7 @@ internal sealed record BluelinkTireStatus(bool? IsPressureLow, decimal? Pressure
 
 /// <summary>
 /// The values of one stored status, in HomeBlaze units: fractions from 0 to 1, km, W, °C, bar. Null when not reported.
-/// Hyundai reports the rear doors and windows as left and right; the left ones are the driver rear ones, which assumes a
-/// left-hand drive vehicle. Tires keep the physical sides.
+/// Doors, windows and tires are named as in <see cref="BluelinkVehicleBody"/>.
 /// </summary>
 internal sealed record BluelinkVehicleStatus
 {
