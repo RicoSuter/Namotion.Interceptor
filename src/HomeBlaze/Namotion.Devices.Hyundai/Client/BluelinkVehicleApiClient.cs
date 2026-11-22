@@ -1,3 +1,4 @@
+// Derived from hyundai_kia_connect_api (MIT License, Copyright (c) 2021, Fuat Akgun); see THIRD-PARTY-NOTICES.md.
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;

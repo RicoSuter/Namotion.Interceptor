@@ -221,7 +221,7 @@ One vehicle with the default interval needs about 100 calls a day. `Refresh` nee
 
 ## API Reference
 
-The integration uses region 1 ("Europe") of the community library hyundai_kia_connect_api as reference. Region 9 (GSPA) is not used, because it rejects vehicles without CCS2.
+The integration uses region 1 ("Europe") of the community library [hyundai_kia_connect_api](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api) as reference. Its status parsing rules, sign in flow and request payloads are derived from that library and used under its MIT license, which the library ships in `THIRD-PARTY-NOTICES.md`. Region 9 (GSPA) is not used, because it rejects vehicles without CCS2.
 
 | Endpoint | Host | Purpose |
 |----------|------|---------|
