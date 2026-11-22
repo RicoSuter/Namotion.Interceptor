@@ -26,6 +26,9 @@ public sealed record FritzBoxDiscoveryResult(string HostAddress, string? Friendl
 
     /// <inheritdoc />
     public string? Detail => IsRepeater ? $"{HostAddress} (repeater)" : HostAddress;
+
+    /// <inheritdoc />
+    public IReadOnlyList<DiscoveredItem> IncludedItems { get; init; } = [];
 }
 
 /// <summary>

@@ -27,6 +27,8 @@ The router's certificate key is pinned on first connection; see [Certificate Tru
 
 The Discover page of the create dialog finds FRITZ!Box routers and repeaters over SSDP and at `fritz.box`. A router that is already added is recognized by its unique device name, so also after it moved to another address, or by its host address. A router added before discovery existed has no unique device name stored, so it is recognized only by its host address: one configured as `fritz.box` shows as new when SSDP finds it under its IP address.
 
+In a FRITZ!Box mesh, the clients of the repeaters already appear under the router. Discovery cannot see which mesh a repeater belongs to, so when it finds exactly one router, it lists the repeaters under that router, with their name and address, instead of as devices of their own. With several routers or none, each repeater is listed as a device of its own, and picking one explains when to add it.
+
 ## Configuration
 
 | Property | Type | Default | Description |

@@ -253,6 +253,7 @@ namespace Namotion.Devices.FritzBox
         public string DisplayName { get; }
         public string? FriendlyName { get; init; }
         public string HostAddress { get; init; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.DiscoveredItem> IncludedItems { get; init; }
         public bool IsRepeater { get; init; }
         public string Key { get; }
         public string? Model { get; init; }

@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Discovery;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -51,5 +52,74 @@ public class FritzBoxDiscovererTests
         Assert.Equal("uuid:r", result.Key);
         Assert.Equal("FRITZ!Repeater 1200", result.DisplayName);
         Assert.Equal("192.168.178.3 (repeater)", result.Detail);
+    }
+
+    [Fact]
+    public void WhenOneRouterAndRepeatersAreFound_ThenTheRepeatersAreIncludedItemsOfTheRouter()
+    {
+        // Arrange
+        var router = Found("192.168.178.1", "uuid:router");
+        FritzBoxDiscoveryResult[] results =
+        [
+            router,
+            new("192.168.178.4", "Repeater Office", "FRITZ!Repeater 1200 AX", "uuid:office", IsRepeater: true),
+            new("192.168.178.3", null, "FRITZ!Repeater 600", "uuid:attic", IsRepeater: true)
+        ];
+
+        // Act
+        var included = FritzBoxDiscoverer.IncludeRepeaters(results);
+
+        // Assert
+        var single = Assert.Single(included);
+        Assert.Equal(router.Key, single.Key);
+        Assert.Equal("192.168.178.1", single.Detail);
+        Assert.Equal(
+            [new DiscoveredItem("FRITZ!Repeater 600", "192.168.178.3"), new DiscoveredItem("Repeater Office", "192.168.178.4")],
+            single.IncludedItems);
+    }
+
+    [Fact]
+    public void WhenTwoRoutersAreFound_ThenTheRepeatersStayResultsOfTheirOwn()
+    {
+        // Arrange
+        FritzBoxDiscoveryResult[] results =
+        [
+            Found("192.168.178.1", "uuid:first"),
+            Found("192.168.179.1", "uuid:second"),
+            new("192.168.178.3", null, "FRITZ!Repeater 600", "uuid:repeater", IsRepeater: true)
+        ];
+
+        // Act
+        var included = FritzBoxDiscoverer.IncludeRepeaters(results);
+
+        // Assert
+        Assert.Equal(results, included);
+        Assert.All(included, result => Assert.Empty(result.IncludedItems));
+    }
+
+    [Fact]
+    public void WhenOnlyARepeaterIsFound_ThenItStaysAResultOfItsOwn()
+    {
+        // Arrange
+        FritzBoxDiscoveryResult[] results = [new("192.168.178.3", null, "FRITZ!Repeater 600", "uuid:repeater", IsRepeater: true)];
+
+        // Act
+        var included = FritzBoxDiscoverer.IncludeRepeaters(results);
+
+        // Assert
+        Assert.Equal(results, included);
+    }
+
+    [Fact]
+    public void WhenOnlyARouterIsFound_ThenItIncludesNothing()
+    {
+        // Arrange
+        FritzBoxDiscoveryResult[] results = [Found("192.168.178.1", "uuid:router")];
+
+        // Act
+        var included = FritzBoxDiscoverer.IncludeRepeaters(results);
+
+        // Assert
+        Assert.Empty(Assert.Single(included).IncludedItems);
     }
 }
