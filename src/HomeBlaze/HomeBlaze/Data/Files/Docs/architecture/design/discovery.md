@@ -153,7 +153,7 @@ The picker page of `SubjectSetupDialog` gets a toggle at the top: All types or D
 
 ### Handoff
 
-Picking a row calls the existing `SelectType` for the result's type and keeps the `DiscoveredSubject`.
+Picking a row opens the configure page for the result's type, as picking the type does, and keeps the `DiscoveredSubject`.
 
 - `SubjectEditPanel` has a dedicated `DiscoveryResult` parameter, not an `EditorParameters` entry. It passes the result on as the `DiscoveryResult` parameter of the hosted component only when `SubjectComponentRegistration.TakesDiscoveryResults` is true for that component, and never otherwise, because `DynamicComponent` rejects a parameter the component does not declare. That property is the one place that decides whether a component takes results, and the registry uses it as well.
 - The name field suggests the result's `DisplayName` when that is a valid, unused name, and the type's usual suggestion otherwise. A name the user typed is kept.
@@ -202,7 +202,8 @@ Unit tests, without sockets:
 
 - The base class keeps only subjects of its type and sets `ExistingSubject` from `Matches`
 - The registry finds discoverers through `TypeProvider` and applies its exclusion rules
-- `DiscoveryScan` shares in-flight queries, isolates failing discoverers, honors cancellation and ends at its deadline, driven by a `TimeProvider` the test advances
+- `DiscoveryScan` shares in-flight queries between discoverers
+- `SubjectDiscoveryService` isolates failing discoverers, honors cancellation and ends at its deadline, driven by a `TimeProvider` the test advances
 - mDNS packet parsing from captured bytes, including name compression, malformed packets and the caps
 - Each discoverer against fake `ISsdpSearch`, `IMulticastDnsBrowser` and HTTP handlers, including its `Matches` rules
 
