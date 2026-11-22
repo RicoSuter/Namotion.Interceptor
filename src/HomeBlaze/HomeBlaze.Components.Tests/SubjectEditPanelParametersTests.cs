@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Components.Editors;
 using Xunit;
 
@@ -46,5 +47,29 @@ public class SubjectEditPanelParametersTests
 
         // Assert
         Assert.True((bool)parameters["IsCreating"]!);
+    }
+
+    [Fact]
+    public void WhenADiscoveryResultIsGiven_ThenItIsPassedUnderItsParameterName()
+    {
+        // Arrange
+        var result = new FoundDevice();
+
+        // Act
+        var parameters = SubjectEditPanel.CreateHostedComponentParameters(true, null, result);
+
+        // Assert
+        Assert.Equal(2, parameters.Count);
+        Assert.Same(result, parameters["DiscoveryResult"]);
+        Assert.True((bool)parameters["IsCreating"]!);
+    }
+
+    private sealed class FoundDevice : IDiscoveryResult
+    {
+        public string Key => "device";
+
+        public string DisplayName => "Device";
+
+        public string? Detail => null;
     }
 }

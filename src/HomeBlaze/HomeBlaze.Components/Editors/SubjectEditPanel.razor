@@ -1,5 +1,6 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Services
+@using HomeBlaze.Abstractions.Discovery
 
 @implements IAsyncDisposable
 
@@ -38,6 +39,7 @@
 
 @code {
     private const string IsCreatingParameterName = "IsCreating";
+    private const string DiscoveryResultParameterName = nameof(ISubjectDiscoveryComponent.DiscoveryResult);
 
     // Shared instances, for the reason given at _mergedParameters.
     private static readonly Dictionary<string, object?> CreatingParameters = new() { [IsCreatingParameterName] = true };
@@ -59,6 +61,12 @@
     [Parameter] public IReadOnlyDictionary<string, object?>? EditorParameters { get; set; }
 
     /// <summary>
+    /// Gets or sets the device the user picked on the Discover page, or null. It reaches the hosted component only
+    /// when that implements <see cref="ISubjectDiscoveryComponent"/>.
+    /// </summary>
+    [Parameter] public IDiscoveryResult? DiscoveryResult { get; set; }
+
+    /// <summary>
     /// Raised with the current validity once the hosted editor is ready, and again whenever the validity changes.
     /// </summary>
     /// <remarks>
@@ -77,9 +85,10 @@
     private bool? _reportedIsValid;
     private Func<Task> _refreshIsValid = () => Task.CompletedTask;
     // SubjectComponent builds the parameters of the hosted component again whenever it is given another instance, so
-    // the merged dictionary is kept until EditorParameters or IsCreating change.
+    // the merged dictionary is kept until EditorParameters, IsCreating or the discovery result change.
     private IReadOnlyDictionary<string, object?>? _mergedEditorParameters;
     private bool _mergedIsCreating;
+    private IDiscoveryResult? _mergedDiscoveryResult;
     private Dictionary<string, object?>? _mergedParameters;
 
     private SubjectComponentType? HostedComponentType
@@ -103,39 +112,64 @@
 
     private Dictionary<string, object?> GetHostedComponentParameters()
     {
-        if (EditorParameters is null)
+        var discoveryResult = GetAcceptedDiscoveryResult();
+        if (EditorParameters is null && discoveryResult is null)
         {
             return CreateHostedComponentParameters(IsCreating, null);
         }
 
         if (_mergedParameters is null ||
             !ReferenceEquals(_mergedEditorParameters, EditorParameters) ||
-            _mergedIsCreating != IsCreating)
+            _mergedIsCreating != IsCreating ||
+            !ReferenceEquals(_mergedDiscoveryResult, discoveryResult))
         {
             _mergedEditorParameters = EditorParameters;
             _mergedIsCreating = IsCreating;
-            _mergedParameters = CreateHostedComponentParameters(IsCreating, EditorParameters);
+            _mergedDiscoveryResult = discoveryResult;
+            _mergedParameters = CreateHostedComponentParameters(IsCreating, EditorParameters, discoveryResult);
         }
 
         return _mergedParameters;
     }
 
+    private IDiscoveryResult? GetAcceptedDiscoveryResult()
+    {
+        // Blazor throws for a parameter the hosted component does not declare.
+        if (DiscoveryResult is null || Subject is null || HostedComponentType is not { } componentType)
+        {
+            return null;
+        }
+
+        var registration = ComponentRegistry.GetComponent(Subject.GetType(), componentType);
+        return registration is not null && typeof(ISubjectDiscoveryComponent).IsAssignableFrom(registration.ComponentType)
+            ? DiscoveryResult
+            : null;
+    }
+
     /// <summary>
-    /// Creates the parameters of the hosted component: the <c>IsCreating</c> entry and the given editor parameters.
-    /// Returns a shared instance when there are no editor parameters.
+    /// Creates the parameters of the hosted component: the <c>IsCreating</c> entry, the given editor parameters and
+    /// the discovery result when one is given. Returns a shared instance when there are neither.
     /// </summary>
     internal static Dictionary<string, object?> CreateHostedComponentParameters(
-        bool isCreating, IReadOnlyDictionary<string, object?>? editorParameters)
+        bool isCreating, IReadOnlyDictionary<string, object?>? editorParameters, IDiscoveryResult? discoveryResult = null)
     {
-        if (editorParameters is null)
+        if (editorParameters is null && discoveryResult is null)
         {
             return isCreating ? CreatingParameters : EditingParameters;
         }
 
-        var parameters = new Dictionary<string, object?>(editorParameters.Count + 1);
-        foreach (var (name, value) in editorParameters)
+        var parameters = new Dictionary<string, object?>((editorParameters?.Count ?? 0) + 2);
+        if (editorParameters is not null)
         {
-            parameters[name] = value;
+            foreach (var (name, value) in editorParameters)
+            {
+                parameters[name] = value;
+            }
+        }
+
+        if (discoveryResult is not null)
+        {
+            parameters[DiscoveryResultParameterName] = discoveryResult;
         }
 
         parameters[IsCreatingParameterName] = isCreating;
