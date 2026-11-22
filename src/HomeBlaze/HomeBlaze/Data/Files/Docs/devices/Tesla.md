@@ -129,7 +129,7 @@ Every value has one path. The vehicle holds its identity, the odometer and the l
 | `Manufacturer`, `Model`, `ProductCode` | | `Tesla`, the model name from the specification (Model 3, Model Y, Model S, Model X, Cybertruck) and the trim badging. `Model` and `ProductCode` are `null` until the first read of the vehicle data, because the cached data does not carry the specification. |
 | `SoftwareVersion`, `AvailableSoftwareUpdate` | | Installed version and the version of an available update |
 
-The title is the name set in the vehicle, else the display name of the account, else the model with the last six characters of the VIN.
+The title is the name set in the vehicle, else the display name of the account, else the model and the last six characters of the VIN, such as "Model 3: 123456".
 
 ### Charge
 

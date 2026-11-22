@@ -139,7 +139,7 @@ public class TeslaVehicleTests
         Assert.Equal("Model 3", vehicle.Model);
         Assert.Equal("74d", vehicle.ProductCode);
         Assert.Null(vehicle.VehicleName); // empty in the fixture
-        Assert.Equal("Model 3 000001", vehicle.Title); // no vehicle name and no display name
+        Assert.Equal("Model 3: 000001", vehicle.Title); // no vehicle name and no display name
         Assert.Equal(FixtureTime, vehicle.LastUpdated); // the newest section timestamp, not the read time
     }
 
@@ -213,7 +213,7 @@ public class TeslaVehicleTests
 
         // Assert
         Assert.Equal("Garage Car", vehicle.Title);
-        Assert.Equal("Tesla 000001", new TeslaVehicle(1, Vin, TimeProvider.System, NullLogger.Instance).Title);
+        Assert.Equal("Tesla: 000001", new TeslaVehicle(1, Vin, TimeProvider.System, NullLogger.Instance).Title);
     }
 
     [Fact]
