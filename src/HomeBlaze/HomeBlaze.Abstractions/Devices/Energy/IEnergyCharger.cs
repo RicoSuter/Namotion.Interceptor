@@ -9,6 +9,6 @@ namespace HomeBlaze.Abstractions.Devices.Energy;
 /// </summary>
 [SubjectAbstraction]
 [Description("Energy charger device with plug-in and charging state.")]
-public interface IEnergyCharger : IEnergyChargerState
+public interface IEnergyCharger : IChargingState
 {
 }

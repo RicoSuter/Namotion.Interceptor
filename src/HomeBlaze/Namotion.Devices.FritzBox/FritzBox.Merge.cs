@@ -7,17 +7,18 @@ public partial class FritzBox
 {
     // Read and written by the polling loop only.
     private string? _stateSerialNumber;
+    private IReadOnlyDictionary<string, string>? _filterProfiles;
 
     /// <summary>
     /// Writes one poll onto the subjects. Existing subjects are patched in place, and a collection is replaced only
     /// when its members change. Called by the polling loop only.
     /// </summary>
     /// <param name="snapshot">The values the poll read.</param>
-    /// <param name="wlanCommandGeneration">
-    /// <see cref="WlanCommandGeneration"/> read before the poll started. A switch state read before a later command is
-    /// stale and not written.
+    /// <param name="commandGeneration">
+    /// <see cref="CommandGeneration"/> read before the poll started. A switch state or internet access read before a
+    /// later command is stale and not written.
     /// </param>
-    internal void ApplySnapshot(FritzBoxSnapshot snapshot, long wlanCommandGeneration)
+    internal void ApplySnapshot(FritzBoxSnapshot snapshot, long commandGeneration)
     {
         if (snapshot.Router.SerialNumber is { } serialNumber)
         {
@@ -34,14 +35,17 @@ public partial class FritzBox
         var hosts = IndexHosts(snapshot.Hosts);
 
         // The owning collection first: a new client gets its parent edge from it before an access point shares it.
-        ApplyClients(SelectClientHosts(hosts, snapshot.Mesh), snapshot.Mesh);
+        // A poll that could not read the profiles keeps the last names, so a transient fault does not clear them.
+        _filterProfiles = snapshot.FilterProfiles ?? _filterProfiles;
+        ApplyClients(SelectClientHosts(hosts, snapshot.Mesh), snapshot.Mesh, _filterProfiles, commandGeneration);
         ApplyAccessPoints(snapshot.Mesh, hosts);
-        ApplyWlans(snapshot.Wlans, wlanCommandGeneration);
+        ApplyWlans(snapshot.Wlans, commandGeneration);
     }
 
     private void ClearRouterState()
     {
         _stateSerialNumber = null;
+        _filterProfiles = null;
         Clients = new Dictionary<string, FritzBoxClient>(StringComparer.Ordinal);
         AccessPoints = new Dictionary<string, FritzBoxAccessPoint>(StringComparer.Ordinal);
         Wlans = new Dictionary<string, FritzBoxWlan>(StringComparer.Ordinal);
@@ -133,17 +137,16 @@ public partial class FritzBox
     /// is removed on the next, so that its final absence is recorded: history resolves the path of a change only after
     /// the change is written, and skips a subject that is detached by then.
     /// </summary>
-    private void ApplyClients(Dictionary<string, HostEntry> hosts, MeshTopology? mesh)
+    private void ApplyClients(
+        Dictionary<string, HostEntry> hosts, MeshTopology? mesh, IReadOnlyDictionary<string, string>? filterProfiles, long commandGeneration)
     {
         var current = Clients;
         var isChanged = HasClientKeyChange(current, hosts);
         var next = isChanged ? new Dictionary<string, FritzBoxClient>(hosts.Count, StringComparer.Ordinal) : current;
         foreach (var (macAddress, host) in hosts)
         {
-            if (!current.TryGetValue(macAddress, out var client))
-            {
-                client = new FritzBoxClient(macAddress);
-            }
+            var isNew = !current.TryGetValue(macAddress, out var client);
+            client ??= new FritzBoxClient(this, macAddress);
 
             ClientPosition? position = null;
             if (host.IsActive)
@@ -151,7 +154,8 @@ public partial class FritzBox
                 mesh?.ClientPositions.TryGetValue(macAddress, out position);
             }
 
-            client.Update(host, position);
+            client.Update(host, position, filterProfiles);
+            ApplyInternetAccess(client, host, isNew, commandGeneration);
             if (isChanged)
             {
                 next[macAddress] = client;
@@ -176,6 +180,18 @@ public partial class FritzBox
         if (isChanged)
         {
             Clients = next;
+        }
+    }
+
+    private void ApplyInternetAccess(FritzBoxClient client, HostEntry host, bool isNew, long commandGeneration)
+    {
+        // Same discipline as ApplySwitchState: a block or allow command completing during the poll is not overwritten.
+        lock (_commandStateLock)
+        {
+            if (isNew || commandGeneration == CommandGeneration)
+            {
+                client.UpdateInternetAccess(host);
+            }
         }
     }
 
@@ -253,7 +269,7 @@ public partial class FritzBox
         return count == current.Count;
     }
 
-    private void ApplyWlans(IReadOnlyList<WlanInfo> wlans, long wlanCommandGeneration)
+    private void ApplyWlans(IReadOnlyList<WlanInfo> wlans, long commandGeneration)
     {
         var infos = new Dictionary<string, WlanInfo>(StringComparer.Ordinal);
         foreach (var wlan in wlans)
@@ -272,7 +288,7 @@ public partial class FritzBox
                 ? new FritzBoxGuestWlan(this, info.ServiceType)
                 : new FritzBoxWlan(role, info.ServiceType);
             wlan.Update(info);
-            ApplySwitchState(wlan, info.IsEnabled, isNew, wlanCommandGeneration);
+            ApplySwitchState(wlan, info.IsEnabled, isNew, commandGeneration);
             if (isChanged)
             {
                 next[role] = wlan;
@@ -285,13 +301,13 @@ public partial class FritzBox
         }
     }
 
-    private void ApplySwitchState(FritzBoxWlan wlan, bool? isEnabled, bool isNew, long wlanCommandGeneration)
+    private void ApplySwitchState(FritzBoxWlan wlan, bool? isEnabled, bool isNew, long commandGeneration)
     {
         // A command raises the generation under this lock, so it cannot complete between the check and the write
         // and have its new switch state overwritten by this older poll.
-        lock (_wlanSwitchStateLock)
+        lock (_commandStateLock)
         {
-            if (isNew || wlanCommandGeneration == WlanCommandGeneration)
+            if (isNew || commandGeneration == CommandGeneration)
             {
                 wlan.IsOn = isEnabled;
             }

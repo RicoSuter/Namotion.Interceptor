@@ -148,7 +148,9 @@ public enum StateUnit
     VoltAmpereReactiveHour, // 2.5 kvarh (reactive energy)
     AmpereHour,             // 50 Ah (charge, battery capacity)
     WattPerSquareMeter,     // 850 W/m² (irradiance)
-    DecibelMilliwatt        // -75 dBm (received signal strength)
+    DecibelMilliwatt,       // -75 dBm (received signal strength)
+    KilometerPerHour,       // 87 km/h (vehicle speed)
+    Bar                     // 2.9 bar (tire pressure)
 }
 ```
 
@@ -182,9 +184,8 @@ public interface IPowerSensor
 [InterceptorSubject]
 public partial class MyDevice : IPowerSensor
 {
-    [Derived]
     [State(Position = 1)]
-    public decimal? Power => InternalPower;  // Merged: Position=1, Unit=Watt
+    public partial decimal? Power { get; set; }  // Merged: Position=1, Unit=Watt
 }
 ```
 
@@ -235,6 +236,7 @@ public partial class Motor
 - Must be expression-bodied (`=>`) or have only a getter
 - Cannot be `partial` (they're computed, not stored)
 - Can combine with `[State]` to display in UI
+- Computes a value; it never forwards a value of another subject or renames a live value, see [Modeling Subjects](#modeling-subjects)
 - Automatically recalculates when `TargetSpeed` or `CurrentSpeed` changes
 - Reads another subject through intercepted properties or through a field that holds its owner (see [Shared Child Subjects](#shared-child-subjects)). Through a field that holds any other subject, it stops following that subject once the subject is detached and attached again while this one stays attached
 
@@ -283,6 +285,38 @@ A subject may be held by several collections, for example a light in a bridge's 
 - **The subject stays attached until the last collection drops it,** not the first: a subject with several parents detaches only once every collection holding it has dropped it. When the owner drops it, drop it from every other collection in the same update, or it stays attached, referenced by them but orphaned from its owner.
 - **Relative paths from a shared subject do not resolve.** A `../` path starting at a subject with several parents resolves to nothing, because its parent is ambiguous.
 - **Do not reference a parent through an intercepted property.** An intercepted (partial) property holding a subject reference attaches the referenced subject under the referencing one; only such a property attaches anything. The parent would become a child of its own child, and the two keep each other attached. Keep a back-reference to an owner in a field.
+
+## Modeling Subjects
+
+These rules decide where a value lives and how other code reaches it.
+
+**One live value, one property, one path.** Paths are permanent identifiers: history records values under them, and automations, dashboards and configuration files refer to them, so a live value that appears at two paths is recorded twice and splits its consumers. `[Derived]` is for computed values, such as a flag from a state or a power from voltage and current. It never forwards the value of another subject or gives a live value of the same subject a second name. A static or descriptive value (identity, model, version) may also be exposed under the name a generic interface expects, for example a vehicle's VIN as `SerialNumber`, because it never changes and so has no history to split.
+
+**Group a large device into child subjects, keep a small device flat.** Cohesive groups of a large device may be child subjects, for example the charge, the climate and the body of a vehicle, each one a typed partial property of the device. A small device stays flat and groups its properties with [`[Category]`](#categories). Repeated instances of one type, such as the phases of a meter or the tires of a vehicle, and separate physical parts are child subjects in any case (see [Child Subject Collections](#child-subject-collections)).
+
+**A capability interface goes on the subject that owns its data.** A battery level of a vehicle that lives in its charge child makes the charge child implement `IBatteryState`, not the vehicle.
+
+**A device-level interface navigates to its capabilities.** When a device interface needs a capability of a child, it exposes it as a typed navigation property, such as `IVehicleChargingState Charge { get; }`. The subject keeps its concretely typed, tracked child property and implements the interface member explicitly with the same name:
+
+```csharp
+public interface IElectricVehicle : IVehicle
+{
+    IVehicleChargingState Charge { get; }
+}
+
+[InterceptorSubject]
+public partial class MyVehicle : IElectricVehicle
+{
+    [State(Position = 400)]
+    public partial MyChargeState Charge { get; internal set; }  // implements IVehicleChargingState
+
+    IVehicleChargingState IElectricVehicle.Charge => Charge;
+}
+```
+
+A class-declared property takes the name over an explicit implementation of the same name without a diagnostic, so the metadata keeps exactly one `Charge` entry, the tracked child (see [Interface Default Properties](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/generator.md#interface-default-properties) and NI0061 in the source generator documentation). A capability that not every device has is nullable, such as `IVehicleClimateState? Climate { get; }`, and is `null` when the device does not report it.
+
+**Interfaces specialize by inheritance and never rename a quantity.** `IVehicleChargingState` inherits `IChargingState` and `IBatteryState` instead of declaring its own power or level. A new abstraction reuses the name of an existing property for the same quantity, or inherits the interface that defines it.
 
 ## Display Interfaces
 
@@ -361,6 +395,7 @@ A type belongs to exactly one group, the one that its `[Category]` names. The si
 | Samples | Examples and simulated devices |
 | Switches | Switches, relays and smart plugs |
 | System | Parts of HomeBlaze itself, such as storage and plugins |
+| Vehicles | Cars and other vehicles, and the accounts that hold them |
 
 When none of them fits, name a new group in `[Category]`. Using the name is all it takes to create the group, and group names are compared ignoring case. A type in such a group that sets no `[SubjectIcon]` gets a generic icon.
 
@@ -571,7 +606,7 @@ public void SetTargetSpeed(int speed) { /* ... */ }
 ```
 
 - Categories are ordered by the lowest `Position` of their state properties. Categories with only methods come last, and names break ties.
-- A `[Category]` on an interface member applies to the class member that implements it. One on the class member wins, and `[Category("")]` there removes the category. The shared interfaces in `HomeBlaze.Abstractions` carry "Device", "Network", "Light", "Playback", "Volume", "Track", "Lock" and "Door" this way.
+- A `[Category]` on an interface member applies to the class member that implements it. One on the class member wins, and `[Category("")]` there removes the category. The shared interfaces in `HomeBlaze.Abstractions` carry "Device", "Network", "Light", "Playback", "Volume", "Track", "Lock", "Door", "Charging", "Climate" and "Vehicle" this way.
 - Names are case-sensitive. .NET shows "Default" as "Misc", "Config" as "Configurations", "DragDrop" as "Drag Drop" and "WindowStyle" as "Window Style".
 
 ## Background Services
@@ -896,7 +931,7 @@ Core platform interfaces and attributes:
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
 | Security | `IAuthenticatedSubject` |
 | Networking | `IConnectionState` |
-| Devices | Switches, lighting, covers, locks, energy, media, input devices |
+| Devices | Switches, lighting, covers, locks, energy, media, input devices, vehicles |
 | Sensors | Temperature, humidity, presence, light, door, rain, soil, power, camera |
 
 Subjects implement these interfaces to declare their capabilities. For example, a Zigbee temperature sensor plugin would implement `ITemperatureSensor`, and a Philips Hue light plugin would implement `ILightbulb` (which composes `ISwitchDevice`, `IBrightnessController`, `IColorController`).

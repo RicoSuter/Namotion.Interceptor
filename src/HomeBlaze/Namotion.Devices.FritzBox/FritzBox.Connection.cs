@@ -2,6 +2,8 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.FritzBox.Client;
+using Namotion.Devices.FritzBox.Parsing;
+using Namotion.Devices.Upnp;
 using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Devices.FritzBox;
@@ -9,6 +11,7 @@ namespace Namotion.Devices.FritzBox;
 public partial class FritzBox
 {
     private const int MaximumConsecutivePollFailures = 3;
+    private const int NoSuchEntryErrorCode = 714;
     private const string NoPasswordMessage = "No password configured.";
     private const string UnsavedCertificateWarning = "The trusted certificate could not be saved and is trusted anew after a restart.";
 
@@ -18,9 +21,9 @@ public partial class FritzBox
     // Only the loop writes _connection. A command holds the gate while it uses the connection, so the loop clears
     // and disposes a connection only after the command completes.
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
-    private readonly Lock _wlanSwitchStateLock = new();
+    private readonly Lock _commandStateLock = new();
     private FritzBoxConnection? _connection;
-    private long _wlanCommandGeneration;
+    private long _commandGeneration;
 
     // Read and written by the polling loop only.
     private string? _stateHostAddress;
@@ -28,18 +31,20 @@ public partial class FritzBox
     private TimeSpan _loginRetryDelay = InitialLoginRetryDelay;
 
     /// <summary>
-    /// Raised by every successful WLAN command, so a poll that read the switch state before it does not write it back.
+    /// Raised by every successful command, so a poll that read the state a command changed before it does not write it
+    /// back. It is shared by all commands: after any command, the next poll leaves every switch state and internet access
+    /// as it is, and the poll after that writes them.
     /// </summary>
-    internal long WlanCommandGeneration => Interlocked.Read(ref _wlanCommandGeneration);
+    internal long CommandGeneration => Interlocked.Read(ref _commandGeneration);
 
     private string? CertificateWarning =>
         _unsavedPublicKeyPin is not null && PublicKeyPin == _unsavedPublicKeyPin ? UnsavedCertificateWarning : null;
 
-    internal void AdvanceWlanCommandGeneration()
+    internal void AdvanceCommandGeneration()
     {
-        lock (_wlanSwitchStateLock)
+        lock (_commandStateLock)
         {
-            Interlocked.Increment(ref _wlanCommandGeneration);
+            Interlocked.Increment(ref _commandGeneration);
         }
     }
 
@@ -56,7 +61,7 @@ public partial class FritzBox
                 ?? throw new InvalidOperationException("The FRITZ!Box is not connected. Try again when its status is Running.");
             var serviceType = wlan.ServiceType;
             await connection.InvokeAsync(serviceType, "SetEnable", [("NewEnable", isEnabled ? "1" : "0")], cancellationToken);
-            AdvanceWlanCommandGeneration();
+            AdvanceCommandGeneration();
             var info = await connection.ReadOrDefaultAsync(serviceType, "GetInfo", null, cancellationToken);
             wlan.IsOn = info?.GetBoolean("NewEnable") ?? isEnabled;
         }
@@ -64,6 +69,87 @@ public partial class FritzBox
         {
             _connectionGate.Release();
         }
+    }
+
+    /// <summary>
+    /// Whether clients can block and allow internet access. True only in debug builds: HomeBlaze has no authentication
+    /// yet, so anyone who can open it could block or unblock any device. Fixed once the router is created, so the
+    /// derived <c>*_IsEnabled</c> properties of the clients need no change notification. Remove this gate once
+    /// HomeBlaze has authentication.
+    /// </summary>
+    internal bool IsInternetAccessControlAvailable { get; init; } =
+#if DEBUG
+        true;
+#else
+        false;
+#endif
+
+    /// <summary>
+    /// Blocks or allows the internet access of a client by the IP address the router currently lists for its MAC
+    /// address. The exceptions are those of <see cref="FritzBoxClient.BlockInternetAccessAsync"/>.
+    /// </summary>
+    internal async Task SetInternetAccessBlockedAsync(FritzBoxClient client, bool isBlocked, CancellationToken cancellationToken)
+    {
+        if (!IsInternetAccessControlAvailable)
+        {
+            throw new InvalidOperationException(
+                "Blocking and allowing internet access is only available in debug builds until HomeBlaze has authentication.");
+        }
+
+        await _connectionGate.WaitAsync(cancellationToken);
+        try
+        {
+            var connection = _connection
+                ?? throw new InvalidOperationException("The FRITZ!Box is not connected. Try again when its status is Running.");
+
+            // The polled IP address may be stale and by now belong to another device, which the command would hit.
+            var ipAddress = await GetCurrentIpAddressAsync(connection, client.MacAddress, cancellationToken);
+            (string Name, string Value)[] address = [("NewIPv4Address", ipAddress)];
+            await connection.InvokeAsync(
+                Tr64Services.HostFilter, "DisallowWANAccessByIP", [.. address, ("NewDisallow", isBlocked ? "1" : "0")], cancellationToken);
+            AdvanceCommandGeneration();
+
+            // The router applies the block asynchronously, so the access read here may still be the old one; the next
+            // poll corrects it.
+            var answer = await connection.ReadOrDefaultAsync(Tr64Services.HostFilter, "GetWANAccessByIP", address, cancellationToken);
+            client.IsInternetAccessBlocked = answer?.GetBoolean("NewDisallow") ?? isBlocked;
+            if (answer is not null)
+            {
+                client.HasInternetAccess = HostListParser.ParseWanAccess(answer.GetString("NewWANAccess"));
+            }
+        }
+        finally
+        {
+            _connectionGate.Release();
+        }
+    }
+
+    /// <returns>The IP address the router lists for the MAC address, once it confirmed that the address maps back to
+    /// that MAC address: an absent device may still be listed with an address the router has since given to another
+    /// one.</returns>
+    private static async Task<string> GetCurrentIpAddressAsync(
+        FritzBoxConnection connection, string macAddress, CancellationToken cancellationToken)
+    {
+        UpnpSoapResponse host;
+        try
+        {
+            host = await connection.QueryAsync(Tr64Services.Hosts, "GetSpecificHostEntry", [("NewMACAddress", macAddress)], cancellationToken);
+        }
+        catch (UpnpFaultException exception) when (exception.ErrorCode == NoSuchEntryErrorCode)
+        {
+            throw new InvalidOperationException("The FRITZ!Box no longer lists this device.", exception);
+        }
+
+        var ipAddress = StringValues.NullIfBlank(host.GetString("NewIPAddress"))
+            ?? throw new InvalidOperationException("The FRITZ!Box lists no IP address for this device.");
+        var holder = await connection.QueryAsync(Tr64Services.Hosts, "X_AVM-DE_GetSpecificHostEntryByIP", [("NewIPAddress", ipAddress)], cancellationToken);
+        if (MacAddresses.Normalize(holder.GetString("NewMACAddress")) != MacAddresses.Normalize(macAddress))
+        {
+            throw new InvalidOperationException(
+                "The FRITZ!Box lists the last IP address of this device for another device. Try again when this device is connected.");
+        }
+
+        return ipAddress;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -216,7 +302,7 @@ public partial class FritzBox
         {
             try
             {
-                var generation = WlanCommandGeneration;
+                var generation = CommandGeneration;
                 var snapshot = await FritzBoxPoller.PollAsync(connection, stoppingToken);
                 ApplySnapshot(snapshot, generation);
                 failures = 0;

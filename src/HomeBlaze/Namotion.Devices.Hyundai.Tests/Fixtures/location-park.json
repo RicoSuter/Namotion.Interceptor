@@ -1,0 +1,1 @@
+{ "retCode": "S", "resCode": "0000", "resMsg": { "gpsDetail": { "coord": { "lat": 1.234567, "lon": 2.345678, "alt": 0, "type": 0 }, "head": 0, "speed": { "value": 0, "unit": 0 } }, "time": "20261122100000" }, "msgId": "MSG-1" }

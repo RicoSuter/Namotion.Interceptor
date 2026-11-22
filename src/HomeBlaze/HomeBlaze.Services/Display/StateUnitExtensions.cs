@@ -274,6 +274,8 @@ public static class StateUnitExtensions
         StateUnit.AmpereHour => ("Ah", true),
         StateUnit.WattPerSquareMeter => ("W/m²", true),
         StateUnit.DecibelMilliwatt => ("dBm", true),
+        StateUnit.KilometerPerHour => ("km/h", true),
+        StateUnit.Bar => ("bar", true),
         _ => null
     };
 
