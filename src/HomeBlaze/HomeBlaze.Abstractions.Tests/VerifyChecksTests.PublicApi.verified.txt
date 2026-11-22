@@ -509,6 +509,12 @@ namespace HomeBlaze.Abstractions.Devices.Locks
 }
 namespace HomeBlaze.Abstractions.Discovery
 {
+    public sealed class DiscoveredItem : System.IEquatable<HomeBlaze.Abstractions.Discovery.DiscoveredItem>
+    {
+        public DiscoveredItem(string DisplayName, string? Detail) { }
+        public string? Detail { get; init; }
+        public string DisplayName { get; init; }
+    }
     public sealed class DiscoveredSubject : System.IEquatable<HomeBlaze.Abstractions.Discovery.DiscoveredSubject>
     {
         public DiscoveredSubject(System.Type SubjectType, HomeBlaze.Abstractions.Discovery.IDiscoveryResult Result, Namotion.Interceptor.IInterceptorSubject? ExistingSubject) { }
@@ -527,6 +533,7 @@ namespace HomeBlaze.Abstractions.Discovery
     {
         string? Detail { get; }
         string DisplayName { get; }
+        System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.DiscoveredItem> IncludedItems { get; }
         string Key { get; }
     }
     public interface IMulticastDnsBrowser

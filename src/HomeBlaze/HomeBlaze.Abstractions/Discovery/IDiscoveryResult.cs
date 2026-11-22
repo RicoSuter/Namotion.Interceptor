@@ -19,4 +19,10 @@ public interface IDiscoveryResult
     /// A second line for the user, such as the host address, or null.
     /// </summary>
     string? Detail { get; }
+
+    /// <summary>
+    /// The items that the subject created for this device includes, such as the speakers of a household, shown under
+    /// its row and not selectable on their own; empty by default.
+    /// </summary>
+    IReadOnlyList<DiscoveredItem> IncludedItems => [];
 }
