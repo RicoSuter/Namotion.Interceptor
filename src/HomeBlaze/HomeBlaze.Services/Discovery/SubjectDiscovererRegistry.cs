@@ -12,14 +12,10 @@ namespace HomeBlaze.Services.Discovery;
 /// </summary>
 public sealed class SubjectDiscovererRegistry
 {
-    private readonly TypeProvider _typeProvider;
     private readonly SubjectComponentRegistry _componentRegistry;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<SubjectDiscovererRegistry> _logger;
-    private readonly Lock _lock = new();
-
-    private IReadOnlyCollection<Type>? _scannedTypes;
-    private ISubjectDiscoverer[] _discoverers = [];
+    private readonly Lazy<ISubjectDiscoverer[]> _discoverers;
 
     public SubjectDiscovererRegistry(
         TypeProvider typeProvider,
@@ -27,10 +23,10 @@ public sealed class SubjectDiscovererRegistry
         IServiceProvider serviceProvider,
         ILogger<SubjectDiscovererRegistry> logger)
     {
-        _typeProvider = typeProvider;
         _componentRegistry = componentRegistry;
         _serviceProvider = serviceProvider;
         _logger = logger;
+        _discoverers = new Lazy<ISubjectDiscoverer[]>(() => CreateDiscoverers(typeProvider.Types));
     }
 
     /// <summary>
@@ -38,22 +34,11 @@ public sealed class SubjectDiscovererRegistry
     /// Edit component that implements <see cref="ISubjectDiscoveryComponent"/>. A discoverer that cannot be created,
     /// or has no such component, is left out and logged as an error.
     /// </summary>
-    public IReadOnlyList<ISubjectDiscoverer> GetDiscoverers()
-    {
-        lock (_lock)
-        {
-            // Read inside the lock: a thread holding an older snapshot must not roll the list back over a newer one.
-            var types = _typeProvider.Types;
-            // The type provider publishes a new collection whenever types are added, such as by a plugin.
-            if (!ReferenceEquals(types, _scannedTypes))
-            {
-                _discoverers = CreateDiscoverers(types);
-                _scannedTypes = types;
-            }
-
-            return _discoverers;
-        }
-    }
+    /// <remarks>
+    /// The discoverers are created once, on the first call, from the types loaded then; types added later are not
+    /// scanned, so every discoverer type must be loaded before.
+    /// </remarks>
+    public IReadOnlyList<ISubjectDiscoverer> GetDiscoverers() => _discoverers.Value;
 
     private ISubjectDiscoverer[] CreateDiscoverers(IReadOnlyCollection<Type> types)
     {

@@ -103,17 +103,19 @@ public class SubjectDiscovererRegistryTests
     }
 
     [Fact]
-    public void WhenTypesAreAddedLater_ThenTheirDiscoverersAreCreated()
+    public void WhenAskedAgainAfterTypesWereAdded_ThenTheDiscoverersOfTheFirstCallAreReturned()
     {
         // Arrange
-        var (registry, typeProvider) = CreateRegistry();
-        Assert.Empty(registry.GetDiscoverers());
+        var (registry, typeProvider) = CreateRegistry(typeof(AcceptedTestDiscoverer));
+        var first = registry.GetDiscoverers();
+        typeProvider.AddTypes([typeof(EditOnlyTestDiscoverer)]);
 
         // Act
-        typeProvider.AddTypes([typeof(AcceptedTestDiscoverer)]);
+        var second = registry.GetDiscoverers();
 
         // Assert
-        Assert.IsType<AcceptedTestDiscoverer>(Assert.Single(registry.GetDiscoverers()));
+        Assert.Same(first, second);
+        Assert.IsType<AcceptedTestDiscoverer>(Assert.Single(second));
     }
 }
 

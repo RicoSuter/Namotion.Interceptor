@@ -94,7 +94,7 @@ A Setup or Edit component implements it with a `[Parameter]` property and casts 
 
 ### Registry
 
-`SubjectDiscovererRegistry` in `HomeBlaze.Services` scans `TypeProvider.Types` for non-abstract `ISubjectDiscoverer` types, as `SubjectComponentRegistry` does for components, so plugins provide discoverers without extra registration. It creates them through DI with `ActivatorUtilities`, so a constructor can ask for `IHttpClientFactory` or `ILogger<T>`.
+`SubjectDiscovererRegistry` in `HomeBlaze.Services` scans `TypeProvider.Types` for non-abstract `ISubjectDiscoverer` types, as `SubjectComponentRegistry` does for components, so plugins provide discoverers without extra registration. It creates them through DI with `ActivatorUtilities`, so a constructor can ask for `IHttpClientFactory` or `ILogger<T>`. Like the components, the discoverers are created once, on first use, so all discoverer types must be loaded before; types added later are not scanned.
 
 It leaves out, with one logged error each, written the first time the create dialog asks for discoverers rather than at startup, and without blocking the app:
 
