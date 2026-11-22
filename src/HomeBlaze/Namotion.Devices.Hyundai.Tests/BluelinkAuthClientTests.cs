@@ -1,4 +1,3 @@
-using System.Buffers.Text;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -14,17 +13,8 @@ public class BluelinkAuthClientTests
 
     private static (FakeHttpMessageHandler Handler, RSA Key) CreateLoginHandler(string signInLocation, string? modulusOverride = null)
     {
-        var key = RSA.Create(2048);
-        var parameters = key.ExportParameters(false);
-        var modulus = modulusOverride ?? Base64Url.EncodeToString(parameters.Modulus);
-        var exponent = Base64Url.EncodeToString(parameters.Exponent);
-        var certs = $$$"""{"retValue":{"kid":"key-1","n":"{{{modulus}}}","e":"{{{exponent}}}"}}""";
-        var handler = new FakeHttpMessageHandler()
-            .Respond(BluelinkResponses.AuthorizePath, HttpStatusCode.OK, "<html>login</html>", ("Set-Cookie", "session=abc; Path=/"))
-            .Respond(BluelinkResponses.CertsPath, HttpStatusCode.OK, certs)
-            .Respond(BluelinkResponses.SignInPath, HttpStatusCode.Found, "", ("Location", signInLocation))
-            .Respond(BluelinkResponses.TokenPath, HttpStatusCode.OK, BluelinkResponses.Tokens(1));
-        return (handler, key);
+        var handler = new FakeHttpMessageHandler();
+        return (handler, LoginFixture.Respond(handler, signInLocation, modulusOverride));
     }
 
     private const string Authorized = "https://oneapp.hyundai.com/redirect?code=CODE-1&state=ccsp";

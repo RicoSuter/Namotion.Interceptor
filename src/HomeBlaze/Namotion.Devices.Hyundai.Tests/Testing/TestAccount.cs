@@ -1,6 +1,4 @@
-using System.Buffers.Text;
 using System.Net;
-using System.Security.Cryptography;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Namotion.Interceptor;
@@ -26,14 +24,8 @@ internal static class TestAccount
     /// <summary>Adds the answers of a successful sign in that returns the token set of the generation.</summary>
     public static FakeHttpMessageHandler RespondLogin(FakeHttpMessageHandler handler, int generation)
     {
-        using var key = RSA.Create(2048);
-        var parameters = key.ExportParameters(false);
-        var certs = $$$"""{"retValue":{"kid":"key-1","n":"{{{Base64Url.EncodeToString(parameters.Modulus)}}}","e":"{{{Base64Url.EncodeToString(parameters.Exponent)}}}"}}""";
-        return handler
-            .Respond(BluelinkResponses.AuthorizePath, HttpStatusCode.OK, "<html>login</html>", ("Set-Cookie", "session=abc; Path=/"))
-            .Respond(BluelinkResponses.CertsPath, HttpStatusCode.OK, certs)
-            .Respond(BluelinkResponses.SignInPath, HttpStatusCode.Found, "", ("Location", "https://oneapp.hyundai.com/redirect?code=CODE-1&state=ccsp"))
-            .Respond(BluelinkResponses.TokenPath, HttpStatusCode.OK, BluelinkResponses.Tokens(generation));
+        using var key = LoginFixture.Respond(handler, tokenGeneration: generation);
+        return handler;
     }
 
     public static (BluelinkAccount Account, FakeHttpMessageHandler Handler, FakeTimeProvider Time) Create(
