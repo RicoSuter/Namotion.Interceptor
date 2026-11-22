@@ -7,7 +7,7 @@ namespace HomeBlaze.Services
     public static class AtomicFile
     {
         public static bool IsTemporaryFile(System.ReadOnlySpan<char> fileName, System.ReadOnlySpan<char> targetFileName) { }
-        public static void WriteAllBytes(string path, System.ReadOnlySpan<byte> content) { }
+        public static void WriteAllBytes(string path, System.ReadOnlySpan<byte> content, System.IO.UnixFileMode? unixCreateMode = default) { }
         public static System.Threading.Tasks.Task WriteAllBytesAsync(string path, System.ReadOnlyMemory<byte> content, System.Threading.CancellationToken cancellationToken) { }
         public static System.Threading.Tasks.Task WriteAllTextAsync(string path, string content, System.Threading.CancellationToken cancellationToken) { }
     }
@@ -20,6 +20,7 @@ namespace HomeBlaze.Services
         public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, System.Action<Namotion.Interceptor.IInterceptorSubject>? created, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, System.Action<Namotion.Interceptor.IInterceptorSubject>? created, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public System.Text.Json.JsonElement? GetDefaultConfiguration(System.Type type, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
+        public bool HasUnstoredSecrets(Namotion.Interceptor.IInterceptorSubject subject) { }
         public void Release(Namotion.Interceptor.IInterceptorSubject subject) { }
         public void ReplaceConfiguration(Namotion.Interceptor.IInterceptorSubject subject, string json, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
@@ -55,6 +56,7 @@ namespace HomeBlaze.Services
         public const string DataProtectionKeysDirectory = "DataProtection-Keys";
         public const string PluginConfigurationPathKey = "PluginConfigurationPath";
         public const string RootConfigurationFileKey = "HomeBlaze:RootConfigFile";
+        public const string SecretsFile = "Secrets.json";
         public const string SeedDirectoryKey = "HomeBlaze:SeedDirectory";
         public static readonly string DefaultPluginConfigurationFile;
         public static readonly string DefaultRootConfigurationFile;
@@ -62,6 +64,7 @@ namespace HomeBlaze.Services
         public static string GetDataProtectionKeysPath(Microsoft.Extensions.Configuration.IConfiguration? configuration) { }
         public static string GetPluginConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration configuration) { }
         public static string GetRootConfigurationPath(Microsoft.Extensions.Configuration.IConfiguration? configuration) { }
+        public static string GetSecretsPath(Microsoft.Extensions.Configuration.IConfiguration? configuration) { }
     }
     public interface ISubjectPathRecorder
     {
@@ -673,6 +676,16 @@ namespace HomeBlaze.Services.Navigation
         public const string Root = "/browser";
         public static string Create(System.Collections.Generic.IEnumerable<string> segments) { }
         public static string FromRoutePath(string routePath) { }
+    }
+}
+namespace HomeBlaze.Services.Secrets
+{
+    public sealed class SecretStore
+    {
+        public SecretStore(string path) { }
+        public string Path { get; }
+        public string Add(string value) { }
+        public bool TryGet(string key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? value) { }
     }
 }
 namespace HomeBlaze.Services.Serialization
