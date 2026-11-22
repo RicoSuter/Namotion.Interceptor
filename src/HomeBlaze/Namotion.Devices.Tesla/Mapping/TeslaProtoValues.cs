@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using CarServer;
+using Microsoft.Extensions.Logging;
 
 namespace Namotion.Devices.Tesla.Mapping;
 
@@ -9,6 +11,17 @@ namespace Namotion.Devices.Tesla.Mapping;
 internal static class TeslaProtoValues
 {
     private const string ChargePortColorPrefix = "ChargePortColor";
+
+    /// <summary>Returns the value, after logging a number that Tesla added to the enum once as a warning.</summary>
+    public static TEnum Checked<TEnum>(TEnum value, ILogger logger) where TEnum : struct, Enum
+    {
+        if (!Enum.IsDefined(value) && LoggedUnknownValues<TEnum>.Values.TryAdd(value, 0))
+        {
+            logger.LogWarning("Tesla API changed? Unknown {EnumType} value {Value}.", typeof(TEnum).Name, value);
+        }
+
+        return value;
+    }
 
     public static TeslaChargingState ChargingState(ChargeState.Types.ChargingState state) => state.TypeCase switch
     {
@@ -151,4 +164,9 @@ internal static class TeslaProtoValues
         SoftwareUpdateState.Types.SoftwareUpdateStatus.TypeOneofCase.DownloadingWifiWait => TeslaSoftwareUpdateStatus.DownloadingWifiWait,
         _ => null
     };
+
+    private static class LoggedUnknownValues<TEnum> where TEnum : struct
+    {
+        public static readonly ConcurrentDictionary<TEnum, byte> Values = new();
+    }
 }

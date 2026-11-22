@@ -213,4 +213,35 @@ public class TeslaValuesTests
         Assert.Null(TeslaValues.FromSeconds(-1));
         Assert.Null(TeslaValues.FromMilliseconds(null));
     }
+
+    [Fact]
+    public void WhenUnknownEnumTextRepeats_ThenItIsLoggedOnceAsApiChange()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+
+        // Act
+        TeslaValues.Enum<TeslaChargingState>("UnexpectedChargingState", logger);
+        TeslaValues.Enum<TeslaChargingState>("UnexpectedChargingState", logger);
+
+        // Assert
+        Assert.Equal(["Tesla API changed? Unknown TeslaChargingState value UnexpectedChargingState."], logger.ApiChanges);
+    }
+
+    [Fact]
+    public void WhenProtobufEnumNumberIsUnknown_ThenItIsLoggedOnceAsApiChange()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var unknown = (CarServer.ClimateState.Types.HvacAutoRequest)99;
+
+        // Act
+        TeslaProtoValues.Checked(unknown, logger);
+        TeslaProtoValues.Checked(CarServer.ClimateState.Types.HvacAutoRequest.On, logger);
+        var result = TeslaProtoValues.HvacAutoRequest(TeslaProtoValues.Checked(unknown, logger));
+
+        // Assert
+        Assert.Null(result);
+        Assert.Equal(["Tesla API changed? Unknown HvacAutoRequest value 99."], logger.ApiChanges);
+    }
 }

@@ -124,4 +124,38 @@ public class TeslaJsonTests
         Assert.Equal("2026.38.6", response.Response.VehicleState!.CarVersion);
         Assert.False(response.Response.VehicleState.Locked);
     }
+
+    [Fact]
+    public void WhenValuesHaveUnexpectedTypes_ThenEachIsLoggedOnceAsApiChangeAndPlaceholdersAreNot()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var context = TeslaJsonContext.Create(logger);
+        const string json = """
+            {
+              "response": {
+                "charge_state": {
+                  "battery_level": "unexpected-battery-level",
+                  "charge_limit_soc": 3000000000,
+                  "charge_port_door_open": {"open": true},
+                  "charge_rate": "<invalid>",
+                  "charger_pilot_current": "",
+                  "minutes_to_full_charge": "42"
+                }
+              }
+            }
+            """;
+
+        // Act
+        JsonSerializer.Deserialize(json, context.TeslaResponseTeslaVehicleDataDto);
+        JsonSerializer.Deserialize(json, context.TeslaResponseTeslaVehicleDataDto);
+
+        // Assert
+        Assert.Equal(
+        [
+            "Tesla API changed? Unexpected int value unexpected-battery-level.",
+            "Tesla API changed? Unexpected int value 3000000000.",
+            "Tesla API changed? Unexpected bool value StartObject."
+        ], logger.ApiChanges);
+    }
 }

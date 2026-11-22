@@ -224,7 +224,7 @@ public partial class TeslaClimateState : IVehicleClimateState, ITitleProvider, I
 
     private void UpdateModesFromProtobuf(ClimateState proto)
     {
-        if (proto.OptionalHvacAutoRequestCase != ClimateState.OptionalHvacAutoRequestOneofCase.None && TeslaProtoValues.HvacAutoRequest(proto.HvacAutoRequest) is { } hvacAutoRequest) HvacAutoRequest = hvacAutoRequest;
+        if (proto.OptionalHvacAutoRequestCase != ClimateState.OptionalHvacAutoRequestOneofCase.None && TeslaProtoValues.HvacAutoRequest(TeslaProtoValues.Checked(proto.HvacAutoRequest, _logger)) is { } hvacAutoRequest) HvacAutoRequest = hvacAutoRequest;
         if (proto.ClimateKeeperMode is { } climateKeeperMode && TeslaProtoValues.ClimateKeeperMode(climateKeeperMode) is { } mappedClimateKeeperMode) ClimateKeeperMode = mappedClimateKeeperMode;
         if (proto.DefrostMode is { } defrostMode && TeslaProtoValues.DefrostMode(defrostMode) is { } mappedDefrostMode) DefrostMode = mappedDefrostMode;
     }
@@ -256,9 +256,9 @@ public partial class TeslaClimateState : IVehicleClimateState, ITitleProvider, I
     {
         if (proto.OptionalAllowCabinOverheatProtectionCase != ClimateState.OptionalAllowCabinOverheatProtectionOneofCase.None) IsCabinOverheatProtectionAllowed = proto.AllowCabinOverheatProtection;
         if (proto.OptionalSupportsFanOnlyCabinOverheatProtectionCase != ClimateState.OptionalSupportsFanOnlyCabinOverheatProtectionOneofCase.None) IsFanOnlyCabinOverheatProtectionSupported = proto.SupportsFanOnlyCabinOverheatProtection;
-        if (proto.OptionalCabinOverheatProtectionCase != ClimateState.OptionalCabinOverheatProtectionOneofCase.None && TeslaProtoValues.CabinOverheatProtection(proto.CabinOverheatProtection) is { } protection) CabinOverheatProtection = protection;
+        if (proto.OptionalCabinOverheatProtectionCase != ClimateState.OptionalCabinOverheatProtectionOneofCase.None && TeslaProtoValues.CabinOverheatProtection(TeslaProtoValues.Checked(proto.CabinOverheatProtection, _logger)) is { } protection) CabinOverheatProtection = protection;
         if (proto.OptionalCabinOverheatProtectionActivelyCoolingCase != ClimateState.OptionalCabinOverheatProtectionActivelyCoolingOneofCase.None) IsCabinOverheatProtectionCooling = proto.CabinOverheatProtectionActivelyCooling;
-        if (proto.OptionalCopActivationTemperatureCase != ClimateState.OptionalCopActivationTemperatureOneofCase.None && TeslaProtoValues.CabinOverheatProtectionTemperature(proto.CopActivationTemperature) is { } temperature) CabinOverheatProtectionTemperature = temperature;
+        if (proto.OptionalCopActivationTemperatureCase != ClimateState.OptionalCopActivationTemperatureOneofCase.None && TeslaProtoValues.CabinOverheatProtectionTemperature(TeslaProtoValues.Checked(proto.CopActivationTemperature, _logger)) is { } temperature) CabinOverheatProtectionTemperature = temperature;
     }
 
     private void UpdateSeatHeatersFromProtobuf(ClimateState proto)
@@ -275,7 +275,7 @@ public partial class TeslaClimateState : IVehicleClimateState, ITitleProvider, I
     private void UpdateSteeringWheelHeaterFromProtobuf(ClimateState proto)
     {
         if (proto.OptionalSteeringWheelHeaterCase != ClimateState.OptionalSteeringWheelHeaterOneofCase.None) SeatHeaters.IsSteeringWheelHeaterOn = proto.SteeringWheelHeater;
-        if (proto.OptionalSteeringWheelHeatLevelCase != ClimateState.OptionalSteeringWheelHeatLevelOneofCase.None && TeslaProtoValues.SteeringWheelHeatLevel(proto.SteeringWheelHeatLevel) is { } heatLevel) SeatHeaters.SteeringWheelHeatLevel = heatLevel;
+        if (proto.OptionalSteeringWheelHeatLevelCase != ClimateState.OptionalSteeringWheelHeatLevelOneofCase.None && TeslaProtoValues.SteeringWheelHeatLevel(TeslaProtoValues.Checked(proto.SteeringWheelHeatLevel, _logger)) is { } heatLevel) SeatHeaters.SteeringWheelHeatLevel = heatLevel;
         if (proto.OptionalAutoSteeringWheelHeatCase != ClimateState.OptionalAutoSteeringWheelHeatOneofCase.None) SeatHeaters.IsAutoSteeringWheelHeatOn = proto.AutoSteeringWheelHeat;
     }
 }

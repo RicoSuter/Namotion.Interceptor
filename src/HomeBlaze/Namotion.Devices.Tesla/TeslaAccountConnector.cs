@@ -79,7 +79,7 @@ public static class TeslaAccountConnector
         TeslaProductDto[] products;
         try
         {
-            products = await new TeslaOwnerApiClient(httpClient, timeProvider).GetVehicleProductsAsync(tokens.AccessToken, cancellationToken);
+            products = await new TeslaOwnerApiClient(httpClient, timeProvider, NullLogger.Instance).GetVehicleProductsAsync(tokens.AccessToken, cancellationToken);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {

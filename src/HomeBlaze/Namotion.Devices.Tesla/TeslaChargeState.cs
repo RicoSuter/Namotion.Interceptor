@@ -361,7 +361,7 @@ public partial class TeslaChargeState : IVehicleChargingState, ITitleProvider, I
     private void UpdateChargePortFromProtobuf(ChargeState proto)
     {
         if (proto.ChargePortLatch is { } latch && TeslaProtoValues.ChargePortLatch(latch) is { } mappedLatch) ChargePortLatch = mappedLatch;
-        if (proto.OptionalChargePortColorCase != ChargeState.OptionalChargePortColorOneofCase.None && TeslaProtoValues.ChargePortColor(proto.ChargePortColor) is { } mappedColor) ChargePortColor = mappedColor;
+        if (proto.OptionalChargePortColorCase != ChargeState.OptionalChargePortColorOneofCase.None && TeslaProtoValues.ChargePortColor(TeslaProtoValues.Checked(proto.ChargePortColor, _logger)) is { } mappedColor) ChargePortColor = mappedColor;
         if (proto.OptionalChargePortColdWeatherModeCase != ChargeState.OptionalChargePortColdWeatherModeOneofCase.None) IsChargePortColdWeatherMode = proto.ChargePortColdWeatherMode;
     }
 
@@ -376,7 +376,7 @@ public partial class TeslaChargeState : IVehicleChargingState, ITitleProvider, I
 
     private void UpdateScheduleFromProtobuf(ChargeState proto)
     {
-        if (proto.OptionalScheduledChargingModeCase != ChargeState.OptionalScheduledChargingModeOneofCase.None && TeslaProtoValues.ScheduledChargingMode(proto.ScheduledChargingMode) is { } mappedMode) ScheduledChargingMode = mappedMode;
+        if (proto.OptionalScheduledChargingModeCase != ChargeState.OptionalScheduledChargingModeOneofCase.None && TeslaProtoValues.ScheduledChargingMode(TeslaProtoValues.Checked(proto.ScheduledChargingMode, _logger)) is { } mappedMode) ScheduledChargingMode = mappedMode;
         if (proto.OptionalScheduledChargingPendingCase != ChargeState.OptionalScheduledChargingPendingOneofCase.None) IsScheduledChargingPending = proto.ScheduledChargingPending;
         if (proto.OptionalScheduledChargingStartTimeMinutesCase != ChargeState.OptionalScheduledChargingStartTimeMinutesOneofCase.None) ScheduledChargingStartTime = TeslaValues.MinutesAfterMidnight((int)proto.ScheduledChargingStartTimeMinutes);
         if (proto.OptionalPreconditioningEnabledCase != ChargeState.OptionalPreconditioningEnabledOneofCase.None) IsPreconditioningEnabled = proto.PreconditioningEnabled;

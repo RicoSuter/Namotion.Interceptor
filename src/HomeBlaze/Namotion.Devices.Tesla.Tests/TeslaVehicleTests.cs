@@ -624,6 +624,34 @@ public class TeslaVehicleTests
     }
 
     [Fact]
+    public void WhenVehicleDataLacksCoreFields_ThenEachIsLoggedOnceAsApiChange()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var vehicle = new TeslaVehicle(1, Vin, new FakeTimeProvider(Now), logger);
+        var complete = LoadVehicleData();
+        var incomplete = new TeslaVehicleDataDto
+        {
+            State = "online",
+            ChargeState = new TeslaChargeStateDto { Timestamp = FixtureTimestamp, ChargingState = "Complete" },
+            ClimateState = complete.ClimateState,
+            DriveState = complete.DriveState
+        };
+
+        // Act
+        vehicle.ApplyVehicleData(complete);
+        vehicle.ApplyVehicleData(incomplete);
+        vehicle.ApplyVehicleData(incomplete);
+
+        // Assert
+        Assert.Equal(
+        [
+            $"Tesla API changed? vehicle_state is missing in the vehicle data of {Vin}.",
+            $"Tesla API changed? charge_state.battery_level is missing in the vehicle data of {Vin}."
+        ], logger.ApiChanges);
+    }
+
+    [Fact]
     public void WhenVehicleFallsAsleep_ThenAwakeChangeIsPublished()
     {
         // Arrange
@@ -639,16 +667,5 @@ public class TeslaVehicleTests
         // Assert
         var change = Assert.Single(changes, change => change.Property.Subject == vehicle && change.Property.Name == nameof(TeslaVehicle.IsAwake));
         Assert.False(change.GetNewValue<bool?>());
-    }
-
-    private sealed class RecordingLogger : ILogger
-    {
-        public List<LogLevel> Levels { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) => Levels.Add(logLevel);
     }
 }

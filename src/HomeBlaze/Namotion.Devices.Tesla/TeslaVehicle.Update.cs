@@ -19,6 +19,21 @@ public partial class TeslaVehicle
         data => data.VehicleState?.Timestamp
     ];
 
+    private static readonly (string Field, Func<TeslaVehicleDataDto, bool> IsMissing)[] CoreFields =
+    [
+        ("charge_state", data => data.ChargeState is null),
+        ("climate_state", data => data.ClimateState is null),
+        ("drive_state", data => data.DriveState is null),
+        ("vehicle_state", data => data.VehicleState is null),
+        ("charge_state.battery_level", data => data.ChargeState is { BatteryLevel: null }),
+        ("charge_state.charging_state", data => data.ChargeState is { ChargingState: null }),
+        ("vehicle_state.odometer", data => data.VehicleState is { Odometer: null }),
+        ("vehicle_state.locked", data => data.VehicleState is { Locked: null })
+    ];
+
+    // One bit per entry of CoreFields that was already logged.
+    private int _loggedMissingCoreFields;
+
     private static readonly Func<VehicleData, Timestamp?>[] SnapshotTimestamps =
     [
         snapshot => snapshot.ChargeState?.Timestamp,
@@ -54,6 +69,7 @@ public partial class TeslaVehicle
     internal void ApplyVehicleData(TeslaVehicleDataDto data)
     {
         VehicleState = TeslaValues.Enum<TeslaVehicleState>(data.State, _logger) ?? VehicleState;
+        LogMissingCoreFields(data);
 
         if (data.ChargeState is { } charge) Charge.Update(charge);
         if (data.ClimateState is { } climate) Climate.Update(climate);
@@ -63,6 +79,19 @@ public partial class TeslaVehicle
         if (data.VehicleState is { } state) ApplyVehicleState(state);
 
         UpdateLastUpdatedFromVehicleData(data);
+    }
+
+    private void LogMissingCoreFields(TeslaVehicleDataDto data)
+    {
+        for (var index = 0; index < CoreFields.Length; index++)
+        {
+            var bit = 1 << index;
+            if ((_loggedMissingCoreFields & bit) == 0 && CoreFields[index].IsMissing(data))
+            {
+                _loggedMissingCoreFields |= bit;
+                _logger.LogWarning("Tesla API changed? {Field} is missing in the vehicle data of {Vin}.", CoreFields[index].Field, Vin);
+            }
+        }
     }
 
     private void UpdateLastUpdatedFromVehicleData(TeslaVehicleDataDto data)

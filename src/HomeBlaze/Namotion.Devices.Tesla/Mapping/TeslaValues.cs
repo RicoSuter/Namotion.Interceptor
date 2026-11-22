@@ -70,7 +70,7 @@ internal static class TeslaValues
     public static TimeSpan? MinutesAfterMidnight(int? minutes) => minutes is >= 0 ? TimeSpan.FromMinutes(minutes.Value) : null;
 
     /// <summary>
-    /// Parses a Tesla text into an enum, ignoring case and underscores. A value Tesla added later becomes Unknown and is logged once.
+    /// Parses a Tesla text into an enum, ignoring case and underscores. A value Tesla added later becomes Unknown and is logged once as a warning.
     /// </summary>
     public static TEnum? Enum<TEnum>(string? value, ILogger logger) where TEnum : struct, System.Enum
     {
@@ -90,7 +90,7 @@ internal static class TeslaValues
 
         if (LoggedUnknownValues.TryAdd((typeof(TEnum), text), 0))
         {
-            logger.LogInformation("Unknown Tesla value {Value} for {EnumType}.", text, typeof(TEnum).Name);
+            logger.LogWarning("Tesla API changed? Unknown {EnumType} value {Value}.", typeof(TEnum).Name, text);
         }
 
         return default(TEnum);

@@ -148,7 +148,7 @@ public partial class TeslaMedia : ITitleProvider, IIconProvider, IMediaTrackStat
         if (proto.OptionalRemoteControlEnabledCase != MediaState.OptionalRemoteControlEnabledOneofCase.None) IsRemoteControlEnabled = proto.RemoteControlEnabled;
         if (proto.OptionalNowPlayingTitleCase != MediaState.OptionalNowPlayingTitleOneofCase.None) CurrentTrackTitle = TeslaValues.Text(proto.NowPlayingTitle);
         if (proto.OptionalNowPlayingArtistCase != MediaState.OptionalNowPlayingArtistOneofCase.None) CurrentTrackArtist = TeslaValues.Text(proto.NowPlayingArtist);
-        if (proto.OptionalMediaPlaybackStatusCase != MediaState.OptionalMediaPlaybackStatusOneofCase.None && TeslaProtoValues.MediaPlaybackStatus(proto.MediaPlaybackStatus) is { } status) PlaybackStatus = status;
+        if (proto.OptionalMediaPlaybackStatusCase != MediaState.OptionalMediaPlaybackStatusOneofCase.None && TeslaProtoValues.MediaPlaybackStatus(TeslaProtoValues.Checked(proto.MediaPlaybackStatus, _logger)) is { } status) PlaybackStatus = status;
     }
 
     private void UpdateVolumeFromProtobuf(MediaState proto)

@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Namotion.Devices.Tesla.Client;
 using Namotion.Devices.Tesla.Tests.Testing;
@@ -14,7 +15,7 @@ public class TeslaOwnerApiClientTests
         var handler = new FakeHttpMessageHandler().Respond("/api/1/products", HttpStatusCode.OK,
             """{"response":[{"id":1,"vehicle_id":2,"vin":"V1","state":"asleep"},{"id":9,"energy_site_id":5}]}""");
         using var httpClient = new HttpClient(handler);
-        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System);
+        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System, NullLogger.Instance);
 
         // Act
         var vehicles = await client.GetVehicleProductsAsync("access", CancellationToken.None);
@@ -32,7 +33,7 @@ public class TeslaOwnerApiClientTests
         // Arrange
         var handler = new FakeHttpMessageHandler().Respond("/api/1/vehicles/1/vehicle_data", HttpStatusCode.OK, FixtureLoader.Load("vehicle-data.json"));
         using var httpClient = new HttpClient(handler);
-        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System);
+        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System, NullLogger.Instance);
 
         // Act
         var data = await client.GetVehicleDataAsync("access", 1, CancellationToken.None);
@@ -49,7 +50,7 @@ public class TeslaOwnerApiClientTests
         var handler = new FakeHttpMessageHandler().Respond("/api/1/vehicles/1/vehicle_data", HttpStatusCode.RequestTimeout,
             """{"response":null,"error":"vehicle unavailable: vehicle is offline or asleep"}""");
         using var httpClient = new HttpClient(handler);
-        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System);
+        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System, NullLogger.Instance);
 
         // Act
         var data = await client.GetVehicleDataAsync("access", 1, CancellationToken.None);
@@ -65,7 +66,7 @@ public class TeslaOwnerApiClientTests
         // Arrange
         var handler = new FakeHttpMessageHandler().Respond("/api/1/vehicles/1/wake_up", HttpStatusCode.OK, """{"response":{"state":"asleep"}}""");
         using var httpClient = new HttpClient(handler);
-        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System);
+        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System, NullLogger.Instance);
 
         // Act
         await client.WakeUpAsync("access", 1, CancellationToken.None);
@@ -84,7 +85,7 @@ public class TeslaOwnerApiClientTests
         // Arrange
         var handler = new FakeHttpMessageHandler().Respond("/api/1/products", statusCode, body, ("Retry-After", "120"));
         using var httpClient = new HttpClient(handler);
-        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System);
+        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System, NullLogger.Instance);
 
         // Act
         var exception = await Assert.ThrowsAsync<TeslaApiException>(() => client.GetVehicleProductsAsync("access", CancellationToken.None));
@@ -101,7 +102,7 @@ public class TeslaOwnerApiClientTests
         // Arrange
         var handler = new FakeHttpMessageHandler().Respond("/api/1/products", HttpStatusCode.TooManyRequests, "{}", ("Retry-After", retryAfter));
         using var httpClient = new HttpClient(handler);
-        var client = new TeslaOwnerApiClient(httpClient, new FakeTimeProvider(new DateTimeOffset(2026, 11, 21, 20, 0, 0, TimeSpan.Zero)));
+        var client = new TeslaOwnerApiClient(httpClient, new FakeTimeProvider(new DateTimeOffset(2026, 11, 21, 20, 0, 0, TimeSpan.Zero)), NullLogger.Instance);
 
         // Act
         var exception = await Assert.ThrowsAsync<TeslaApiException>(() => client.GetVehicleProductsAsync("access", CancellationToken.None));
@@ -116,7 +117,7 @@ public class TeslaOwnerApiClientTests
         // Arrange
         var handler = new FakeHttpMessageHandler().Respond("/api/1/products", HttpStatusCode.TooManyRequests, "{}");
         using var httpClient = new HttpClient(handler);
-        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System);
+        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System, NullLogger.Instance);
 
         // Act
         var exception = await Assert.ThrowsAsync<TeslaApiException>(() => client.GetVehicleProductsAsync("access", CancellationToken.None));
@@ -131,7 +132,7 @@ public class TeslaOwnerApiClientTests
         // Arrange
         var handler = new FakeHttpMessageHandler().Respond("/api/1/products", HttpStatusCode.Unauthorized, """{"error":"invalid bearer token"}""");
         using var httpClient = new HttpClient(handler);
-        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System);
+        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System, NullLogger.Instance);
 
         // Act
         var exception = await Assert.ThrowsAsync<TeslaApiException>(() => client.GetVehicleProductsAsync("access", CancellationToken.None));
@@ -148,7 +149,7 @@ public class TeslaOwnerApiClientTests
         // Arrange
         var handler = new FakeHttpMessageHandler().Respond("/api/1/products", HttpStatusCode.BadGateway, "<html>access upstream</html>");
         using var httpClient = new HttpClient(handler);
-        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System);
+        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System, NullLogger.Instance);
 
         // Act
         var exception = await Assert.ThrowsAsync<TeslaApiException>(() => client.GetVehicleProductsAsync("access", CancellationToken.None));
@@ -169,7 +170,7 @@ public class TeslaOwnerApiClientTests
             DefaultRequestVersion = HttpVersion.Version20,
             DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact
         };
-        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System);
+        var client = new TeslaOwnerApiClient(httpClient, TimeProvider.System, NullLogger.Instance);
 
         // Act
         await client.GetVehicleProductsAsync("access", CancellationToken.None);

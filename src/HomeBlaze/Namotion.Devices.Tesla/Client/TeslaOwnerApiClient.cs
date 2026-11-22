@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using Microsoft.Extensions.Logging;
 using Namotion.Devices.Tesla.Client.Dto;
 
 namespace Namotion.Devices.Tesla.Client;
@@ -18,20 +19,23 @@ internal sealed class TeslaOwnerApiClient
 
     private readonly HttpClient _httpClient;
     private readonly TimeProvider _timeProvider;
+    private readonly TeslaJsonContext _jsonContext;
 
     /// <param name="httpClient">A client that uses HTTP/2 and TLS 1.3, which Tesla requires.</param>
     /// <param name="timeProvider">The clock for a Retry-After date.</param>
-    public TeslaOwnerApiClient(HttpClient httpClient, TimeProvider timeProvider)
+    /// <param name="logger">Receives a warning for each response value of an unexpected type.</param>
+    public TeslaOwnerApiClient(HttpClient httpClient, TimeProvider timeProvider, ILogger logger)
     {
         _httpClient = httpClient;
         _timeProvider = timeProvider;
+        _jsonContext = TeslaJsonContext.Create(logger);
     }
 
     /// <summary>Reads the vehicles of the account with their state and cached snapshot. Never wakes a vehicle.</summary>
     /// <exception cref="TeslaApiException">Tesla answered with an error.</exception>
     public async Task<TeslaProductDto[]> GetVehicleProductsAsync(string accessToken, CancellationToken cancellationToken)
     {
-        var response = await GetAsync("products", accessToken, TeslaJsonContext.Default.TeslaResponseTeslaProductDtoArray, cancellationToken)
+        var response = await GetAsync("products", accessToken, _jsonContext.TeslaResponseTeslaProductDtoArray, cancellationToken)
             ?? throw new TeslaApiException(HttpStatusCode.RequestTimeout, "products unavailable");
         return response.Response?.Where(product => product.VehicleId is not null).ToArray() ?? [];
     }
@@ -41,7 +45,7 @@ internal sealed class TeslaOwnerApiClient
     public async Task<TeslaVehicleDataDto?> GetVehicleDataAsync(string accessToken, long vehicleId, CancellationToken cancellationToken)
     {
         var response = await GetAsync($"vehicles/{vehicleId}/vehicle_data?endpoints={VehicleDataEndpoints}", accessToken,
-            TeslaJsonContext.Default.TeslaResponseTeslaVehicleDataDto, cancellationToken);
+            _jsonContext.TeslaResponseTeslaVehicleDataDto, cancellationToken);
         return response?.Response;
     }
 

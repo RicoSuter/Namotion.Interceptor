@@ -48,7 +48,7 @@ public partial class TeslaAccount : BackgroundService,
         _logger = loggerFactory.CreateLogger<TeslaAccount>();
         _httpClient = createHttpClient();
         _authClient = new TeslaAuthClient(_httpClient);
-        _apiClient = new TeslaOwnerApiClient(_httpClient, timeProvider);
+        _apiClient = new TeslaOwnerApiClient(_httpClient, timeProvider, _logger);
 
         Name = string.Empty;
         Provider = TeslaProvider.OwnerApi;
