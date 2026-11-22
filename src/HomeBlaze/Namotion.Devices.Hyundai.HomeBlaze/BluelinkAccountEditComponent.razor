@@ -1,0 +1,145 @@
+@using System.Globalization
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(BluelinkAccount))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_name" @bind-Value:after="OnFieldChanged" Label="Name"
+                  HelperText="Empty to show the email of the account" Immediate="true" />
+
+    <MudText Typo="Typo.subtitle2" Class="mt-4">Polling</MudText>
+    <MudTextField @bind-Value="_statusPollingInterval" @bind-Value:after="OnFieldChanged" Label="Status interval (hh:mm:ss, at least 00:15:00)"
+                  Immediate="true" Validation="@(new Func<string, string?>(ValidateStatusPollingInterval))" />
+    <MudTextField @bind-Value="_retryInterval" @bind-Value:after="OnFieldChanged" Label="Retry interval after a failure (hh:mm:ss, at least 00:01:00)"
+                  Immediate="true" Validation="@(new Func<string, string?>(ValidateRetryInterval))" />
+    <MudNumericField T="int" @bind-Value="_dailyRequestLimit" @bind-Value:after="OnFieldChanged" Label="Daily request limit"
+                     Min="20" Max="200" HelperText="Hyundai blocks an account for up to a day above about 200 requests" />
+
+    <MudText Typo="Typo.subtitle2" Class="mt-4">Vehicle</MudText>
+    <MudNumericField T="int" @bind-Value="_minimumAuxiliaryBatteryPercent" @bind-Value:after="OnFieldChanged" Label="Minimum 12 V battery for Refresh (%)"
+                     Min="0" Max="100" />
+    <MudNumericField T="int" @bind-Value="_climateDurationMinutes" @bind-Value:after="OnFieldChanged" Label="Climate duration (minutes)"
+                     Min="1" Max="30" />
+
+    <MudExpansionPanels Elevation="0" Class="mt-4">
+        <MudExpansionPanel Text="@(IsReauthenticationRequired ? "Replace credentials (re-authentication required)" : "Replace credentials")"
+                           Expanded="IsReauthenticationRequired">
+            <BluelinkCredentialsPanel InitialEmail="@Account?.Email" OnConnected="OnConnected" OnReset="OnReset" />
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+</MudForm>
+
+@code {
+    private static readonly TimeSpan MinimumStatusPollingInterval = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan MinimumRetryInterval = TimeSpan.FromMinutes(1);
+
+    private string _name = string.Empty;
+    private string _statusPollingInterval = string.Empty;
+    private string _retryInterval = string.Empty;
+    private int _climateDurationMinutes;
+    private int _dailyRequestLimit;
+    private int _minimumAuxiliaryBatteryPercent;
+    private string _original = string.Empty;
+
+    // The connection of a replacement between the connect and the save; cleared once saved.
+    private BluelinkConnection? _connection;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private BluelinkAccount? Account => Subject as BluelinkAccount;
+
+    private bool IsReauthenticationRequired => Account?.IsReauthenticationRequired == true;
+
+    public bool IsValid =>
+        TryParseInterval(_statusPollingInterval, MinimumStatusPollingInterval, out _) &&
+        TryParseInterval(_retryInterval, MinimumRetryInterval, out _) &&
+        _climateDurationMinutes is >= 1 and <= 30 &&
+        _dailyRequestLimit is >= 20 and <= 200 &&
+        _minimumAuxiliaryBatteryPercent is >= 0 and <= 100;
+
+    public bool IsDirty => Snapshot() != _original || _connection is not null;
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (Account is not null)
+        {
+            _name = Account.Name;
+            _statusPollingInterval = FormatInterval(Account.StatusPollingInterval);
+            _retryInterval = FormatInterval(Account.RetryInterval);
+            _climateDurationMinutes = (int)Account.ClimateDuration.TotalMinutes;
+            _dailyRequestLimit = Account.DailyRequestLimit;
+            _minimumAuxiliaryBatteryPercent = (int)Math.Round(Account.MinimumAuxiliaryBatteryLevel * 100m, MidpointRounding.AwayFromZero);
+        }
+
+        _original = Snapshot();
+    }
+
+    private static string FormatInterval(TimeSpan interval) => interval.ToString("c", CultureInfo.InvariantCulture);
+
+    private static bool TryParseInterval(string text, TimeSpan minimum, out TimeSpan interval) =>
+        TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out interval) && interval >= minimum;
+
+    private static string? ValidateStatusPollingInterval(string text) =>
+        TryParseInterval(text, MinimumStatusPollingInterval, out _) ? null : "Enter at least 00:15:00";
+
+    private static string? ValidateRetryInterval(string text) =>
+        TryParseInterval(text, MinimumRetryInterval, out _) ? null : "Enter at least 00:01:00";
+
+    private string Snapshot() => string.Join("|",
+        _name, _statusPollingInterval, _retryInterval,
+        _climateDurationMinutes.ToString(CultureInfo.InvariantCulture),
+        _dailyRequestLimit.ToString(CultureInfo.InvariantCulture), _minimumAuxiliaryBatteryPercent.ToString(CultureInfo.InvariantCulture));
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    private void OnConnected(BluelinkConnection connection)
+    {
+        _connection = connection;
+        OnFieldChanged();
+    }
+
+    private void OnReset()
+    {
+        _connection = null;
+        OnFieldChanged();
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Account is null || !IsValid)
+        {
+            return Task.CompletedTask;
+        }
+
+        TryParseInterval(_statusPollingInterval, MinimumStatusPollingInterval, out var statusPollingInterval);
+        TryParseInterval(_retryInterval, MinimumRetryInterval, out var retryInterval);
+
+        Account.Name = _name.Trim();
+        Account.StatusPollingInterval = statusPollingInterval;
+        Account.RetryInterval = retryInterval;
+        Account.ClimateDuration = TimeSpan.FromMinutes(_climateDurationMinutes);
+        Account.DailyRequestLimit = _dailyRequestLimit;
+        Account.MinimumAuxiliaryBatteryLevel = _minimumAuxiliaryBatteryPercent / 100m;
+        if (_connection is not null)
+        {
+            Account.ReplaceCredentials(_connection);
+            _connection = null;
+        }
+
+        _original = Snapshot();
+        IsDirtyChanged?.Invoke(false);
+        return Task.CompletedTask;
+    }
+}

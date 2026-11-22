@@ -1,0 +1,14 @@
+{
+  "$type": "Namotion.Devices.Hyundai.BluelinkAccount",
+  "name": "Hyundai",
+  "email": "",
+  "password": "",
+  "pin": "",
+  "tokens": "",
+  "deviceId": "",
+  "statusPollingInterval": "00:30:00",
+  "dailyRequestLimit": 150,
+  "minimumAuxiliaryBatteryLevel": 0.65,
+  "climateDuration": "00:10:00",
+  "retryInterval": "00:05:00"
+}

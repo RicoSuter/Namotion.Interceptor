@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.Json;
 using Namotion.Devices.FritzBox.Model;
 using Namotion.Devices.FritzBox.Parsing;
 using Namotion.Devices.Upnp;
@@ -28,9 +27,10 @@ internal static class FritzBoxPoller
         var internetTask = ReadInternetAsync(connection, cancellationToken);
         var trafficTask = ReadTrafficAsync(connection, cancellationToken);
         var wlansTask = ReadWlansAsync(connection, cancellationToken);
-        var hostsTask = ReadHostsAsync(connection, cancellationToken);
-        var meshTask = ReadMeshAsync(connection, cancellationToken);
-        await Task.WhenAll(userInterfaceTask, internetTask, trafficTask, wlansTask, hostsTask, meshTask);
+        var hostsTask = FritzBoxListReader.ReadHostsAsync(connection, cancellationToken);
+        var meshTask = FritzBoxListReader.ReadMeshAsync(connection, cancellationToken);
+        var filterProfilesTask = FritzBoxListReader.ReadFilterProfilesAsync(connection, cancellationToken);
+        await Task.WhenAll(userInterfaceTask, internetTask, trafficTask, wlansTask, hostsTask, meshTask, filterProfilesTask);
 
         return new FritzBoxSnapshot(
             ToRouterInfo(deviceInfo),
@@ -39,7 +39,8 @@ internal static class FritzBoxPoller
             await trafficTask,
             await wlansTask,
             await hostsTask,
-            await meshTask);
+            await meshTask,
+            await filterProfilesTask);
     }
 
     /// <returns>The first value of a comma-separated series of the online monitor, the most recent one.</returns>
@@ -190,53 +191,6 @@ internal static class FritzBoxPoller
         }
 
         return wlans;
-    }
-
-    private static async Task<IReadOnlyList<HostEntry>> ReadHostsAsync(FritzBoxConnection connection, CancellationToken cancellationToken)
-    {
-        UpnpSoapResponse answer;
-        try
-        {
-            answer = await connection.QueryAsync(Tr64Services.Hosts, "X_AVM-DE_GetHostListPath", null, cancellationToken);
-        }
-        catch (Exception exception) when (exception is FritzBoxServiceUnavailableException or UpnpFaultException { ErrorCode: 401 })
-        {
-            throw new FritzBoxFirmwareException(
-                "The FRITZ!Box does not offer its host list (X_AVM-DE_GetHostListPath). Update FRITZ!OS.", exception);
-        }
-        catch (Exception exception) when (FritzBoxConnection.IsLoginRefusal(exception))
-        {
-            // The required list refused after a successful login means the password or permission changed since.
-            throw new FritzBoxLoginException(exception);
-        }
-
-        var path = answer.GetString("NewX_AVM-DE_HostListPath")
-            ?? throw new InvalidDataException("The FRITZ!Box did not return the path of its host list.");
-        await using var content = await connection.DownloadAsync(path, FritzBoxConnection.MaximumListBytes, cancellationToken);
-        return HostListParser.Parse(content);
-    }
-
-    private static async Task<MeshTopology?> ReadMeshAsync(FritzBoxConnection connection, CancellationToken cancellationToken)
-    {
-        var answer = await connection.ReadOrDefaultAsync(Tr64Services.Hosts, "X_AVM-DE_GetMeshListPath", null, cancellationToken);
-        var path = answer?.GetString("NewX_AVM-DE_MeshListPath");
-        if (string.IsNullOrEmpty(path))
-        {
-            return null;
-        }
-
-        // A malformed document, an unsafe path or an HTTP status error drops only the mesh; a connection failure,
-        // a certificate problem, a timeout or cancellation fails the poll, so access points do not flicker for a cycle.
-        try
-        {
-            await using var content = await connection.DownloadAsync(path, FritzBoxConnection.MaximumListBytes, cancellationToken);
-            return MeshTopology.Build(MeshListParser.Parse(content));
-        }
-        catch (Exception exception) when (exception is JsonException or InvalidDataException or HttpRequestException { StatusCode: not null })
-        {
-            connection.LogUnavailable(Tr64Services.Hosts, "X_AVM-DE_GetMeshListPath", exception);
-            return null;
-        }
     }
 
     private static TimeSpan? ToTimeSpan(long? seconds) => seconds is { } value ? TimeSpan.FromSeconds(value) : null;

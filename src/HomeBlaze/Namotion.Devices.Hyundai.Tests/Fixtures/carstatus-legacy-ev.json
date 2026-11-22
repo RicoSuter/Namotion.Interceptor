@@ -1,0 +1,47 @@
+{
+  "retCode": "S",
+  "resCode": "0000",
+  "resMsg": {
+    "resCode": "0000",
+    "ServiceNo": "1",
+    "RetCode": "S",
+    "lastUpdateTime": "20261122101500",
+    "state": {
+      "Vehicle": {
+        "Date": "20261122101500.000",
+        "Drivetrain": { "Odometer": 16773.9, "FuelSystem": { "DTE": { "Unit": 1, "Total": 190 } } },
+        "Electronics": { "Battery": { "Level": 84, "SensorReliability": 0 } },
+        "Green": {
+          "BatteryManagement": { "BatteryRemain": { "Ratio": 46.5 } },
+          "ChargingInformation": {
+            "Charging": { "State": 1, "RemainTime": 95 },
+            "ConnectorFastening": { "State": 1 },
+            "TargetSoC": { "Standard": 80, "Quick": 100 }
+          },
+          "Electric": { "SmartGrid": { "RealTimePower": 7.2 } }
+        },
+        "Cabin": {
+          "HVAC": { "Row1": { "Driver": { "Blower": { "SpeedLevel": 0 }, "Temperature": { "Value": "OFF", "Unit": 0 } } } },
+          "SteeringWheel": { "Heat": { "State": 0 } },
+          "Door": {
+            "Row1": { "Driver": { "Open": 0, "Lock": 0 }, "Passenger": { "Open": 0, "Lock": 0 } },
+            "Row2": { "Left": { "Open": 0, "Lock": 0 }, "Right": { "Open": 1, "Lock": 0 } }
+          },
+          "Window": {
+            "Row1": { "Driver": { "Open": 0, "OpenLevel": 0 }, "Passenger": { "Open": 0, "OpenLevel": 2 } },
+            "Row2": { "Left": { "Open": 0, "OpenLevel": 0 }, "Right": { "Open": 0, "OpenLevel": 0 } }
+          }
+        },
+        "Body": { "Trunk": { "Open": 0 }, "Hood": { "Open": 0 }, "Windshield": { "Front": { "Defog": { "State": 0 } } } },
+        "Chassis": {
+          "Axle": {
+            "Tire": { "PressureLow": 1, "PressureUnit": 2 },
+            "Row1": { "Left": { "Tire": { "PressureLow": 0, "Pressure": 25 } }, "Right": { "Tire": { "PressureLow": 1, "Pressure": 22 } } },
+            "Row2": { "Left": { "Tire": { "PressureLow": 0, "Pressure": 25 } }, "Right": { "Tire": { "PressureLow": 0, "Pressure": 25 } } }
+          }
+        }
+      }
+    }
+  },
+  "msgId": "MSG-1"
+}

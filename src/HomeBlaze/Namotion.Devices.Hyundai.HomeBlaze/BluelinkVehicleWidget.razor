@@ -1,0 +1,88 @@
+@using System.Globalization
+@using global::HomeBlaze.Abstractions.Devices.Locks
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(BluelinkVehicle))]
+@implements ISubjectComponent
+@inject ITimeZoneDisplay TimeZone
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.DirectionsCar" Class="mr-2" />
+            <MudStack Spacing="0">
+                <MudText Typo="Typo.h6">@(Vehicle?.Title ?? "Hyundai")</MudText>
+                @* Without a nickname, the title already starts with the model. *@
+                @if (Vehicle is { Model: { } model, Nickname: not null })
+                {
+                    <MudText Typo="Typo.caption">@model</MudText>
+                }
+            </MudStack>
+        </MudStack>
+
+        @if (Vehicle?.Charge.BatteryLevel is { } batteryLevel)
+        {
+            <div style="position: relative;">
+                <MudProgressLinear Value="@((double)(batteryLevel * 100))" Size="Size.Large"
+                                   Color="@(Vehicle.Charge.IsCharging == true ? Color.Success : Color.Primary)" />
+                @if (Vehicle.Charge.ChargeLimit is { } limit)
+                {
+                    <div title="Charge limit" style="position: absolute; top: -2px; bottom: -2px; left: @((limit * 100).ToString(CultureInfo.InvariantCulture))%; width: 2px; background: var(--mud-palette-text-primary);"></div>
+                }
+            </div>
+            <MudStack Row="true" Spacing="4" AlignItems="AlignItems.Baseline">
+                <MudText Typo="Typo.h6">@($"{batteryLevel * 100:F0}%")</MudText>
+                @if (Vehicle.Charge.Range is { } range)
+                {
+                    <MudText Typo="Typo.body1">@($"{range:F0} km")</MudText>
+                }
+                @if (Vehicle.Charge.ChargeLimit is { } chargeLimit)
+                {
+                    <MudText Typo="Typo.caption">@($"Limit {chargeLimit * 100:F0}%")</MudText>
+                }
+            </MudStack>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2">No data yet.</MudText>
+        }
+
+        @if (Vehicle?.Charge.IsCharging == true)
+        {
+            <MudText Typo="Typo.body2">
+                Charging@(Vehicle.Charge.ChargingPower is { } power ? $" {power / 1000m:F1} kW" : "")@(Vehicle.Charge.RemainingChargingTime is { } remaining ? $", {(int)remaining.TotalHours}:{remaining.Minutes:00} left" : "")
+            </MudText>
+        }
+        else if (Vehicle?.Charge.IsPluggedIn == true)
+        {
+            <MudText Typo="Typo.body2">Plugged in</MudText>
+        }
+
+        <MudStack Row="true" Spacing="3" AlignItems="AlignItems.Center">
+            @if (Vehicle?.Body.LockState is { } lockState)
+            {
+                <MudIcon Icon="@(lockState == DoorLockState.Locked ? Icons.Material.Filled.Lock : Icons.Material.Filled.LockOpen)"
+                         Size="Size.Small" Title="@lockState.ToString()" />
+            }
+            @if (Vehicle?.Climate.IsClimateOn == true)
+            {
+                <MudText Typo="Typo.caption">Climate on@(Vehicle.Climate.DriverTemperatureSetting is { } setting ? $" {setting:F1} °C" : "")</MudText>
+            }
+            @if (Vehicle?.AuxiliaryBatteryLevel is { } auxiliary)
+            {
+                <MudText Typo="Typo.caption">12 V @($"{auxiliary * 100:F0}%")</MudText>
+            }
+        </MudStack>
+
+        @if (Vehicle?.LastUpdated is { } lastUpdated)
+        {
+            <MudText Typo="Typo.caption">Updated @TimeZone.Format(lastUpdated)</MudText>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private BluelinkVehicle? Vehicle => Subject as BluelinkVehicle;
+}
