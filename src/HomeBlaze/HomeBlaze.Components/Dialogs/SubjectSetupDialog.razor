@@ -29,7 +29,7 @@
                                 ValueChanged="OnPickerModeChanged"
                                 SelectionMode="SelectionMode.SingleSelection"
                                 Size="Size.Small"
-                                Class="mb-2"
+                                Class="mb-2 subject-setup-picker-mode-toggle"
                                 data-testid="picker-mode-toggle">
                     <MudToggleItem Value="PickerMode.Types" Text="All types" data-testid="picker-mode-types" />
                     <MudToggleItem Value="PickerMode.Discover" Text="Discover" data-testid="picker-mode-discover" />
@@ -135,6 +135,11 @@
     .subject-setup-picker-content > .subject-setup-picker-page {
         flex: 1 1 auto;
         min-height: 0;
+    }
+
+    /* The toggle group clips its overflow, so as a flex item it would shrink to nothing on a short screen. */
+    .subject-setup-picker-page > .subject-setup-picker-mode-toggle {
+        flex: none;
     }
 
     /* :not([hidden]) keeps display: flex from overriding the hidden attribute. */
