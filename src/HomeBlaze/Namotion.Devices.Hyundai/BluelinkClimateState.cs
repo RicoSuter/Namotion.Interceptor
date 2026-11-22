@@ -19,8 +19,8 @@ public partial class BluelinkClimateState : IVehicleClimateState, IVehicleClimat
     {
         _vehicle = vehicle;
         IsClimateOn = null;
-        TemperatureSetting = null;
-        IsDefrostOn = null;
+        DriverTemperatureSetting = null;
+        IsFrontDefrosterOn = null;
         IsSteeringWheelHeaterOn = null;
         OutsideTemperature = null;
     }
@@ -33,9 +33,9 @@ public partial class BluelinkClimateState : IVehicleClimateState, IVehicleClimat
     [State(IsDiscrete = true, Position = 1)] public partial bool? IsClimateOn { get; internal set; }
 
     /// <summary>The set temperature, or null while the climate is off.</summary>
-    [State(Unit = StateUnit.DegreeCelsius, Position = 2)] public partial decimal? TemperatureSetting { get; internal set; }
+    [State(Unit = StateUnit.DegreeCelsius, Position = 2)] public partial decimal? DriverTemperatureSetting { get; internal set; }
 
-    [State(IsDiscrete = true, Position = 3)] public partial bool? IsDefrostOn { get; internal set; }
+    [State(IsDiscrete = true, Position = 3)] public partial bool? IsFrontDefrosterOn { get; internal set; }
     [State(IsDiscrete = true, Position = 4)] public partial bool? IsSteeringWheelHeaterOn { get; internal set; }
 
     /// <summary>Not reported by the Bluelink API; always null.</summary>
@@ -77,8 +77,8 @@ public partial class BluelinkClimateState : IVehicleClimateState, IVehicleClimat
     internal void Apply(BluelinkVehicleStatus status)
     {
         IsClimateOn = status.IsClimateOn;
-        TemperatureSetting = status.TemperatureSetting;
-        IsDefrostOn = status.IsDefrostOn;
+        DriverTemperatureSetting = status.DriverTemperatureSetting;
+        IsFrontDefrosterOn = status.IsFrontDefrosterOn;
         IsSteeringWheelHeaterOn = status.IsSteeringWheelHeaterOn;
         OutsideTemperature = status.OutsideTemperature;
     }

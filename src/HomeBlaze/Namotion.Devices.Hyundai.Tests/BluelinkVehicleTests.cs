@@ -256,10 +256,10 @@ public class BluelinkVehicleTests
         // Act
         vehicle.ApplyStatus(new BluelinkVehicleStatus
         {
-            IsFrontLeftDoorOpen = false,
-            IsFrontRightDoorOpen = false,
-            IsRearLeftDoorOpen = false,
-            IsRearRightDoorOpen = false,
+            IsDriverFrontDoorOpen = false,
+            IsPassengerFrontDoorOpen = false,
+            IsDriverRearDoorOpen = false,
+            IsPassengerRearDoorOpen = false,
         }, ReadTime);
 
         // Assert
@@ -275,10 +275,10 @@ public class BluelinkVehicleTests
         // Act
         vehicle.ApplyStatus(new BluelinkVehicleStatus
         {
-            IsFrontLeftDoorOpen = false,
-            IsFrontRightDoorOpen = null,
-            IsRearLeftDoorOpen = false,
-            IsRearRightDoorOpen = false,
+            IsDriverFrontDoorOpen = false,
+            IsPassengerFrontDoorOpen = null,
+            IsDriverRearDoorOpen = false,
+            IsPassengerRearDoorOpen = false,
         }, ReadTime);
 
         // Assert
@@ -294,8 +294,8 @@ public class BluelinkVehicleTests
         // Act
         vehicle.ApplyStatus(new BluelinkVehicleStatus
         {
-            IsFrontLeftDoorOpen = null,
-            IsFrontRightDoorOpen = true,
+            IsDriverFrontDoorOpen = null,
+            IsPassengerFrontDoorOpen = true,
         }, ReadTime);
 
         // Assert

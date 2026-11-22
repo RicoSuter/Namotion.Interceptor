@@ -64,7 +64,7 @@
             }
             @if (Vehicle?.Climate.IsClimateOn == true)
             {
-                <MudText Typo="Typo.caption">Climate on@(Vehicle.Climate.TemperatureSetting is { } setting ? $" {setting:F1} °C" : "")</MudText>
+                <MudText Typo="Typo.caption">Climate on@(Vehicle.Climate.DriverTemperatureSetting is { } setting ? $" {setting:F1} °C" : "")</MudText>
             }
             @if (Vehicle?.AuxiliaryBatteryLevel is { } auxiliary)
             {

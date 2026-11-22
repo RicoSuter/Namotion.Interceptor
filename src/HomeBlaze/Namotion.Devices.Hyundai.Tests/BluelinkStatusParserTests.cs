@@ -41,15 +41,15 @@ public class BluelinkStatusParserTests
     }
 
     [Fact]
-    public void WhenClimateIsOff_ThenTemperatureSettingIsNull()
+    public void WhenClimateIsOff_ThenDriverTemperatureSettingIsNull()
     {
         // Act
         var status = ParseFixture();
 
         // Assert
         Assert.False(status.IsClimateOn);
-        Assert.Null(status.TemperatureSetting);
-        Assert.False(status.IsDefrostOn);
+        Assert.Null(status.DriverTemperatureSetting);
+        Assert.False(status.IsFrontDefrosterOn);
         Assert.False(status.IsSteeringWheelHeaterOn);
         Assert.Null(status.OutsideTemperature);
     }
@@ -62,9 +62,9 @@ public class BluelinkStatusParserTests
 
         // Assert
         Assert.Equal(DoorLockState.Locked, status.LockState);
-        Assert.True(status.IsRearRightDoorOpen);
-        Assert.False(status.IsFrontLeftDoorOpen);
-        Assert.True(status.IsFrontRightWindowOpen);
+        Assert.True(status.IsPassengerRearDoorOpen);
+        Assert.False(status.IsDriverFrontDoorOpen);
+        Assert.True(status.IsPassengerFrontWindowOpen);
         Assert.False(status.IsTrunkOpen);
     }
 
@@ -154,7 +154,7 @@ public class BluelinkStatusParserTests
 
         // Assert
         Assert.True(status.IsClimateOn);
-        Assert.Equal(22.0m, status.TemperatureSetting);
+        Assert.Equal(22.0m, status.DriverTemperatureSetting);
         Assert.Equal(4m, status.OutsideTemperature);
     }
 
@@ -246,7 +246,7 @@ public class BluelinkStatusParserTests
         var status = Parse("""{"Body":{"Windshield":{"Front":{"Defog":{"State":STATE}}}}}""".Replace("STATE", state.ToString()));
 
         // Assert
-        Assert.Equal(expected, status.IsDefrostOn);
+        Assert.Equal(expected, status.IsFrontDefrosterOn);
     }
 
     [Fact]
@@ -276,7 +276,24 @@ public class BluelinkStatusParserTests
         var status = Parse("""{"Cabin":{"Window":{"Row1":{"Driver":{}}}}}""");
 
         // Assert
-        Assert.Null(status.IsFrontLeftWindowOpen);
+        Assert.Null(status.IsDriverFrontWindowOpen);
+    }
+
+    [Fact]
+    public void WhenOnlyTheLeftRearDoorAndWindowAreOpen_ThenTheDriverRearOnesAreOpen()
+    {
+        // Act
+        var status = Parse("""
+            {"Cabin":{
+              "Door":{"Row2":{"Left":{"Open":1},"Right":{"Open":0}}},
+              "Window":{"Row2":{"Left":{"Open":1,"OpenLevel":0},"Right":{"Open":0,"OpenLevel":0}}}}}
+            """);
+
+        // Assert
+        Assert.True(status.IsDriverRearDoorOpen);
+        Assert.False(status.IsPassengerRearDoorOpen);
+        Assert.True(status.IsDriverRearWindowOpen);
+        Assert.False(status.IsPassengerRearWindowOpen);
     }
 
     [Fact]

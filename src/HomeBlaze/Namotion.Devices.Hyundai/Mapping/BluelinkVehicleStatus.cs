@@ -7,7 +7,8 @@ internal sealed record BluelinkTireStatus(bool? IsPressureLow, decimal? Pressure
 
 /// <summary>
 /// The values of one stored status, in HomeBlaze units: fractions from 0 to 1, km, W, °C, bar. Null when not reported.
-/// Sides assume a left-hand drive vehicle: the driver door is the front left door.
+/// Hyundai reports the rear doors and windows as left and right; the left ones are the driver rear ones, which assumes a
+/// left-hand drive vehicle. Tires keep the physical sides.
 /// </summary>
 internal sealed record BluelinkVehicleStatus
 {
@@ -27,22 +28,22 @@ internal sealed record BluelinkVehicleStatus
     public decimal? Range { get; init; }
 
     public bool? IsClimateOn { get; init; }
-    public decimal? TemperatureSetting { get; init; }
+    public decimal? DriverTemperatureSetting { get; init; }
     public decimal? OutsideTemperature { get; init; }
-    public bool? IsDefrostOn { get; init; }
+    public bool? IsFrontDefrosterOn { get; init; }
     public bool? IsSteeringWheelHeaterOn { get; init; }
 
     public DoorLockState? LockState { get; init; }
-    public bool? IsFrontLeftDoorOpen { get; init; }
-    public bool? IsFrontRightDoorOpen { get; init; }
-    public bool? IsRearLeftDoorOpen { get; init; }
-    public bool? IsRearRightDoorOpen { get; init; }
+    public bool? IsDriverFrontDoorOpen { get; init; }
+    public bool? IsPassengerFrontDoorOpen { get; init; }
+    public bool? IsDriverRearDoorOpen { get; init; }
+    public bool? IsPassengerRearDoorOpen { get; init; }
     public bool? IsTrunkOpen { get; init; }
     public bool? IsHoodOpen { get; init; }
-    public bool? IsFrontLeftWindowOpen { get; init; }
-    public bool? IsFrontRightWindowOpen { get; init; }
-    public bool? IsRearLeftWindowOpen { get; init; }
-    public bool? IsRearRightWindowOpen { get; init; }
+    public bool? IsDriverFrontWindowOpen { get; init; }
+    public bool? IsPassengerFrontWindowOpen { get; init; }
+    public bool? IsDriverRearWindowOpen { get; init; }
+    public bool? IsPassengerRearWindowOpen { get; init; }
 
     public BluelinkTireStatus FrontLeftTire { get; init; } = UnknownTire;
     public BluelinkTireStatus FrontRightTire { get; init; } = UnknownTire;

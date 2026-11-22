@@ -89,7 +89,7 @@ BluelinkAccount                          tokens, polling, call budget
 
 Vehicles are discovered, not configured, and keyed by VIN. Only electric vehicles are added. The vehicle list is read at start, after the tokens were replaced, and then once a day: a vehicle that appears is added, one that disappears is removed, and a known vehicle is updated in place, so paths and history stay stable.
 
-All readings are `null` until the vehicle reported them. Percentages are fractions from 0 to 1, distances are in km, temperatures in °C, power in W, tire pressures in bar and durations are `TimeSpan`. Sides assume a left-hand drive vehicle: the driver door is the front left door.
+All readings are `null` until the vehicle reported them. Percentages are fractions from 0 to 1, distances are in km, temperatures in °C, power in W, tire pressures in bar and durations are `TimeSpan`. Doors and windows are named relative to the driver. Hyundai reports the rear ones as left and right, and the left ones count as the driver side, which assumes a left-hand drive vehicle. Tires keep the physical sides.
 
 | Subject | Interfaces |
 |---------|------------|
@@ -149,8 +149,8 @@ The title is the nickname, else "Hyundai: " and the last six characters of the V
 | Property | Unit | Description |
 |----------|------|-------------|
 | `IsClimateOn` | | Whether the climate runs, from the blower speed |
-| `TemperatureSetting` | °C | Set temperature; `null` while the climate is off or in another unit |
-| `IsDefrostOn`, `IsSteeringWheelHeaterOn` | | Front windshield defrost and steering wheel heater |
+| `DriverTemperatureSetting` | °C | Set temperature; `null` while the climate is off or in another unit |
+| `IsFrontDefrosterOn`, `IsSteeringWheelHeaterOn` | | Front windshield defrost and steering wheel heater |
 | `OutsideTemperature` | °C | Outside temperature, when the vehicle reports it |
 | `InsideTemperature` | °C | Always `null`; the API does not report it |
 
@@ -159,9 +159,9 @@ The title is the nickname, else "Hyundai: " and the last six characters of the V
 | Property | Description |
 |----------|-------------|
 | `LockState`, `IsLocked` | `Unlocked` when any door is unlocked, otherwise `null` when a door is unknown, and `Locked` when all four doors are locked |
-| `IsFrontLeftDoorOpen`, `IsFrontRightDoorOpen`, `IsRearLeftDoorOpen`, `IsRearRightDoorOpen` | Doors |
+| `IsDriverFrontDoorOpen`, `IsPassengerFrontDoorOpen`, `IsDriverRearDoorOpen`, `IsPassengerRearDoorOpen` | Doors |
 | `IsTrunkOpen`, `IsHoodOpen` | Trunk and hood |
-| `IsFrontLeftWindowOpen`, `IsFrontRightWindowOpen`, `IsRearLeftWindowOpen`, `IsRearRightWindowOpen` | Windows; a vented window counts as open |
+| `IsDriverFrontWindowOpen`, `IsPassengerFrontWindowOpen`, `IsDriverRearWindowOpen`, `IsPassengerRearWindowOpen` | Windows; a vented window counts as open |
 | `IsAnyDoorOpen`, `IsAnyWindowOpen` | Derived: `true` when any of the four is open, `null` when none is open and one is unknown |
 | `FrontLeftTire`, `FrontRightTire`, `RearLeftTire`, `RearRightTire` | `BluelinkTire` children with `IsPressureLow` and `Pressure` (bar; `null` for vehicles without direct pressure sensors and when the vehicle reports no reading, such as the value 255) |
 

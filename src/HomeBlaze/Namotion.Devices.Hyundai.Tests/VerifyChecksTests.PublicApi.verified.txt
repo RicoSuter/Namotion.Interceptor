@@ -135,6 +135,8 @@ namespace Namotion.Devices.Hyundai
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class BluelinkClimateState : HomeBlaze.Abstractions.Devices.Vehicles.IVehicleClimateController, HomeBlaze.Abstractions.Devices.Vehicles.IVehicleClimateState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? DriverTemperatureSetting { get; }
         public string IconName { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
         [Namotion.Interceptor.Attributes.Derived]
@@ -144,7 +146,7 @@ namespace Namotion.Devices.Hyundai
         [System.ComponentModel.Category("")]
         public bool? IsClimateOn { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
-        public bool? IsDefrostOn { get; }
+        public bool? IsFrontDefrosterOn { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
         public bool? IsSteeringWheelHeaterOn { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=6, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
@@ -159,8 +161,6 @@ namespace Namotion.Devices.Hyundai
         [Namotion.Interceptor.Attributes.Derived]
         [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("StopClimate", "IsEnabled")]
         public bool StopClimate_IsEnabled { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
-        public decimal? TemperatureSetting { get; }
         public string Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
@@ -286,23 +286,23 @@ namespace Namotion.Devices.Hyundai
         [Namotion.Interceptor.Attributes.Derived]
         public bool? IsAnyWindowOpen { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=2)]
-        public bool? IsFrontLeftDoorOpen { get; }
+        public bool? IsDriverFrontDoorOpen { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=8)]
-        public bool? IsFrontLeftWindowOpen { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
-        public bool? IsFrontRightDoorOpen { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=9)]
-        public bool? IsFrontRightWindowOpen { get; }
+        public bool? IsDriverFrontWindowOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
+        public bool? IsDriverRearDoorOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=10)]
+        public bool? IsDriverRearWindowOpen { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
         public bool? IsHoodOpen { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
-        public bool? IsRearLeftDoorOpen { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=10)]
-        public bool? IsRearLeftWindowOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        public bool? IsPassengerFrontDoorOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=9)]
+        public bool? IsPassengerFrontWindowOpen { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=5)]
-        public bool? IsRearRightDoorOpen { get; }
+        public bool? IsPassengerRearDoorOpen { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=11)]
-        public bool? IsRearRightWindowOpen { get; }
+        public bool? IsPassengerRearWindowOpen { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=6)]
         public bool? IsTrunkOpen { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
