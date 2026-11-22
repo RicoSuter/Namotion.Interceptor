@@ -55,7 +55,7 @@ public class BluelinkStatusParserTests
     }
 
     [Fact]
-    public void WhenAllDoorsReportLockZero_ThenVehicleIsLocked()
+    public void WhenAllDoorsReportLockZero_ThenVehicleIsLockedAndOpeningsAreRead()
     {
         // Act
         var status = ParseFixture();
@@ -165,5 +165,136 @@ public class BluelinkStatusParserTests
 
         // Assert
         Assert.Equal(new BluelinkTireStatus(true, null), status.FrontLeftTire);
+    }
+
+    [Theory]
+    [InlineData(0, 38, 2.62)]
+    [InlineData(1, 51, 2.55)]
+    public void WhenPressureUnitIsPsiOrKilopascal_ThenPressureIsConvertedToBar(int unit, int raw, double expectedBar)
+    {
+        // Act
+        var status = Parse("""{"Chassis":{"Axle":{"Tire":{"PressureUnit":UNIT},"Row1":{"Left":{"Tire":{"PressureLow":0,"Pressure":RAW}}}}}}"""
+            .Replace("UNIT", unit.ToString()).Replace("RAW", raw.ToString()));
+
+        // Assert
+        Assert.Equal(new BluelinkTireStatus(false, (decimal)expectedBar), status.FrontLeftTire);
+    }
+
+    [Fact]
+    public void WhenPressureIs255_ThenPressureIsNullButWarningIsKept()
+    {
+        // Act
+        var status = Parse("""{"Chassis":{"Axle":{"Tire":{"PressureUnit":2},"Row1":{"Left":{"Tire":{"PressureLow":1,"Pressure":255}}}}}}""");
+
+        // Assert
+        Assert.Equal(new BluelinkTireStatus(true, null), status.FrontLeftTire);
+    }
+
+    [Fact]
+    public void WhenRangeUnitIsThree_ThenRangeIsConvertedFromMiles()
+    {
+        // Act
+        var status = Parse("""{"Drivetrain":{"FuelSystem":{"DTE":{"Unit":3,"Total":100}}}}""");
+
+        // Assert
+        Assert.Equal(160.9m, status.Range);
+    }
+
+    [Fact]
+    public void WhenRangeIsAString_ThenItIsRead()
+    {
+        // Act
+        var status = Parse("""{"Drivetrain":{"FuelSystem":{"DTE":{"Unit":1,"Total":"190"}}}}""");
+
+        // Assert
+        Assert.Equal(190m, status.Range);
+    }
+
+    [Fact]
+    public void WhenConnectorLockIsIdleAndFasteningIsZero_ThenNotPluggedIn()
+    {
+        // Act
+        var status = Parse("""{"Green":{"ChargingConnector":{"LockState":0},"ChargingInformation":{"ConnectorFastening":{"State":0}}}}""");
+
+        // Assert
+        Assert.False(status.IsPluggedIn);
+    }
+
+    [Fact]
+    public void WhenConnectorIsLockedAndFasteningIsZero_ThenPluggedInIsUnknown()
+    {
+        // Act
+        var status = Parse("""{"Green":{"ChargingConnector":{"LockState":2},"ChargingInformation":{"ConnectorFastening":{"State":0}}}}""");
+
+        // Assert
+        Assert.Null(status.IsPluggedIn);
+    }
+
+    [Theory]
+    [InlineData("20261122101500", true)]
+    [InlineData("20261122101500.12", true)]
+    [InlineData("20261122101500.123", true)]
+    [InlineData("2026112210", false)]
+    [InlineData("not a time!!!", false)]
+    [InlineData(null, false)]
+    public void WhenTimeIsParsed_ThenAFractionOfAnyLengthIsIgnoredAndInvalidValuesAreNull(string? value, bool isValid)
+    {
+        // Act
+        var time = BluelinkStatusParser.ParseTime(value);
+
+        // Assert
+        Assert.Equal(isValid ? new DateTimeOffset(2026, 11, 22, 10, 15, 0, TimeSpan.Zero) : null, time);
+    }
+
+    [Theory]
+    [InlineData(2, false)]
+    [InlineData(5, null)]
+    public void WhenDefrostStateIsTwoOrUnknown_ThenItIsOffOrNull(int state, bool? expected)
+    {
+        // Act
+        var status = Parse("""{"Body":{"Windshield":{"Front":{"Defog":{"State":STATE}}}}}""".Replace("STATE", state.ToString()));
+
+        // Assert
+        Assert.Equal(expected, status.IsDefrostOn);
+    }
+
+    [Fact]
+    public void WhenAuxiliaryBatteryLevelIs255_ThenLevelIsUnknown()
+    {
+        // Act
+        var status = Parse("""{"Electronics":{"Battery":{"Level":255,"SensorReliability":0}}}""");
+
+        // Assert
+        Assert.Null(status.AuxiliaryBatteryLevel);
+    }
+
+    [Fact]
+    public void WhenBatteryRatioIsAbove100_ThenBatteryLevelIsUnknown()
+    {
+        // Act
+        var status = Parse("""{"Green":{"BatteryManagement":{"BatteryRemain":{"Ratio":120}}}}""");
+
+        // Assert
+        Assert.Null(status.BatteryLevel);
+    }
+
+    [Fact]
+    public void WhenBothWindowFieldsAreMissing_ThenWindowStateIsUnknown()
+    {
+        // Act
+        var status = Parse("""{"Cabin":{"Window":{"Row1":{"Driver":{}}}}}""");
+
+        // Assert
+        Assert.Null(status.IsFrontLeftWindowOpen);
+    }
+
+    [Fact]
+    public void WhenOneDoorIsUnlockedAndAnotherIsMissing_ThenVehicleIsUnlocked()
+    {
+        // Act
+        var status = Parse("""{"Cabin":{"Door":{"Row1":{"Driver":{"Lock":1}}}}}""");
+
+        // Assert
+        Assert.Equal(DoorLockState.Unlocked, status.LockState);
     }
 }

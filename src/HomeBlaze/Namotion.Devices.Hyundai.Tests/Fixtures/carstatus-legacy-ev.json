@@ -39,8 +39,7 @@
             "Row1": { "Left": { "Tire": { "PressureLow": 0, "Pressure": 25 } }, "Right": { "Tire": { "PressureLow": 1, "Pressure": 22 } } },
             "Row2": { "Left": { "Tire": { "PressureLow": 0, "Pressure": 25 } }, "Right": { "Tire": { "PressureLow": 0, "Pressure": 25 } } }
           }
-        },
-        "Location": { "Date": "20260330230659.213", "GeoCoord": { "Latitude": 1.234567, "Longitude": 2.345678, "Type": 0 } }
+        }
       }
     }
   },

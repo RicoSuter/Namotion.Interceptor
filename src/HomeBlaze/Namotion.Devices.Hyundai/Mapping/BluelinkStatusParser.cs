@@ -65,16 +65,17 @@ internal static class BluelinkStatusParser
         };
     }
 
-    /// <summary>Parses the UTC time <c>yyyyMMddHHmmss</c>, optionally with milliseconds.</summary>
+    /// <summary>Parses the UTC time <c>yyyyMMddHHmmss</c>; a fraction of any length after the first 14 characters is ignored.</summary>
     internal static DateTimeOffset? ParseTime(string? value) =>
-        DateTime.TryParseExact(value, ["yyyyMMddHHmmss.fff", "yyyyMMddHHmmss"], CultureInfo.InvariantCulture,
+        value is { Length: >= 14 } &&
+        DateTime.TryParseExact(value.AsSpan(0, 14), "yyyyMMddHHmmss", CultureInfo.InvariantCulture,
             DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var time)
             ? new DateTimeOffset(time, TimeSpan.Zero)
             : null;
 
     private static bool? GetIsCharging(int? chargingState, int? fastening, decimal? remainingMinutes)
     {
-        // A state of 0 or a disconnected connector outrule a stale remaining time.
+        // A state of 0 or a disconnected connector overrule a stale remaining time.
         if (chargingState == 0 || fastening == 0)
         {
             return false;
@@ -112,7 +113,7 @@ internal static class BluelinkStatusParser
         return vehicle.GetInt32("Drivetrain.FuelSystem.DTE.Unit") switch
         {
             1 => total,
-            2 => Math.Round(total * MilesToKilometers, 1),
+            2 or 3 => Math.Round(total * MilesToKilometers, 1),
             _ => null
         };
     }
@@ -136,14 +137,20 @@ internal static class BluelinkStatusParser
         _ => false
     };
 
-    private static DoorLockState? GetLockState(params bool?[] doorsLocked)
+    /// <summary>One door known unlocked decides Unlocked; otherwise any unknown door leaves the state unknown.</summary>
+    private static DoorLockState? GetLockState(bool? frontLeft, bool? frontRight, bool? rearLeft, bool? rearRight)
     {
-        if (doorsLocked.Any(isLocked => isLocked is null))
+        if (frontLeft == false || frontRight == false || rearLeft == false || rearRight == false)
+        {
+            return DoorLockState.Unlocked;
+        }
+
+        if (frontLeft is null || frontRight is null || rearLeft is null || rearRight is null)
         {
             return null;
         }
 
-        return doorsLocked.All(isLocked => isLocked == true) ? DoorLockState.Locked : DoorLockState.Unlocked;
+        return DoorLockState.Locked;
     }
 
     /// <summary>A vented window reports Open 0 with OpenLevel above 0 and counts as open.</summary>
@@ -170,7 +177,8 @@ internal static class BluelinkStatusParser
 
     private static BluelinkTireStatus GetTire(JsonElement vehicle, string position, decimal? pressureScale) => new(
         vehicle.GetFlag($"Chassis.Axle.{position}.Tire.PressureLow"),
-        pressureScale is { } scale && vehicle.GetDecimal($"Chassis.Axle.{position}.Tire.Pressure") is { } raw and > 0m
+        // 255 marks no reading.
+        pressureScale is { } scale && vehicle.GetDecimal($"Chassis.Axle.{position}.Tire.Pressure") is { } raw and > 0m and not 255m
             ? Math.Round(raw * scale, 2)
             : null);
 }
