@@ -1,23 +1,27 @@
 @using HomeBlaze.Abstractions.Discovery
 @using HomeBlaze.Services.Discovery
 @using HomeBlaze.Services.Navigation
+@using Microsoft.Extensions.Logging
 
 @inject SubjectDiscoveryService DiscoveryService
 @inject SubjectPathResolver PathResolver
+@inject ILogger<SubjectDiscoveryPage> Logger
 
 @implements IDisposable
 
 <div class="subject-discovery-page" data-testid="subject-discovery-page">
     <div class="subject-discovery-header">
-        @if (_isScanning)
-        {
-            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
-            <MudText Typo="Typo.body2" data-testid="discovery-status">Searching your network...</MudText>
-        }
-        else if (_hasScanned)
-        {
-            <MudText Typo="Typo.body2" data-testid="discovery-status">@GetFoundText()</MudText>
-        }
+        <div class="subject-discovery-status" role="status">
+            @if (_isScanning)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                <MudText Typo="Typo.body2" data-testid="discovery-status">Searching your network...</MudText>
+            }
+            else if (_hasScanned)
+            {
+                <MudText Typo="Typo.body2" data-testid="discovery-status">@GetFoundText()</MudText>
+            }
+        </div>
         <MudSpacer />
         <MudButton Variant="Variant.Text"
                    StartIcon="@Icons.Material.Filled.Refresh"
@@ -31,7 +35,7 @@
             var result = row.Discovered.Result;
             @if (row.Discovered.ExistingSubject is { } existingSubject)
             {
-                <div class="subject-type-row subject-discovery-row-existing" data-testid="discovery-row-existing">
+                <div class="subject-type-row subject-discovery-row-existing" aria-disabled="true" data-testid="discovery-row-existing">
                     <MudIcon Icon="@MudBlazorIconResolver.Resolve(row.Descriptor.IconName)" />
                     <span class="subject-type-row-text">
                         <span>@result.DisplayName</span>
@@ -42,7 +46,8 @@
                         <MudIconButton Href="@url"
                                        Icon="@Icons.Material.Filled.OpenInNew"
                                        Size="Size.Small"
-                                       aria-label="Open the subject of this device"
+                                       Class="subject-discovery-row-link"
+                                       aria-label="@($"Open {result.DisplayName}")"
                                        OnClick="OnNavigating" />
                     }
                 </div>
@@ -83,6 +88,7 @@
 </div>
 
 <style>
+    /* The .subject-type-* styles come from SubjectTypePicker, which stays in the dialog's tree. */
     .subject-discovery-page {
         display: flex;
         flex-direction: column;
@@ -91,7 +97,8 @@
         gap: 8px;
     }
 
-    .subject-discovery-header {
+    .subject-discovery-header,
+    .subject-discovery-status {
         display: flex;
         align-items: center;
         gap: 8px;
@@ -100,6 +107,14 @@
     .subject-discovery-row-existing {
         opacity: 0.6;
         cursor: default;
+    }
+
+    .subject-type-row.subject-discovery-row-existing:hover {
+        background: transparent;
+    }
+
+    .subject-discovery-row-link {
+        margin-left: auto;
     }
 </style>
 
@@ -111,7 +126,7 @@
     public IReadOnlyCollection<IInterceptorSubject> ExistingSubjects { get; set; } = [];
 
     /// <summary>
-    /// Whether the page is shown. The first time it is, the page starts a scan.
+    /// Whether the page is shown. The first time it is, the page starts a scan. A hidden page does not render.
     /// </summary>
     [Parameter]
     public bool IsActive { get; set; }
@@ -146,10 +161,14 @@
         }
     }
 
+    // The dialog renders on every keystroke of its own fields, also while the page is hidden. Results that arrive
+    // meanwhile are rendered when the page is shown again, as its parameters are set then.
+    protected override bool ShouldRender() => IsActive;
+
     private void StartScan()
     {
         // Canceled but not disposed: the running scan still reads the token after this.
-        _scanCancellation?.Cancel();
+        _ = _scanCancellation?.CancelAsync();
         var scanCancellation = new CancellationTokenSource();
         _scanCancellation = scanCancellation;
 
@@ -189,6 +208,11 @@
             // A new scan or the disposal of the page took over.
             return;
         }
+        catch (Exception exception)
+        {
+            // The page still leaves the scanning state below, so Scan again can retry.
+            Logger.LogError(exception, "The discovery scan failed.");
+        }
 
         // Posted after every result of the scan, so the dispatcher runs it after them.
         await InvokeAsync(() =>
@@ -218,6 +242,6 @@
 
     public void Dispose()
     {
-        _scanCancellation?.Cancel();
+        _ = _scanCancellation?.CancelAsync();
     }
 }

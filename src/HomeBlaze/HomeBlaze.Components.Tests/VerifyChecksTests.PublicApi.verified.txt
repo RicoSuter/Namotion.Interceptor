@@ -1724,6 +1724,7 @@ namespace HomeBlaze.Components.Dialogs
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
         protected override void OnParametersSet() { }
+        protected override bool ShouldRender() { }
     }
     public class SubjectEditDialog : Microsoft.AspNetCore.Components.ComponentBase
     {

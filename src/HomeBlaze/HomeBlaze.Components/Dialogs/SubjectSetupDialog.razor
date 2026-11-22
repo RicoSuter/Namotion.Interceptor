@@ -43,7 +43,7 @@
                 <div class="subject-setup-picker-mode" hidden="@(_pickerMode != PickerMode.Discover)">
                     <SubjectDiscoveryPage Types="_types"
                                           ExistingSubjects="_existingSubjects"
-                                          IsActive="@(_pickerMode == PickerMode.Discover)"
+                                          IsActive="@(_selectedType is null && _pickerMode == PickerMode.Discover)"
                                           OnSelected="SelectDiscovered"
                                           OnNavigating="Cancel" />
                 </div>
