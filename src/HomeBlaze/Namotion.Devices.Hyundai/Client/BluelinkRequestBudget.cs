@@ -21,8 +21,21 @@ internal sealed class BluelinkRequestBudget
         _day = timeProvider.GetLocalNow().Date;
     }
 
-    /// <summary>Raised with the new count after it changed, outside the lock.</summary>
-    public event Action<int>? CountChanged;
+    /// <summary>Raised after the count changed, outside the lock.</summary>
+    /// <remarks>Concurrent changes can raise out of order; read <see cref="Count"/> for the current value.</remarks>
+    public event Action? CountChanged;
+
+    /// <summary>The calls of the current local day, without resetting the counter or raising <see cref="CountChanged"/>.</summary>
+    public int Count
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _timeProvider.GetLocalNow().Date == _day ? _count : 0;
+            }
+        }
+    }
 
     /// <summary>The calls left today.</summary>
     public int Remaining => Math.Max(0, _getLimit() - Update());
@@ -61,7 +74,7 @@ internal sealed class BluelinkRequestBudget
 
         if (isChanged)
         {
-            CountChanged?.Invoke(count);
+            CountChanged?.Invoke();
         }
 
         return count;
@@ -72,7 +85,6 @@ internal sealed class BluelinkRequestBudget
     public void Consume()
     {
         var limit = _getLimit();
-        int count;
         lock (_lock)
         {
             ResetIfNewDay();
@@ -81,10 +93,10 @@ internal sealed class BluelinkRequestBudget
                 throw new BluelinkRequestLimitException();
             }
 
-            count = ++_count;
+            _count++;
         }
 
-        CountChanged?.Invoke(count);
+        CountChanged?.Invoke();
     }
 
     /// <returns>Whether the count changed.</returns>

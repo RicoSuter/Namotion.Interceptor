@@ -28,7 +28,7 @@ public class BluelinkRequestBudgetTests
         var time = new FakeTimeProvider(Evening);
         var budget = new BluelinkRequestBudget(time, () => 10);
         var reported = new List<int>();
-        budget.CountChanged += reported.Add;
+        budget.CountChanged += () => reported.Add(budget.Count);
         budget.Consume();
 
         // Act
@@ -38,6 +38,25 @@ public class BluelinkRequestBudgetTests
         // Assert
         Assert.Equal(0, count);
         Assert.Equal([1, 0], reported);
+    }
+
+    [Fact]
+    public void WhenLocalMidnightPassesWithoutUpdate_ThenCountIsZeroAndNothingIsReported()
+    {
+        // Arrange
+        var time = new FakeTimeProvider(Evening);
+        var budget = new BluelinkRequestBudget(time, () => 10);
+        budget.Consume();
+        var reportCount = 0;
+        budget.CountChanged += () => reportCount++;
+
+        // Act
+        time.Advance(TimeSpan.FromHours(2));
+        var count = budget.Count;
+
+        // Assert
+        Assert.Equal(0, count);
+        Assert.Equal(0, reportCount);
     }
 
     [Fact]

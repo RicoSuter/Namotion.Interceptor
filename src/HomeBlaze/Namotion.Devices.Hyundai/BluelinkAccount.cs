@@ -37,6 +37,10 @@ public partial class BluelinkAccount : BackgroundService,
     // dictionary are only touched while it is held.
     private readonly SemaphoreSlim _lock = new(1, 1);
 
+    // Budget changes on different threads can be reported out of order. Reading the current count under this lock
+    // makes the last write to RequestsToday the current count.
+    private readonly Lock _requestsTodayLock = new();
+
     public BluelinkAccount(TimeProvider timeProvider, ILoggerFactory loggerFactory)
         : this(timeProvider, loggerFactory, BluelinkHttp.CreateClient)
     {
@@ -49,7 +53,7 @@ public partial class BluelinkAccount : BackgroundService,
         _httpClient = createHttpClient();
         _authClient = new BluelinkAuthClient(_httpClient, timeProvider);
         _budget = new BluelinkRequestBudget(timeProvider, () => DailyRequestLimit);
-        _budget.CountChanged += count => RequestsToday = count;
+        _budget.CountChanged += UpdateRequestsToday;
         _apiClient = new BluelinkVehicleApiClient(_httpClient, timeProvider, _budget);
 
         Name = string.Empty;
@@ -173,6 +177,14 @@ public partial class BluelinkAccount : BackgroundService,
         ServiceStatus.Error => "Error",
         _ => null
     };
+
+    private void UpdateRequestsToday()
+    {
+        lock (_requestsTodayLock)
+        {
+            RequestsToday = _budget.Count;
+        }
+    }
 
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)

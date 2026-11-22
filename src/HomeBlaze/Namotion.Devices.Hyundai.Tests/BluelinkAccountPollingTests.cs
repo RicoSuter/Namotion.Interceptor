@@ -42,6 +42,21 @@ public class BluelinkAccountPollingTests
     }
 
     [Fact]
+    public async Task WhenLocalMidnightPasses_ThenRequestsTodayCountsOnlyTheNewDay()
+    {
+        // Arrange
+        var (account, _, time) = TestAccount.Create();
+        await account.RunIterationAsync(CancellationToken.None);
+
+        // Act
+        time.Advance(TimeSpan.FromHours(14));
+        await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert (the vehicle list is not read again within 24 hours)
+        Assert.Equal(4, account.RequestsToday);
+    }
+
+    [Fact]
     public async Task WhenPolledAgainWithinADay_ThenVehicleListIsNotReadAgainAndVehiclesStay()
     {
         // Arrange
