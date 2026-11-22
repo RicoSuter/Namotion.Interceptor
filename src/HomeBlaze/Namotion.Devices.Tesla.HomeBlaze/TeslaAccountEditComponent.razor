@@ -26,7 +26,7 @@
     <MudExpansionPanels Elevation="0" Class="mt-4">
         <MudExpansionPanel Text="@(IsReauthenticationRequired ? "Replace token (re-authentication required)" : "Replace token")"
                            Expanded="IsReauthenticationRequired">
-            <TeslaTokenPanel OnConnected="OnConnected" />
+            <TeslaTokenPanel OnConnected="OnConnected" OnReset="OnReset" />
         </MudExpansionPanel>
     </MudExpansionPanels>
 
@@ -109,6 +109,12 @@
     private void OnConnected(TeslaConnection connection)
     {
         _newRefreshToken = connection.RefreshToken;
+        OnFieldChanged();
+    }
+
+    private void OnReset()
+    {
+        _newRefreshToken = null;
         OnFieldChanged();
     }
 

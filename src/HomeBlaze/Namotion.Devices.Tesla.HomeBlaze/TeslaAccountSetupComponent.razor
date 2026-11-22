@@ -1,7 +1,7 @@
 @attribute [SubjectComponent(SubjectComponentType.Setup, typeof(TeslaAccount))]
 @implements ISubjectEditComponent
 
-<TeslaTokenPanel OnConnected="OnConnected" />
+<TeslaTokenPanel OnConnected="OnConnected" OnReset="OnReset" />
 
 @code {
     // The rotated refresh token between the connect and the save; cleared once saved.
@@ -28,6 +28,13 @@
         _refreshToken = connection.RefreshToken;
         IsValidChanged?.Invoke(true);
         IsDirtyChanged?.Invoke(true);
+    }
+
+    private void OnReset()
+    {
+        _refreshToken = null;
+        IsValidChanged?.Invoke(false);
+        IsDirtyChanged?.Invoke(false);
     }
 
     public Task SaveAsync(CancellationToken cancellationToken)

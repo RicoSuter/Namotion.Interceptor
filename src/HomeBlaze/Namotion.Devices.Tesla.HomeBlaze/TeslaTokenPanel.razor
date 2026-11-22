@@ -3,98 +3,158 @@
 @inject TimeProvider TimeProvider
 
 <MudStack Spacing="3">
-    <MudText Typo="Typo.body2">
-        HomeBlaze reads your Tesla with a refresh token of your Tesla account. Create one on any device with tesla_auth
-        (Windows, macOS, Linux) or the app Auth app for Tesla (iOS), and paste the refresh token here.
-    </MudText>
-
-    <MudTextField Value="@TeslaAuthAddress"
-                  Label="tesla_auth"
-                  ReadOnly="true"
-                  Variant="Variant.Outlined" />
-
-    <MudTextField Value="@AuthAppAddress"
-                  Label="Auth app for Tesla"
-                  ReadOnly="true"
-                  Variant="Variant.Outlined" />
-
-    <MudAlert Severity="Severity.Info" Dense="true">
-        Do not reuse a token that TeslaMate or another tool uses: each refresh replaces the token, so the tools would log each other out.
-    </MudAlert>
-
-    <MudTextField @bind-Value="_refreshToken"
-                  Label="Refresh token"
-                  InputType="InputType.Password"
-                  Immediate="true"
-                  Disabled="_connecting" />
-
-    <MudButton OnClick="ConnectWithTokenAsync"
-               Variant="Variant.Filled"
-               Color="Color.Primary"
-               Disabled="@(_connecting || string.IsNullOrWhiteSpace(_refreshToken))">
-        @if (_connecting)
-        {
-            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-        }
-        Connect
-    </MudButton>
-
-    <MudExpansionPanels Elevation="0">
-        <MudExpansionPanel Text="Advanced: sign in with Tesla">
-            <MudStack Spacing="2">
-                <MudText Typo="Typo.body2">
-                    Open this address in a browser on any device and sign in. Tesla then redirects to an address that starts with
-                    <code>tesla://auth/callback</code>, which the browser cannot open. In a desktop browser, open the developer tools before
-                    signing in, enable "Preserve log" in the network tab, and copy the address of the failed request. Paste it below.
-                </MudText>
-                <MudTextField Value="@_login.Url"
-                              Label="Tesla sign in address"
-                              ReadOnly="true"
-                              Variant="Variant.Outlined"
-                              Lines="3" />
-                <MudTextField @bind-Value="_callback"
-                              Label="Pasted tesla://auth/callback address"
-                              InputType="InputType.Password"
-                              Immediate="true"
-                              Disabled="_connecting" />
-                <MudButton OnClick="ConnectWithLoginAsync"
-                           Variant="Variant.Outlined"
-                           Disabled="@(_connecting || string.IsNullOrWhiteSpace(_callback))">
-                    Connect with the pasted address
-                </MudButton>
-            </MudStack>
-        </MudExpansionPanel>
-    </MudExpansionPanels>
-
-    @if (_errorMessage is not null)
-    {
-        <MudAlert Severity="Severity.Error">@_errorMessage</MudAlert>
-    }
-
     @if (_isConnected)
     {
-        <MudAlert Severity="Severity.Success">
-            Connected@(_email is null ? "" : " as " + _email). Save to store the new token: Tesla has replaced the one you entered.
-        </MudAlert>
-        @if (_vehicleListError is not null)
+        <MudCard Outlined="true">
+            <MudCardContent>
+                <MudStack Spacing="2">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" />
+                        <MudText Typo="Typo.h6">Connected</MudText>
+                    </MudStack>
+                    @if (_email is not null)
+                    {
+                        <MudText Typo="Typo.body2">@_email</MudText>
+                    }
+                    @if (_vehicleListError is not null)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true">The vehicles could not be listed: @_vehicleListError</MudAlert>
+                    }
+                    else if (_vehicles.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true">This account has no vehicles.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudList T="string" ReadOnly="true" Dense="true" Padding="false">
+                            @foreach (var vehicle in _vehicles)
+                            {
+                                <MudListItem T="string" Icon="@Icons.Material.Filled.DirectionsCar">
+                                    @(vehicle.DisplayName ?? "Tesla")
+                                    <MudText Typo="Typo.caption" Inline="true">(@VinSuffix(vehicle.Vin), @(vehicle.State?.ToString() ?? "Unknown"))</MudText>
+                                </MudListItem>
+                            }
+                        </MudList>
+                    }
+                    <MudText Typo="Typo.body2">
+                        Create or save to store the new token: Tesla has replaced the one you entered, which no longer works.
+                    </MudText>
+                </MudStack>
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton OnClick="UseDifferentTokenAsync" Variant="Variant.Text" Color="Color.Primary">Use a different token</MudButton>
+            </MudCardActions>
+        </MudCard>
+    }
+    else
+    {
+        <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" TabPanelsClass="pa-4" @bind-ActivePanelIndex="_tabIndex">
+            <MudTabPanel Text="Refresh token">
+                <MudStack Spacing="3">
+                    <ol class="pl-6">
+                        <li>
+                            <MudText Typo="Typo.body2">
+                                Create a refresh token on any device with tesla_auth (Windows, macOS, Linux) or the app Auth app for Tesla (iOS).
+                            </MudText>
+                            <MudTextField Value="@TeslaAuthAddress"
+                                          Label="tesla_auth"
+                                          ReadOnly="true"
+                                          Variant="Variant.Outlined"
+                                          Margin="Margin.Dense"
+                                          Class="mt-2" />
+                            <MudTextField Value="@AuthAppAddress"
+                                          Label="Auth app for Tesla"
+                                          ReadOnly="true"
+                                          Variant="Variant.Outlined"
+                                          Margin="Margin.Dense"
+                                          Class="mt-2 mb-2" />
+                        </li>
+                        <li><MudText Typo="Typo.body2">Paste it below.</MudText></li>
+                        <li><MudText Typo="Typo.body2">Connect.</MudText></li>
+                    </ol>
+
+                    <MudAlert Severity="Severity.Info" Dense="true">
+                        Do not reuse a token that TeslaMate or another tool uses: each refresh replaces the token, so the tools would log each other out.
+                    </MudAlert>
+
+                    <MudTextField @bind-Value="_refreshToken"
+                                  Label="Refresh token"
+                                  InputType="InputType.Password"
+                                  Immediate="true"
+                                  Disabled="_connecting" />
+
+                    <MudButton OnClick="ConnectWithTokenAsync"
+                               Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Disabled="@(_connecting || string.IsNullOrWhiteSpace(_refreshToken))">
+                        @if (_connecting)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                        }
+                        Connect
+                    </MudButton>
+                </MudStack>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Sign in with Tesla">
+                <MudStack Spacing="3">
+                    <MudText Typo="Typo.body2">In a desktop browser:</MudText>
+                    <ol class="pl-6">
+                        <li>
+                            <MudText Typo="Typo.body2">Copy the sign in address and open it in a new browser tab.</MudText>
+                            <MudTextField Value="@_login.Url"
+                                          Label="Tesla sign in address"
+                                          ReadOnly="true"
+                                          Variant="Variant.Outlined"
+                                          Margin="Margin.Dense"
+                                          Lines="3"
+                                          Class="mt-2 mb-2" />
+                        </li>
+                        <li>
+                            <MudText Typo="Typo.body2">
+                                Sign in. The page then stays on "Loading", because Tesla redirects to a <code>tesla://</code> address that the browser cannot open.
+                            </MudText>
+                        </li>
+                        <li>
+                            <MudText Typo="Typo.body2">
+                                Open the developer tools (F12, or Cmd+Option+I on a Mac), switch to the Network tab and tick "Preserve log".
+                            </MudText>
+                        </li>
+                        <li><MudText Typo="Typo.body2">Reload the page; Tesla redirects again right away.</MudText></li>
+                        <li>
+                            <MudText Typo="Typo.body2">
+                                Copy the address of the request that starts with <code>callback?code=</code> (right-click, Copy, Copy URL),
+                                or the location response header of the authorize request.
+                            </MudText>
+                        </li>
+                        <li>
+                            <MudText Typo="Typo.body2">Paste it below within a few minutes and Connect. Keep this dialog open meanwhile.</MudText>
+                        </li>
+                    </ol>
+
+                    <MudTextField @bind-Value="_callback"
+                                  Label="Pasted callback address"
+                                  InputType="InputType.Password"
+                                  Immediate="true"
+                                  Disabled="_connecting" />
+
+                    <MudButton OnClick="ConnectWithLoginAsync"
+                               Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Disabled="@(_connecting || string.IsNullOrWhiteSpace(_callback))">
+                        @if (_connecting)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                        }
+                        Connect
+                    </MudButton>
+                </MudStack>
+            </MudTabPanel>
+        </MudTabs>
+
+        @if (_errorMessage is not null)
         {
-            <MudAlert Severity="Severity.Warning">The vehicles could not be listed: @_vehicleListError</MudAlert>
-        }
-        else if (_vehicles.Count == 0)
-        {
-            <MudAlert Severity="Severity.Warning">This account has no vehicles.</MudAlert>
-        }
-        else
-        {
-            <MudList T="string" ReadOnly="true" Dense="true">
-                @foreach (var vehicle in _vehicles)
-                {
-                    <MudListItem T="string" Icon="@Icons.Material.Filled.DirectionsCar">
-                        @(vehicle.DisplayName ?? vehicle.Vin)
-                        <MudText Typo="Typo.caption" Inline="true">(@vehicle.Vin, @(vehicle.State?.ToString() ?? "Unknown"))</MudText>
-                    </MudListItem>
-                }
-            </MudList>
+            <MudAlert Severity="Severity.Error">@_errorMessage</MudAlert>
         }
     }
 </MudStack>
@@ -110,6 +170,7 @@
     private string _callback = string.Empty;
     private bool _connecting;
     private string? _errorMessage;
+    private int _tabIndex;
 
     // Only what is shown is kept: the new refresh token goes to OnConnected and is not held here.
     private bool _isConnected;
@@ -120,6 +181,21 @@
     /// <summary>Raised with the connection after a successful connect; store its refresh token.</summary>
     [Parameter]
     public EventCallback<TeslaConnection> OnConnected { get; set; }
+
+    /// <summary>Raised when the user discards the connection to enter a different token; drop the stored refresh token.</summary>
+    [Parameter]
+    public EventCallback OnReset { get; set; }
+
+    private static string VinSuffix(string vin) => vin[^Math.Min(6, vin.Length)..];
+
+    private Task UseDifferentTokenAsync()
+    {
+        _isConnected = false;
+        _email = null;
+        _vehicles = [];
+        _vehicleListError = null;
+        return OnReset.InvokeAsync();
+    }
 
     private Task ConnectWithTokenAsync()
     {
