@@ -1,7 +1,5 @@
 using CarServer;
 using Microsoft.Extensions.Logging.Abstractions;
-using System.Text.Json;
-using Namotion.Devices.Tesla.Client;
 using Namotion.Devices.Tesla.Tests.Testing;
 
 namespace Namotion.Devices.Tesla.Tests;
@@ -10,7 +8,7 @@ public class TeslaChargeStateTests
 {
     private static TeslaChargeState CreateFromFixture()
     {
-        var data = JsonSerializer.Deserialize(FixtureLoader.Load("vehicle-data.json"), TeslaJsonContext.Default.TeslaResponseTeslaVehicleDataDto)!.Response!;
+        var data = FixtureLoader.LoadVehicleData();
         var charge = new TeslaChargeState(NullLogger.Instance);
         charge.Update(data.ChargeState!);
         return charge;
@@ -60,7 +58,7 @@ public class TeslaChargeStateTests
     {
         // Arrange
         var charge = CreateFromFixture();
-        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353 + 60_000));
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(FixtureLoader.FixtureTimestamp + 60_000));
 
         // Act
         charge.Update(snapshot.ChargeState);
@@ -81,7 +79,7 @@ public class TeslaChargeStateTests
     {
         // Arrange
         var charge = CreateFromFixture();
-        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353 - 60_000));
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(FixtureLoader.FixtureTimestamp - 60_000));
 
         // Act
         charge.Update(snapshot.ChargeState);
@@ -95,7 +93,7 @@ public class TeslaChargeStateTests
     {
         // Arrange
         var charge = CreateFromFixture();
-        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353));
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(FixtureLoader.FixtureTimestamp));
 
         // Act
         charge.Update(snapshot.ChargeState);
@@ -109,8 +107,8 @@ public class TeslaChargeStateTests
     {
         // Arrange
         var charge = new TeslaChargeState(NullLogger.Instance);
-        charge.Update(VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353 + 60_000)).ChargeState);
-        var data = JsonSerializer.Deserialize(FixtureLoader.Load("vehicle-data.json"), TeslaJsonContext.Default.TeslaResponseTeslaVehicleDataDto)!.Response!;
+        charge.Update(VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(FixtureLoader.FixtureTimestamp + 60_000)).ChargeState);
+        var data = FixtureLoader.LoadVehicleData();
 
         // Act
         charge.Update(data.ChargeState!);
@@ -155,7 +153,7 @@ public class TeslaChargeStateTests
     {
         // Arrange
         var charge = CreateFromFixture();
-        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353 + 60_000));
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(FixtureLoader.FixtureTimestamp + 60_000));
         snapshot.ChargeState.ConnChargeCable = new ChargeState.Types.CableType { IEC = new CarServer.Void() };
         snapshot.ChargeState.ChargePortLatch = new ChargePortLatchState { Disengaged = new CarServer.Void() };
         snapshot.ChargeState.FastChargerType = new ChargeState.Types.ChargerType { Combo = new CarServer.Void() };
@@ -189,7 +187,7 @@ public class TeslaChargeStateTests
     {
         // Arrange
         var charge = CreateFromFixture();
-        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353 + 60_000));
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(FixtureLoader.FixtureTimestamp + 60_000));
         snapshot.ChargeState.ConnChargeCable = new ChargeState.Types.CableType { SNA = new CarServer.Void() };
         snapshot.ChargeState.ChargePortLatch = new ChargePortLatchState { SNA = new CarServer.Void() };
         snapshot.ChargeState.FastChargerBrand = new ChargeState.Types.ChargerBrand { SNA = new CarServer.Void() };
@@ -208,7 +206,7 @@ public class TeslaChargeStateTests
     {
         // Arrange
         var charge = CreateFromFixture();
-        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353 + 60_000));
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(FixtureLoader.FixtureTimestamp + 60_000));
         snapshot.ChargeState.MinutesToFullCharge = 120;
 
         // Act
@@ -223,7 +221,7 @@ public class TeslaChargeStateTests
     {
         // Arrange
         var charge = CreateFromFixture();
-        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353 + 60_000));
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(FixtureLoader.FixtureTimestamp + 60_000));
         snapshot.ChargeState.ClearMinutesToChargeLimit();
         snapshot.ChargeState.MinutesToFullCharge = 120;
 
@@ -239,7 +237,7 @@ public class TeslaChargeStateTests
     {
         // Arrange
         var charge = CreateFromFixture();
-        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353 + 60_000));
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(FixtureLoader.FixtureTimestamp + 60_000));
         snapshot.ChargeState.BatteryRange = float.NaN;
 
         // Act
@@ -261,9 +259,9 @@ public class TeslaChargeStateTests
             EstBatteryRange = 201.33m,
             ChargeMilesAddedRated = 12.35m,
             ChargeMilesAddedIdeal = 15.44m,
-            Timestamp = 1795293677353
+            Timestamp = FixtureLoader.FixtureTimestamp
         });
-        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(1795293677353));
+        var snapshot = VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(FixtureLoader.FixtureTimestamp));
         snapshot.ChargeState.BatteryRange = 230.4537f;
         snapshot.ChargeState.IdealBatteryRange = 288.0749f;
         snapshot.ChargeState.EstBatteryRange = 201.3349f;

@@ -11,6 +11,7 @@ using Microsoft.Extensions.Time.Testing;
 using Namotion.Devices.Tesla.Client;
 using Namotion.Devices.Tesla.Client.Dto;
 using Namotion.Devices.Tesla.Tests.Testing;
+using static Namotion.Devices.Tesla.Tests.Testing.FixtureLoader;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
@@ -19,7 +20,6 @@ namespace Namotion.Devices.Tesla.Tests;
 
 public class TeslaVehicleTests
 {
-    private const long FixtureTimestamp = 1795293677353;
     private const string Vin = "TESTVIN0000000001";
 
     private static readonly DateTimeOffset Now = DateTimeOffset.FromUnixTimeMilliseconds(1795293700000);
@@ -33,9 +33,6 @@ public class TeslaVehicleTests
         vehicle.ApplyProduct(products[0]);
         return vehicle;
     }
-
-    private static TeslaVehicleDataDto LoadVehicleData() =>
-        JsonSerializer.Deserialize(FixtureLoader.Load("vehicle-data.json"), TeslaJsonContext.Default.TeslaResponseTeslaVehicleDataDto)!.Response!;
 
     private static TeslaVehicleDataDto ChargeData(string chargingState, int power, int current, int voltage, int phases, int pilotCurrent, int maximumCurrent) => new()
     {

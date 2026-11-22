@@ -1,27 +1,21 @@
 using CarServer;
 using HomeBlaze.Abstractions.Common;
 using Microsoft.Extensions.Logging.Abstractions;
-using System.Text.Json;
-using Namotion.Devices.Tesla.Client;
 using Namotion.Devices.Tesla.Client.Dto;
 using Namotion.Devices.Tesla.Tests.Testing;
+using static Namotion.Devices.Tesla.Tests.Testing.FixtureLoader;
 
 namespace Namotion.Devices.Tesla.Tests;
 
 public class TeslaClimateAndDriveTests
 {
-    private const long FixtureTimestamp = 1795293677353;
-
-    private static TeslaVehicleDataDto LoadFixture() =>
-        JsonSerializer.Deserialize(FixtureLoader.Load("vehicle-data.json"), TeslaJsonContext.Default.TeslaResponseTeslaVehicleDataDto)!.Response!;
-
     private static VehicleData CreateSnapshot(long offsetMilliseconds) =>
         VehicleDataBuilder.Create(DateTimeOffset.FromUnixTimeMilliseconds(FixtureTimestamp + offsetMilliseconds));
 
     private static TeslaClimateState CreateClimateFromFixture()
     {
         var climate = new TeslaClimateState(NullLogger.Instance);
-        climate.Update(LoadFixture().ClimateState!);
+        climate.Update(LoadVehicleData().ClimateState!);
         return climate;
     }
 
@@ -31,7 +25,7 @@ public class TeslaClimateAndDriveTests
     private static TeslaVehicle CreateVehicleFromDriveFixture()
     {
         var vehicle = CreateVehicle();
-        vehicle.Drive.Update(LoadFixture().DriveState!);
+        vehicle.Drive.Update(LoadVehicleData().DriveState!);
         return vehicle;
     }
 
@@ -250,7 +244,7 @@ public class TeslaClimateAndDriveTests
         climate.Update(CreateSnapshot(60_000).ClimateState);
 
         // Act
-        climate.Update(LoadFixture().ClimateState!);
+        climate.Update(LoadVehicleData().ClimateState!);
 
         // Assert
         Assert.True(climate.IsClimateOn);
@@ -727,7 +721,7 @@ public class TeslaClimateAndDriveTests
         drive.Update(snapshot.LocationState);
 
         // Act
-        drive.Update(LoadFixture().DriveState!);
+        drive.Update(LoadVehicleData().DriveState!);
 
         // Assert
         Assert.Equal(47.5, vehicle.Location!.Value.Latitude, 3); // location snapshot is newer than the JSON

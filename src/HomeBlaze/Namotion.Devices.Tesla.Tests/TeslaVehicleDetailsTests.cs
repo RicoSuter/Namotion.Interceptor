@@ -1,20 +1,14 @@
-using System.Text.Json;
 using CarServer;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging.Abstractions;
-using Namotion.Devices.Tesla.Client;
 using Namotion.Devices.Tesla.Client.Dto;
 using Namotion.Devices.Tesla.Tests.Testing;
+using static Namotion.Devices.Tesla.Tests.Testing.FixtureLoader;
 
 namespace Namotion.Devices.Tesla.Tests;
 
 public class TeslaVehicleDetailsTests
 {
-    private const long FixtureTimestamp = 1795293677353;
-
-    private static TeslaVehicleDataDto LoadFixture() =>
-        JsonSerializer.Deserialize(FixtureLoader.Load("vehicle-data.json"), TeslaJsonContext.Default.TeslaResponseTeslaVehicleDataDto)!.Response!;
-
     private static Timestamp Timestamp(long offsetMilliseconds) =>
         Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(DateTimeOffset.FromUnixTimeMilliseconds(FixtureTimestamp + offsetMilliseconds));
 
@@ -23,14 +17,14 @@ public class TeslaVehicleDetailsTests
     private static TeslaMedia CreateMediaFromFixture()
     {
         var media = new TeslaMedia(NullLogger.Instance);
-        media.Update(LoadFixture().VehicleState!);
+        media.Update(LoadVehicleData().VehicleState!);
         return media;
     }
 
     private static TeslaSoftwareUpdate CreateSoftwareUpdateFromFixture()
     {
         var update = new TeslaSoftwareUpdate(NullLogger.Instance);
-        update.Update(LoadFixture().VehicleState!.SoftwareUpdate!, FixtureTime);
+        update.Update(LoadVehicleData().VehicleState!.SoftwareUpdate!, FixtureTime);
         return update;
     }
 
@@ -385,7 +379,7 @@ public class TeslaVehicleDetailsTests
         var speedLimit = new TeslaSpeedLimitMode();
 
         // Act
-        speedLimit.Update(LoadFixture().VehicleState!.SpeedLimitMode!, FixtureTime);
+        speedLimit.Update(LoadVehicleData().VehicleState!.SpeedLimitMode!, FixtureTime);
 
         // Assert
         Assert.False(speedLimit.IsActive);
@@ -400,7 +394,7 @@ public class TeslaVehicleDetailsTests
     {
         // Arrange
         var json = new TeslaSpeedLimitMode();
-        json.Update(LoadFixture().VehicleState!.SpeedLimitMode!, DateTimeOffset.FromUnixTimeMilliseconds(FixtureTimestamp));
+        json.Update(LoadVehicleData().VehicleState!.SpeedLimitMode!, DateTimeOffset.FromUnixTimeMilliseconds(FixtureTimestamp));
         var protobufOnly = new TeslaSpeedLimitMode();
         var snapshot = new SpeedLimitMode { Active = false, PinCodeSet = false, CurrentLimitMph = 87f, MinLimitMph = 50f, MaxLimitMph = 120f };
 
@@ -421,7 +415,7 @@ public class TeslaVehicleDetailsTests
         // Arrange
         var speedLimit = new TeslaSpeedLimitMode();
         var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(FixtureTimestamp);
-        speedLimit.Update(LoadFixture().VehicleState!.SpeedLimitMode!, timestamp);
+        speedLimit.Update(LoadVehicleData().VehicleState!.SpeedLimitMode!, timestamp);
 
         // Act
         speedLimit.Update(new SpeedLimitMode { Active = true }, timestamp.AddMinutes(-1));
@@ -439,7 +433,7 @@ public class TeslaVehicleDetailsTests
         // Arrange
         var specification = new TeslaVehicleSpecification();
         var display = new TeslaDisplaySettings();
-        var data = LoadFixture();
+        var data = LoadVehicleData();
 
         // Act
         specification.Update(data.VehicleConfig!);
@@ -462,7 +456,7 @@ public class TeslaVehicleDetailsTests
         // Arrange
         var specification = new TeslaVehicleSpecification();
         var display = new TeslaDisplaySettings();
-        var data = LoadFixture();
+        var data = LoadVehicleData();
 
         // Act
         specification.Update(data.VehicleConfig!);
@@ -497,7 +491,7 @@ public class TeslaVehicleDetailsTests
     {
         // Arrange
         var specification = new TeslaVehicleSpecification();
-        var data = LoadFixture();
+        var data = LoadVehicleData();
         specification.Update(data.VehicleConfig!);
 
         // Act

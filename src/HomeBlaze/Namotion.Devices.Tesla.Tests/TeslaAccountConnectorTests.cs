@@ -1,8 +1,8 @@
 using System.Net;
-using System.Text;
 using Microsoft.Extensions.Time.Testing;
 using Namotion.Devices.Tesla.Client;
 using Namotion.Devices.Tesla.Tests.Testing;
+using static Namotion.Devices.Tesla.Tests.Testing.TokenResponses;
 
 namespace Namotion.Devices.Tesla.Tests;
 
@@ -12,15 +12,6 @@ public class TeslaAccountConnectorTests
     private const string ProductsPath = "/api/1/products";
 
     private static readonly DateTimeOffset Start = new(2026, 11, 21, 20, 0, 0, TimeSpan.Zero);
-
-    private static string TokenJson(string accessToken, string refreshToken) =>
-        $$"""{"access_token":"{{accessToken}}","refresh_token":"{{refreshToken}}","id_token":"{{IdToken("owner@example.com")}}","expires_in":28800,"token_type":"Bearer"}""";
-
-    private static string IdToken(string email)
-    {
-        static string Encode(string text) => Convert.ToBase64String(Encoding.UTF8.GetBytes(text)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        return Encode("{\"alg\":\"none\"}") + "." + Encode($$"""{"email":"{{email}}"}""") + ".";
-    }
 
     [Fact]
     public async Task WhenConnectingWithARefreshToken_ThenTheRotatedTokenAndTheVehiclesAreReturned()

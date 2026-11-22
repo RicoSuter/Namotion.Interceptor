@@ -1,8 +1,8 @@
 using System.Net;
-using System.Text;
 using Microsoft.Extensions.Time.Testing;
 using Namotion.Devices.Tesla.Client;
 using Namotion.Devices.Tesla.Tests.Testing;
+using static Namotion.Devices.Tesla.Tests.Testing.TokenResponses;
 
 namespace Namotion.Devices.Tesla.Tests;
 
@@ -11,15 +11,6 @@ public class TeslaAuthenticationTests
     private const string TokenPath = "/oauth2/v3/token";
 
     private static readonly DateTimeOffset Start = new(2026, 11, 21, 20, 0, 0, TimeSpan.Zero);
-
-    private static string TokenJson(string accessToken, string refreshToken, int expiresIn = 28800) =>
-        $$"""{"access_token":"{{accessToken}}","refresh_token":"{{refreshToken}}","id_token":"{{IdToken("owner@example.com")}}","expires_in":{{expiresIn}},"token_type":"Bearer"}""";
-
-    private static string IdToken(string email)
-    {
-        static string Encode(string text) => Convert.ToBase64String(Encoding.UTF8.GetBytes(text)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        return Encode("{\"alg\":\"none\"}") + "." + Encode($$"""{"email":"{{email}}"}""") + ".";
-    }
 
     /// <summary>Returns the access token that an API call receives.</summary>
     private static Task<string> GetAccessTokenAsync(TeslaTokenManager manager, CancellationToken cancellationToken) =>

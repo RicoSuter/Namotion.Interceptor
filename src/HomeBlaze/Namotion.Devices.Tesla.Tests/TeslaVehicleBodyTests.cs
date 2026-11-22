@@ -1,19 +1,15 @@
-using System.Text.Json;
 using CarServer;
 using Google.Protobuf.WellKnownTypes;
 using HomeBlaze.Abstractions.Devices.Locks;
-using Namotion.Devices.Tesla.Client;
 using Namotion.Devices.Tesla.Client.Dto;
 using Namotion.Devices.Tesla.Tests.Testing;
+using static Namotion.Devices.Tesla.Tests.Testing.FixtureLoader;
 
 namespace Namotion.Devices.Tesla.Tests;
 
 public class TeslaVehicleBodyTests
 {
-    private const long FixtureTimestamp = 1795293677353;
-
-    private static TeslaVehicleStateDto LoadVehicleState() =>
-        JsonSerializer.Deserialize(FixtureLoader.Load("vehicle-data.json"), TeslaJsonContext.Default.TeslaResponseTeslaVehicleDataDto)!.Response!.VehicleState!;
+    private static TeslaVehicleStateDto LoadVehicleState() => LoadVehicleData().VehicleState!;
 
     private static TeslaVehicleBody CreateFromFixture()
     {
