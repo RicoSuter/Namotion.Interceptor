@@ -80,8 +80,7 @@ public sealed class SubjectDiscoveryService
         {
             // Bounded by the token as well, so a discoverer that ignores it cannot hold the scan past its time limit.
             await Task.WhenAll(discoverers.Select(discoverer => Task.Run(
-                    () => RunAsync(discoverer, scan, existingSubjects, reporter, scanToken),
-                    CancellationToken.None)))
+                    () => RunAsync(discoverer, scan, existingSubjects, reporter, scanToken))))
                 .WaitAsync(scanToken);
         }
         catch (OperationCanceledException) when (scanCancellation.IsCancellationRequested)
@@ -119,6 +118,11 @@ public sealed class SubjectDiscoveryService
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // Canceled by the caller or at the time limit, which is no failure of the discoverer.
+        }
+        catch (Exception exception) when (cancellationToken.IsCancellationRequested)
+        {
+            // A library reacting to the cancellation, such as by disposing a socket, may throw something else.
+            _logger.LogDebug(exception, "The subject discoverer {Discoverer} ended with an error after the scan ended.", discoverer.GetType());
         }
         catch (Exception exception)
         {

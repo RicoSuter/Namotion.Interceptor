@@ -84,6 +84,51 @@ internal static class TestScans
         }
     }
 
+    /// <summary>
+    /// Ignores cancellation: waits for <paramref name="release"/>, throws, and completes <paramref name="ended"/>
+    /// once the enumeration ends.
+    /// </summary>
+    public static async IAsyncEnumerable<TestDiscoveryResult> ThrowIgnoringCancellation(
+        Task release, TaskCompletionSource ended)
+    {
+        try
+        {
+            await release;
+            throw new InvalidOperationException("The search failed.");
+        }
+        finally
+        {
+            ended.TrySetResult();
+        }
+#pragma warning disable CS0162 // The unreachable yield makes this an iterator.
+        yield break;
+#pragma warning restore CS0162
+    }
+
+    /// <summary>
+    /// Throws an <see cref="ObjectDisposedException"/> instead of an <see cref="OperationCanceledException"/> once
+    /// canceled, as a library does that disposes its socket on cancellation, and completes <paramref name="ended"/>
+    /// once the enumeration ends.
+    /// </summary>
+    public static async IAsyncEnumerable<TestDiscoveryResult> ThrowDisposedWhenCanceled(
+        TaskCompletionSource ended, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new ObjectDisposedException("socket");
+        }
+        finally
+        {
+            ended.TrySetResult();
+        }
+
+        yield break;
+    }
+
     public static DiscoveryScan CreateScan() => new(new FakeSsdpSearch(), new FakeMulticastDnsBrowser(), CancellationToken.None);
 }
 
