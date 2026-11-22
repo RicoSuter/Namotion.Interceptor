@@ -51,14 +51,16 @@ Two units are added to `StateUnit`: `KilometerPerHour` (speed, speed limit) and 
 
 ### New interfaces
 
-In `HomeBlaze.Abstractions/Devices/Vehicles/`, with positions in the documented ranges and categories. `IVehicleState` has the category "Vehicle" and the positions 223 to 225 (`Range`, `TotalDrivenDistance`, `Location`), `IVehicleChargingState` the category "Charging" and 341, 342, and `IVehicleClimateState` the category "Climate" and the positions 153 (`IsClimateOn`), 201 and 202:
+In `HomeBlaze.Abstractions/Devices/Vehicles/`, with positions in the documented ranges and categories. `IVehicle` has the category "Vehicle" and the positions 224, 225 (`TotalDrivenDistance`, `Location`), `IVehicleChargingState` the category "Charging" and 341 to 343, and `IVehicleClimateState` the category "Climate" and the positions 153 (`IsClimateOn`), 201 and 202:
 
 | Interface | Members |
 |-----------|---------|
-| `IVehicleState` | `Range` (km), `TotalDrivenDistance` (km, cumulative, the odometer), `Location` (`GeoCoordinate?`) |
-| `IVehicleChargingState : IChargingState` | `ChargeLimit` (percent), `RemainingChargingTime` (`TimeSpan?`) |
+| `IVehicle` | `TotalDrivenDistance` (km, cumulative, the odometer), `Location` (`GeoCoordinate?`), and the navigation properties `Climate` (`IVehicleClimateState?`) and `Body` (`IDoorLockState?`), `null` when the vehicle does not report them |
+| `IElectricVehicle : IVehicle` | `Charge` (`IVehicleChargingState`), never `null` |
+| `IVehicleChargingState : IChargingState, IBatteryState` | `ChargeLimit` (percent), `RemainingChargingTime` (`TimeSpan?`), `Range` (km) |
 | `IVehicleClimateState` | `IsClimateOn`, `InsideTemperature`, `OutsideTemperature` (°C) |
-| `IElectricVehicle : IVehicleState, IVehicleChargingState, IBatteryState` | Marker for electric vehicles |
+
+Each value has one path. A capability interface goes on the subject that owns the data, and the vehicle reaches it through a typed navigation property: `TeslaChargeState` implements `IVehicleChargingState`, `TeslaClimateState` implements `IVehicleClimateState` and `TeslaVehicleBody` implements `IDoorLockState`. `TeslaVehicle` keeps its children concretely typed and implements `Charge`, `Climate` and `Body` of the interfaces explicitly under the same names, so its metadata holds only the tracked child.
 
 A charging controller for vehicles is not part of this plan. The Bluelink integration adds it as its first implementer, and decides whether it generalizes `IVehicleChargerController`. Phase 2 of Tesla implements it.
 
@@ -79,7 +81,7 @@ The four protobuf files that `vehicle.proto` needs (`vehicle.proto`, `common.pro
 
 ```
 TeslaAccount                                   hub: provider, tokens, polling
-└─ Vehicles[VIN]: TeslaVehicle                 shared interfaces, identity, Wake Up
+└─ Vehicles[VIN]: TeslaVehicle                 identity, odometer, location, Wake Up
    ├─ Charge: TeslaChargeState
    ├─ Climate: TeslaClimateState
    │  └─ SeatHeaters: TeslaSeatHeaters
@@ -104,7 +106,7 @@ TeslaAccount                                   hub: provider, tokens, polling
 
 ### TeslaVehicle and its children
 
-`TeslaVehicle` implements `IElectricVehicle`, `IVehicleClimateState`, `IDoorLockState`, `IDeviceInfo`, `ISoftwareState`, `IConnectionState`, `ILastUpdatedProvider`, `ITitleProvider` and `IIconProvider`. Its interface properties are `[Derived]` and read the children, as `WallboxCharger.ChargeLevel` reads its session. It holds identity and status itself: `Vin`, `DisplayName`, `VehicleName`, `VehicleState` (enum `Online`, `Asleep`, `Offline`, `Unknown`), the derived `IsAwake` (true when online, false when asleep or offline, `null` when unknown; discrete, so history shows every wake and sleep), `IsConnected` (true when online or asleep, false when offline: an asleep car is still reachable through Tesla's servers), `CommandSigning` (enum from `/products`), `IsInService`, and the operation `Wake Up`, which wakes the car, waits until it is online (at most 2 minutes, polling of the account pauses meanwhile) and fetches its data. `Wake Up` is enabled only while the car is asleep or offline. `Model` is not stored: it is derived from the car type of `TeslaVehicleSpecification` (`vehicle_config`), so it is `null` until the first `vehicle_data` read, because the cached snapshot carries no specification. `ProductCode` is the trim badging, `SerialNumber` the VIN, and `MaximumChargingPower` is derived from the charger voltage, the lower of the pilot current and the maximum requested current, and the phases. The phases come from the measured power, voltage and current when charging, because Tesla is reported to send 2 phases while charging on 3-phase AC, and from the reported phases otherwise; it is `null` while the car does not charge.
+`TeslaVehicle` implements `IElectricVehicle`, `IDeviceInfo`, `ISoftwareState`, `IConnectionState`, `ILastUpdatedProvider`, `ITitleProvider` and `IIconProvider`. It stores `TotalDrivenDistance` and `Location` (set by the drive state from the location section) and navigates to `Charge`, `Climate` and `Body` for the other vehicle interfaces. It holds identity and status itself: `Vin`, `DisplayName`, `VehicleName`, `VehicleState` (enum `Online`, `Asleep`, `Offline`, `Unknown`), the derived `IsAwake` (true when online, false when asleep or offline, `null` when unknown; discrete, so history shows every wake and sleep), `IsConnected` (true when online or asleep, false when offline: an asleep car is still reachable through Tesla's servers), `CommandSigning` (enum from `/products`), `IsInService`, and the operation `Wake Up`, which wakes the car, waits until it is online (at most 2 minutes, polling of the account pauses meanwhile) and fetches its data. `Wake Up` is enabled only while the car is asleep or offline. `Model` is not stored: it is derived from the car type of `TeslaVehicleSpecification` (`vehicle_config`), so it is `null` until the first `vehicle_data` read, because the cached snapshot carries no specification. `ProductCode` is the trim badging and `SerialNumber` the VIN. `MaximumChargingPower` of `TeslaChargeState` is derived from the charger voltage, the lower of the pilot current and the maximum requested current, and the phases. The phases come from the measured power, voltage and current when charging, because Tesla is reported to send 2 phases while charging on 3-phase AC, and from the reported phases otherwise; it is `null` while the car does not charge.
 
 Every field of `vehicle_data` and `cached_data` that describes the car is exposed in the child that it belongs to. Dropped are only API internals (tokens, `id_s`, user ID, backseat token, `feature_bitmask`, API version, the per-section timestamps, which feed `LastUpdated`) and deprecated fields (`option_codes`). The fixture decides the final property list; the groups are:
 
@@ -113,7 +115,7 @@ Every field of `vehicle_data` and `cached_data` that describes the car is expose
 | `TeslaChargeState` | charging state (enum), battery level, usable battery level, charge limit with minimum, maximum and standard, charging power, currents (actual, requested, maximum, pilot), voltage, phases, added energy and range, remaining time, fast charger present, brand and type, cable, charge port door, latch and color, battery heater, scheduled charging mode and start, scheduled departure, off-peak and preconditioning settings, estimated battery capacity (v1, derived) |
 | `TeslaClimateState` | climate on, auto conditioning, preconditioning, inside, outside, driver and passenger temperature, minimum and maximum settable temperature, fan, defrosters, cabin overheat protection and its activation temperature, climate keeper mode, battery heater, mirror and wiper heaters |
 | `TeslaSeatHeaters` | levels of the front left, front right, rear left, rear center and rear right seats (physical sides, `FrontLeftLevel` and so on), auto seat climate of the front left and right seats, and the steering wheel heater (on, level, auto), which therefore is not in `TeslaClimateState` |
-| `TeslaDriveState` | location, native location, heading, speed, shift state (enum), derived `IsDriving`, drive power, GPS time |
+| `TeslaDriveState` | native location, heading, speed, shift state (enum), derived `IsDriving`, drive power, GPS time |
 | `TeslaNavigation` | active route destination, minutes and distance to arrival, energy at arrival, traffic delay, destination location |
 | `TeslaVehicleBody` | lock state, each door, window, frunk and trunk open, derived "any open" flags, sentry mode, valet mode, user present, remote start, dashcam state, homelink nearby, center display state |
 | `TeslaTire` | pressure (bar), recommended pressure, soft and hard warning, last seen |

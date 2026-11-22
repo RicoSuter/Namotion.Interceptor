@@ -10,14 +10,17 @@ using Namotion.Interceptor.Attributes;
 namespace Namotion.Devices.Tesla;
 
 /// <summary>
-/// The location and driving state of a Tesla vehicle.
+/// The driving state of a Tesla vehicle: heading, native location, speed, shift state and navigation. It sets the location of its vehicle from the location section.
 /// </summary>
 [ExcludeFromCreation]
 [InterceptorSubject]
 public partial class TeslaDriveState : ITitleProvider, IIconProvider
 {
-    // The cached snapshot has separate timestamps for the location and the drive section.
+    // The owner, never an intercepted property: an intercepted property holding it would attach the vehicle under its own child.
+    private readonly TeslaVehicle _vehicle;
     private readonly ILogger _logger;
+
+    // The cached snapshot has separate timestamps for the location and the drive section.
     private readonly TeslaSectionClock _locationClock = new();
     private readonly TeslaSectionClock _driveClock = new();
 
@@ -28,9 +31,7 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
 
     public string IconName => "Speed";
 
-    [State(Position = 1)] public partial GeoCoordinate? Location { get; internal set; }
-
-    /// <summary>The location in the coordinate system of <see cref="NativeLocationType"/>, which differs from <see cref="Location"/> only in some regions.</summary>
+    /// <summary>The location in the coordinate system of <see cref="NativeLocationType"/>, which differs from <see cref="TeslaVehicle.Location"/> only in some regions.</summary>
     [State(Position = 2)] public partial GeoCoordinate? NativeLocation { get; internal set; }
 
     [State(Position = 3)] public partial TeslaGpsCoordinateType? NativeLocationType { get; internal set; }
@@ -63,10 +64,10 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
 
     [State(Position = 12)] public partial TeslaNavigation Navigation { get; internal set; }
 
-    internal TeslaDriveState(ILogger logger)
+    internal TeslaDriveState(TeslaVehicle vehicle, ILogger logger)
     {
+        _vehicle = vehicle;
         _logger = logger;
-        Location = null;
         NativeLocation = null;
         NativeLocationType = null;
         IsNativeLocationSupported = null;
@@ -131,7 +132,7 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
 
     private void UpdateLocationFromJson(TeslaDriveStateDto dto)
     {
-        Location = TeslaValues.Coordinate(TeslaValues.ToFloatPrecision(dto.Latitude), TeslaValues.ToFloatPrecision(dto.Longitude));
+        _vehicle.Location = TeslaValues.Coordinate(TeslaValues.ToFloatPrecision(dto.Latitude), TeslaValues.ToFloatPrecision(dto.Longitude));
         NativeLocation = TeslaValues.Coordinate(TeslaValues.ToFloatPrecision(dto.NativeLatitude), TeslaValues.ToFloatPrecision(dto.NativeLongitude));
         NativeLocationType = TeslaValues.Enum<TeslaGpsCoordinateType>(dto.NativeType, _logger);
         IsNativeLocationSupported = dto.NativeLocationSupported is { } supported ? supported > 0 : null;
@@ -152,7 +153,7 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
     {
         if (proto.OptionalLatitudeCase != LocationState.OptionalLatitudeOneofCase.None && proto.OptionalLongitudeCase != LocationState.OptionalLongitudeOneofCase.None)
         {
-            Location = TeslaValues.Coordinate(TeslaValues.Decimal(proto.Latitude), TeslaValues.Decimal(proto.Longitude));
+            _vehicle.Location = TeslaValues.Coordinate(TeslaValues.Decimal(proto.Latitude), TeslaValues.Decimal(proto.Longitude));
         }
 
         if (proto.OptionalNativeLatitudeCase != LocationState.OptionalNativeLatitudeOneofCase.None && proto.OptionalNativeLongitudeCase != LocationState.OptionalNativeLongitudeOneofCase.None)

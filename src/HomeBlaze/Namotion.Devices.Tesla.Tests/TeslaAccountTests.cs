@@ -101,7 +101,7 @@ public class TeslaAccountTests
         // Assert
         var vehicle = Assert.Single(account.Vehicles).Value;
         Assert.Equal("TESTVIN0000000001", Assert.Single(account.Vehicles).Key);
-        Assert.Equal(0.7m, vehicle.BatteryLevel);
+        Assert.Equal(0.7m, vehicle.Charge.BatteryLevel);
         Assert.True(account.IsAuthenticated);
         Assert.Equal(Start, account.AuthenticatedAt);
         Assert.Equal("refresh-2", account.RefreshToken);
@@ -199,7 +199,7 @@ public class TeslaAccountTests
 
         // Assert
         Assert.Equal(2, account.Vehicles.Count);
-        Assert.Equal(0.7m, account.Vehicles["TESTVIN0000000002"].BatteryLevel);
+        Assert.Equal(0.7m, account.Vehicles["TESTVIN0000000002"].Charge.BatteryLevel);
         Assert.Equal(1, CountRequests(handler, VehicleDataPath));
         Assert.Equal(ServiceStatus.Running, account.Status);
         Assert.Contains("500", account.StatusMessage);
@@ -220,7 +220,7 @@ public class TeslaAccountTests
         await account.PollOnceAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(0.7m, account.Vehicles["TESTVIN0000000002"].BatteryLevel);
+        Assert.Equal(0.7m, account.Vehicles["TESTVIN0000000002"].Charge.BatteryLevel);
         Assert.Equal(ServiceStatus.Running, account.Status);
         Assert.NotNull(account.StatusMessage);
     }
@@ -575,7 +575,7 @@ public class TeslaAccountTests
 
         // Assert
         Assert.Equal(TeslaVehicleState.Online, vehicle.VehicleState);
-        Assert.Equal(0.7m, vehicle.BatteryLevel);
+        Assert.Equal(0.7m, vehicle.Charge.BatteryLevel);
         Assert.Equal(1, CountRequests(handler, WakeUpPath));
     }
 

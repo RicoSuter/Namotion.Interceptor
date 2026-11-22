@@ -109,7 +109,7 @@ public class TeslaVehicleTests
     }
 
     [Fact]
-    public void WhenVehicleDataIsApplied_ThenSharedInterfacesAreDerived()
+    public void WhenVehicleDataIsApplied_ThenSharedInterfacesNavigateToTheChildren()
     {
         // Arrange
         var vehicle = Create();
@@ -119,20 +119,21 @@ public class TeslaVehicleTests
 
         // Assert
         IElectricVehicle electricVehicle = vehicle;
-        Assert.Equal(0.7m, electricVehicle.BatteryLevel);
-        Assert.Equal(0.7m, electricVehicle.ChargeLimit);
-        Assert.Equal(vehicle.Charge.Range, electricVehicle.Range);
-        Assert.True(electricVehicle.IsPluggedIn);
-        Assert.False(electricVehicle.IsCharging);
-        Assert.Equal(0m, electricVehicle.ChargingPower);
-        Assert.Null(electricVehicle.MaximumChargingPower); // no charger voltage while not charging
-        Assert.Null(electricVehicle.RemainingChargingTime);
+        Assert.Same(vehicle.Charge, electricVehicle.Charge);
+        Assert.Same(vehicle.Climate, electricVehicle.Climate);
+        Assert.Same(vehicle.Body, electricVehicle.Body);
+        Assert.Equal(0.7m, electricVehicle.Charge.BatteryLevel);
+        Assert.Equal(0.7m, electricVehicle.Charge.ChargeLimit);
+        Assert.NotNull(electricVehicle.Charge.Range);
+        Assert.True(electricVehicle.Charge.IsPluggedIn);
+        Assert.False(electricVehicle.Charge.IsCharging);
+        Assert.Equal(0m, electricVehicle.Charge.ChargingPower);
+        Assert.Null(electricVehicle.Charge.MaximumChargingPower); // no charger voltage while not charging
+        Assert.Null(electricVehicle.Charge.RemainingChargingTime);
         Assert.Equal(36469.00m * 1.609344m, electricVehicle.TotalDrivenDistance); // miles rounded to the hundredths of the snapshot
         Assert.Equal(new GeoCoordinate(47.0, 8.0), electricVehicle.Location);
-        Assert.Equal(12.1m, ((IVehicleClimateState)vehicle).InsideTemperature);
-        Assert.Equal(vehicle.Climate.IsClimateOn, vehicle.IsClimateOn);
-        Assert.Equal(vehicle.Climate.OutsideTemperature, vehicle.OutsideTemperature);
-        Assert.Equal(DoorLockState.Locked, vehicle.LockState);
+        Assert.Equal(12.1m, electricVehicle.Climate!.InsideTemperature);
+        Assert.Equal(DoorLockState.Locked, electricVehicle.Body!.LockState);
         Assert.Equal("2026.38.6", vehicle.SoftwareVersion);
         Assert.Null(vehicle.AvailableSoftwareUpdate);
         Assert.Equal("Model 3", vehicle.Model);
@@ -140,6 +141,26 @@ public class TeslaVehicleTests
         Assert.Null(vehicle.VehicleName); // empty in the fixture
         Assert.Equal("Model 3 000001", vehicle.Title); // no vehicle name and no display name
         Assert.Equal(FixtureTime, vehicle.LastUpdated); // the newest section timestamp, not the read time
+    }
+
+    [Theory]
+    [InlineData(nameof(TeslaVehicle.Charge), typeof(TeslaChargeState))]
+    [InlineData(nameof(TeslaVehicle.Climate), typeof(TeslaClimateState))]
+    [InlineData(nameof(TeslaVehicle.Body), typeof(TeslaVehicleBody))]
+    public void WhenInterfaceNavigationIsImplementedExplicitly_ThenTheMetadataHasOnlyTheTrackedChild(string name, System.Type childType)
+    {
+        // Arrange
+        var vehicle = Create();
+
+        // Act
+        var properties = ((IInterceptorSubject)vehicle).Properties;
+
+        // Assert
+        var property = Assert.Single(properties.Values, property => property.Name == name);
+        Assert.Equal(childType, property.Type);
+        Assert.True(property.IsIntercepted);
+        Assert.False(property.IsDerived);
+        Assert.Same(typeof(TeslaVehicle).GetProperty(name)!.GetValue(vehicle), property.GetValue!(vehicle));
     }
 
     [Fact]
@@ -207,10 +228,10 @@ public class TeslaVehicleTests
 
         // Assert
         Assert.Equal(TeslaVehicleState.Asleep, vehicle.VehicleState);
-        Assert.Equal(0.65m, vehicle.BatteryLevel);
-        Assert.True(vehicle.IsCharging);
-        Assert.True(vehicle.IsClimateOn);
-        Assert.Equal(DoorLockState.Unlocked, vehicle.LockState);
+        Assert.Equal(0.65m, vehicle.Charge.BatteryLevel);
+        Assert.True(vehicle.Charge.IsCharging);
+        Assert.True(vehicle.Climate.IsClimateOn);
+        Assert.Equal(DoorLockState.Unlocked, vehicle.Body.LockState);
         Assert.Equal(new GeoCoordinate(47.5, 8.5), vehicle.Location);
         Assert.Equal(Now, vehicle.LastUpdated);
     }
@@ -282,8 +303,8 @@ public class TeslaVehicleTests
         vehicle.ApplyProduct(CachedProduct(vehicle, new VehicleData { ClosuresState = new ClosuresState() }));
 
         // Assert
-        Assert.Null(vehicle.BatteryLevel);
-        Assert.Null(vehicle.LockState);
+        Assert.Null(vehicle.Charge.BatteryLevel);
+        Assert.Null(vehicle.Body.LockState);
         Assert.Null(vehicle.LastUpdated);
     }
 
@@ -300,11 +321,11 @@ public class TeslaVehicleTests
 
         // Assert
         Assert.Equal(TeslaVehicleState.Asleep, vehicle.VehicleState);
-        Assert.Null(vehicle.BatteryLevel);
+        Assert.Null(vehicle.Charge.BatteryLevel);
     }
 
     [Fact]
-    public void WhenChildChanges_ThenDerivedInterfacePropertyChangeIsPublished()
+    public void WhenChildChanges_ThenTheChildAndTheDerivedVehiclePropertyPublishChanges()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
@@ -317,9 +338,9 @@ public class TeslaVehicleTests
         vehicle.ApplyProduct(CachedProduct(vehicle, VehicleDataBuilder.Create(Now)));
 
         // Assert
-        Assert.Contains(changes, change => change.Property.Subject == vehicle && change.Property.Name == nameof(TeslaVehicle.BatteryLevel));
+        Assert.Contains(changes, change => change.Property.Subject == vehicle.Charge && change.Property.Name == nameof(TeslaChargeState.BatteryLevel));
         Assert.Contains(changes, change => change.Property.Subject == vehicle && change.Property.Name == nameof(TeslaVehicle.IconColor));
-        Assert.Equal(0.65m, vehicle.BatteryLevel);
+        Assert.Equal("Success", vehicle.IconColor);
     }
 
     [Fact]
@@ -395,7 +416,7 @@ public class TeslaVehicleTests
         vehicle.ApplyVehicleData(ChargeData("Charging", power: 11, current: 16, voltage: 230, phases: 2, pilotCurrent: 16, maximumCurrent: 16));
 
         // Assert
-        Assert.Equal(230m * 16m * 3m, vehicle.MaximumChargingPower);
+        Assert.Equal(230m * 16m * 3m, vehicle.Charge.MaximumChargingPower);
     }
 
     [Fact]
@@ -408,7 +429,7 @@ public class TeslaVehicleTests
         vehicle.ApplyVehicleData(ChargeData("Charging", power: 7, current: 32, voltage: 230, phases: 1, pilotCurrent: 32, maximumCurrent: 32));
 
         // Assert
-        Assert.Equal(230m * 32m, vehicle.MaximumChargingPower);
+        Assert.Equal(230m * 32m, vehicle.Charge.MaximumChargingPower);
     }
 
     [Fact]
@@ -421,7 +442,7 @@ public class TeslaVehicleTests
         vehicle.ApplyVehicleData(ChargeData("Charging", power: 7, current: 10, voltage: 230, phases: 2, pilotCurrent: 10, maximumCurrent: 16));
 
         // Assert
-        Assert.Equal(230m * 10m * 3m, vehicle.MaximumChargingPower);
+        Assert.Equal(230m * 10m * 3m, vehicle.Charge.MaximumChargingPower);
     }
 
     [Fact]
@@ -434,7 +455,7 @@ public class TeslaVehicleTests
         vehicle.ApplyVehicleData(ChargeData("Starting", power: 0, current: 0, voltage: 230, phases: 2, pilotCurrent: 16, maximumCurrent: 16));
 
         // Assert
-        Assert.Equal(230m * 16m * 2m, vehicle.MaximumChargingPower);
+        Assert.Equal(230m * 16m * 2m, vehicle.Charge.MaximumChargingPower);
     }
 
     [Fact]

@@ -1,6 +1,8 @@
+using System.ComponentModel;
 using CarServer;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Devices.Vehicles;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Tesla.Client.Dto;
 using Namotion.Devices.Tesla.Mapping;
@@ -13,7 +15,7 @@ namespace Namotion.Devices.Tesla;
 /// </summary>
 [ExcludeFromCreation]
 [InterceptorSubject]
-public partial class TeslaClimateState : ITitleProvider, IIconProvider
+public partial class TeslaClimateState : IVehicleClimateState, ITitleProvider, IIconProvider
 {
     private readonly ILogger _logger;
     private readonly TeslaSectionClock _clock = new();
@@ -22,14 +24,17 @@ public partial class TeslaClimateState : ITitleProvider, IIconProvider
 
     public string IconName => "Thermostat";
 
+    [Category("")]
     [State(IsDiscrete = true, Position = 1)] public partial bool? IsClimateOn { get; internal set; }
 
     [State(IsDiscrete = true, Position = 2)] public partial bool? IsAutoConditioningOn { get; internal set; }
 
     [State(IsDiscrete = true, Position = 3)] public partial bool? IsPreconditioning { get; internal set; }
 
+    [Category("")]
     [State(Unit = StateUnit.DegreeCelsius, Position = 4)] public partial decimal? InsideTemperature { get; internal set; }
 
+    [Category("")]
     [State(Unit = StateUnit.DegreeCelsius, Position = 5)] public partial decimal? OutsideTemperature { get; internal set; }
 
     /// <summary>The target temperature on the driver side.</summary>

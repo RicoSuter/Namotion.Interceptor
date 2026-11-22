@@ -113,7 +113,7 @@ namespace Namotion.Devices.Tesla
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
-    public class TeslaChargeState : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public class TeslaChargeState : HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Devices.Energy.IChargingState, HomeBlaze.Abstractions.Devices.Vehicles.IVehicleChargingState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=18, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
         public decimal? AddedEnergy { get; }
@@ -126,6 +126,7 @@ namespace Namotion.Devices.Tesla
         [HomeBlaze.Abstractions.Attributes.State(Position=24)]
         public string? ChargeCable { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        [System.ComponentModel.Category("")]
         public decimal? ChargeLimit { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=27)]
         public string? ChargePortColor { get; }
@@ -142,6 +143,7 @@ namespace Namotion.Devices.Tesla
         [HomeBlaze.Abstractions.Attributes.State(Position=38, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         public decimal? ChargingCurrentSetting { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=11, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [System.ComponentModel.Category("")]
         public decimal? ChargingPower { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
         public Namotion.Devices.Tesla.TeslaChargingState? ChargingState { get; }
@@ -169,6 +171,7 @@ namespace Namotion.Devices.Tesla
         public bool? IsChargePortDoorOpen { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=49)]
         [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("")]
         public bool? IsCharging { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=21)]
         public bool? IsFastChargerPresent { get; }
@@ -178,6 +181,7 @@ namespace Namotion.Devices.Tesla
         public bool? IsOffPeakChargingEnabled { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=48)]
         [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("")]
         public bool? IsPluggedIn { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=35)]
         public bool? IsPreconditioningEnabled { get; }
@@ -189,6 +193,10 @@ namespace Namotion.Devices.Tesla
         public bool? IsTripCharging { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=6, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         public decimal? MaximumChargeLimit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=51, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("")]
+        public decimal? MaximumChargingPower { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=37)]
         public int? MaximumRangeChargeCounter { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=14, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
@@ -204,8 +212,10 @@ namespace Namotion.Devices.Tesla
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=47)]
         public Namotion.Devices.Tesla.TeslaScheduleDays? PreconditioningDays { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=8, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        [System.ComponentModel.Category("")]
         public decimal? Range { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=20)]
+        [System.ComponentModel.Category("")]
         public System.TimeSpan? RemainingChargingTime { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=13, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
         public decimal? RequestedChargingCurrent { get; }
@@ -249,7 +259,7 @@ namespace Namotion.Devices.Tesla
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
-    public class TeslaClimateState : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public class TeslaClimateState : HomeBlaze.Abstractions.Devices.Vehicles.IVehicleClimateState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=25)]
         public Namotion.Devices.Tesla.TeslaCabinOverheatProtection? CabinOverheatProtection { get; }
@@ -267,6 +277,7 @@ namespace Namotion.Devices.Tesla
         public Namotion.Devices.Tesla.TeslaHvacAutoRequest? HvacAutoRequest { get; }
         public string IconName { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [System.ComponentModel.Category("")]
         public decimal? InsideTemperature { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=2)]
         public bool? IsAutoConditioningOn { get; }
@@ -279,6 +290,7 @@ namespace Namotion.Devices.Tesla
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=26)]
         public bool? IsCabinOverheatProtectionCooling { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [System.ComponentModel.Category("")]
         public bool? IsClimateOn { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=24)]
         public bool? IsFanOnlyCabinOverheatProtectionSupported { get; }
@@ -301,6 +313,7 @@ namespace Namotion.Devices.Tesla
         [HomeBlaze.Abstractions.Attributes.State(Position=8, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
         public decimal? MinimumTemperatureSetting { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [System.ComponentModel.Category("")]
         public decimal? OutsideTemperature { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=7, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
         public decimal? PassengerTemperatureSetting { get; }
@@ -377,8 +390,6 @@ namespace Namotion.Devices.Tesla
         public bool? IsHomelinkNearby { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
         public bool? IsNativeLocationSupported { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
-        public HomeBlaze.Abstractions.Common.GeoCoordinate? Location { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=2)]
         public HomeBlaze.Abstractions.Common.GeoCoordinate? NativeLocation { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=3)]
@@ -632,20 +643,14 @@ namespace Namotion.Devices.Tesla
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
-    public class TeslaVehicle : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Devices.Energy.IChargingState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.Devices.Locks.IDoorLockState, HomeBlaze.Abstractions.Devices.Vehicles.IElectricVehicle, HomeBlaze.Abstractions.Devices.Vehicles.IVehicleChargingState, HomeBlaze.Abstractions.Devices.Vehicles.IVehicleClimateState, HomeBlaze.Abstractions.Devices.Vehicles.IVehicleState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public class TeslaVehicle : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.Devices.Vehicles.IElectricVehicle, HomeBlaze.Abstractions.Devices.Vehicles.IVehicle, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         [Namotion.Interceptor.Attributes.Derived]
         public string? AvailableSoftwareUpdate { get; }
-        [Namotion.Interceptor.Attributes.Derived]
-        public decimal? BatteryLevel { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=403)]
         public Namotion.Devices.Tesla.TeslaVehicleBody Body { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=400)]
         public Namotion.Devices.Tesla.TeslaChargeState Charge { get; }
-        [Namotion.Interceptor.Attributes.Derived]
-        public decimal? ChargeLimit { get; }
-        [Namotion.Interceptor.Attributes.Derived]
-        public decimal? ChargingPower { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=401)]
         public Namotion.Devices.Tesla.TeslaClimateState Climate { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=5)]
@@ -662,43 +667,24 @@ namespace Namotion.Devices.Tesla
         public string? IconColor { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string IconName { get; }
-        [Namotion.Interceptor.Attributes.Derived]
-        public decimal? InsideTemperature { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
         [Namotion.Interceptor.Attributes.Derived]
         public bool? IsAwake { get; }
         [Namotion.Interceptor.Attributes.Derived]
-        public bool? IsCharging { get; }
-        [Namotion.Interceptor.Attributes.Derived]
-        public bool? IsClimateOn { get; }
-        [Namotion.Interceptor.Attributes.Derived]
         public bool IsConnected { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=6)]
         public bool? IsInService { get; }
-        [Namotion.Interceptor.Attributes.Derived]
-        public bool? IsPluggedIn { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=8)]
         public System.DateTimeOffset? LastUpdated { get; }
-        [Namotion.Interceptor.Attributes.Derived]
         public HomeBlaze.Abstractions.Common.GeoCoordinate? Location { get; }
         [Namotion.Interceptor.Attributes.Derived]
-        public HomeBlaze.Abstractions.Devices.Locks.DoorLockState? LockState { get; }
-        [Namotion.Interceptor.Attributes.Derived]
         public string? Manufacturer { get; }
-        [Namotion.Interceptor.Attributes.Derived]
-        public decimal? MaximumChargingPower { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=404)]
         public Namotion.Devices.Tesla.TeslaMedia Media { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string? Model { get; }
         [Namotion.Interceptor.Attributes.Derived]
-        public decimal? OutsideTemperature { get; }
-        [Namotion.Interceptor.Attributes.Derived]
         public string? ProductCode { get; }
-        [Namotion.Interceptor.Attributes.Derived]
-        public decimal? Range { get; }
-        [Namotion.Interceptor.Attributes.Derived]
-        public System.TimeSpan? RemainingChargingTime { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string? SerialNumber { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=405)]
@@ -733,7 +719,7 @@ namespace Namotion.Devices.Tesla
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
-    public class TeslaVehicleBody : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public class TeslaVehicleBody : HomeBlaze.Abstractions.Devices.Locks.IDoorLockState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public TeslaVehicleBody(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         [HomeBlaze.Abstractions.Attributes.State(Position=28)]

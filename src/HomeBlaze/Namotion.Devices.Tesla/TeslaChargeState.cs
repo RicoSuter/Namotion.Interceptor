@@ -1,6 +1,8 @@
+using System.ComponentModel;
 using CarServer;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Devices.Vehicles;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Tesla.Client.Dto;
 using Namotion.Devices.Tesla.Mapping;
@@ -13,7 +15,7 @@ namespace Namotion.Devices.Tesla;
 /// </summary>
 [ExcludeFromCreation]
 [InterceptorSubject]
-public partial class TeslaChargeState : ITitleProvider, IIconProvider
+public partial class TeslaChargeState : IVehicleChargingState, ITitleProvider, IIconProvider
 {
     private const decimal MinimumChargerVoltage = 2m;
 
@@ -27,18 +29,21 @@ public partial class TeslaChargeState : ITitleProvider, IIconProvider
     [State(IsDiscrete = true, Position = 1)] public partial TeslaChargingState? ChargingState { get; internal set; }
     [State(Unit = StateUnit.Percent, Position = 2)] public partial decimal? BatteryLevel { get; internal set; }
     [State(Unit = StateUnit.Percent, Position = 3)] public partial decimal? UsableBatteryLevel { get; internal set; }
+    [Category("")]
     [State(Unit = StateUnit.Percent, Position = 4)] public partial decimal? ChargeLimit { get; internal set; }
     [State(Unit = StateUnit.Percent, Position = 5)] public partial decimal? MinimumChargeLimit { get; internal set; }
     [State(Unit = StateUnit.Percent, Position = 6)] public partial decimal? MaximumChargeLimit { get; internal set; }
     [State(Unit = StateUnit.Percent, Position = 7)] public partial decimal? StandardChargeLimit { get; internal set; }
 
     /// <summary>The rated range, which Tesla reports as battery range.</summary>
+    [Category("")]
     [State(Unit = StateUnit.Kilometer, Position = 8)] public partial decimal? Range { get; internal set; }
 
     [State(Unit = StateUnit.Kilometer, Position = 9)] public partial decimal? IdealRange { get; internal set; }
     [State(Unit = StateUnit.Kilometer, IsEstimated = true, Position = 10)] public partial decimal? EstimatedRange { get; internal set; }
 
     /// <summary>The charging power, which Tesla reports with a resolution of 1 kW.</summary>
+    [Category("")]
     [State(Unit = StateUnit.Watt, Position = 11)] public partial decimal? ChargingPower { get; internal set; }
 
     [State(Unit = StateUnit.Ampere, Position = 12)] public partial decimal? ChargingCurrent { get; internal set; }
@@ -62,6 +67,7 @@ public partial class TeslaChargeState : ITitleProvider, IIconProvider
     [State(Unit = StateUnit.Kilometer, Position = 19)] public partial decimal? AddedRange { get; internal set; }
 
     /// <summary>The time until the charge limit is reached, or null when the vehicle does not charge.</summary>
+    [Category("")]
     [State(Position = 20)] public partial TimeSpan? RemainingChargingTime { get; internal set; }
 
     [State(IsDiscrete = true, Position = 21)] public partial bool? IsFastChargerPresent { get; internal set; }
@@ -121,6 +127,7 @@ public partial class TeslaChargeState : ITitleProvider, IIconProvider
 
     /// <summary>Whether a cable is plugged in, from the charging state.</summary>
     [Derived]
+    [Category("")]
     [State(IsDiscrete = true, Position = 48)]
     public bool? IsPluggedIn => ChargingState switch
     {
@@ -131,6 +138,7 @@ public partial class TeslaChargeState : ITitleProvider, IIconProvider
 
     /// <summary>Whether the vehicle charges, from the charging state.</summary>
     [Derived]
+    [Category("")]
     [State(IsDiscrete = true, Position = 49)]
     public bool? IsCharging => ChargingState switch
     {
@@ -143,6 +151,12 @@ public partial class TeslaChargeState : ITitleProvider, IIconProvider
     [Derived]
     [State(Unit = StateUnit.WattHour, IsEstimated = true, Position = 50)]
     public decimal? EstimatedBatteryCapacity => GetEstimatedBatteryCapacity();
+
+    /// <summary>The power at the highest current that the charger offers and the vehicle can request, or null when the vehicle does not charge.</summary>
+    [Derived]
+    [Category("")]
+    [State(Unit = StateUnit.Watt, Position = 51)]
+    public decimal? MaximumChargingPower => ChargerVoltage * GetMaximumChargingCurrent() * GetChargingPhases();
 
     internal TeslaChargeState(ILogger logger)
     {
@@ -395,5 +409,26 @@ public partial class TeslaChargeState : ITitleProvider, IIconProvider
         var fullIdealRange = IdealRange.Value / UsableBatteryLevel.Value;
         var capacity = fullIdealRange / AddedIdealRange.Value * AddedEnergy.Value;
         return capacity > 10_000m ? Math.Round(capacity, 0) : null;
+    }
+
+    private decimal? GetMaximumChargingCurrent()
+    {
+        var pilotCurrent = PilotCurrent;
+        var maximumRequestedCurrent = MaximumRequestedChargingCurrent;
+        return pilotCurrent is { } pilot && maximumRequestedCurrent is { } maximum ? Math.Min(pilot, maximum) : pilotCurrent ?? maximumRequestedCurrent;
+    }
+
+    // Tesla is reported to send 2 phases while charging on 3-phase AC, so the measured power decides when it is known.
+    private decimal GetChargingPhases()
+    {
+        var power = ChargingPower;
+        var voltage = ChargerVoltage;
+        var current = ChargingCurrent;
+        if (power is > 0 && voltage is > 0 && current is > 0)
+        {
+            return Math.Clamp(Math.Round(power.Value / (voltage.Value * current.Value), MidpointRounding.AwayFromZero), 1m, 3m);
+        }
+
+        return ChargerPhases ?? 1;
     }
 }

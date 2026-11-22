@@ -19,8 +19,6 @@ namespace Namotion.Devices.Tesla;
 [InterceptorSubject]
 public partial class TeslaVehicle :
     IElectricVehicle,
-    IVehicleClimateState,
-    IDoorLockState,
     IDeviceInfo,
     ISoftwareState,
     IConnectionState,
@@ -51,11 +49,12 @@ public partial class TeslaVehicle :
         IsInService = null;
         LastUpdated = null;
         TotalDrivenDistance = null;
+        Location = null;
         SoftwareVersion = null;
 
         Charge = new TeslaChargeState(logger);
         Climate = new TeslaClimateState(logger);
-        Drive = new TeslaDriveState(logger);
+        Drive = new TeslaDriveState(this, logger);
         Body = new TeslaVehicleBody();
         Media = new TeslaMedia(logger);
         SoftwareUpdate = new TeslaSoftwareUpdate(logger);
@@ -117,38 +116,16 @@ public partial class TeslaVehicle :
 
     // IElectricVehicle
 
-    [Derived] public decimal? BatteryLevel => Charge.BatteryLevel;
-
-    [Derived] public decimal? Range => Charge.Range;
-
     public partial decimal? TotalDrivenDistance { get; internal set; }
 
-    [Derived] public GeoCoordinate? Location => Drive.Location;
+    /// <summary>The location, which the drive state sets from the location section.</summary>
+    public partial GeoCoordinate? Location { get; internal set; }
 
-    [Derived] public bool? IsPluggedIn => Charge.IsPluggedIn;
+    IVehicleChargingState IElectricVehicle.Charge => Charge;
 
-    [Derived] public bool? IsCharging => Charge.IsCharging;
+    IVehicleClimateState? IVehicle.Climate => Climate;
 
-    [Derived] public decimal? ChargingPower => Charge.ChargingPower;
-
-    /// <summary>The power at the highest current that the charger offers and the vehicle can request, or null when the vehicle does not charge.</summary>
-    [Derived] public decimal? MaximumChargingPower => Charge.ChargerVoltage * GetMaximumChargingCurrent() * GetChargingPhases();
-
-    [Derived] public decimal? ChargeLimit => Charge.ChargeLimit;
-
-    [Derived] public TimeSpan? RemainingChargingTime => Charge.RemainingChargingTime;
-
-    // IVehicleClimateState
-
-    [Derived] public bool? IsClimateOn => Climate.IsClimateOn;
-
-    [Derived] public decimal? InsideTemperature => Climate.InsideTemperature;
-
-    [Derived] public decimal? OutsideTemperature => Climate.OutsideTemperature;
-
-    // IDoorLockState
-
-    [Derived] public DoorLockState? LockState => Body.LockState;
+    IDoorLockState? IVehicle.Body => Body;
 
     // IDeviceInfo, ISoftwareState
 
@@ -184,33 +161,12 @@ public partial class TeslaVehicle :
     [Derived] public string IconName => "DirectionsCar";
 
     [Derived]
-    public string? IconColor => (IsCharging, IsAwake) switch
+    public string? IconColor => (Charge.IsCharging, IsAwake) switch
     {
         (true, _) => "Success",
         (_, true) => "Info",
         _ => null
     };
-
-    private decimal? GetMaximumChargingCurrent()
-    {
-        var pilotCurrent = Charge.PilotCurrent;
-        var maximumRequestedCurrent = Charge.MaximumRequestedChargingCurrent;
-        return pilotCurrent is { } pilot && maximumRequestedCurrent is { } maximum ? Math.Min(pilot, maximum) : pilotCurrent ?? maximumRequestedCurrent;
-    }
-
-    // Tesla is reported to send 2 phases while charging on 3-phase AC, so the measured power decides when it is known.
-    private decimal GetChargingPhases()
-    {
-        var power = Charge.ChargingPower;
-        var voltage = Charge.ChargerVoltage;
-        var current = Charge.ChargingCurrent;
-        if (power is > 0 && voltage is > 0 && current is > 0)
-        {
-            return Math.Clamp(Math.Round(power.Value / (voltage.Value * current.Value), MidpointRounding.AwayFromZero), 1m, 3m);
-        }
-
-        return Charge.ChargerPhases ?? 1;
-    }
 
     // Activity, read by the polling of the account
 

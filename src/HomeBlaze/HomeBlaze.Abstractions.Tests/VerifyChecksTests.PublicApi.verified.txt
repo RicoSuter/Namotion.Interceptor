@@ -517,16 +517,36 @@ namespace HomeBlaze.Abstractions.Devices.Locks
 namespace HomeBlaze.Abstractions.Devices.Vehicles
 {
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
-    [System.ComponentModel.Description("Electric vehicle with battery level, range, location and charging state.")]
-    public interface IElectricVehicle : HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Devices.Energy.IChargingState, HomeBlaze.Abstractions.Devices.Vehicles.IVehicleChargingState, HomeBlaze.Abstractions.Devices.Vehicles.IVehicleState { }
+    [System.ComponentModel.Description("Electric vehicle with driven distance, location and the charging state of its bat" +
+        "tery.")]
+    public interface IElectricVehicle : HomeBlaze.Abstractions.Devices.Vehicles.IVehicle
+    {
+        HomeBlaze.Abstractions.Devices.Vehicles.IVehicleChargingState Charge { get; }
+    }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
-    [System.ComponentModel.Description("Reports the charging state of a vehicle: plug, charging, power, charge limit and " +
-        "remaining time.")]
-    public interface IVehicleChargingState : HomeBlaze.Abstractions.Devices.Energy.IChargingState
+    [System.ComponentModel.Description("Vehicle with driven distance, location, climate and door locks.")]
+    public interface IVehicle
+    {
+        HomeBlaze.Abstractions.Devices.Locks.IDoorLockState? Body { get; }
+        HomeBlaze.Abstractions.Devices.Vehicles.IVehicleClimateState? Climate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=225)]
+        [System.ComponentModel.Category("Vehicle")]
+        HomeBlaze.Abstractions.Common.GeoCoordinate? Location { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=224, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        [System.ComponentModel.Category("Vehicle")]
+        decimal? TotalDrivenDistance { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports the charging state of a vehicle: plug, charging, power, battery level, ch" +
+        "arge limit, remaining time and range.")]
+    public interface IVehicleChargingState : HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Devices.Energy.IChargingState
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=341, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         [System.ComponentModel.Category("Charging")]
         decimal? ChargeLimit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=343, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        [System.ComponentModel.Category("Charging")]
+        decimal? Range { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=342)]
         [System.ComponentModel.Category("Charging")]
         System.TimeSpan? RemainingChargingTime { get; }
@@ -545,20 +565,6 @@ namespace HomeBlaze.Abstractions.Devices.Vehicles
         [HomeBlaze.Abstractions.Attributes.State(Position=202, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
         [System.ComponentModel.Category("Climate")]
         decimal? OutsideTemperature { get; }
-    }
-    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
-    [System.ComponentModel.Description("Reports the range, the driven distance and the location of a vehicle.")]
-    public interface IVehicleState
-    {
-        [HomeBlaze.Abstractions.Attributes.State(Position=225)]
-        [System.ComponentModel.Category("Vehicle")]
-        HomeBlaze.Abstractions.Common.GeoCoordinate? Location { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=223, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
-        [System.ComponentModel.Category("Vehicle")]
-        decimal? Range { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=224, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
-        [System.ComponentModel.Category("Vehicle")]
-        decimal? TotalDrivenDistance { get; }
     }
 }
 namespace HomeBlaze.Abstractions

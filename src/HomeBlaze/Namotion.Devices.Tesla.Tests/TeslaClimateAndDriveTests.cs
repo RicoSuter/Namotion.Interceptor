@@ -25,11 +25,14 @@ public class TeslaClimateAndDriveTests
         return climate;
     }
 
-    private static TeslaDriveState CreateDriveFromFixture()
+    // The drive state sets the location of its vehicle, so it is created through one.
+    private static TeslaVehicle CreateVehicle() => new(1, "TESTVIN0000000001", TimeProvider.System, NullLogger.Instance);
+
+    private static TeslaVehicle CreateVehicleFromDriveFixture()
     {
-        var drive = new TeslaDriveState(NullLogger.Instance);
-        drive.Update(LoadFixture().DriveState!);
-        return drive;
+        var vehicle = CreateVehicle();
+        vehicle.Drive.Update(LoadFixture().DriveState!);
+        return vehicle;
     }
 
     [Fact]
@@ -258,10 +261,11 @@ public class TeslaClimateAndDriveTests
     public void WhenDriveFixtureIsApplied_ThenParkedVehicleIsNotDriving()
     {
         // Act
-        var drive = CreateDriveFromFixture();
+        var vehicle = CreateVehicleFromDriveFixture();
+        var drive = vehicle.Drive;
 
         // Assert
-        Assert.Equal(new GeoCoordinate(47.0, 8.0), drive.Location);
+        Assert.Equal(new GeoCoordinate(47.0, 8.0), vehicle.Location);
         Assert.Equal(261m, drive.Heading);
         Assert.Equal(TeslaShiftState.Park, drive.ShiftState);
         Assert.False(drive.IsDriving);
@@ -273,7 +277,7 @@ public class TeslaClimateAndDriveTests
     public void WhenDriveFixtureIsApplied_ThenRemainingFieldsAreMapped()
     {
         // Act
-        var drive = CreateDriveFromFixture();
+        var drive = CreateVehicleFromDriveFixture().Drive;
 
         // Assert
         Assert.Equal(new GeoCoordinate(47.0, 8.0), drive.NativeLocation);
@@ -290,7 +294,7 @@ public class TeslaClimateAndDriveTests
     public void WhenVehicleDrivesAccordingToJson_ThenValuesAreConverted()
     {
         // Arrange
-        var drive = new TeslaDriveState(NullLogger.Instance);
+        var drive = CreateVehicle().Drive;
         var dto = new TeslaDriveStateDto { ShiftState = "D", Speed = 50m, Power = -12, Timestamp = FixtureTimestamp };
 
         // Act
@@ -307,7 +311,7 @@ public class TeslaClimateAndDriveTests
     public void WhenShiftStateAndSpeedAreMissingInJson_ThenVehicleIsParked()
     {
         // Arrange
-        var drive = new TeslaDriveState(NullLogger.Instance);
+        var drive = CreateVehicle().Drive;
         var dto = new TeslaDriveStateDto { Timestamp = FixtureTimestamp };
 
         // Act
@@ -322,7 +326,7 @@ public class TeslaClimateAndDriveTests
     public void WhenOnlyShiftStateIsMissingInJson_ThenShiftStateAndIsDrivingAreNull()
     {
         // Arrange
-        var drive = new TeslaDriveState(NullLogger.Instance);
+        var drive = CreateVehicle().Drive;
         var dto = new TeslaDriveStateDto { Speed = 5m, Timestamp = FixtureTimestamp };
 
         // Act
@@ -337,7 +341,7 @@ public class TeslaClimateAndDriveTests
     public void WhenRouteIsActiveInJson_ThenNavigationIsMapped()
     {
         // Arrange
-        var drive = new TeslaDriveState(NullLogger.Instance);
+        var drive = CreateVehicle().Drive;
         var dto = new TeslaDriveStateDto
         {
             ActiveRouteDestination = "Test Destination",
@@ -366,7 +370,7 @@ public class TeslaClimateAndDriveTests
     public void WhenRouteEndsInJson_ThenNavigationIsCleared()
     {
         // Arrange
-        var drive = new TeslaDriveState(NullLogger.Instance);
+        var drive = CreateVehicle().Drive;
         drive.Update(new TeslaDriveStateDto { ActiveRouteDestination = "Test Destination", ActiveRouteMinutesToArrival = 12m, Timestamp = FixtureTimestamp });
 
         // Act
@@ -381,14 +385,15 @@ public class TeslaClimateAndDriveTests
     public void WhenSnapshotLocationIsNewer_ThenLocationUpdates()
     {
         // Arrange
-        var drive = CreateDriveFromFixture();
+        var vehicle = CreateVehicleFromDriveFixture();
+        var drive = vehicle.Drive;
         var snapshot = CreateSnapshot(60_000);
 
         // Act
         drive.Update(snapshot.LocationState);
 
         // Assert
-        Assert.Equal(47.5, drive.Location!.Value.Latitude, 3);
+        Assert.Equal(47.5, vehicle.Location!.Value.Latitude, 3);
         Assert.Equal(90m, drive.Heading);
         Assert.Equal(new GeoCoordinate(47.0, 8.0), drive.NativeLocation); // not in the snapshot, unchanged
         Assert.Equal(TeslaShiftState.Park, drive.ShiftState); // drive section is not part of the location snapshot
@@ -398,7 +403,8 @@ public class TeslaClimateAndDriveTests
     public void WhenSnapshotLocationHasAllFields_ThenTheyAreMapped()
     {
         // Arrange
-        var drive = CreateDriveFromFixture();
+        var vehicle = CreateVehicleFromDriveFixture();
+        var drive = vehicle.Drive;
         var snapshot = CreateSnapshot(60_000);
         snapshot.LocationState.NativeLatitude = 47.75f;
         snapshot.LocationState.NativeLongitude = 8.75f;
@@ -411,7 +417,7 @@ public class TeslaClimateAndDriveTests
         drive.Update(snapshot.LocationState);
 
         // Assert
-        Assert.Equal(8.5, drive.Location!.Value.Longitude, 3);
+        Assert.Equal(8.5, vehicle.Location!.Value.Longitude, 3);
         Assert.Equal(47.75, drive.NativeLocation!.Value.Latitude, 3);
         Assert.Equal(8.75, drive.NativeLocation.Value.Longitude, 3);
         Assert.Equal(TeslaGpsCoordinateType.Gcj, drive.NativeLocationType);
@@ -424,14 +430,15 @@ public class TeslaClimateAndDriveTests
     public void WhenSnapshotLocationIsOlder_ThenItIsIgnored()
     {
         // Arrange
-        var drive = CreateDriveFromFixture();
+        var vehicle = CreateVehicleFromDriveFixture();
+        var drive = vehicle.Drive;
         var snapshot = CreateSnapshot(-60_000);
 
         // Act
         drive.Update(snapshot.LocationState);
 
         // Assert
-        Assert.Equal(new GeoCoordinate(47.0, 8.0), drive.Location);
+        Assert.Equal(new GeoCoordinate(47.0, 8.0), vehicle.Location);
         Assert.Equal(261m, drive.Heading);
     }
 
@@ -439,7 +446,7 @@ public class TeslaClimateAndDriveTests
     public void WhenSnapshotLocationHasEqualTimestamp_ThenItApplies()
     {
         // Arrange
-        var drive = CreateDriveFromFixture();
+        var drive = CreateVehicleFromDriveFixture().Drive;
         var snapshot = CreateSnapshot(0);
 
         // Act
@@ -453,7 +460,8 @@ public class TeslaClimateAndDriveTests
     public void WhenSnapshotLocationHasNonFiniteCoordinate_ThenLocationBecomesNull()
     {
         // Arrange
-        var drive = CreateDriveFromFixture();
+        var vehicle = CreateVehicleFromDriveFixture();
+        var drive = vehicle.Drive;
         var snapshot = CreateSnapshot(60_000);
         snapshot.LocationState.Latitude = float.NaN;
 
@@ -461,14 +469,15 @@ public class TeslaClimateAndDriveTests
         drive.Update(snapshot.LocationState);
 
         // Assert
-        Assert.Null(drive.Location);
+        Assert.Null(vehicle.Location);
     }
 
     [Fact]
     public void WhenDriveSnapshotIsNewer_ThenItUpdatesAndAbsentFieldsStay()
     {
         // Arrange
-        var drive = CreateDriveFromFixture();
+        var vehicle = CreateVehicleFromDriveFixture();
+        var drive = vehicle.Drive;
         var snapshot = CreateSnapshot(60_000);
 
         // Act
@@ -479,14 +488,14 @@ public class TeslaClimateAndDriveTests
         Assert.True(drive.IsDriving);
         Assert.Equal(80.4672m, drive.Speed);
         Assert.Equal(20000m, drive.Power);
-        Assert.Equal(new GeoCoordinate(47.0, 8.0), drive.Location); // location section is not part of the drive snapshot
+        Assert.Equal(new GeoCoordinate(47.0, 8.0), vehicle.Location); // location section is not part of the drive snapshot
     }
 
     [Fact]
     public void WhenDriveSnapshotHasOnlyIntegerSpeed_ThenItIsUsed()
     {
         // Arrange
-        var drive = CreateDriveFromFixture();
+        var drive = CreateVehicleFromDriveFixture().Drive;
         var snapshot = CreateSnapshot(60_000);
         snapshot.DriveState.ClearSpeedFloat();
         snapshot.DriveState.Speed = 30;
@@ -502,7 +511,7 @@ public class TeslaClimateAndDriveTests
     public void WhenParkedSnapshotHasInvalidShiftStateAndNoSpeed_ThenVehicleIsParked()
     {
         // Arrange
-        var drive = new TeslaDriveState(NullLogger.Instance);
+        var drive = CreateVehicle().Drive;
         drive.Update(CreateSnapshot(0).DriveState);
         var snapshot = CreateSnapshot(60_000);
         snapshot.DriveState.ShiftState = new ShiftState { Invalid = new CarServer.Void() };
@@ -520,7 +529,7 @@ public class TeslaClimateAndDriveTests
     public void WhenSnapshotHasSnaShiftStateAndNoSpeed_ThenVehicleIsParked()
     {
         // Arrange
-        var drive = new TeslaDriveState(NullLogger.Instance);
+        var drive = CreateVehicle().Drive;
         var snapshot = CreateSnapshot(0);
         snapshot.DriveState.ShiftState = new ShiftState { SNA = new CarServer.Void() };
         snapshot.DriveState.ClearSpeedFloat();
@@ -536,7 +545,7 @@ public class TeslaClimateAndDriveTests
     public void WhenSnapshotHasInvalidShiftStateAndSpeed_ThenShiftStateStays()
     {
         // Arrange
-        var drive = CreateDriveFromFixture();
+        var drive = CreateVehicleFromDriveFixture().Drive;
         var snapshot = CreateSnapshot(60_000);
         snapshot.DriveState.ShiftState = new ShiftState { Invalid = new CarServer.Void() };
 
@@ -552,7 +561,8 @@ public class TeslaClimateAndDriveTests
     public void WhenSnapshotAndJsonDescribeTheSameCoordinate_ThenTheValuesAreEqual()
     {
         // Arrange
-        var jsonDrive = new TeslaDriveState(NullLogger.Instance);
+        var jsonVehicle = CreateVehicle();
+        var jsonDrive = jsonVehicle.Drive;
         jsonDrive.Update(new TeslaDriveStateDto
         {
             Latitude = 47.123456789m,
@@ -571,15 +581,16 @@ public class TeslaClimateAndDriveTests
         snapshot.LocationState.NativeLongitude = 8.987654321f;
         snapshot.DriveState.ActiveRouteDestination = "Test Destination";
         snapshot.DriveState.ActiveRouteCoordinates = new LatLong { Latitude = 47.123456789f, Longitude = 8.987654321f };
-        var protobufDrive = new TeslaDriveState(NullLogger.Instance);
+        var protobufVehicle = CreateVehicle();
+        var protobufDrive = protobufVehicle.Drive;
 
         // Act
         protobufDrive.Update(snapshot.LocationState);
         protobufDrive.Update(snapshot.DriveState);
 
         // Assert
-        Assert.NotNull(jsonDrive.Location);
-        Assert.Equal(jsonDrive.Location, protobufDrive.Location);
+        Assert.NotNull(jsonVehicle.Location);
+        Assert.Equal(jsonVehicle.Location, protobufVehicle.Location);
         Assert.Equal(jsonDrive.NativeLocation, protobufDrive.NativeLocation);
         Assert.Equal(jsonDrive.Navigation.DestinationLocation, protobufDrive.Navigation.DestinationLocation);
     }
@@ -588,7 +599,7 @@ public class TeslaClimateAndDriveTests
     public void WhenSnapshotHasFractionalSpeed_ThenItIsRoundedLikeTheJson()
     {
         // Arrange
-        var drive = CreateDriveFromFixture();
+        var drive = CreateVehicleFromDriveFixture().Drive;
         var snapshot = CreateSnapshot(60_000);
         snapshot.DriveState.SpeedFloat = 49.6f;
 
@@ -603,7 +614,7 @@ public class TeslaClimateAndDriveTests
     public void WhenSnapshotHasWholeAndFractionalSpeed_ThenWholeSpeedWins()
     {
         // Arrange
-        var drive = CreateDriveFromFixture();
+        var drive = CreateVehicleFromDriveFixture().Drive;
         var snapshot = CreateSnapshot(60_000);
         snapshot.DriveState.Speed = 30;
         snapshot.DriveState.SpeedFloat = 30.4f;
@@ -619,7 +630,7 @@ public class TeslaClimateAndDriveTests
     public void WhenSnapshotHasNoRoute_ThenNavigationIsCleared()
     {
         // Arrange
-        var drive = new TeslaDriveState(NullLogger.Instance);
+        var drive = CreateVehicle().Drive;
         drive.Update(new TeslaDriveStateDto { ActiveRouteDestination = "Test Destination", ActiveRouteMinutesToArrival = 12m, Timestamp = FixtureTimestamp });
 
         // Act
@@ -634,7 +645,7 @@ public class TeslaClimateAndDriveTests
     public void WhenDriveSnapshotHasRoute_ThenNavigationIsMapped()
     {
         // Arrange
-        var drive = CreateDriveFromFixture();
+        var drive = CreateVehicleFromDriveFixture().Drive;
         var snapshot = CreateSnapshot(60_000);
         snapshot.DriveState.ActiveRouteDestination = "Test Destination";
         snapshot.DriveState.ActiveRouteMinutesToArrival = 12.5f;
@@ -659,7 +670,7 @@ public class TeslaClimateAndDriveTests
     public void WhenDriveSnapshotEndsRoute_ThenNavigationIsCleared()
     {
         // Arrange
-        var drive = new TeslaDriveState(NullLogger.Instance);
+        var drive = CreateVehicle().Drive;
         var routeSnapshot = CreateSnapshot(0);
         routeSnapshot.DriveState.ActiveRouteDestination = "Test Destination";
         routeSnapshot.DriveState.ActiveRouteMinutesToArrival = 12f;
@@ -679,7 +690,7 @@ public class TeslaClimateAndDriveTests
     public void WhenDriveSnapshotIsOlder_ThenItIsIgnored()
     {
         // Arrange
-        var drive = CreateDriveFromFixture();
+        var drive = CreateVehicleFromDriveFixture().Drive;
         var snapshot = CreateSnapshot(-60_000);
 
         // Act
@@ -694,7 +705,7 @@ public class TeslaClimateAndDriveTests
     public void WhenDriveSnapshotHasEqualTimestamp_ThenItApplies()
     {
         // Arrange
-        var drive = CreateDriveFromFixture();
+        var drive = CreateVehicleFromDriveFixture().Drive;
         var snapshot = CreateSnapshot(0);
 
         // Act
@@ -708,7 +719,8 @@ public class TeslaClimateAndDriveTests
     public void WhenJsonDriveIsOlderThanAppliedSnapshot_ThenOnlyTheNewerSectionsAreIgnored()
     {
         // Arrange
-        var drive = new TeslaDriveState(NullLogger.Instance);
+        var vehicle = CreateVehicle();
+        var drive = vehicle.Drive;
         var snapshot = CreateSnapshot(60_000);
         drive.Update(snapshot.LocationState);
 
@@ -716,7 +728,7 @@ public class TeslaClimateAndDriveTests
         drive.Update(LoadFixture().DriveState!);
 
         // Assert
-        Assert.Equal(47.5, drive.Location!.Value.Latitude, 3); // location snapshot is newer than the JSON
+        Assert.Equal(47.5, vehicle.Location!.Value.Latitude, 3); // location snapshot is newer than the JSON
         Assert.Equal(TeslaShiftState.Park, drive.ShiftState); // the drive section had no newer data
     }
 }

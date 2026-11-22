@@ -70,13 +70,13 @@ The sample file `Devices/Tesla.json` has no token and shows the status "Missing 
 
 ```
 TeslaAccount                                   tokens and polling
-└─ Vehicles[VIN]: TeslaVehicle                 identity, shared interfaces, Wake Up
-   ├─ Charge: TeslaChargeState
+└─ Vehicles[VIN]: TeslaVehicle                 identity, odometer, location, Wake Up
+   ├─ Charge: TeslaChargeState                 battery, range and charging
    ├─ Climate: TeslaClimateState
    │  └─ SeatHeaters: TeslaSeatHeaters
    ├─ Drive: TeslaDriveState
    │  └─ Navigation: TeslaNavigation
-   ├─ Body: TeslaVehicleBody
+   ├─ Body: TeslaVehicleBody                   doors, windows, lock and tires
    │  └─ FrontLeftTire, FrontRightTire, RearLeftTire, RearRightTire: TeslaTire
    ├─ Media: TeslaMedia
    ├─ SoftwareUpdate: TeslaSoftwareUpdate
@@ -92,7 +92,10 @@ All readings are `null` until the vehicle reported them. Percentages are fractio
 | Subject | Interfaces |
 |---------|------------|
 | `TeslaAccount` | `IConfigurable`, `IMonitoredService`, `IAuthenticatedSubject`, `ITitleProvider`, `IIconProvider` |
-| `TeslaVehicle` | `IElectricVehicle` (`IVehicleState`, `IVehicleChargingState` with `IChargingState`, `IBatteryState`), `IVehicleClimateState`, `IDoorLockState`, `IDeviceInfo`, `ISoftwareState`, `IConnectionState`, `ILastUpdatedProvider`, `ITitleProvider`, `IIconProvider` |
+| `TeslaVehicle` | `IElectricVehicle` (with `IVehicle`), `IDeviceInfo`, `ISoftwareState`, `IConnectionState`, `ILastUpdatedProvider`, `ITitleProvider`, `IIconProvider` |
+| `TeslaChargeState` | `IVehicleChargingState` (with `IChargingState`, `IBatteryState`), `ITitleProvider`, `IIconProvider` |
+| `TeslaClimateState` | `IVehicleClimateState`, `ITitleProvider`, `IIconProvider` |
+| `TeslaVehicleBody` | `IDoorLockState`, `ITitleProvider`, `IIconProvider` |
 | `TeslaMedia` | `IMediaTrackState`, `IVolumeState` |
 
 ### TeslaAccount
@@ -108,7 +111,7 @@ All readings are `null` until the vehicle reported them. Percentages are fractio
 
 ### TeslaVehicle
 
-The properties of the shared interfaces read the child subjects, so the vehicle can be used like any other electric vehicle, for example on a page or by an automation, without knowing the Tesla children.
+Every value has one path. The vehicle holds its identity, the odometer and the location; battery, range and charging are in `Charge`, the climate in `Climate` and the lock in `Body`, for example `Vehicles[VIN]/Charge/BatteryLevel`. Through `IElectricVehicle`, code reaches them as the typed `Charge`, `Climate` and `Body` of the vehicle, so it can use the vehicle like any other electric vehicle without knowing the Tesla children.
 
 | Property | Unit | Description |
 |----------|------|-------------|
@@ -121,17 +124,8 @@ The properties of the shared interfaces read the child subjects, so the vehicle 
 | `CommandSigning` | | Whether the vehicle requires signed commands (`Off`, `Allowed`, `Required`) |
 | `IsInService` | | Whether the vehicle is in service at Tesla |
 | `LastUpdated` | | Time of the newest data, from the data itself and not from the read time of the poll |
-| `BatteryLevel` | Percent | State of charge |
-| `Range` | km | Estimated range |
 | `TotalDrivenDistance` | km | Odometer |
 | `Location` | | Coordinate of the vehicle |
-| `IsPluggedIn`, `IsCharging` | | Charging cable and charging state |
-| `ChargingPower` | W | Current charging power |
-| `MaximumChargingPower` | W | Power at the highest current that the charger offers and the vehicle can request; `null` when the vehicle does not charge. The phases come from the measured power, because Tesla reports 2 phases while charging on 3-phase AC. |
-| `ChargeLimit` | Percent | Battery level at which charging stops |
-| `RemainingChargingTime` | TimeSpan | Time until the charge limit is reached |
-| `IsClimateOn`, `InsideTemperature`, `OutsideTemperature` | °C | Climate state |
-| `LockState` | | Door lock state |
 | `Manufacturer`, `Model`, `ProductCode` | | `Tesla`, the model name from the specification (Model 3, Model Y, Model S, Model X, Cybertruck) and the trim badging. `Model` and `ProductCode` are `null` until the first read of the vehicle data, because the cached data does not carry the specification. |
 | `SoftwareVersion`, `AvailableSoftwareUpdate` | | Installed version and the version of an available update |
 
@@ -147,6 +141,7 @@ The title is the name set in the vehicle, else the display name of the account, 
 | `ChargeLimit`, `MinimumChargeLimit`, `MaximumChargeLimit`, `StandardChargeLimit` | Percent | Charge limit with its bounds and the standard limit |
 | `Range`, `IdealRange`, `EstimatedRange` | km | Rated, ideal and estimated range |
 | `ChargingPower` | W | Current charging power |
+| `MaximumChargingPower` | W | Derived: power at the highest current that the charger offers and the vehicle can request; `null` when the vehicle does not charge. The phases come from the measured power, because Tesla reports 2 phases while charging on 3-phase AC. |
 | `ChargingCurrent`, `RequestedChargingCurrent`, `MaximumRequestedChargingCurrent`, `PilotCurrent`, `ChargingCurrentSetting` | A | Actual, requested, maximum requested and charger offered current, and the current setting of the vehicle |
 | `ChargerVoltage` | V | Charger voltage, `null` when not charging |
 | `ChargerPhases` | | Number of phases as Tesla reports it |
@@ -185,7 +180,7 @@ The title is the name set in the vehicle, else the display name of the account, 
 
 | Property | Unit | Description |
 |----------|------|-------------|
-| `Location`, `NativeLocation`, `NativeLocationType`, `IsNativeLocationSupported` | | Location, and the location in the coordinate system of `NativeLocationType` (`Wgs` or `Gcj`), which differs from `Location` only in some regions |
+| `NativeLocation`, `NativeLocationType`, `IsNativeLocationSupported` | | The location in the coordinate system of `NativeLocationType` (`Wgs` or `Gcj`), which differs from the `Location` of the vehicle only in some regions |
 | `Heading` | degrees | Heading |
 | `GpsTime` | | Time of the last location |
 | `Speed` | km/h | Speed, which Tesla omits while the vehicle is parked |
@@ -200,7 +195,7 @@ The title is the name set in the vehicle, else the display name of the account, 
 
 | Property | Description |
 |----------|-------------|
-| `LockState` | Door lock state |
+| `LockState`, `IsLocked` | Door lock state, and whether it is locked |
 | `IsDriverFrontDoorOpen`, `IsDriverRearDoorOpen`, `IsPassengerFrontDoorOpen`, `IsPassengerRearDoorOpen` | Doors, named after Tesla's sides as the vehicle reports them |
 | `IsFrunkOpen`, `IsTrunkOpen` | Frunk and trunk |
 | `IsDriverFrontWindowOpen`, `IsPassengerFrontWindowOpen`, `IsDriverRearWindowOpen`, `IsPassengerRearWindowOpen` | Windows |

@@ -13,7 +13,7 @@ namespace Namotion.Devices.Tesla;
 /// </summary>
 [ExcludeFromCreation]
 [InterceptorSubject]
-public partial class TeslaVehicleBody : ITitleProvider, IIconProvider
+public partial class TeslaVehicleBody : IDoorLockState, ITitleProvider, IIconProvider
 {
     // The cached snapshot has separate timestamps for the closures and the tires, the JSON has one for both.
     private readonly TeslaSectionClock _closuresClock = new();

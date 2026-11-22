@@ -1,23 +1,17 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
+using HomeBlaze.Abstractions.Devices.Locks;
 
 namespace HomeBlaze.Abstractions.Devices.Vehicles;
 
 /// <summary>
-/// State of a vehicle: range, driven distance and location.
+/// A vehicle with its driven distance, its location and the subjects that report its climate and its door locks.
 /// </summary>
 [SubjectAbstraction]
-[Description("Reports the range, the driven distance and the location of a vehicle.")]
-public interface IVehicleState
+[Description("Vehicle with driven distance, location, climate and door locks.")]
+public interface IVehicle
 {
-    /// <summary>
-    /// The estimated distance the vehicle can still drive, in kilometers.
-    /// </summary>
-    [State(Unit = StateUnit.Kilometer, Position = 223)]
-    [Category("Vehicle")]
-    decimal? Range { get; }
-
     /// <summary>
     /// The distance the vehicle has driven in its life (the odometer), in kilometers.
     /// </summary>
@@ -31,4 +25,14 @@ public interface IVehicleState
     [State(Position = 225)]
     [Category("Vehicle")]
     GeoCoordinate? Location { get; }
+
+    /// <summary>
+    /// The climate of the vehicle, or null when the vehicle does not report it.
+    /// </summary>
+    IVehicleClimateState? Climate { get; }
+
+    /// <summary>
+    /// The door locks of the vehicle, or null when the vehicle does not report them.
+    /// </summary>
+    IDoorLockState? Body { get; }
 }
