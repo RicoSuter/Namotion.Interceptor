@@ -4,8 +4,9 @@ using HomeBlaze.Services;
 namespace HomeBlaze.Components.Dialogs;
 
 /// <summary>
-/// The rows of the Discover page, ordered by type and then by name so the list moves little while results arrive,
-/// and a line for each discoverer that failed. Not thread-safe: the page changes it on the renderer's dispatcher.
+/// The rows of the Discover page, ordered by type and then by name so the list moves little while results arrive, a
+/// line for each discoverer that failed, and which rows show their included items. Not thread-safe: the page changes
+/// it on the renderer's dispatcher.
 /// </summary>
 internal sealed class SubjectDiscoveryList
 {
@@ -13,6 +14,7 @@ internal sealed class SubjectDiscoveryList
 
     private readonly List<SubjectDiscoveryRow> _rows = [];
     private readonly List<string> _failures = [];
+    private readonly HashSet<(Type SubjectType, string Key)> _expandedRows = [];
 
     public IReadOnlyList<SubjectDiscoveryRow> Rows => _rows;
 
@@ -30,10 +32,36 @@ internal sealed class SubjectDiscoveryList
         _failures.Add($"{descriptor.DisplayName}: search failed");
     }
 
+    /// <summary>
+    /// Whether the row shows its included items. A row is collapsed until it is toggled, and stays as toggled while
+    /// further results arrive, until the list is cleared.
+    /// </summary>
+    public bool IsExpanded(SubjectDiscoveryRow row) =>
+        _expandedRows.Contains((row.Discovered.SubjectType, row.Discovered.Result.Key));
+
+    public void ToggleExpanded(SubjectDiscoveryRow row)
+    {
+        var key = (row.Discovered.SubjectType, row.Discovered.Result.Key);
+        if (!_expandedRows.Remove(key))
+        {
+            _expandedRows.Add(key);
+        }
+    }
+
     public void Clear()
     {
         _rows.Clear();
         _failures.Clear();
+        _expandedRows.Clear();
+    }
+
+    /// <summary>
+    /// The accessible name of the control that shows or hides the included items of a row.
+    /// </summary>
+    public static string GetExpanderLabel(int itemCount, bool isExpanded)
+    {
+        var action = isExpanded ? "Hide" : "Show";
+        return itemCount == 1 ? $"{action} 1 included item" : $"{action} {itemCount} included items";
     }
 
     private static int CompareRows(SubjectDiscoveryRow first, SubjectDiscoveryRow second)

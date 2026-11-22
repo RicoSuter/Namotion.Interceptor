@@ -1213,6 +1213,68 @@ public class SubjectSetupDialogTests
         }
     }
 
+    [Theory]
+    [InlineData(1300, 880)]
+    [InlineData(375, 812)]
+    public async Task WhenTheExpanderOfAFoundDeviceIsClicked_ThenItsIncludedItemsAreShownAndAreNotSelectable(int width, int height)
+    {
+        // Arrange - the navigation to the browser is in a drawer that a narrow viewport closes, so the viewport is
+        // only resized once the pane is there.
+        var page = await _fixture.CreatePageAsync();
+        await OpenSubjectBrowserAsync(page);
+        await page.SetViewportSizeAsync(width, height);
+        await PaneCreateButton(page).ClickAsync();
+        await Assertions.Expect(TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Dialog(page).GetByTestId("picker-mode-discover").ClickAsync();
+
+        var hubRow = Dialog(page).Locator(".subject-discovery-row").Filter(new() { HasText = DiscoverableTestDiscoverer.HubName });
+        var expander = hubRow.GetByTestId("discovery-row-expander");
+        var items = hubRow.GetByTestId("discovery-included-item");
+        await Assertions.Expect(expander).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(expander).ToHaveAttributeAsync("aria-expanded", "false");
+        await Assertions.Expect(expander).ToHaveAccessibleNameAsync("Show 2 included items");
+        await Assertions.Expect(items).ToHaveCountAsync(0);
+
+        // Act
+        await expander.ClickAsync();
+
+        // Assert
+        await Assertions.Expect(items).ToHaveTextAsync(
+            ["Kitchen speaker, Test model, 192.0.2.19", "Office speaker"], new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(expander).ToHaveAttributeAsync("aria-expanded", "true");
+        await Assertions.Expect(expander).ToHaveAccessibleNameAsync("Hide 2 included items");
+        await Assertions.Expect(hubRow.GetByTestId("discovery-included-items").Locator("button, a, [tabindex]")).ToHaveCountAsync(0);
+
+        // The select button and the expander are siblings on one line, both completely in view.
+        var layout = await hubRow.EvaluateAsync<double[]>(
+            """
+            row => {
+                const select = row.querySelector("[data-testid='discovery-row']").getBoundingClientRect();
+                const expander = row.querySelector("[data-testid='discovery-row-expander']").getBoundingClientRect();
+                const list = row.closest('.subject-type-list');
+                const isInViewport = box => box.left >= 0 && box.right <= innerWidth;
+                return [
+                    row.querySelector("[data-testid='discovery-row'] [data-testid='discovery-row-expander']") ? 1 : 0,
+                    select.right <= expander.left + 0.5 ? 1 : 0,
+                    isInViewport(select) && isInViewport(expander) ? 1 : 0,
+                    list.scrollWidth - list.clientWidth
+                ];
+            }
+            """);
+        Assert.Equal([0, 1, 1], layout[..3]);
+        Assert.True(layout[3] <= 0, $"The list scrolls sideways by {layout[3]} pixels.");
+
+        // Act - events of a circuit are handled in order, so once the second click of the expander has collapsed the
+        // items, the click on an item has been handled before it.
+        await items.First.ClickAsync();
+        await expander.ClickAsync();
+
+        // Assert - the item did not pick the device, which would have left the Discover page.
+        await Assertions.Expect(items).ToHaveCountAsync(0, new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(Dialog(page).GetByTestId("subject-discovery-page")).ToBeVisibleAsync();
+        await Assertions.Expect(CreateButton(page)).Not.ToBeVisibleAsync();
+    }
+
     [Fact]
     public async Task WhenApplyingTheConfigurationOfACreatedSubjectFails_ThenTheFailureIsReportedAndTheSubjectIsStored()
     {

@@ -85,6 +85,80 @@ public class SubjectDiscoveryListTests
         Assert.Empty(list.Failures);
     }
 
+    [Fact]
+    public void WhenARowIsToggled_ThenOnlyItIsExpandedAndStaysSoWhileResultsArrive()
+    {
+        // Arrange
+        var list = new SubjectDiscoveryList();
+        list.Add(Found(Hue, "Bridge"), Hue);
+        list.Add(Found(Shelly, "Bridge"), Shelly);
+        var hueRow = list.Rows.Single(row => row.Descriptor == Hue);
+        var shellyRow = list.Rows.Single(row => row.Descriptor == Shelly);
+
+        // Act
+        list.ToggleExpanded(hueRow);
+        list.Add(Found(Hue, "Another bridge"), Hue);
+
+        // Assert
+        Assert.True(list.IsExpanded(hueRow));
+        Assert.False(list.IsExpanded(shellyRow));
+        Assert.True(list.IsExpanded(list.Rows.Single(row => row.Descriptor == Hue && row.Discovered.Result.DisplayName == "Bridge")));
+    }
+
+    [Fact]
+    public void WhenAnExpandedRowIsToggledAgain_ThenItIsCollapsed()
+    {
+        // Arrange
+        var list = new SubjectDiscoveryList();
+        list.Add(Found(Hue, "Bridge"), Hue);
+        var row = Assert.Single(list.Rows);
+        list.ToggleExpanded(row);
+
+        // Act
+        list.ToggleExpanded(row);
+
+        // Assert
+        Assert.False(list.IsExpanded(row));
+    }
+
+    [Fact]
+    public void WhenTheListIsClearedForANewScan_ThenTheSameDeviceIsCollapsedAgain()
+    {
+        // Arrange
+        var list = new SubjectDiscoveryList();
+        list.Add(Found(Hue, "Bridge"), Hue);
+        list.ToggleExpanded(Assert.Single(list.Rows));
+
+        // Act
+        list.Clear();
+        list.Add(Found(Hue, "Bridge"), Hue);
+
+        // Assert
+        Assert.False(list.IsExpanded(Assert.Single(list.Rows)));
+    }
+
+    [Theory]
+    [InlineData(1, false, "Show 1 included item")]
+    [InlineData(10, false, "Show 10 included items")]
+    [InlineData(10, true, "Hide 10 included items")]
+    public void WhenARowHasIncludedItems_ThenItsExpanderIsLabeledWithTheirCount(int itemCount, bool isExpanded, string expectedLabel)
+    {
+        // Act & Assert
+        Assert.Equal(expectedLabel, SubjectDiscoveryList.GetExpanderLabel(itemCount, isExpanded));
+    }
+
+    [Fact]
+    public void WhenAResultDoesNotListIncludedItems_ThenItIncludesNone()
+    {
+        // Arrange
+        IDiscoveryResult result = new FoundDevice("Bridge");
+        IDiscoveryResult other = new FoundDevice("Other");
+
+        // Act & Assert - the same empty list for every result, so the default allocates nothing.
+        Assert.Empty(result.IncludedItems);
+        Assert.Same(result.IncludedItems, other.IncludedItems);
+    }
+
     private sealed record FoundDevice(string DisplayName, string? KeyOverride = null) : IDiscoveryResult
     {
         public string Key => KeyOverride ?? DisplayName;

@@ -33,38 +33,65 @@
         @foreach (var row in _list.Rows)
         {
             var result = row.Discovered.Result;
-            @if (row.Discovered.ExistingSubject is { } existingSubject)
-            {
-                <div class="subject-type-row subject-discovery-row-existing" aria-disabled="true" data-testid="discovery-row-existing">
-                    <MudIcon Icon="@MudBlazorIconResolver.Resolve(row.Descriptor.IconName)" />
-                    <span class="subject-type-row-text">
-                        <span>@result.DisplayName</span>
-                        <span class="subject-type-row-description">@GetCaption(row), already added</span>
-                    </span>
-                    @if (GetBrowserUrl(existingSubject) is { } url)
+            var includedItems = result.IncludedItems;
+            var isExpanded = includedItems.Count > 0 && _list.IsExpanded(row);
+            @* The row is a container, because the expander is a button of its own and must not sit inside the select
+               button. *@
+            <div class="subject-discovery-row" @key="row">
+                <div class="subject-discovery-row-line">
+                    @if (row.Discovered.ExistingSubject is { } existingSubject)
                     {
-                        <MudIconButton Href="@url"
-                                       Icon="@Icons.Material.Filled.OpenInNew"
+                        <div class="subject-type-row subject-discovery-row-existing" aria-disabled="true" data-testid="discovery-row-existing">
+                            <MudIcon Icon="@MudBlazorIconResolver.Resolve(row.Descriptor.IconName)" />
+                            <span class="subject-type-row-text">
+                                <span>@result.DisplayName</span>
+                                <span class="subject-type-row-description">@GetCaption(row), already added</span>
+                            </span>
+                            @if (GetBrowserUrl(existingSubject) is { } url)
+                            {
+                                <MudIconButton Href="@url"
+                                               Icon="@Icons.Material.Filled.OpenInNew"
+                                               Size="Size.Small"
+                                               Class="subject-discovery-row-link"
+                                               aria-label="@($"Open {result.DisplayName}")"
+                                               OnClick="OnNavigating" />
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <button type="button"
+                                class="subject-type-row"
+                                @onclick="() => OnSelected.InvokeAsync(row.Discovered)"
+                                data-testid="discovery-row">
+                            <MudIcon Icon="@MudBlazorIconResolver.Resolve(row.Descriptor.IconName)" />
+                            <span class="subject-type-row-text">
+                                <span>@result.DisplayName</span>
+                                <span class="subject-type-row-description">@GetCaption(row)</span>
+                            </span>
+                        </button>
+                    }
+                    @if (includedItems.Count > 0)
+                    {
+                        <MudIconButton Icon="@(isExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
                                        Size="Size.Small"
-                                       Class="subject-discovery-row-link"
-                                       aria-label="@($"Open {result.DisplayName}")"
-                                       OnClick="OnNavigating" />
+                                       Class="subject-discovery-row-expander"
+                                       aria-expanded="@(isExpanded ? "true" : "false")"
+                                       aria-label="@SubjectDiscoveryList.GetExpanderLabel(includedItems.Count, isExpanded)"
+                                       OnClick="() => _list.ToggleExpanded(row)"
+                                       data-testid="discovery-row-expander" />
                     }
                 </div>
-            }
-            else
-            {
-                <button type="button"
-                        class="subject-type-row"
-                        @onclick="() => OnSelected.InvokeAsync(row.Discovered)"
-                        data-testid="discovery-row">
-                    <MudIcon Icon="@MudBlazorIconResolver.Resolve(row.Descriptor.IconName)" />
-                    <span class="subject-type-row-text">
-                        <span>@result.DisplayName</span>
-                        <span class="subject-type-row-description">@GetCaption(row)</span>
-                    </span>
-                </button>
-            }
+                @if (isExpanded)
+                {
+                    <ul class="subject-discovery-included" data-testid="discovery-included-items">
+                        @foreach (var item in includedItems)
+                        {
+                            <li class="subject-discovery-included-item" data-testid="discovery-included-item">@GetText(item)</li>
+                        }
+                    </ul>
+                }
+            </div>
         }
 
         @foreach (var failure in _list.Failures)
@@ -105,6 +132,22 @@
         gap: 8px;
     }
 
+    .subject-discovery-row {
+        border-top: 1px solid var(--mud-palette-lines-default);
+    }
+
+    .subject-discovery-row-line {
+        display: flex;
+        align-items: center;
+    }
+
+    /* The row carries the border, so the select button and the expander share one line. */
+    .subject-discovery-row-line > .subject-type-row {
+        flex: 1 1 auto;
+        min-width: 0;
+        border-top: 0;
+    }
+
     .subject-discovery-row-existing {
         opacity: 0.6;
         cursor: default;
@@ -116,6 +159,25 @@
 
     .subject-discovery-row-link {
         margin-left: auto;
+    }
+
+    .subject-discovery-row-expander {
+        flex-shrink: 0;
+        margin-right: 4px;
+    }
+
+    /* Indented to the text of the row: its padding, icon and gap. */
+    .subject-discovery-included {
+        margin: 0;
+        padding: 0 8px 8px 44px;
+        list-style: none;
+        color: var(--mud-palette-text-secondary);
+        font-size: 0.875rem;
+    }
+
+    .subject-discovery-included-item {
+        padding: 2px 0;
+        overflow-wrap: anywhere;
     }
 
     .subject-discovery-hint {
@@ -242,6 +304,9 @@
         row.Discovered.Result.Detail is { } detail
             ? $"{row.Descriptor.DisplayName}, {detail}"
             : row.Descriptor.DisplayName;
+
+    private static string GetText(DiscoveredItem item) =>
+        item.Detail is { } detail ? $"{item.DisplayName}, {detail}" : item.DisplayName;
 
     private string? GetBrowserUrl(IInterceptorSubject subject) =>
         PathResolver.GetPath(subject, PathStyle.Route) is { } routePath ? BrowserUrls.FromRoutePath(routePath) : null;
