@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -11,6 +12,13 @@ internal static class SonosDiscovery
     private const string UuidPrefix = "uuid:";
     private const string SonosUsnPrefix = UuidPrefix + "RINCON_";
     private const string UsnSeparator = "::";
+
+    /// <summary>
+    /// The most hex digits a RINCON ID may have; that of a speaker has 17.
+    /// </summary>
+    internal const int MaximumSpeakerIdDigits = 32;
+
+    private static readonly SearchValues<char> HexDigits = SearchValues.Create("0123456789ABCDEFabcdef");
     private static readonly TimeSpan SearchTime = TimeSpan.FromSeconds(5);
 
     /// <summary>
@@ -127,7 +135,7 @@ internal static class SonosDiscovery
     /// <summary>
     /// Returns the RINCON ID of a Sonos speaker from the USN of its answer, such as <c>RINCON_000E58A0123401400</c>
     /// from <c>uuid:RINCON_000E58A0123401400::urn:schemas-upnp-org:device:ZonePlayer:1</c>, or null when the USN is not
-    /// that of a Sonos speaker.
+    /// that of a Sonos speaker: its ID must be <c>RINCON_</c> and 1 to <see cref="MaximumSpeakerIdDigits"/> hex digits.
     /// </summary>
     internal static string? GetSpeakerId(string? uniqueServiceName)
     {
@@ -142,6 +150,9 @@ internal static class SonosDiscovery
             end = uniqueServiceName.Length;
         }
 
-        return end > SonosUsnPrefix.Length ? uniqueServiceName[UuidPrefix.Length..end] : null;
+        var digits = uniqueServiceName.AsSpan(SonosUsnPrefix.Length, end - SonosUsnPrefix.Length);
+        return digits.Length is > 0 and <= MaximumSpeakerIdDigits && !digits.ContainsAnyExcept(HexDigits)
+            ? uniqueServiceName[UuidPrefix.Length..end]
+            : null;
     }
 }

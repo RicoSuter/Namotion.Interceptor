@@ -70,6 +70,11 @@ public class SonosDiscoveryTests
     [InlineData("uuid:RINCON_A0000000000601400", "RINCON_A0000000000601400")]
     [InlineData("uuid:RINCON_::" + ZonePlayer, null)]
     [InlineData("uuid:2f402f80-da50-11e1-9b23-001788255acc::" + ZonePlayer, null)]
+    [InlineData("uuid:RINCON_000e58a0123401400::" + ZonePlayer, "RINCON_000e58a0123401400")]
+    [InlineData("uuid:RINCON_A000000000060140G::" + ZonePlayer, null)]
+    [InlineData("uuid:RINCON_A0000/../601400::" + ZonePlayer, null)]
+    [InlineData("uuid:RINCON_A00000000006014000000000000000000::" + ZonePlayer, null)]
+    [InlineData("uuid:RINCON_A0000000000601400000000000000000::" + ZonePlayer, "RINCON_A0000000000601400000000000000000")]
     [InlineData(null, null)]
     public void WhenReadingTheSpeakerIdOfAUsn_ThenOnlySonosSpeakersHaveOne(string? usn, string? expected)
     {
@@ -85,6 +90,7 @@ public class SonosDiscoveryTests
     [InlineData("upnp:rootdevice", "uuid:RINCON_A0000000000601400::upnp:rootdevice", true, false)]
     [InlineData(ZonePlayer, "uuid:2f402f80-da50-11e1-9b23-001788255acc::" + ZonePlayer, true, false)]
     [InlineData(ZonePlayer, null, true, false)]
+    [InlineData(ZonePlayer, "uuid:RINCON_NOT-HEX::" + ZonePlayer, true, false)]
     [InlineData(ZonePlayer, "uuid:RINCON_A0000000000601400::" + ZonePlayer, false, false)]
     public void WhenFilteringDiscoveredDevices_ThenAcceptsOnlySonosZonePlayers(string notificationType, string? usn, bool hasLocation, bool expected)
     {
