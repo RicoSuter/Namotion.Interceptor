@@ -511,6 +511,25 @@ public class TeslaClimateAndDriveTests
         // Assert
         Assert.Equal(TeslaShiftState.Park, drive.ShiftState);
         Assert.False(drive.IsDriving);
+        Assert.Null(drive.Speed);
+    }
+
+    [Fact]
+    public void WhenSnapshotReportsParkWithoutSpeedAfterDriving_ThenSpeedIsClearedLikeTheJson()
+    {
+        // Arrange
+        var drive = CreateVehicle().Drive;
+        drive.Update(CreateSnapshot(0).DriveState);
+        var snapshot = CreateSnapshot(60_000);
+        snapshot.DriveState.ShiftState = new ShiftState { P = new CarServer.Void() };
+        snapshot.DriveState.ClearSpeedFloat();
+
+        // Act
+        drive.Update(snapshot.DriveState);
+
+        // Assert
+        Assert.Equal(TeslaShiftState.Park, drive.ShiftState);
+        Assert.Null(drive.Speed);
     }
 
     [Fact]

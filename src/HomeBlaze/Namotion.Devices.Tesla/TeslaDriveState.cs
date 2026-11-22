@@ -153,18 +153,19 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
     private void UpdateDriveFromProtobuf(DriveState proto)
     {
         if (proto.OptionalPowerCase != DriveState.OptionalPowerOneofCase.None) Power = TeslaValues.KilowattsToWatts(proto.Power);
-        UpdateShiftStateFromProtobuf(proto);
-        UpdateSpeedFromProtobuf(proto);
+        var shiftState = UpdateShiftStateFromProtobuf(proto);
+        UpdateSpeedFromProtobuf(proto, shiftState);
     }
 
-    // A parked vehicle reports an invalid shift state and no speed, where the JSON omits both.
-    private void UpdateShiftStateFromProtobuf(DriveState proto)
+    /// <returns>The shift state this snapshot reports, or null.</returns>
+    private TeslaShiftState? UpdateShiftStateFromProtobuf(DriveState proto)
     {
         if (proto.ShiftState is not { } shiftState)
         {
-            return;
+            return null;
         }
 
+        // A parked vehicle reports an invalid shift state and no speed, where the JSON omits both.
         var mapped = TeslaProtoValues.ShiftState(shiftState);
         if (mapped is null && !HasSpeed(proto))
         {
@@ -175,13 +176,17 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
         {
             ShiftState = mapped;
         }
+
+        return mapped;
     }
 
-    // The JSON speed is whole miles per hour, so the fractional speed of the snapshot is rounded to match.
-    private void UpdateSpeedFromProtobuf(DriveState proto)
+    // The JSON speed is whole miles per hour, so the fractional speed of the snapshot is rounded to match. A parked
+    // vehicle has no speed, like the JSON that omits it.
+    private void UpdateSpeedFromProtobuf(DriveState proto, TeslaShiftState? shiftState)
     {
         if (proto.OptionalSpeedCase != DriveState.OptionalSpeedOneofCase.None) Speed = TeslaValues.MilesPerHourToKilometersPerHour(proto.Speed);
         else if (proto.OptionalSpeedFloatCase != DriveState.OptionalSpeedFloatOneofCase.None) Speed = TeslaValues.MilesPerHourToKilometersPerHour(TeslaValues.WholeNumber(TeslaValues.Decimal(proto.SpeedFloat)));
+        else if (shiftState == TeslaShiftState.Park) Speed = null;
     }
 
     private static bool HasSpeed(DriveState proto) =>
