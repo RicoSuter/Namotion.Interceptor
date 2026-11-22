@@ -24,14 +24,14 @@ public class TeslaAccountTests
 
     private static readonly DateTimeOffset Start = DateTimeOffset.FromUnixTimeMilliseconds(1795293700000);
 
-    private static (TeslaAccount Account, FakeHttpMessageHandler Handler, FakeTimeProvider Time) Create(FakeHttpMessageHandler? handler = null)
+    private static (TeslaAccount Account, FakeHttpMessageHandler Handler, FakeTimeProvider Time) Create(FakeHttpMessageHandler? handler = null, RecordingLogger? logger = null)
     {
         handler ??= new FakeHttpMessageHandler()
             .Respond(TokenPath, HttpStatusCode.OK, TokenJson)
             .Respond(ProductsPath, HttpStatusCode.OK, FixtureLoader.Load("products.json"))
             .Respond(VehicleDataPath, HttpStatusCode.OK, FixtureLoader.Load("vehicle-data.json"));
         var time = new FakeTimeProvider(Start);
-        var account = new TeslaAccount(time, NullLoggerFactory.Instance, () => new HttpClient(handler)) { RefreshToken = "refresh-1" };
+        var account = new TeslaAccount(time, logger is null ? NullLoggerFactory.Instance : new RecordingLoggerFactory(logger), () => new HttpClient(handler)) { RefreshToken = "refresh-1" };
         return (account, handler, time);
     }
 
@@ -614,6 +614,43 @@ public class TeslaAccountTests
         Assert.Contains("refresh_token=refresh-new", tokenRequests[1].Body);
         Assert.Equal(["refresh-4"], writer.Writes.Select(write => write.RefreshToken));
         Assert.Equal("refresh-4", account.RefreshToken);
+    }
+
+    [Fact]
+    public async Task WhenWakeUpTimesOut_ThenAWarningIsLogged()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var (account, handler, _) = Create(logger: logger);
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // HttpClient reports its own timeout as a canceled task while the token of the caller is not canceled.
+        handler.Respond(WakeUpPath, () => Task.FromException<HttpResponseMessage>(new TaskCanceledException("The request timed out.")));
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => account.Vehicles.Single().Value.WakeUpAsync(CancellationToken.None));
+        Assert.Single(logger.Warnings, message => message.StartsWith("Waking Tesla vehicle", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WhenWakeUpIsCanceledByTheCaller_ThenNoWarningIsLogged()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var (account, handler, _) = Create(logger: logger);
+        await account.PollOnceAsync(CancellationToken.None);
+        var wakeUpResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.Respond(WakeUpPath, () => wakeUpResponse.Task);
+        using var cancellation = new CancellationTokenSource();
+        var wakeUp = account.Vehicles.Single().Value.WakeUpAsync(cancellation.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => CountRequests(handler, WakeUpPath) == 1);
+
+        // Act
+        await cancellation.CancelAsync();
+
+        // Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wakeUp);
+        Assert.DoesNotContain(logger.Warnings, message => message.StartsWith("Waking Tesla vehicle", StringComparison.Ordinal));
     }
 
     [Fact]

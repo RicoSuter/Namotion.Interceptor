@@ -12,10 +12,13 @@ internal static class TeslaProtoValues
 {
     private const string ChargePortColorPrefix = "ChargePortColor";
 
-    /// <summary>Returns the value, after logging a number that Tesla added to the enum once as a warning.</summary>
+    // Process-wide and keyed by the enum type only, so that it stays small; the first unknown number is the logged sample.
+    private static readonly ConcurrentDictionary<Type, byte> LoggedUnknownEnums = new();
+
+    /// <summary>Returns the value, after logging the first number per enum that Tesla added to it as a warning.</summary>
     public static TEnum Checked<TEnum>(TEnum value, ILogger logger) where TEnum : struct, Enum
     {
-        if (!Enum.IsDefined(value) && LoggedUnknownValues<TEnum>.Values.TryAdd(value, 0))
+        if (!Enum.IsDefined(value) && logger.IsEnabled(LogLevel.Warning) && LoggedUnknownEnums.TryAdd(typeof(TEnum), 0))
         {
             logger.LogWarning("Tesla API changed? Unknown {EnumType} value {Value}.", typeof(TEnum).Name, value);
         }
@@ -164,9 +167,4 @@ internal static class TeslaProtoValues
         SoftwareUpdateState.Types.SoftwareUpdateStatus.TypeOneofCase.DownloadingWifiWait => TeslaSoftwareUpdateStatus.DownloadingWifiWait,
         _ => null
     };
-
-    private static class LoggedUnknownValues<TEnum> where TEnum : struct
-    {
-        public static readonly ConcurrentDictionary<TEnum, byte> Values = new();
-    }
 }

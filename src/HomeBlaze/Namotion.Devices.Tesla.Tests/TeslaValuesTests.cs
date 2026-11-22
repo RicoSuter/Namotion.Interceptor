@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Tesla.Mapping;
 using Namotion.Devices.Tesla.Tests.Testing;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Devices.Tesla.Tests;
 
@@ -214,34 +215,58 @@ public class TeslaValuesTests
         Assert.Null(TeslaValues.FromMilliseconds(null));
     }
 
-    [Fact]
-    public void WhenUnknownEnumTextRepeats_ThenItIsLoggedOnceAsApiChange()
+    // The log-once state is process-wide per enum type, so each test uses an enum that no other test parses.
+    private enum ApiChangeTextState
     {
-        // Arrange
-        var logger = new RecordingLogger();
+        Unknown,
+        Known
+    }
 
-        // Act
-        TeslaValues.Enum<TeslaChargingState>("UnexpectedChargingState", logger);
-        TeslaValues.Enum<TeslaChargingState>("UnexpectedChargingState", logger);
-
-        // Assert
-        Assert.Equal(["Tesla API changed? Unknown TeslaChargingState value UnexpectedChargingState."], logger.ApiChanges);
+    private enum ApiChangeNumberState
+    {
+        Unknown,
+        Known
     }
 
     [Fact]
-    public void WhenProtobufEnumNumberIsUnknown_ThenItIsLoggedOnceAsApiChange()
+    public void WhenUnknownEnumTextsRepeat_ThenTheFirstIsLoggedOnceAsApiChange()
     {
         // Arrange
         var logger = new RecordingLogger();
-        var unknown = (CarServer.ClimateState.Types.HvacAutoRequest)99;
 
         // Act
-        TeslaProtoValues.Checked(unknown, logger);
-        TeslaProtoValues.Checked(CarServer.ClimateState.Types.HvacAutoRequest.On, logger);
-        var result = TeslaProtoValues.HvacAutoRequest(TeslaProtoValues.Checked(unknown, logger));
+        TeslaValues.Enum<ApiChangeTextState>("First", logger);
+        TeslaValues.Enum<ApiChangeTextState>("Known", logger);
+        var result = TeslaValues.Enum<ApiChangeTextState>("Second", logger);
+
+        // Assert
+        Assert.Equal(ApiChangeTextState.Unknown, result);
+        Assert.Equal(["Tesla API changed? Unknown ApiChangeTextState value First."], logger.Warnings);
+    }
+
+    [Fact]
+    public void WhenProtobufEnumNumbersAreUnknown_ThenTheFirstIsLoggedOnceAsApiChange()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+
+        // Act
+        TeslaProtoValues.Checked((ApiChangeNumberState)99, logger);
+        TeslaProtoValues.Checked(ApiChangeNumberState.Known, logger);
+        var result = TeslaProtoValues.Checked((ApiChangeNumberState)100, logger);
+
+        // Assert
+        Assert.Equal((ApiChangeNumberState)100, result);
+        Assert.Equal(["Tesla API changed? Unknown ApiChangeNumberState value 99."], logger.Warnings);
+    }
+
+    [Fact]
+    public void WhenProtobufEnumNumberIsUnknown_ThenItMapsToNull()
+    {
+        // Act
+        var result = TeslaProtoValues.HvacAutoRequest(TeslaProtoValues.Checked((CarServer.ClimateState.Types.HvacAutoRequest)99, NullLogger.Instance));
 
         // Assert
         Assert.Null(result);
-        Assert.Equal(["Tesla API changed? Unknown HvacAutoRequest value 99."], logger.ApiChanges);
     }
 }

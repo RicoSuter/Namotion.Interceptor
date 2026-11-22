@@ -17,7 +17,8 @@ internal static class TeslaLenientReader
 {
     private const int MaximumLoggedLength = 40;
 
-    private static readonly ConcurrentDictionary<(string TargetType, string Value), byte> LoggedUnexpectedValues = new();
+    // Process-wide, keyed by token type rather than by value so that a value that changes on every poll is logged only once.
+    private static readonly ConcurrentDictionary<(string TargetType, JsonTokenType TokenType), byte> LoggedUnexpectedValues = new();
 
     public static decimal? ReadDecimal(ref Utf8JsonReader reader, string targetType, ILogger logger)
     {
@@ -95,12 +96,16 @@ internal static class TeslaLenientReader
         }
     }
 
-    /// <summary>Logs the value unless it is a placeholder and skips it. <paramref name="text"/> is the value of a string token when it was already read.</summary>
+    /// <summary>
+    /// Logs the first unexpected value per target and token type, except a placeholder, and skips it.
+    /// <paramref name="text"/> is the value of a string token when it was already read; only a numeric text is not passed.
+    /// </summary>
     private static void LogUnexpected(ref Utf8JsonReader reader, string targetType, ILogger logger, string? text)
     {
-        if (logger.IsEnabled(LogLevel.Warning) && Describe(ref reader, text) is { } value && LoggedUnexpectedValues.TryAdd((targetType, value), 0))
+        var isPlaceholder = text is not null && TeslaValues.Text(text) is null;
+        if (!isPlaceholder && logger.IsEnabled(LogLevel.Warning) && LoggedUnexpectedValues.TryAdd((targetType, reader.TokenType), 0))
         {
-            logger.LogWarning("Tesla API changed? Unexpected {TargetType} value {Value}.", targetType, value);
+            logger.LogWarning("Tesla API changed? Unexpected {TargetType} value {Value}.", targetType, Describe(ref reader, text));
         }
 
         if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
@@ -109,21 +114,14 @@ internal static class TeslaLenientReader
         }
     }
 
-    /// <returns>The raw value, shortened, or null for a placeholder Tesla sends routinely.</returns>
-    private static string? Describe(ref Utf8JsonReader reader, string? text)
+    private static string Describe(ref Utf8JsonReader reader, string? text)
     {
-        if (reader.TokenType == JsonTokenType.String)
+        var value = reader.TokenType switch
         {
-            text ??= reader.GetString();
-            if (TeslaValues.Text(text) is null)
-            {
-                return null;
-            }
-        }
-
-        var value = text ?? (reader.TokenType == JsonTokenType.Number && reader.TryGetDouble(out var number)
-            ? number.ToString(CultureInfo.InvariantCulture)
-            : reader.TokenType.ToString());
+            JsonTokenType.String => text ?? reader.GetString()!,
+            JsonTokenType.Number when reader.TryGetDouble(out var number) => number.ToString(CultureInfo.InvariantCulture),
+            _ => reader.TokenType.ToString()
+        };
 
         return value.Length > MaximumLoggedLength ? value[..MaximumLoggedLength] : value;
     }

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Namotion.Devices.Tesla.Client;
 using Namotion.Devices.Tesla.Client.Dto;
 using Namotion.Devices.Tesla.Tests.Testing;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Devices.Tesla.Tests;
 
@@ -126,6 +127,22 @@ public class TeslaJsonTests
     }
 
     [Fact]
+    public void WhenFixturesAreRead_ThenNoApiChangeIsLogged()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var context = TeslaJsonContext.Create(logger);
+
+        // Act
+        JsonSerializer.Deserialize(FixtureLoader.Load("vehicle-data.json"), context.TeslaResponseTeslaVehicleDataDto);
+        JsonSerializer.Deserialize(FixtureLoader.Load("products.json"), context.TeslaResponseTeslaProductDtoArray);
+
+        // Assert
+        Assert.Empty(logger.Warnings);
+    }
+
+    // The log-once state is process-wide per target and token type: no other test reads an unexpected value through a logging context.
+    [Fact]
     public void WhenValuesHaveUnexpectedTypes_ThenEachIsLoggedOnceAsApiChangeAndPlaceholdersAreNot()
     {
         // Arrange
@@ -148,7 +165,7 @@ public class TeslaJsonTests
 
         // Act
         JsonSerializer.Deserialize(json, context.TeslaResponseTeslaVehicleDataDto);
-        JsonSerializer.Deserialize(json, context.TeslaResponseTeslaVehicleDataDto);
+        JsonSerializer.Deserialize(json.Replace("unexpected-battery-level", "changed-battery-level").Replace("3000000000", "3000000001"), context.TeslaResponseTeslaVehicleDataDto);
 
         // Assert
         Assert.Equal(
@@ -156,6 +173,6 @@ public class TeslaJsonTests
             "Tesla API changed? Unexpected int value unexpected-battery-level.",
             "Tesla API changed? Unexpected int value 3000000000.",
             "Tesla API changed? Unexpected bool value StartObject."
-        ], logger.ApiChanges);
+        ], logger.Warnings);
     }
 }

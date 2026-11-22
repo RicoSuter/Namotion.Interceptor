@@ -14,7 +14,8 @@ internal static class TeslaValues
     // Smaller than decimal.MaxValue (about 7.9E28), so the cast from float never overflows.
     private const float MaximumDecimalFloat = 7.9E28f;
 
-    private static readonly ConcurrentDictionary<(Type EnumType, string Value), byte> LoggedUnknownValues = new();
+    // Process-wide and keyed by the enum type only, so that it stays small; the first unknown value is the logged sample.
+    private static readonly ConcurrentDictionary<Type, byte> LoggedUnknownEnums = new();
 
     /// <summary>Returns null for the placeholders Tesla sends instead of a missing text.</summary>
     public static string? Text(string? value)
@@ -70,7 +71,7 @@ internal static class TeslaValues
     public static TimeSpan? MinutesAfterMidnight(int? minutes) => minutes is >= 0 ? TimeSpan.FromMinutes(minutes.Value) : null;
 
     /// <summary>
-    /// Parses a Tesla text into an enum, ignoring case and underscores. A value Tesla added later becomes Unknown and is logged once as a warning.
+    /// Parses a Tesla text into an enum, ignoring case and underscores. A value Tesla added later becomes Unknown; the first one per enum is logged as a warning.
     /// </summary>
     public static TEnum? Enum<TEnum>(string? value, ILogger logger) where TEnum : struct, System.Enum
     {
@@ -88,7 +89,7 @@ internal static class TeslaValues
             return result;
         }
 
-        if (LoggedUnknownValues.TryAdd((typeof(TEnum), text), 0))
+        if (logger.IsEnabled(LogLevel.Warning) && LoggedUnknownEnums.TryAdd(typeof(TEnum), 0))
         {
             logger.LogWarning("Tesla API changed? Unknown {EnumType} value {Value}.", typeof(TEnum).Name, text);
         }

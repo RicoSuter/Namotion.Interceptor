@@ -13,6 +13,7 @@ using Namotion.Devices.Tesla.Client.Dto;
 using Namotion.Devices.Tesla.Tests.Testing;
 using static Namotion.Devices.Tesla.Tests.Testing.FixtureLoader;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -620,7 +621,7 @@ public class TeslaVehicleTests
         vehicle.ApplyProduct(invalid);
 
         // Assert
-        Assert.Equal([LogLevel.Warning, LogLevel.Debug, LogLevel.Warning], logger.Levels);
+        Assert.Equal([LogLevel.Warning, LogLevel.Debug, LogLevel.Warning], logger.Entries.Select(entry => entry.Level));
     }
 
     [Fact]
@@ -648,7 +649,7 @@ public class TeslaVehicleTests
         [
             $"Tesla API changed? vehicle_state is missing in the vehicle data of {Vin}.",
             $"Tesla API changed? charge_state.battery_level is missing in the vehicle data of {Vin}."
-        ], logger.ApiChanges);
+        ], logger.Warnings);
     }
 
     [Fact]

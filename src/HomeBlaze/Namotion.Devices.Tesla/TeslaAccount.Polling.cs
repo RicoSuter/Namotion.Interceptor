@@ -362,7 +362,7 @@ public partial class TeslaAccount
             SetReauthenticationRequired(exception);
             throw;
         }
-        catch (Exception exception) when (LogWakeUpFailure(exception, vehicle))
+        catch (Exception exception) when (LogWakeUpFailure(exception, vehicle, cancellationToken))
         {
             // Not reached: the filter only logs and lets the exception reach the caller.
             throw;
@@ -373,9 +373,10 @@ public partial class TeslaAccount
         }
     }
 
-    private bool LogWakeUpFailure(Exception exception, TeslaVehicle vehicle)
+    private bool LogWakeUpFailure(Exception exception, TeslaVehicle vehicle, CancellationToken cancellationToken)
     {
-        if (exception is not OperationCanceledException)
+        // HttpClient reports its own timeout as a canceled task, so only a cancellation by the caller is not a failure.
+        if (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(exception, "Waking Tesla vehicle {Vin} failed.", vehicle.Vin);
         }
