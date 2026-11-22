@@ -28,7 +28,7 @@ public abstract class SubjectDiscoverer<TSubject, TResult> : ISubjectDiscoverer
     {
         var candidates = existingSubjects.OfType<TSubject>().ToArray();
         var keys = new HashSet<string>(StringComparer.Ordinal);
-        await foreach (var result in DiscoverAsync(scan, cancellationToken).WithCancellation(cancellationToken))
+        await foreach (var result in DiscoverAsync(scan, cancellationToken))
         {
             // A device that answers on several adapters, or to several queries, is listed once.
             if (!keys.Add(result.Key))

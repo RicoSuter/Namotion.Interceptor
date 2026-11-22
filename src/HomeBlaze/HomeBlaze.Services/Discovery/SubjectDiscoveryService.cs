@@ -108,9 +108,7 @@ public sealed class SubjectDiscoveryService
     {
         try
         {
-            await foreach (var discovered in discoverer
-                .DiscoverAsync(scan, existingSubjects, cancellationToken)
-                .WithCancellation(cancellationToken))
+            await foreach (var discovered in discoverer.DiscoverAsync(scan, existingSubjects, cancellationToken))
             {
                 if (!reporter.TryReportResult(discovered))
                 {
