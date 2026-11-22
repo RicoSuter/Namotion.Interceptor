@@ -1,6 +1,5 @@
 using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Components.Abstractions;
-using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Services.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;

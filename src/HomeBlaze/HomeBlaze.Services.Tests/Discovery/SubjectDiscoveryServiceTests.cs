@@ -124,12 +124,11 @@ public class SubjectDiscoveryServiceTests
     {
         // Arrange
         var timeProvider = new FakeTimeProvider();
-        var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var logger = new RecordingLogger();
         var service = CreateService(
             timeProvider,
             logger,
-            new LambdaDiscoverer<DiscoveryTestSubject>((_, cancellationToken) => TestScans.ThrowDisposedWhenCanceled(ended, cancellationToken)));
+            new LambdaDiscoverer<DiscoveryTestSubject>((_, cancellationToken) => TestScans.ThrowDisposedWhenCanceled(cancellationToken)));
         var failures = new ConcurrentQueue<Type>();
         var scan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], _ => { }, failures.Enqueue, CancellationToken.None);
 
@@ -144,17 +143,16 @@ public class SubjectDiscoveryServiceTests
     }
 
     [Fact]
-    public async Task WhenAnAbandonedDiscovererThrowsLate_ThenNoFailureIsReported()
+    public async Task WhenAnAbandonedDiscovererThrowsLate_ThenItIsLoggedAtDebugOnly()
     {
         // Arrange
         var timeProvider = new FakeTimeProvider();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var logger = new RecordingLogger();
         var service = CreateService(
             timeProvider,
             logger,
-            new LambdaDiscoverer<DiscoveryTestSubject>((_, _) => TestScans.ThrowIgnoringCancellation(release.Task, ended)));
+            new LambdaDiscoverer<DiscoveryTestSubject>((_, _) => TestScans.ThrowIgnoringCancellation(release.Task)));
         var failures = new ConcurrentQueue<Type>();
         var scan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], _ => { }, failures.Enqueue, CancellationToken.None);
 
@@ -162,7 +160,6 @@ public class SubjectDiscoveryServiceTests
         timeProvider.Advance(SubjectDiscoveryService.ScanTimeout);
         await scan.WaitAsync(TestTimeouts.Default);
         release.SetResult();
-        await ended.Task.WaitAsync(TestTimeouts.Default);
         await logger.Logged.WaitAsync(TestTimeouts.Default);
 
         // Assert

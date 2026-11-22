@@ -85,21 +85,12 @@ internal static class TestScans
     }
 
     /// <summary>
-    /// Ignores cancellation: waits for <paramref name="release"/>, throws, and completes <paramref name="ended"/>
-    /// once the enumeration ends.
+    /// Ignores cancellation: waits for <paramref name="release"/>, then throws.
     /// </summary>
-    public static async IAsyncEnumerable<TestDiscoveryResult> ThrowIgnoringCancellation(
-        Task release, TaskCompletionSource ended)
+    public static async IAsyncEnumerable<TestDiscoveryResult> ThrowIgnoringCancellation(Task release)
     {
-        try
-        {
-            await release;
-            throw new InvalidOperationException("The search failed.");
-        }
-        finally
-        {
-            ended.TrySetResult();
-        }
+        await release;
+        throw new InvalidOperationException("The search failed.");
 #pragma warning disable CS0162 // The unreachable yield makes this an iterator.
         yield break;
 #pragma warning restore CS0162
@@ -107,11 +98,10 @@ internal static class TestScans
 
     /// <summary>
     /// Throws an <see cref="ObjectDisposedException"/> instead of an <see cref="OperationCanceledException"/> once
-    /// canceled, as a library does that disposes its socket on cancellation, and completes <paramref name="ended"/>
-    /// once the enumeration ends.
+    /// canceled, as a library does that disposes its socket on cancellation.
     /// </summary>
     public static async IAsyncEnumerable<TestDiscoveryResult> ThrowDisposedWhenCanceled(
-        TaskCompletionSource ended, [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         try
         {
@@ -120,10 +110,6 @@ internal static class TestScans
         catch (OperationCanceledException)
         {
             throw new ObjectDisposedException("socket");
-        }
-        finally
-        {
-            ended.TrySetResult();
         }
 
         yield break;

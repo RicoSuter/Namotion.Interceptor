@@ -164,9 +164,10 @@ Picking a row opens the configure page for the result's type, as picking the typ
 
 - Each discoverer runs in its own task. An exception other than cancellation ends that discoverer only: it is logged with the discoverer's type and shown as one line on the page, such as "Nuki Bridge: search failed". Results it yielded before stay listed.
 - An `OperationCanceledException` from a canceled session is neither logged nor shown.
+- An exception thrown once the scan has been canceled or has reached its deadline, such as from a library that disposes its socket, counts as the end of the scan: it is logged at debug level and not shown.
 - The shared services fail soft: no usable adapter or a socket error returns an empty answer and one debug log entry, not an exception.
 - A `Matches` call that throws ends its discoverer like any other exception.
-- A discoverer that never completes is canceled at the session deadline. The scan ends then even when the discoverer ignores its cancellation; the abandoned discoverer's later results and failures are dropped, a later exception is still logged, and no callback of `ScanAsync` runs once it has returned.
+- A discoverer that never completes is canceled at the session deadline. The scan ends then even when the discoverer ignores its cancellation; the abandoned discoverer's later results and failures are dropped, a later exception is still logged, at debug level, and no callback of `ScanAsync` runs once it has returned.
 - Every string from the network is untrusted. Blazor renders it as text, never as markup.
 
 ## v1 discoverers
