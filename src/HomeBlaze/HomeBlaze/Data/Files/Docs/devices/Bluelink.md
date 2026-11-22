@@ -11,8 +11,8 @@ The Bluelink integration reads the Hyundai electric vehicles of a Bluelink accou
 
 1. In HomeBlaze, create a **Hyundai Bluelink account** (group **Vehicles**).
 2. Enter the email and password of your Bluelink account. Enter the PIN of the Bluelink app only when a vehicle needs it: charging and climate commands of newer vehicles (protocol `Ccs2`) need it, older vehicles such as the first Kona Electric do not.
-3. Select **Connect**. HomeBlaze registers itself as a device of the account, signs in and lists the vehicles with their name, the last six characters of the VIN, the model and the protocol. Vehicles that are not electric are marked as not supported, and a `Ccs2` vehicle is marked when its commands need a PIN that was not entered.
-4. Create the account.
+3. Select **Connect**. HomeBlaze registers itself as a device of the account and signs in. A **Connected** card then replaces the form and shows the email and the vehicles with their name, the last six characters of the VIN, the model and the protocol. Vehicles that are not electric are marked as not supported, and a `Ccs2` vehicle is marked when its commands need a PIN that was not entered. **Use different credentials** discards the connection and brings the form back.
+4. Create the account, which stores the credentials and the token set of the connection.
 
 Connecting never reaches a vehicle. Leading and trailing spaces of the email and the PIN are removed. The PIN is checked only when one is entered and the account has an electric `Ccs2` vehicle, because five wrong PINs lock PIN entry for a while; a rejected PIN fails the connect. When Hyundai refuses the device registration, HomeBlaze signs in with a random device identity instead, as the reference library does; the account keeps it until Hyundai answers that the device is not registered (4002), and then registers a new device with the next poll.
 
