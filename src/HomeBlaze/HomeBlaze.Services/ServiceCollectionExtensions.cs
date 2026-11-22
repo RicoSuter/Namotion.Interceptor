@@ -1,5 +1,8 @@
+using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Services.Clients;
 using HomeBlaze.Services.Diagnostics;
+using HomeBlaze.Services.Discovery;
+using HomeBlaze.Services.Discovery.MulticastDns;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -38,6 +41,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(serviceProvider => new ClientConnectionService(
             serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System,
             serviceProvider.GetService<ILogger<ClientConnectionService>>() ?? NullLogger<ClientConnectionService>.Instance));
+        services.AddSingleton<ISsdpSearch>(serviceProvider => new SsdpSearch(
+            serviceProvider.GetService<ILogger<SsdpSearch>>() ?? NullLogger<SsdpSearch>.Instance));
+        services.AddSingleton<IMulticastDnsBrowser>(serviceProvider => new MulticastDnsBrowser(
+            serviceProvider.GetService<ILogger<MulticastDnsBrowser>>() ?? NullLogger<MulticastDnsBrowser>.Instance));
         services.AddScoped<ITimeZoneDisplay, TimeZoneDisplayService>();
         // The logging factory creates the provider when the host builds it, so the store fills from startup on,
         // before a host system subject configures it.

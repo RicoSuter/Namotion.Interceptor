@@ -497,6 +497,21 @@ namespace HomeBlaze.Services.Diagnostics
     }
     public sealed class RecentLogStore { }
 }
+namespace HomeBlaze.Services.Discovery
+{
+    public sealed class SubjectDiscovererRegistry
+    {
+        public SubjectDiscovererRegistry(HomeBlaze.Services.TypeProvider typeProvider, HomeBlaze.Services.Components.SubjectComponentRegistry componentRegistry, System.IServiceProvider serviceProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Services.Discovery.SubjectDiscovererRegistry> logger) { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.ISubjectDiscoverer> GetDiscoverers() { }
+    }
+    public sealed class SubjectDiscoveryService
+    {
+        public static readonly System.TimeSpan ScanTimeout;
+        public SubjectDiscoveryService(HomeBlaze.Services.Discovery.SubjectDiscovererRegistry registry, HomeBlaze.Abstractions.Discovery.ISsdpSearch ssdpSearch, HomeBlaze.Abstractions.Discovery.IMulticastDnsBrowser multicastDnsBrowser, System.TimeProvider timeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Services.Discovery.SubjectDiscoveryService> logger) { }
+        public bool HasDiscoverers(System.Collections.Generic.IReadOnlyCollection<System.Type> subjectTypes) { }
+        public System.Threading.Tasks.Task ScanAsync(System.Collections.Generic.IReadOnlyCollection<System.Type> subjectTypes, System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.IInterceptorSubject> existingSubjects, System.Action<HomeBlaze.Abstractions.Discovery.DiscoveredSubject> onResult, System.Action<System.Type> onFailure, System.Threading.CancellationToken cancellationToken) { }
+    }
+}
 namespace HomeBlaze.Services.Display
 {
     public static class ExpressionDisplay
