@@ -74,13 +74,15 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(ServerLog));
 
         // A scan on the Discover page runs the discoverers of the application too, which must not search the network
-        // of the machine or tell the Nuki discovery service its public IP address.
+        // of the machine, send broadcasts or bind its ports, or tell the Nuki discovery service its public IP address.
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<ISsdpSearch>();
             services.AddSingleton<ISsdpSearch, EmptySsdpSearch>();
             services.RemoveAll<IMulticastDnsBrowser>();
             services.AddSingleton<IMulticastDnsBrowser, EmptyMulticastDnsBrowser>();
+            services.RemoveAll<IUdpDiscovery>();
+            services.AddSingleton<IUdpDiscovery, EmptyUdpDiscovery>();
             services.ConfigureHttpClientDefaults(httpClient => httpClient.AddHttpMessageHandler(() => new NukiDiscoveryStub()));
         });
     }
@@ -115,6 +117,15 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
     {
         public Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<MulticastDnsService>>([]);
+    }
+
+    private sealed class EmptyUdpDiscovery : IUdpDiscovery
+    {
+        public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken) =>
+            AsyncEnumerable.Empty<UdpDatagram>();
+
+        public IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken) =>
+            AsyncEnumerable.Empty<UdpDatagram>();
     }
 
     /// <summary>

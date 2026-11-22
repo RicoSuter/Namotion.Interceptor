@@ -45,15 +45,22 @@ public class PlaywrightFixtureTests
         // Arrange
         var services = _fixture.ServerServices;
         using var httpClient = services.GetRequiredService<IHttpClientFactory>().CreateClient();
+        var udpDiscovery = services.GetRequiredService<IUdpDiscovery>();
 
         // Act
         var ssdpResponses = await services.GetRequiredService<ISsdpSearch>().SearchAsync("ssdp:all", CancellationToken.None);
         var multicastDnsServices = await services.GetRequiredService<IMulticastDnsBrowser>().BrowseAsync("_hue._tcp", CancellationToken.None);
+        var broadcastAnswers = await udpDiscovery.BroadcastAsync(46000, new byte[] { 0x01 }, TimeSpan.FromSeconds(1), CancellationToken.None).ToListAsync();
+        var listenedDatagrams = await udpDiscovery.ListenAsync(7979, TimeSpan.FromSeconds(1), CancellationToken.None).ToListAsync();
         var nukiAnswer = await httpClient.GetStringAsync(NukiBridgeDiscovery.DiscoveryAddress);
 
         // Assert
         Assert.Empty(ssdpResponses);
         Assert.Empty(multicastDnsServices);
+        // The real service can also find nothing on a quiet network, so the replacement itself is checked.
+        Assert.Same(typeof(PlaywrightFixtureTests).Assembly, udpDiscovery.GetType().Assembly);
+        Assert.Empty(broadcastAnswers);
+        Assert.Empty(listenedDatagrams);
         // The stub of the host answers with exactly this; the real service adds an error code.
         Assert.Equal("{\"bridges\":[]}", nukiAnswer);
     }
