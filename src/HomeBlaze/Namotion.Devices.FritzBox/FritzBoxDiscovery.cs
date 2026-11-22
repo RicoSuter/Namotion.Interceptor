@@ -58,16 +58,14 @@ public static class FritzBoxDiscovery
     public static async Task<IReadOnlyList<FritzBoxDiscoveryResult>> DiscoverAsync(
         ISsdpSearch ssdpSearch, TimeSpan timeout, CancellationToken cancellationToken)
     {
-        var hosts = new List<string>();
-        foreach (var response in await ssdpSearch.SearchAsync(SearchTarget, cancellationToken))
-        {
-            hosts.Add(response.Location.Host);
-        }
+        var responses = await ssdpSearch.SearchAsync(SearchTarget, cancellationToken);
 
         using var httpClient = FritzBoxHttpClient.CreatePlain(timeout, Tr64Description.MaximumBytes);
 
         // A slot is reserved for the fritz.box fallback so a flood of SSDP answers cannot push it out of the cap.
-        var distinctHosts = hosts.Distinct(StringComparer.OrdinalIgnoreCase)
+        var distinctHosts = responses
+            .Select(response => response.Location.Host)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(MaximumLocations - 1)
             .Append(WellKnownHost)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -80,7 +78,7 @@ public static class FritzBoxDiscovery
         {
             if (result is not null)
             {
-                results.TryAdd(result.Udn ?? result.HostAddress, result);
+                results.TryAdd(result.Key, result);
             }
         }
 
