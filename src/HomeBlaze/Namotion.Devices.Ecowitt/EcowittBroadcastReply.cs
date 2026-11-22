@@ -9,9 +9,8 @@ namespace Namotion.Devices.Ecowitt;
 /// </summary>
 /// <param name="MacAddress">The MAC address in upper case with colons, such as <c>3C:8A:1F:32:E1:57</c>.</param>
 /// <param name="IpAddress">The IPv4 address the gateway reports.</param>
-/// <param name="Port">The port of the binary local API.</param>
 /// <param name="Name">The name the gateway reports, such as <c>GW2000A-WIFIE157 V3.3.3</c>, trimmed; can be empty.</param>
-internal sealed record EcowittBroadcastReply(string MacAddress, IPAddress IpAddress, int Port, string Name)
+internal sealed record EcowittBroadcastReply(string MacAddress, IPAddress IpAddress, string Name)
 {
     internal const byte BroadcastCommand = 0x12;
 
@@ -48,7 +47,6 @@ internal sealed record EcowittBroadcastReply(string MacAddress, IPAddress IpAddr
         return new EcowittBroadcastReply(
             FormatMacAddress(datagram.Slice(5, MacAddressLength)),
             new IPAddress(datagram.Slice(11, 4)),
-            BinaryPrimitives.ReadUInt16BigEndian(datagram.Slice(15, 2)),
             Encoding.UTF8.GetString(datagram.Slice(FixedLength, nameLength)).Trim());
     }
 

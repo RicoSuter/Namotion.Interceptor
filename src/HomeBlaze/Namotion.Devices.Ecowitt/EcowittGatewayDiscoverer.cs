@@ -25,7 +25,7 @@ public sealed class EcowittGatewayDiscoverer : SubjectDiscoverer<EcowittGateway,
     protected override async IAsyncEnumerable<EcowittDiscoveredGateway> DiscoverAsync(
         DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await foreach (var reply in _probe(cancellationToken).WithCancellation(cancellationToken))
+        await foreach (var reply in _probe(cancellationToken))
         {
             yield return ToResult(reply);
         }
@@ -48,13 +48,9 @@ public sealed class EcowittGatewayDiscoverer : SubjectDiscoverer<EcowittGateway,
             firmwareVersion.Length == 0 ? null : firmwareVersion);
     }
 
-    internal static bool IsSameGateway(EcowittGateway existing, EcowittDiscoveredGateway result)
-    {
-        var macAddress = existing.MacAddress;
-        var hostAddress = existing.HostAddress;
-        return IsSameMacAddress(macAddress, result.MacAddress) ||
-               string.Equals(hostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase);
-    }
+    internal static bool IsSameGateway(EcowittGateway existing, EcowittDiscoveredGateway result) =>
+        IsSameMacAddress(existing.MacAddress, result.MacAddress) ||
+        string.Equals(existing.HostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Compares two MAC addresses, ignoring case and the separators <c>:</c> and <c>-</c>.

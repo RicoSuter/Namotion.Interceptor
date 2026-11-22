@@ -14,7 +14,7 @@ public class EcowittGatewayDiscovererTests
     private const string HostAddress = "192.168.1.216";
 
     private static EcowittBroadcastReply Reply(string macAddress = MacAddress, string ipAddress = HostAddress, string name = "GW2000A-WIFIE157 V3.3.3") =>
-        new(macAddress, IPAddress.Parse(ipAddress), 45000, name);
+        new(macAddress, IPAddress.Parse(ipAddress), name);
 
     private static EcowittDiscoveredGateway Found(string macAddress = MacAddress, string hostAddress = HostAddress) =>
         new(macAddress, hostAddress, "GW2000A-WIFIE157", "V3.3.3");

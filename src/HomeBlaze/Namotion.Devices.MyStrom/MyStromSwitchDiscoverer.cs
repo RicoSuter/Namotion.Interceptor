@@ -25,7 +25,7 @@ public sealed class MyStromSwitchDiscoverer : SubjectDiscoverer<MyStromSwitch, M
     protected override async IAsyncEnumerable<MyStromDiscoveredSwitch> DiscoverAsync(
         DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await foreach (var announcement in _listen(cancellationToken).WithCancellation(cancellationToken))
+        await foreach (var announcement in _listen(cancellationToken))
         {
             yield return ToResult(announcement);
         }
@@ -37,13 +37,9 @@ public sealed class MyStromSwitchDiscoverer : SubjectDiscoverer<MyStromSwitch, M
     internal static MyStromDiscoveredSwitch ToResult(MyStromAnnouncement announcement) =>
         new(announcement.MacAddress, announcement.IpAddress.ToString(), announcement.DeviceType);
 
-    internal static bool IsSameSwitch(MyStromSwitch existing, MyStromDiscoveredSwitch result)
-    {
-        var macAddress = existing.MacAddress;
-        var hostAddress = existing.HostAddress;
-        return IsSameMacAddress(macAddress, result.MacAddress) ||
-               string.Equals(hostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase);
-    }
+    internal static bool IsSameSwitch(MyStromSwitch existing, MyStromDiscoveredSwitch result) =>
+        IsSameMacAddress(existing.MacAddress, result.MacAddress) ||
+        string.Equals(existing.HostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Compares two MAC addresses, ignoring case and the separators <c>:</c> and <c>-</c>.
