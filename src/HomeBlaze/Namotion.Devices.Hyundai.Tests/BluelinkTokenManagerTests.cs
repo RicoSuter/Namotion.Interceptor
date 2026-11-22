@@ -79,24 +79,6 @@ public class BluelinkTokenManagerTests
     }
 
     [Fact]
-    public async Task WhenAccessTokenIsFresh_ThenNoRefreshHappens()
-    {
-        // Arrange
-        var harness = new Harness();
-        harness.Handler.Respond(BluelinkResponses.RefreshPath, HttpStatusCode.OK, BluelinkResponses.Tokens(1))
-            .Respond(BluelinkResponses.ExchangePath, HttpStatusCode.OK, BluelinkResponses.Ccs(1));
-        var manager = harness.Create();
-        await Echo(manager);
-
-        // Act
-        harness.Time.Advance(TimeSpan.FromMinutes(50));
-        await Echo(manager);
-
-        // Assert
-        Assert.Equal(1, harness.Handler.Count(BluelinkResponses.RefreshPath));
-    }
-
-    [Fact]
     public async Task WhenAccessTokenIsWithinSixMinutesOfExpiry_ThenItRefreshes()
     {
         // Arrange

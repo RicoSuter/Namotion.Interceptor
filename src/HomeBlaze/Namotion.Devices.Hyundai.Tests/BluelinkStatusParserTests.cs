@@ -102,6 +102,7 @@ public class BluelinkStatusParserTests
     [Theory]
     [InlineData("""{"Drivetrain":{"FuelSystem":{"DTE":{"Unit":1,"Total":4095}}}}""", null)]
     [InlineData("""{"Drivetrain":{"FuelSystem":{"DTE":{"Unit":2,"Total":100}}}}""", 160.9)]
+    [InlineData("""{"Drivetrain":{"FuelSystem":{"DTE":{"Unit":3,"Total":100}}}}""", 160.9)]
     [InlineData("""{"Drivetrain":{"FuelSystem":{"DTE":{"Unit":0,"Total":100}}}}""", null)]
     public void WhenRangeIsASentinelOrInMiles_ThenItIsUnknownOrConverted(string json, double? expected)
     {
@@ -188,16 +189,6 @@ public class BluelinkStatusParserTests
 
         // Assert
         Assert.Equal(new BluelinkTireStatus(true, null), status.FrontLeftTire);
-    }
-
-    [Fact]
-    public void WhenRangeUnitIsThree_ThenRangeIsConvertedFromMiles()
-    {
-        // Act
-        var status = Parse("""{"Drivetrain":{"FuelSystem":{"DTE":{"Unit":3,"Total":100}}}}""");
-
-        // Assert
-        Assert.Equal(160.9m, status.Range);
     }
 
     [Fact]
