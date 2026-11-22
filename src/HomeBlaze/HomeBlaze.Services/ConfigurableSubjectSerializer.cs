@@ -141,6 +141,14 @@ public class ConfigurableSubjectSerializer
     }
 
     /// <summary>
+    /// Whether a secret configuration value of the subject, or of a subject in its configuration, has no key in the
+    /// <see cref="SecretStore"/> yet, such as a value that was read as plaintext. Stores nothing. False without a
+    /// <see cref="SecretStore"/> service and for a subject that is not <see cref="IConfigurable"/>.
+    /// </summary>
+    public bool HasUnstoredSecrets(IInterceptorSubject subject) =>
+        subject is IConfigurable && _secrets is { } secrets && secrets.HasUnstoredSecrets(() => Serialize(subject));
+
+    /// <summary>
     /// Gets the configuration of a new subject of <paramref name="type"/> as
     /// <see cref="Serialize(IInterceptorSubject, ConfigurationNaming)"/> writes it: the values that
     /// <see cref="Deserialize(string, ConfigurationNaming)"/> gives a property that the JSON does not have.
@@ -335,12 +343,23 @@ public class ConfigurableSubjectSerializer
             if (!hasConfigAttribute || !property.CanWrite)
                 continue;
 
+            var isSecret = SecretReferences.IsSecret(property);
+            if (isSecret)
+            {
+                SecretReferences.EnsureSupported(type, property.Name, property.PropertyType);
+            }
+
             var jsonName = GetJsonName(property.Name, naming);
             if (root.TryGetProperty(jsonName, out var jsonValue))
             {
                 var valueJson = jsonValue.GetRawText();
                 if (TryConvert(valueJson, property.Name, property.PropertyType, options, skipped, out var value))
                 {
+                    if (isSecret && _secrets is not null)
+                    {
+                        value = _secrets.Read(subject, property.Name, value);
+                    }
+
                     property.SetValue(subject, value);
                 }
             }
@@ -361,6 +380,13 @@ public class ConfigurableSubjectSerializer
         var options = GetOptions(naming);
         foreach (var property in subject.GetConfigurationProperties())
         {
+            // Checked before the value is looked up, so a type with an unsupported secret fails for every file.
+            var isSecret = SecretReferences.IsSecret(property);
+            if (isSecret)
+            {
+                SecretReferences.EnsureSupported(subject.GetType(), property.Name, property.Type);
+            }
+
             var jsonName = GetJsonName(property.Name, naming);
             string valueJson;
             if (root.TryGetProperty(jsonName, out var jsonValue))
@@ -379,6 +405,11 @@ public class ConfigurableSubjectSerializer
 
             if (TryConvert(valueJson, property.Name, property.Type, options, skipped, out var value))
             {
+                if (isSecret && _secrets is not null)
+                {
+                    value = _secrets.Read(subject, property.Name, value);
+                }
+
                 property.SetValue(value);
             }
         }

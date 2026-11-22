@@ -163,6 +163,129 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         Assert.Contains(nameof(SecretCredentials.Password), exception.Message);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WhenAReferenceIsDeserialized_ThenThePropertyHoldsTheValueAndKeepsTheKey(bool hasRegistry)
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer(hasRegistry: hasRegistry);
+        var key = store.Add("hunter2");
+
+        // Act
+        var device = Deserialize(serializer, DeviceJson(Prefix + key));
+
+        // Assert
+        Assert.Equal("hunter2", device.Password);
+        Assert.Equal(key, KeyOf(ReadString(serializer.Serialize(device), "password")));
+    }
+
+    [Fact]
+    public void WhenAReferenceIsUpdatedInPlace_ThenThePropertyHoldsTheValue()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        var key = store.Add("hunter2");
+        var device = Deserialize(serializer, DeviceJson(password: null));
+
+        // Act
+        serializer.UpdateConfiguration(device, DeviceJson(Prefix + key));
+
+        // Assert
+        Assert.Equal("hunter2", device.Password);
+    }
+
+    [Fact]
+    public void WhenAReferenceIsMissing_ThenThePropertyIsNullAndTheReferenceIsWrittenBack()
+    {
+        // Arrange
+        var (serializer, _) = CreateSerializer();
+        const string missingKey = "0123456789abcdef0123456789abcdef";
+
+        // Act
+        var device = Deserialize(serializer, DeviceJson(Prefix + missingKey));
+        var json = serializer.Serialize(device);
+
+        // Assert
+        Assert.Null(device.Password);
+        Assert.Equal(Prefix + missingKey, ReadString(json, "password"));
+    }
+
+    [Fact]
+    public void WhenAMissingReferenceIsEnteredAgain_ThenTheNewValueGetsANewKey()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        const string missingKey = "0123456789abcdef0123456789abcdef";
+        var device = Deserialize(serializer, DeviceJson(Prefix + missingKey));
+        device.Password = "hunter2";
+
+        // Act
+        var key = KeyOf(ReadString(serializer.Serialize(device), "password"));
+
+        // Assert
+        Assert.NotEqual(missingKey, key);
+        Assert.True(store.TryGet(key, out var value));
+        Assert.Equal("hunter2", value);
+    }
+
+    [Fact]
+    public void WhenAPlaintextSecretIsDeserialized_ThenItIsSetAndReportedAsUnstoredWithoutStoringIt()
+    {
+        // Arrange
+        var (serializer, _) = CreateSerializer();
+
+        // Act
+        var device = Deserialize(serializer, DeviceJson("s3cr3t"));
+        var hasUnstoredSecrets = serializer.HasUnstoredSecrets(device);
+
+        // Assert
+        Assert.Equal("s3cr3t", device.Password);
+        Assert.True(hasUnstoredSecrets);
+        Assert.False(File.Exists(StorePath));
+    }
+
+    [Fact]
+    public void WhenAPlaintextSecretOfANestedSubjectIsDeserialized_ThenItIsReportedAsUnstored()
+    {
+        // Arrange
+        var (serializer, _) = CreateSerializer();
+
+        // Act
+        var device = Deserialize(serializer, DeviceJson(password: null, childPassword: "s3cr3t"));
+
+        // Assert
+        Assert.Equal("s3cr3t", device.Child!.Password);
+        Assert.True(serializer.HasUnstoredSecrets(device));
+    }
+
+    [Fact]
+    public void WhenAPlaintextSecretWasSerialized_ThenNoSecretIsReportedAsUnstored()
+    {
+        // Arrange
+        var (serializer, _) = CreateSerializer();
+        var device = Deserialize(serializer, DeviceJson("s3cr3t", childPassword: "inner"));
+        serializer.Serialize(device);
+
+        // Act
+        var hasUnstoredSecrets = serializer.HasUnstoredSecrets(device);
+
+        // Assert
+        Assert.False(hasUnstoredSecrets);
+    }
+
+    [Fact]
+    public void WhenASecretPropertyIsNotAString_ThenDeserializingThrows()
+    {
+        // Arrange
+        var (serializer, _) = CreateSerializer(withInvalidSecretType: true);
+        var json = $$"""{ "$type": "{{typeof(InvalidSecretTypeDevice).FullName}}" }""";
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => serializer.Deserialize(json));
+        Assert.Contains(nameof(InvalidSecretTypeDevice.Pin), exception.Message);
+    }
+
     // A type with an unsupported secret is only registered on request: serializing any subject as IConfigurable resolves
     // every registered type, so it would make every serialization throw.
     internal (ConfigurableSubjectSerializer Serializer, SecretStore Store) CreateSerializer(
