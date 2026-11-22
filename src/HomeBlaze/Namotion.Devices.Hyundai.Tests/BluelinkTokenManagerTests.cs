@@ -16,7 +16,8 @@ public class BluelinkTokenManagerTests
         public List<BluelinkTokenSet> Persisted { get; } = [];
         public int LoginCount { get; set; }
         public Exception? PersistFailure { get; set; }
-        public Func<CancellationToken, Task<BluelinkCciTokens>>? Login { get; set; }
+        public Func<CancellationToken, Task<BluelinkCciTokens>> Login { get; set; } =
+            _ => throw new BluelinkReauthenticationRequiredException("Hyundai rejected the refresh token, and no password is stored.");
 
         public BluelinkTokenManager Create()
         {
@@ -160,18 +161,6 @@ public class BluelinkTokenManagerTests
     }
 
     [Fact]
-    public async Task WhenRefreshIsRejectedWithoutPassword_ThenReauthenticationIsRequired()
-    {
-        // Arrange
-        var harness = new Harness();
-        harness.Handler.Respond(BluelinkResponses.RefreshPath, HttpStatusCode.BadRequest, BluelinkResponses.CciError(4111));
-        var manager = harness.Create();
-
-        // Act & Assert
-        await Assert.ThrowsAsync<BluelinkReauthenticationRequiredException>(() => Echo(manager));
-    }
-
-    [Fact]
     public async Task WhenFingerprintIsRejected_ThenNoLoginIsAttempted()
     {
         // Arrange
@@ -265,7 +254,7 @@ public class BluelinkTokenManagerTests
     [Theory]
     [InlineData(HttpStatusCode.ServiceUnavailable)]
     [InlineData(HttpStatusCode.TooManyRequests)]
-    public async Task WhenRefreshFailsTransientlyWithoutPassword_ThenNoReauthenticationIsRequired(HttpStatusCode statusCode)
+    public async Task WhenRefreshFailsTransientlyAndSignInIsNotPossible_ThenNoReauthenticationIsRequired(HttpStatusCode statusCode)
     {
         // Arrange
         var harness = new Harness();

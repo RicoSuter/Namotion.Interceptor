@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Hyundai.Client;
+using Namotion.Devices.Hyundai.Mapping;
 
 namespace Namotion.Devices.Hyundai;
 
@@ -48,9 +49,22 @@ public partial class BluelinkAccount
         RunCommandAsync(vehicle, needsPin: false,
             (request, _) => _apiClient.SetChargeTargetsAsync(request, acPercent, dcPercent, cancellationToken), cancellationToken);
 
-    Task IBluelinkVehicleCommands.StartClimateAsync(BluelinkVehicle vehicle, decimal temperature, bool defrost, CancellationToken cancellationToken) =>
-        RunCommandAsync(vehicle, needsPin: true,
-            (request, controlToken) => _apiClient.StartClimateAsync(request, temperature, defrost, ClimateDuration, controlToken, cancellationToken), cancellationToken);
+    Task IBluelinkVehicleCommands.StartClimateAsync(BluelinkVehicle vehicle, decimal temperature, bool defrost, CancellationToken cancellationToken)
+    {
+        // Validated before any call, so that a wrong configuration never costs a PIN exchange.
+        int minutes;
+        try
+        {
+            minutes = BluelinkValues.ToClimateMinutes(ClimateDuration);
+        }
+        catch (ArgumentOutOfRangeException exception)
+        {
+            throw new InvalidOperationException("The climate duration of the account must be whole minutes from 1 to 30.", exception);
+        }
+
+        return RunCommandAsync(vehicle, needsPin: true,
+            (request, controlToken) => _apiClient.StartClimateAsync(request, temperature, defrost, minutes, controlToken, cancellationToken), cancellationToken);
+    }
 
     Task IBluelinkVehicleCommands.StopClimateAsync(BluelinkVehicle vehicle, CancellationToken cancellationToken) =>
         RunCommandAsync(vehicle, needsPin: true,

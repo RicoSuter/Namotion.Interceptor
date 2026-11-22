@@ -26,7 +26,7 @@ When the sign in is rejected as well (wrong email or password, a 4xx answer, or 
 
 When Hyundai asks to accept new terms, the message says so: accept them once in the Bluelink app, then connect again.
 
-When the credentials are replaced while a poll, `Refresh` or a command still uses the previous ones, that call fails with the status `Error` and the message "The credentials were replaced; the next poll uses them.", and the next poll continues with the new credentials.
+A poll, `Refresh` or command that runs while the credentials are replaced either completes with the previous credentials or, when those would need a sign in or are rejected, fails with the status `Error` and the message "The credentials were replaced; the next poll uses them."; the next poll uses the new credentials.
 
 ## Configuration
 
@@ -41,7 +41,7 @@ When the credentials are replaced while a poll, `Refresh` or a command still use
 | `StatusPollingInterval` | TimeSpan | 30 minutes | How often the stored status of every vehicle is read; at least 15 minutes. |
 | `DailyRequestLimit` | int | 150 | Vehicle API calls per local day; see [Call budget](#call-budget). |
 | `MinimumAuxiliaryBatteryLevel` | decimal | 0.65 | 12 V battery level (0 to 1) below which `Refresh` is refused. |
-| `ClimateDuration` | TimeSpan | 10 minutes | How long a started climate runs, in whole minutes from 1 to 30. Starting the climate fails with another value. |
+| `ClimateDuration` | TimeSpan | 10 minutes | How long a started climate runs, in whole minutes from 1 to 30. With another value, starting the climate fails before any call. |
 | `RetryInterval` | TimeSpan | 5 minutes | Wait after a failed poll; at least one minute. |
 
 The edit dialog enforces the minimums of `StatusPollingInterval` and `RetryInterval`, and the account uses the minimum when the file holds a shorter interval. In the dialog, `DailyRequestLimit` ranges from 20 to 200 and `ClimateDuration` is a number of minutes from 1 to 30. The account picks up a changed configuration at once when it is applied.
@@ -72,7 +72,7 @@ The sample file `Devices/Bluelink.json` has no credentials and shows the status 
 | Stopped | No email or no tokens | "Missing credentials" |
 | Starting | First poll | |
 | Running | Polling | Empty, or the failure of the last vehicle that could not be read; the other vehicles are not affected. "Polling pauses until midnight to keep the remaining requests for commands." while polling saves the last calls of the day. |
-| Error | Re-authentication required, replaced credentials, Hyundai's request limit, the daily request limit, or a failed poll | The cause, for example "Re-authentication required: Hyundai rejected the email or password.", "Hyundai's request limit was reached; polling resumes at 14:32.", "Daily request limit reached" |
+| Error | Re-authentication required, replaced credentials, Hyundai's request limit, the daily request limit, or a failed poll | The cause, for example "Re-authentication required: Hyundai rejected the email or password.", "Hyundai's request limit was reached; polling resumes at 14:32.", "Daily request limit reached." |
 
 After an error, the next poll follows after `RetryInterval`, unless re-authentication is required or a pause applies.
 
@@ -175,7 +175,7 @@ The title is the nickname, else "Hyundai: " and the last six characters of the V
 | `Start Climate`, `Start Climate With Defrost` | `Climate` | Yes | Starts the climate with a temperature from 14.0 to 31.5 °C in steps of 0.5, for `ClimateDuration`. A `Ccs2` vehicle needs the PIN. |
 | `Stop Climate` | `Climate` | Yes | Stops the climate. A `Ccs2` vehicle needs the PIN. |
 
-A command fails before any call when the account has no credentials, is not connected, is paused after Hyundai's request limit or has spent its budget, when a `Ccs2` vehicle needs a PIN that is not stored, and when the temperature or a charge limit is invalid. A command waits for its result: the account checks the notification records of the vehicle every 10 seconds for at most 90 seconds, then reads the stored status and parking location once. A rejected command, a vehicle that does not respond and a result that does not arrive in time fail the operation with the reason. Hyundai rejecting the PIN fails the command without a retry, because five wrong PINs lock PIN entry for a while. Values change only from what the vehicle reports, never from what a command asked for. Canceling a command does not change the status of the account. The operations are disabled while the account is not connected or has spent its budget, and the commands that need the PIN while a `Ccs2` vehicle has none; `Refresh` also while the 12 V battery is below the minimum or unknown.
+A command fails before any call when the account has no credentials, is not connected, is paused after Hyundai's request limit or has spent its budget, when a `Ccs2` vehicle needs a PIN that is not stored, and when the temperature, a charge limit or `ClimateDuration` is invalid. A command waits for its result: the account checks the notification records of the vehicle every 10 seconds for at most 90 seconds, then reads the stored status and parking location once. A rejected command, a vehicle that does not respond and a result that does not arrive in time fail the operation with the reason. Hyundai rejecting the PIN fails the command without a retry, because five wrong PINs lock PIN entry for a while. Values change only from what the vehicle reports, never from what a command asked for. Canceling a command does not change the status of the account. The operations are disabled while the account is not connected or has spent its budget, and the commands that need the PIN while a `Ccs2` vehicle has none; `Refresh` also while the 12 V battery is below the minimum or unknown.
 
 A HomeBlaze automation can call `Refresh` on a schedule when fresher values are needed; the 12 V guard and the call budget apply.
 
@@ -195,7 +195,7 @@ The stored status changes only when the vehicle uploads it, for example when the
 Hyundai blocks an account that makes too many calls in a day (about 200, not documented), for up to a day, and then the official app fails too. The account therefore counts its calls to the vehicle API in `RequestsToday`, per local day:
 
 - Polling pauses once fewer than 10 calls are left, so that commands and `Refresh` still work, and continues after midnight.
-- At `DailyRequestLimit`, polling, `Refresh` and commands stop with "Daily request limit reached". They continue after midnight, or at once when the limit is raised.
+- At `DailyRequestLimit`, polling, `Refresh` and commands stop, and both the status message and the error of a refused command read "Daily request limit reached." They continue after midnight, or at once when the limit is raised.
 - When Hyundai reports its limit (5091), polling, `Refresh` and commands pause for 2 hours; meanwhile `Refresh` and commands fail before any call.
 - The vehicle API calls of the setup and authentication calls are not counted; the PIN exchange of a command is. The counter starts at 0 after a restart.
 
@@ -212,7 +212,7 @@ One vehicle with the default interval needs about 100 calls a day. `Refresh` nee
 - **The protocol flag can be wrong.** Some vehicles report the wrong protocol; their commands then fail with 5031 or 5153.
 - **No seat heating, no lock or unlock, no charging current.** Seat heating fails on some older vehicles, and unlocking from HomeBlaze is not wanted.
 - **The charging power unit is not verified on every vehicle.** It is read as kW.
-- **Signing in again can log out the official app.** It happens only when Hyundai rejected a refresh.
+- **Signing in again can log out the official app.** It happens only when Hyundai rejected a refresh. When the sign in that follows fails for another reason than the credentials, such as a server error or a blocked request, the account tries the refresh and the sign in again after every `RetryInterval`, which can log out the official app repeatedly. Raise `RetryInterval` if that happens.
 - **The location is state like any other.** It is readable by automations, pages, history and AI agents with access to the vehicle. Restrict access accordingly.
 - **The account has to live in a storage file.** Rotated tokens are written back through it; in the root configuration they stay in memory only. If saving fails, the account keeps the tokens in memory and retries saving with the next call.
 

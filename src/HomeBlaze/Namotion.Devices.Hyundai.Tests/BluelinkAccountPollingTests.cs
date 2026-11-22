@@ -110,6 +110,23 @@ public class BluelinkAccountPollingTests
     }
 
     [Fact]
+    public async Task WhenBudgetLeavesOnlyTheReserveAfterAnError_ThenStatusIsRunningWithTheReserveMessage()
+    {
+        // Arrange
+        var (account, _, _) = TestAccount.Create();
+        account.DailyRequestLimit = 14;
+        await account.PollOnceAsync(CancellationToken.None);
+        account.Status = ServiceStatus.Error;
+
+        // Act
+        await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.Equal("Polling pauses until midnight to keep the remaining requests for commands.", account.StatusMessage);
+    }
+
+    [Fact]
     public async Task WhenCredentialsAreMissing_ThenAccountIsStopped()
     {
         // Arrange
@@ -212,7 +229,7 @@ public class BluelinkAccountPollingTests
         await account.RunIterationAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal("Daily request limit reached", messageAfterLimit);
+        Assert.Equal("Daily request limit reached.", messageAfterLimit);
         Assert.Equal(ServiceStatus.Running, account.Status);
         Assert.Equal(1, handler.Count(BluelinkResponses.StatusPath("VEHICLE-2")));
     }
@@ -231,7 +248,7 @@ public class BluelinkAccountPollingTests
 
         // Assert
         Assert.Equal(ServiceStatus.Error, account.Status);
-        Assert.Equal("Daily request limit reached", account.StatusMessage);
+        Assert.Equal("Daily request limit reached.", account.StatusMessage);
         Assert.Equal(TimeSpan.FromHours(13.5), delay);
         Assert.Equal(requestCount, handler.Requests.Count);
     }

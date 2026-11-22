@@ -6,8 +6,8 @@ namespace Namotion.Devices.Hyundai.Client;
 /// <summary>
 /// Caches the CCS access token and refreshes the token set 6 minutes before the CCI or CCS token expires; the server
 /// rejects tokens earlier than their stated lifetime. The rotated set is persisted before the new access token is
-/// handed out. A rejected refresh (a 4xx answer other than 408 and 429) falls back to one sign in with the stored
-/// password; every other failure propagates unchanged for the caller to retry later. Not thread-safe: call it only
+/// handed out. A rejected refresh (a 4xx answer other than 408 and 429) falls back to one sign in through the login
+/// delegate; every other failure propagates unchanged for the caller to retry later. Not thread-safe: call it only
 /// while the account lock is held.
 /// </summary>
 internal sealed class BluelinkTokenManager
@@ -19,7 +19,7 @@ internal sealed class BluelinkTokenManager
     private readonly string _deviceId;
     private readonly TimeProvider _timeProvider;
     private readonly Func<BluelinkTokenSet, Task> _persistTokens;
-    private readonly Func<CancellationToken, Task<BluelinkCciTokens>>? _login;
+    private readonly Func<CancellationToken, Task<BluelinkCciTokens>> _login;
 
     private BluelinkTokenSet _tokens;
     private bool _isPersisted = true;
@@ -35,14 +35,17 @@ internal sealed class BluelinkTokenManager
     /// Stores a rotated token set. When it throws, the access token is not handed out, and the next call runs only this
     /// callback again, without a refresh.
     /// </param>
-    /// <param name="login">Signs in with the stored password, or null when no password is stored.</param>
+    /// <param name="login">
+    /// Signs in again after a rejected refresh; throws <see cref="BluelinkReauthenticationRequiredException"/> when it
+    /// cannot sign in, for example because no password is stored.
+    /// </param>
     public BluelinkTokenManager(
         BluelinkAuthClient authClient,
         BluelinkTokenSet tokens,
         string deviceId,
         TimeProvider timeProvider,
         Func<BluelinkTokenSet, Task> persistTokens,
-        Func<CancellationToken, Task<BluelinkCciTokens>>? login)
+        Func<CancellationToken, Task<BluelinkCciTokens>> login)
     {
         _authClient = authClient;
         _tokens = tokens;
@@ -59,7 +62,7 @@ internal sealed class BluelinkTokenManager
     public DateTimeOffset? AuthenticatedAt { get; private set; }
 
     /// <summary>Calls the vehicle API with an access token; after a token expired answer it refreshes once and calls again.</summary>
-    /// <exception cref="BluelinkReauthenticationRequiredException">The refresh is rejected and no password is stored, or the sign in is rejected.</exception>
+    /// <exception cref="BluelinkReauthenticationRequiredException">The refresh is rejected, and the sign in is rejected or not possible.</exception>
     /// <exception cref="BluelinkApiException">Any other failure, including a token expired answer after the refresh; the caller retries later.</exception>
     /// <exception cref="BluelinkCredentialsReplacedException">The login delegate refused to sign in, because the credentials were replaced.</exception>
     /// <exception cref="Exception">The exception of a failed persist callback; the next call retries only the persist.</exception>
@@ -88,7 +91,7 @@ internal sealed class BluelinkTokenManager
         }, cancellationToken);
 
     /// <summary>Makes sure a fresh access token is available, so that a refresh or sign in fails here and not inside a vehicle call.</summary>
-    /// <exception cref="BluelinkReauthenticationRequiredException">The refresh is rejected and no password is stored, or the sign in is rejected.</exception>
+    /// <exception cref="BluelinkReauthenticationRequiredException">The refresh is rejected, and the sign in is rejected or not possible.</exception>
     /// <exception cref="BluelinkApiException">The refresh or the token exchange failed otherwise; the caller retries later.</exception>
     /// <exception cref="BluelinkCredentialsReplacedException">The login delegate refused to sign in, because the credentials were replaced.</exception>
     /// <exception cref="Exception">The exception of a failed persist callback; the next call retries only the persist.</exception>
@@ -151,11 +154,6 @@ internal sealed class BluelinkTokenManager
         }
         catch (BluelinkApiException exception) when (IsRefreshRejected(exception))
         {
-            if (_login is null)
-            {
-                throw new BluelinkReauthenticationRequiredException("Hyundai rejected the refresh token, and no password is stored.");
-            }
-
             return await _login(CancellationToken.None);
         }
     }

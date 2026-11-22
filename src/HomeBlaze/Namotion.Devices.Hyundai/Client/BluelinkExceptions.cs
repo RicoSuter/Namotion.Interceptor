@@ -62,8 +62,12 @@ public sealed class BluelinkReauthenticationRequiredException(string message) : 
 /// <summary>The credentials were replaced while the previous ones were in use; the request was not sent with the replaced credentials.</summary>
 public sealed class BluelinkCredentialsReplacedException(string message) : Exception(message);
 
-/// <summary>The daily request limit of the account is reached; requests resume after local midnight.</summary>
-public sealed class BluelinkRequestLimitException() : Exception("Daily request limit reached.");
+/// <summary>The daily request limit of the account is reached; requests resume after local midnight or once the limit is raised.</summary>
+public sealed class BluelinkRequestLimitException() : InvalidOperationException(LimitMessage)
+{
+    /// <summary>The message of the exception, which the account also shows as its status message.</summary>
+    internal const string LimitMessage = "Daily request limit reached.";
+}
 
 /// <summary>The result of a command, read from the notification records of the vehicle.</summary>
 public enum BluelinkCommandResult

@@ -107,6 +107,25 @@ public class BluelinkAccountCommandTests
     }
 
     [Fact]
+    public async Task WhenClimateDurationIsInvalid_ThenClimateStartThrowsBeforeAnyCall()
+    {
+        // Arrange
+        var (account, handler, _) = await CreatePolledAsync(pin: "1234");
+        account.ClimateDuration = TimeSpan.FromMinutes(31);
+        var requestCount = handler.Requests.Count;
+        var status = account.Status;
+
+        // Act
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => account.Vehicles[Ioniq].Climate.StartClimateAsync(21m, CancellationToken.None));
+
+        // Assert
+        Assert.Equal("The climate duration of the account must be whole minutes from 1 to 30.", exception.Message);
+        Assert.Equal(requestCount, handler.Requests.Count);
+        Assert.Equal(0, handler.Count(BluelinkResponses.PinPath));
+        Assert.Equal(status, account.Status);
+    }
+
+    [Fact]
     public async Task WhenCcs2CommandsAreSent_ThenTheControlTokenIsFetchedOnceAndReused()
     {
         // Arrange

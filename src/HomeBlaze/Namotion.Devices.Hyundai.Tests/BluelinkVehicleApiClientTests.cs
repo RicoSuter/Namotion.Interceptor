@@ -175,7 +175,7 @@ public class BluelinkVehicleApiClientTests
         var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.LegacyTemperaturePath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-9")));
 
         // Act
-        await client.StartClimateAsync(LegacyRequest, 21m, defrost: true, TimeSpan.FromMinutes(10), controlToken: null, CancellationToken.None);
+        await client.StartClimateAsync(LegacyRequest, 21m, defrost: true, 10, controlToken: null, CancellationToken.None);
 
         // Assert
         Assert.Equal("""{"action":"start","hvacType":0,"options":{"defrost":true,"heating1":0,"igniOnDuration":10},"tempCode":"0EH","unit":"C"}""", Assert.Single(handler.Requests).Body);
@@ -188,7 +188,7 @@ public class BluelinkVehicleApiClientTests
         var (client, handler, _) = Create(new FakeHttpMessageHandler().Respond(BluelinkResponses.Ccs2TemperaturePath("VEHICLE-2"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-10")));
 
         // Act
-        await client.StartClimateAsync(Ccs2Request, 21.5m, defrost: false, TimeSpan.FromMinutes(10), controlToken: "control-1", CancellationToken.None);
+        await client.StartClimateAsync(Ccs2Request, 21.5m, defrost: false, 10, controlToken: "control-1", CancellationToken.None);
 
         // Assert
         using var body = JsonDocument.Parse(Assert.Single(handler.Requests).Body!);
@@ -476,7 +476,7 @@ public class BluelinkVehicleApiClientTests
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentNullException>(() => client.SetChargingAsync(Ccs2Request, start: true, controlToken: null, CancellationToken.None));
-        await Assert.ThrowsAsync<ArgumentNullException>(() => client.StartClimateAsync(Ccs2Request, 21m, defrost: false, TimeSpan.FromMinutes(10), controlToken: null, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => client.StartClimateAsync(Ccs2Request, 21m, defrost: false, 10, controlToken: null, CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentNullException>(() => client.StopClimateAsync(Ccs2Request, controlToken: null, CancellationToken.None));
         Assert.Empty(handler.Requests);
         Assert.Equal(0, budget.Update());
@@ -489,8 +489,8 @@ public class BluelinkVehicleApiClientTests
         var (client, handler, budget) = Create(new FakeHttpMessageHandler());
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => client.StartClimateAsync(LegacyRequest, 21m, defrost: false, TimeSpan.FromMinutes(31), controlToken: null, CancellationToken.None));
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => client.StartClimateAsync(Ccs2Request, 21m, defrost: false, TimeSpan.Zero, controlToken: "control-1", CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => client.StartClimateAsync(LegacyRequest, 21m, defrost: false, 31, controlToken: null, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => client.StartClimateAsync(Ccs2Request, 21m, defrost: false, 0, controlToken: "control-1", CancellationToken.None));
         Assert.Empty(handler.Requests);
         Assert.Equal(0, budget.Update());
     }

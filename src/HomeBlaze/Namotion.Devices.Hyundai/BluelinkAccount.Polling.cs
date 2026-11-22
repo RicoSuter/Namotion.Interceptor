@@ -9,7 +9,6 @@ namespace Namotion.Devices.Hyundai;
 public partial class BluelinkAccount
 {
     private const string MissingCredentialsMessage = "Missing credentials";
-    private const string RequestLimitMessage = "Daily request limit reached";
     private const int CommandReserve = 10;
 
     private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromMinutes(15);
@@ -94,12 +93,13 @@ public partial class BluelinkAccount
         if (remaining == 0)
         {
             Status = ServiceStatus.Error;
-            StatusMessage = RequestLimitMessage;
+            StatusMessage = BluelinkRequestLimitException.LimitMessage;
             return _budget.TimeUntilReset;
         }
 
         if (remaining < CommandReserve)
         {
+            Status = ServiceStatus.Running;
             StatusMessage = "Polling pauses until midnight to keep the remaining requests for commands.";
             return _budget.TimeUntilReset;
         }
@@ -254,7 +254,7 @@ public partial class BluelinkAccount
             case BluelinkRequestLimitException:
                 // No pause: the next iteration waits until midnight, unless the limit was raised meanwhile.
                 Status = ServiceStatus.Error;
-                StatusMessage = RequestLimitMessage;
+                StatusMessage = BluelinkRequestLimitException.LimitMessage;
                 break;
 
             case BluelinkApiException { IsDeviceNotRegistered: true }:

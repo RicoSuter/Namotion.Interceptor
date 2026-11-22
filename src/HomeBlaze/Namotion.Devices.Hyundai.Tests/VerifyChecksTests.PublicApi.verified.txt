@@ -363,7 +363,7 @@ namespace Namotion.Devices.Hyundai.Client
     {
         public BluelinkReauthenticationRequiredException(string message) { }
     }
-    public sealed class BluelinkRequestLimitException : System.Exception
+    public sealed class BluelinkRequestLimitException : System.InvalidOperationException
     {
         public BluelinkRequestLimitException() { }
     }

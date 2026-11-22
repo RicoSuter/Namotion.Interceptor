@@ -70,7 +70,7 @@ public class BluelinkAccountCommandStateTests
         await Assert.ThrowsAsync<BluelinkRequestLimitException>(() => account.Vehicles[Kona].Charge.StartChargingAsync(CancellationToken.None));
         Assert.Equal(requestCount, handler.Requests.Count);
         Assert.Equal(ServiceStatus.Error, account.Status);
-        Assert.Equal("Daily request limit reached", account.StatusMessage);
+        Assert.Equal("Daily request limit reached.", account.StatusMessage);
     }
 
     [Fact]

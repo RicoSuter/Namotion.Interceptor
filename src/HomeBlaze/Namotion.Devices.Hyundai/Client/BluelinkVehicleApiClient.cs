@@ -117,11 +117,13 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
         return GetMessageId(await SendAsync(HttpMethod.Post, $"{SpaV2}vehicles/{request.VehicleId}/ccs2/control/charge", request, command, controlToken, cancellationToken));
     }
 
+    /// <summary>Starts the climate for 1 to 30 minutes.</summary>
     /// <returns>The message ID of the command.</returns>
-    public async Task<string> StartClimateAsync(BluelinkVehicleRequest request, decimal temperature, bool defrost, TimeSpan duration, string? controlToken, CancellationToken cancellationToken)
+    public async Task<string> StartClimateAsync(BluelinkVehicleRequest request, decimal temperature, bool defrost, int minutes, string? controlToken, CancellationToken cancellationToken)
     {
         RequireControlToken(request, controlToken);
-        var minutes = BluelinkValues.ToClimateMinutes(duration);
+        ArgumentOutOfRangeException.ThrowIfLessThan(minutes, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(minutes, 30);
         if (request.Protocol == BluelinkProtocol.Legacy)
         {
             var temperatureCode = BluelinkValues.ToTemperatureCode(temperature);
