@@ -6,7 +6,7 @@ internal static class BluelinkHttp
 {
     /// <summary>
     /// Creates the client for all Bluelink hosts. Redirects are not followed, because the sign in reads the code from a
-    /// 302, and cookies are handled per login (<c>BluelinkAuthClient</c>), so that two logins never share them.
+    /// 302, and cookies are handled per login (<see cref="BluelinkAuthClient"/>), so that two logins never share them.
     /// </summary>
     public static HttpClient CreateClient() => new(new SocketsHttpHandler
     {
