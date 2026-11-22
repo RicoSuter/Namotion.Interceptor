@@ -125,7 +125,7 @@ public interface IMulticastDnsBrowser
 }
 ```
 
-- `SsdpResponse` carries the location, unique service name, search target and headers.
+- `SsdpResponse` carries the location, unique service name and search target of an answer for exactly the searched target.
 - `MulticastDnsService` carries the instance name, host name, addresses, port and TXT records.
 
 SSDP uses Rssdp, which the FRITZ!Box library already depends on, and searches every IPv4 adapter with a listening window of about 3 seconds.
@@ -145,7 +145,7 @@ The picker page of `SubjectSetupDialog` gets a toggle at the top: All types or D
 - A row whose `ExistingSubject` is set is shown disabled as "already added" and links to that subject.
 - While the scan runs, the header shows a progress indicator; afterwards it shows the number of devices found.
 - With nothing found, the page says so and points to All types for adding a device by its address. Battery devices that sleep only answer while awake, which the hint mentions.
-- When every multicast query failed because no adapter supports multicast, the empty state says multicast seems blocked and suggests host networking or adding by address. Docker bridge networking is the usual cause.
+- The page always shows a hint that a container on a bridge network receives no multicast, so devices there are added by address or HomeBlaze runs with host networking. A container still has an adapter that claims multicast support, so the case cannot be detected reliably.
 
 ### Handoff
 
@@ -158,10 +158,10 @@ Picking a row calls the existing `SelectType` for the result's type and keeps th
 
 ## Error handling
 
-- Each discoverer runs in its own task. An exception other than cancellation ends that discoverer only: it is logged with the discoverer's type and shown as one line on the page, such as "Nuki: lookup failed". Results it yielded before stay listed.
+- Each discoverer runs in its own task. An exception other than cancellation ends that discoverer only: it is logged with the discoverer's type and shown as one line on the page, such as "Nuki Bridge: search failed". Results it yielded before stay listed.
 - An `OperationCanceledException` from a canceled session is neither logged nor shown.
 - The shared services fail soft: no usable adapter or a socket error returns an empty answer and one debug log entry, not an exception.
-- A `Matches` call that throws leaves that result out and is logged like a discoverer failure.
+- A `Matches` call that throws ends its discoverer like any other exception.
 - A discoverer that never completes is canceled at the session deadline.
 - Every string from the network is untrusted. Blazor renders it as text, never as markup.
 
@@ -170,11 +170,11 @@ Picking a row calls the existing `SelectType` for the result's type and keeps th
 | Type | Discovery | Result | Matches |
 |---|---|---|---|
 | `FritzBox` | `FritzBoxDiscovery` through the shared `ISsdpSearch`, plus the `fritz.box` fallback | `FritzBoxDiscoveryResult`, key `Udn` or else host address | A new persisted `Udn` when both sides have one, otherwise the host address |
-| `HueBridge` | mDNS `_hue._tcp`, local only | A new record with bridge ID and address, key bridge ID | The persisted `BridgeId`, ignoring case |
-| `NukiBridge` | The Nuki cloud lookup, which runs only because the user pressed Scan | `NukiDiscoveredBridge`, key bridge ID | The host address, plus the bridge ID once the implementation confirms which runtime identity of the bridge it corresponds to |
+| `HueBridge` | mDNS `_hue._tcp`, local only | A new record with bridge ID and address, key bridge ID | The persisted `BridgeId`, ignoring case; `HueBridge` itself compares bridge IDs ignoring case as well |
+| `NukiBridge` | The Nuki cloud lookup, which runs only because the user pressed Scan | `NukiDiscoveredBridge`, key bridge ID | The host address and port. The bridge ID the discovery service returns is compared with the runtime `ServerId` of a real bridge during manual verification, and a match on it is added only if they agree |
 | `ShellyDevice` | mDNS `_shelly._tcp`; the TXT records carry the device ID, model and generation | A new record with device ID, model and address, key device ID | A new persisted `DeviceId`, otherwise the host address |
 
-- `FritzBox.Udn` and `ShellyDevice.DeviceId` are new `[Configuration]` properties. The component that receives the result writes them, and the subject fills them in on its first successful connect when they are empty, so subjects created before this change gain them.
+- `FritzBox.Udn` and `ShellyDevice.DeviceId` are new `[Configuration]` properties, written by the component that receives the result. Shelly also matches on the device ID the running subject read from the device, so a Shelly created before this change is recognized while it is connected. Subjects do not write their own configuration for discovery.
 - `FritzBoxDiscovery.DiscoverAsync` takes the SSDP search as a parameter, so the Setup component and the discoverer share parsing and description.
 - The Setup components keep their own search for when the type is picked directly. The Hue Setup component keeps the HueApi locator with its network scan fallback.
 - `FritzBoxSetupComponent`, `HueBridgeSetupComponent`, `NukiBridgeSetupComponent` and `ShellyDeviceEditComponent` implement `ISubjectDiscoveryComponent`. The Setup components preselect the result in their lists; the Shelly component fills in the host address and device ID.
@@ -195,7 +195,7 @@ Unit tests, without sockets:
 - mDNS packet parsing from captured bytes, including name compression, malformed packets and the caps
 - Each discoverer against fake `ISsdpSearch`, `IMulticastDnsBrowser` and HTTP handlers, including its `Matches` rules
 
-Component tests for the Discover page with fake discoverers: rows streaming in, already added rows, the failure line, the blocked multicast hint, and `DiscoveryResult` reaching only components that implement `ISubjectDiscoveryComponent`.
+This repository has no component test framework, so the Discover page keeps its logic in `SubjectDiscoveryList` (ordering, failures), `SubjectNameOptions.SuggestName` (the name) and `SubjectEditPanel.CreateHostedComponentParameters` (passing the result), which unit tests cover. The E2E test covers the page itself.
 
 One E2E test with a fake discoverer: open Discover, pick the result, create, and find the stored subject.
 
@@ -205,4 +205,4 @@ Manual verification before the pull request is finalized, agreed while planning:
 
 - `architecture/design/discovery.md` becomes the canonical description once implemented, and this plan is removed or marked implemented.
 - The device pages of FRITZ!Box, Hue, Nuki and Shelly each state how the device is discovered and matched.
-- The `create-homeblaze-library` skill describes writing a discoverer.
+- The `create-homeblaze-library` command (`.claude/commands/create-homeblaze-library.md`) describes writing a discoverer.
