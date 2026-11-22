@@ -63,6 +63,7 @@ public sealed class SonosHouseholdDiscoverer : SubjectDiscoverer<SonosSystem, So
         {
             var speakerId = SonosDiscovery.GetSpeakerId(response.UniqueServiceName);
             if (speakerId is null ||
+                !IsSpeakerLocation(response.Location) ||
                 !response.Headers.TryGetValue(HouseholdHeader, out var householdId) ||
                 string.IsNullOrWhiteSpace(householdId))
             {
@@ -130,6 +131,14 @@ public sealed class SonosHouseholdDiscoverer : SubjectDiscoverer<SonosSystem, So
 
         return false;
     }
+
+    // The host and port of the location are where the speaker is asked, as seed and for its description; an absolute
+    // location such as urn:x has neither.
+    private static bool IsSpeakerLocation(Uri location) =>
+        location.IsAbsoluteUri &&
+        string.Equals(location.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) &&
+        Uri.CheckHostName(location.Host) != UriHostNameType.Unknown &&
+        location.Port is >= 1 and <= 65535;
 
     private static string ToSeedHost(SonosDiscoveredSpeaker speaker) =>
         speaker.Port == SonosValues.DevicePort

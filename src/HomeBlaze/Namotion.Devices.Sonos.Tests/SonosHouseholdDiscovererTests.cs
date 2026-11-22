@@ -155,7 +155,50 @@ public class SonosHouseholdDiscovererTests
     }
 
     [Fact]
-    public async Task WhenAnAnswerAdvertisesAnotherPathOrScheme_ThenTheFixedDescriptionPathIsRequestedOnItsHostAndPort()
+    public void WhenAnAnswerNamesALocationWithoutAPlainHttpHost_ThenItIsDroppedAndTheOtherSpeakersAreKept()
+    {
+        // Arrange
+        SsdpResponse[] responses =
+        [
+            Answer("RINCON_A00000000000001400", "192.168.1.101"),
+            new(new Uri("urn:x"), $"uuid:RINCON_B00000000000001400::{ZonePlayer}", HouseholdHeaders()),
+            new(new Uri("file:///x"), $"uuid:RINCON_C00000000000001400::{ZonePlayer}", HouseholdHeaders()),
+            new(new Uri("https://192.168.1.104:1443/xml/device_description.xml"), $"uuid:RINCON_D00000000000001400::{ZonePlayer}", HouseholdHeaders()),
+            Answer("RINCON_E00000000000001400", "192.168.1.105")
+        ];
+
+        // Act
+        var household = Assert.Single(SonosHouseholdDiscoverer.ToHouseholds(responses));
+
+        // Assert
+        Assert.Equal(["RINCON_A00000000000001400", "RINCON_E00000000000001400"], household.Speakers.Select(speaker => speaker.Id));
+        Assert.Equal("192.168.1.101", household.SeedHost);
+    }
+
+    [Fact]
+    public async Task WhenAHostlessLocationAnswersNextToSpeakers_ThenTheScanFindsTheHouseholdWithTheSpeakers()
+    {
+        // Arrange
+        var search = new AnsweringSsdpSearch(
+            Answer("RINCON_A00000000000001400", "192.168.1.101"),
+            new SsdpResponse(new Uri("urn:x"), $"uuid:RINCON_B00000000000001400::{ZonePlayer}", HouseholdHeaders()),
+            Answer("RINCON_C00000000000001400", "192.168.1.103"));
+        using var handler = new DescriptionHandler(_ => Description("Wohnzimmer", "Sonos One"));
+        ISubjectDiscoverer discoverer = new SonosHouseholdDiscoverer(handler, new FakeTimeProvider());
+        var scan = new DiscoveryScan(search, new EmptyMulticastDnsBrowser(), new UnusedUdpDiscovery(), CancellationToken.None);
+
+        // Act
+        var discovered = await discoverer.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
+
+        // Assert
+        var household = Assert.IsType<SonosDiscoveredHousehold>(Assert.Single(discovered).Result);
+        Assert.Equal(
+            [new DiscoveredItem("Wohnzimmer", "Sonos One, 192.168.1.101"), new DiscoveredItem("Wohnzimmer", "Sonos One, 192.168.1.103")],
+            household.IncludedItems);
+    }
+
+    [Fact]
+    public async Task WhenAnAnswerAdvertisesAnotherPath_ThenTheFixedDescriptionPathIsRequestedOnItsHostAndPort()
     {
         // Arrange
         var requested = new List<Uri>();
@@ -172,7 +215,7 @@ public class SonosHouseholdDiscovererTests
         var households = SonosHouseholdDiscoverer.ToHouseholds(
         [
             new(new Uri("http://192.168.1.101:1400/elsewhere?target=192.0.2.1"), $"uuid:RINCON_A00000000000001400::{ZonePlayer}", HouseholdHeaders()),
-            new(new Uri("https://192.168.1.102:1443/xml/device_description.xml"), $"uuid:RINCON_B00000000000001400::{ZonePlayer}", HouseholdHeaders())
+            new(new Uri("http://192.168.1.102:1401/"), $"uuid:RINCON_B00000000000001400::{ZonePlayer}", HouseholdHeaders())
         ]);
 
         // Act
@@ -180,7 +223,7 @@ public class SonosHouseholdDiscovererTests
 
         // Assert
         Assert.Equal(
-            [new Uri("http://192.168.1.101:1400/xml/device_description.xml"), new Uri("http://192.168.1.102:1443/xml/device_description.xml")],
+            [new Uri("http://192.168.1.101:1400/xml/device_description.xml"), new Uri("http://192.168.1.102:1401/xml/device_description.xml")],
             requested.OrderBy(uri => uri.Host, StringComparer.Ordinal));
     }
 
@@ -331,7 +374,8 @@ public class SonosHouseholdDiscovererTests
     [Fact]
     public async Task WhenASpeakerAnswersWithARedirect_ThenTheRedirectIsNotFollowed()
     {
-        // Arrange - the discoverer with its own handler, against a speaker on the loopback address.
+        // Arrange - the discoverer with its own handler, against a speaker on the loopback address, with a deadline
+        // that never passes.
         var paths = new List<string>();
         await using var speaker = new LoopbackHttpServer(async context =>
         {
@@ -351,7 +395,7 @@ public class SonosHouseholdDiscovererTests
             context.Response.ContentType = "text/xml; charset=utf-8";
             await context.Response.OutputStream.WriteAsync(body);
         });
-        var discoverer = new SonosHouseholdDiscoverer();
+        var discoverer = new SonosHouseholdDiscoverer(handler: null, new FakeTimeProvider());
         var households = SonosHouseholdDiscoverer.ToHouseholds([Answer("RINCON_A00000000000001400", "127.0.0.1", port: speaker.Port)]);
 
         // Act
@@ -365,14 +409,15 @@ public class SonosHouseholdDiscovererTests
     [Fact]
     public async Task WhenASpeakerAnswersOverTheNetwork_ThenItsRoomIsRead()
     {
-        // Arrange - the discoverer with its own handler, against a speaker on the loopback address.
+        // Arrange - the discoverer with its own handler, against a speaker on the loopback address, with a deadline
+        // that never passes.
         await using var speaker = new LoopbackHttpServer(async context =>
         {
             var body = Encoding.UTF8.GetBytes(TestFixtures.Read("device-description-ray.xml"));
             context.Response.ContentType = "text/xml";
             await context.Response.OutputStream.WriteAsync(body);
         });
-        var discoverer = new SonosHouseholdDiscoverer();
+        var discoverer = new SonosHouseholdDiscoverer(handler: null, new FakeTimeProvider());
         var households = SonosHouseholdDiscoverer.ToHouseholds([Answer("RINCON_A00000000000001400", "127.0.0.1", port: speaker.Port)]);
 
         // Act

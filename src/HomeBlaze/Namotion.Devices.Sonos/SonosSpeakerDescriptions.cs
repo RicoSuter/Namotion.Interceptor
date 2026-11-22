@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Xml;
 using Namotion.Devices.Sonos.Parsing;
 
@@ -109,9 +110,16 @@ internal static class SonosSpeakerDescriptions
     private static async Task<SonosDiscoveredSpeaker> DescribeSpeakerAsync(
         HttpClient httpClient, SonosDiscoveredSpeaker speaker, CancellationToken timeoutToken, CancellationToken cancellationToken)
     {
+        if (!Uri.TryCreate(
+                string.Create(CultureInfo.InvariantCulture, $"{Uri.UriSchemeHttp}://{speaker.HostAddress}:{speaker.Port}{DescriptionPath}"),
+                UriKind.Absolute,
+                out var location))
+        {
+            return speaker;
+        }
+
         try
         {
-            var location = new UriBuilder(Uri.UriSchemeHttp, speaker.HostAddress, speaker.Port, DescriptionPath).Uri;
             using var response = await httpClient.GetAsync(location, HttpCompletionOption.ResponseContentRead, timeoutToken);
             if (!response.IsSuccessStatusCode)
             {
