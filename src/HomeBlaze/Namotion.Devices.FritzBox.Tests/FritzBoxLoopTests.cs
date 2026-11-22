@@ -476,10 +476,43 @@ public class FritzBoxLoopTests
     }
 
     [Fact]
+    public void WhenARouterIsCreated_ThenInternetAccessControlIsAvailableOnlyInDebugBuilds()
+    {
+        // Act
+        using var router = new FritzBox(NullLogger<FritzBox>.Instance);
+
+        // Assert
+#if DEBUG
+        Assert.True(router.IsInternetAccessControlAvailable);
+#else
+        Assert.False(router.IsInternetAccessControlAvailable);
+#endif
+    }
+
+    [Fact]
+    public async Task WhenInternetAccessControlIsUnavailable_ThenTheOperationsAreDisabledAndBlockingSendsNothing()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        var router = CreateRouter(fake);
+        router.IsInternetAccessControlAvailable = false;
+        await using var running = await RunAsync(router);
+        var laptop = await WaitForClientAsync(router, Snapshots.Laptop);
+
+        // Act & Assert
+        Assert.False(laptop.BlockInternetAccess_IsEnabled);
+        Assert.False(laptop.AllowInternetAccess_IsEnabled);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => laptop.BlockInternetAccessAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => laptop.AllowInternetAccessAsync(CancellationToken.None));
+        Assert.DoesNotContain("GetSpecificHostEntry", fake.Actions);
+        Assert.DoesNotContain("DisallowWANAccessByIP", fake.Actions);
+    }
+
+    [Fact]
     public async Task WhenTheInternetAccessIsBlockedWithoutAConnection_ThenItThrows()
     {
         // Arrange
-        using var router = new FritzBox(NullLogger<FritzBox>.Instance);
+        using var router = new FritzBox(NullLogger<FritzBox>.Instance) { IsInternetAccessControlAvailable = true };
         var client = new FritzBoxClient(router, Snapshots.Laptop);
         client.Update(new HostEntry(Snapshots.Laptop, "192.168.178.20", true, "laptop", "802.11", 0, 144, false), null, null);
 
@@ -629,7 +662,8 @@ public class FritzBoxLoopTests
             DescriptionPort = fake.HttpPort,
             MinimumInterval = TimeSpan.FromMilliseconds(50),
             PollingInterval = TimeSpan.FromMilliseconds(100),
-            RetryInterval = TimeSpan.FromMilliseconds(100)
+            RetryInterval = TimeSpan.FromMilliseconds(100),
+            IsInternetAccessControlAvailable = true
         };
 
     /// <summary>

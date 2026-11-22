@@ -8,13 +8,14 @@ using Namotion.Devices.FritzBox.Parsing;
 using Namotion.Devices.Upnp;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Devices.FritzBox;
 
 /// <summary>
 /// A device in the FRITZ!Box host list, such as a computer or a phone, keyed by its MAC address. Its internet access
-/// can be blocked and allowed; both require confirmation in the operations panel and cannot be called by agents or
-/// over MCP.
+/// can be blocked and allowed in debug builds; both require confirmation in the operations panel and cannot be called
+/// by agents or over MCP.
 /// </summary>
 [InterceptorSubject]
 public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitleProvider, IIconProvider
@@ -161,6 +162,14 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     [Derived]
     public string? IconColor => IsPresent == true ? "Success" : null;
 
+    [Derived]
+    [PropertyAttribute("BlockInternetAccess", KnownAttributes.IsEnabled)]
+    public bool BlockInternetAccess_IsEnabled => _router.IsInternetAccessControlAvailable;
+
+    [Derived]
+    [PropertyAttribute("AllowInternetAccess", KnownAttributes.IsEnabled)]
+    public bool AllowInternetAccess_IsEnabled => _router.IsInternetAccessControlAvailable;
+
     /// <param name="host">The host list entry of the device.</param>
     /// <param name="position">Where the mesh list places the device, null when it does not.</param>
     /// <param name="filterProfiles">The names of the filter profiles by ID as last read, null when the router never returned them.</param>
@@ -199,7 +208,7 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     /// currently lists for <see cref="MacAddress"/>. The router applies it asynchronously, so
     /// <see cref="HasInternetAccess"/> may follow only with the next poll.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The router is not connected, no longer lists the device, lists it without an IP address, or lists its last IP address for another device.</exception>
+    /// <exception cref="InvalidOperationException">The build is not a debug build, or the router is not connected, no longer lists the device, lists it without an IP address, or lists its last IP address for another device.</exception>
     /// <exception cref="FritzBoxServiceUnavailableException">The router does not offer the host filter service.</exception>
     /// <exception cref="HttpRequestException">The request to the router failed.</exception>
     /// <exception cref="TimeoutException">The router did not answer in time.</exception>
@@ -213,7 +222,7 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     /// Lifts the block of <see cref="BlockInternetAccessAsync"/>. The access profile may still deny internet access, see
     /// <see cref="HasInternetAccess"/>.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The router is not connected, no longer lists the device, lists it without an IP address, or lists its last IP address for another device.</exception>
+    /// <exception cref="InvalidOperationException">The build is not a debug build, or the router is not connected, no longer lists the device, lists it without an IP address, or lists its last IP address for another device.</exception>
     /// <exception cref="FritzBoxServiceUnavailableException">The router does not offer the host filter service.</exception>
     /// <exception cref="HttpRequestException">The request to the router failed.</exception>
     /// <exception cref="TimeoutException">The router did not answer in time.</exception>
