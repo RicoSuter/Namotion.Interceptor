@@ -447,6 +447,8 @@ Events are useful for:
 - Dynamic subscribers that register/unregister at runtime (unlike `ILifecycleHandler` which is registered at startup)
 - Integration packages (MQTT, OPC UA) that need to clean up internal state
 
+**Replacement order:** a write that replaces the subjects of a property stores the new value first, then detaches the departing subjects and attaches the new ones after, so a departing subject and the subject that takes its position or key are never attached at the same time. A handler notified of the detach can therefore observe the moment in between, when the property already holds the new subject but that subject is not attached or registered yet. The graph agrees with the property once concurrent writes settle, so a consumer should evaluate again on each lifecycle and child index change instead of treating the first one as the final state of the replacement.
+
 ### Child Index Changes
 
 A structural write that keeps a subject in the property raises neither a detach nor an attach for it, also when the subject now sits at another position or under another key. A handler that stores that index implements `IChildIndexHandler` and is registered as a context service:
