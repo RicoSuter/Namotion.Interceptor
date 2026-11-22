@@ -194,4 +194,37 @@ public class SubjectNameOptionsTests
         // Assert
         Assert.Equal(nameof(SubjectNameOptionsTests), name);
     }
+
+    [Theory]
+    [InlineData("Living\nroom")]
+    [InlineData("Living\troom")]
+    [InlineData("Living\u0007room")]
+    [InlineData("Living\u202Emoor")]
+    [InlineData("Living\u200Broom")]
+    [InlineData(".hidden")]
+    [InlineData(" .hidden ")]
+    public void WhenThePreferredNameIsNotPlain_ThenTheTypeNameIsSuggested(string preferredName)
+    {
+        // Arrange
+        var options = new SubjectNameOptions("File name", ".json", []);
+
+        // Act
+        var name = options.SuggestName(preferredName, typeof(SubjectNameOptionsTests));
+
+        // Assert
+        Assert.Equal(nameof(SubjectNameOptionsTests), name);
+    }
+
+    [Fact]
+    public void WhenThePreferredNameHasADotInside_ThenItIsSuggested()
+    {
+        // Arrange
+        var options = new SubjectNameOptions("File name", ".json", []);
+
+        // Act
+        var name = options.SuggestName("shelly1.kitchen", typeof(SubjectNameOptionsTests));
+
+        // Assert
+        Assert.Equal("shelly1.kitchen", name);
+    }
 }
