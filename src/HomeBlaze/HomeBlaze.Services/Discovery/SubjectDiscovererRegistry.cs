@@ -71,7 +71,7 @@ public sealed class SubjectDiscovererRegistry
                 if (!AcceptsDiscoveryResults(discoverer.SubjectType))
                 {
                     _logger.LogError(
-                        "The subject discoverer {Discoverer} is not used: the component the create dialog shows for {SubjectType} does not implement {Interface}.",
+                        "The subject discoverer {Discoverer} is not used: {SubjectType} has no Setup or Edit component that implements {Interface}.",
                         type, discoverer.SubjectType, nameof(ISubjectDiscoveryComponent));
                     continue;
                 }
