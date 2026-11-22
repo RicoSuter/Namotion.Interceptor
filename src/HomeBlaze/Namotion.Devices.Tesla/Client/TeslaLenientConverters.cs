@@ -71,74 +71,33 @@ internal static class TeslaLenientReader
     }
 }
 
-internal sealed class LenientInt32Converter : JsonConverter<int?>
+/// <summary>A converter of the Tesla JSON context, which only reads.</summary>
+internal abstract class LenientReadOnlyConverter<T> : JsonConverter<T>
+{
+    public sealed override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options) =>
+        throw new NotSupportedException("The Tesla JSON context only reads.");
+}
+
+internal sealed class LenientInt32Converter : LenientReadOnlyConverter<int?>
 {
     public override int? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
         (int?)TeslaLenientReader.ReadInteger(ref reader, int.MinValue, int.MaxValue);
-
-    public override void Write(Utf8JsonWriter writer, int? value, JsonSerializerOptions options)
-    {
-        if (value is null)
-        {
-            writer.WriteNullValue();
-        }
-        else
-        {
-            writer.WriteNumberValue(value.Value);
-        }
-    }
 }
 
-internal sealed class LenientInt64Converter : JsonConverter<long?>
+internal sealed class LenientInt64Converter : LenientReadOnlyConverter<long?>
 {
     public override long? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
         TeslaLenientReader.ReadInteger(ref reader, long.MinValue, long.MaxValue);
-
-    public override void Write(Utf8JsonWriter writer, long? value, JsonSerializerOptions options)
-    {
-        if (value is null)
-        {
-            writer.WriteNullValue();
-        }
-        else
-        {
-            writer.WriteNumberValue(value.Value);
-        }
-    }
 }
 
-internal sealed class LenientDecimalConverter : JsonConverter<decimal?>
+internal sealed class LenientDecimalConverter : LenientReadOnlyConverter<decimal?>
 {
     public override decimal? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
         TeslaLenientReader.ReadDecimal(ref reader);
-
-    public override void Write(Utf8JsonWriter writer, decimal? value, JsonSerializerOptions options)
-    {
-        if (value is null)
-        {
-            writer.WriteNullValue();
-        }
-        else
-        {
-            writer.WriteNumberValue(value.Value);
-        }
-    }
 }
 
-internal sealed class LenientBooleanConverter : JsonConverter<bool?>
+internal sealed class LenientBooleanConverter : LenientReadOnlyConverter<bool?>
 {
     public override bool? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
         TeslaLenientReader.ReadBoolean(ref reader);
-
-    public override void Write(Utf8JsonWriter writer, bool? value, JsonSerializerOptions options)
-    {
-        if (value is null)
-        {
-            writer.WriteNullValue();
-        }
-        else
-        {
-            writer.WriteBooleanValue(value.Value);
-        }
-    }
 }
