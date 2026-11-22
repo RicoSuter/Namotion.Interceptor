@@ -1,7 +1,6 @@
-using System.Net.Sockets;
 using System.Xml;
+using HomeBlaze.Abstractions.Discovery;
 using Namotion.Devices.FritzBox.Client;
-using Rssdp;
 
 namespace Namotion.Devices.FritzBox;
 
@@ -16,7 +15,18 @@ namespace Namotion.Devices.FritzBox;
 /// Whether the device offers no internet connection, as a FRITZ!Repeater: in a FRITZ!Box mesh its clients already
 /// appear under the router.
 /// </param>
-public sealed record FritzBoxDiscoveryResult(string HostAddress, string? FriendlyName, string? Model, string? Udn, bool IsRepeater);
+public sealed record FritzBoxDiscoveryResult(string HostAddress, string? FriendlyName, string? Model, string? Udn, bool IsRepeater)
+    : IDiscoveryResult
+{
+    /// <inheritdoc />
+    public string Key => Udn ?? HostAddress;
+
+    /// <inheritdoc />
+    public string DisplayName => FriendlyName ?? Model ?? FritzBox.DefaultName;
+
+    /// <inheritdoc />
+    public string? Detail => IsRepeater ? $"{HostAddress} (repeater)" : HostAddress;
+}
 
 /// <summary>
 /// Finds FRITZ!Box routers on the local network over SSDP and by their usual host name.
@@ -33,41 +43,25 @@ public static class FritzBoxDiscovery
     private const int MaximumLocations = 32;
 
     /// <summary>
-    /// Searches every IPv4 adapter and asks <c>fritz.box</c>, then describes each router found in parallel. Never
-    /// throws for a location that does not answer or does not describe a FRITZ!Box: it is left out of the result.
-    /// Cancellation still propagates.
+    /// Searches with <paramref name="ssdpSearch"/> and asks <c>fritz.box</c>, then describes each router found in
+    /// parallel. Never throws for a location that does not answer or does not describe a FRITZ!Box: it is left out
+    /// of the result. Cancellation still propagates.
     /// </summary>
-    /// <remarks>
-    /// A container on a bridge network usually receives no multicast; enter the address by hand in that case instead
-    /// of relying on this search.
-    /// </remarks>
-    /// <param name="timeout">How long to wait for SSDP answers and for each description request.</param>
+    /// <param name="ssdpSearch">The SSDP search to use.</param>
+    /// <param name="timeout">How long to wait for each description request.</param>
     /// <param name="cancellationToken">Cancels the search and every description request.</param>
     /// <returns>
     /// The routers found, de-duplicated by unique device name, or by host address when that is absent, with
     /// repeaters last. A router found by both SSDP and the <c>fritz.box</c> fallback is kept once, under its SSDP
     /// host address.
     /// </returns>
-    public static async Task<IReadOnlyList<FritzBoxDiscoveryResult>> DiscoverAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    public static async Task<IReadOnlyList<FritzBoxDiscoveryResult>> DiscoverAsync(
+        ISsdpSearch ssdpSearch, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var hosts = new List<string>();
-        try
+        foreach (var response in await ssdpSearch.SearchAsync(SearchTarget, cancellationToken))
         {
-            using var locator = new AggregateSsdpDeviceLocator(includeIpv4: true, includeIpv6: false, adapterFilter: null, logger: null);
-            var devices = await locator.SearchAsync(SearchTarget, timeout, cancellationToken);
-            foreach (var device in devices)
-            {
-                // Other UPnP devices can answer a search with any notification type; only a genuine answer for the
-                // target, with an absolute location to describe, is usable.
-                if (device.NotificationType == SearchTarget && device.DescriptionLocation is { IsAbsoluteUri: true } location)
-                {
-                    hosts.Add(location.Host);
-                }
-            }
-        }
-        catch (Exception exception) when (exception is ArgumentException or SocketException or AggregateException)
-        {
-            // No IPv4 adapter usable for multicast exists, or the search itself failed; fritz.box is still tried.
+            hosts.Add(response.Location.Host);
         }
 
         using var httpClient = FritzBoxHttpClient.CreatePlain(timeout, Tr64Description.MaximumBytes);

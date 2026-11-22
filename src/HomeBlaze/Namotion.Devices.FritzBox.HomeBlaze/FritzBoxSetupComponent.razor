@@ -1,6 +1,9 @@
+@using global::HomeBlaze.Abstractions.Discovery
 @attribute [SubjectComponent(SubjectComponentType.Setup, typeof(FritzBox))]
 @implements ISubjectEditComponent
+@implements ISubjectDiscoveryComponent
 @implements IDisposable
+@inject ISsdpSearch SsdpSearch
 
 <MudStack Spacing="3">
     @if (_routers == null)
@@ -99,6 +102,9 @@
     [Parameter]
     public bool IsCreating { get; set; }
 
+    [Parameter]
+    public IDiscoveryResult? DiscoveryResult { get; set; }
+
     private FritzBox? RouterSubject => Subject as FritzBox;
 
     private readonly CancellationTokenSource _cancellationTokenSource = new();
@@ -127,9 +133,18 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Picked on the Discover page, which has searched already.
+        if (DiscoveryResult is FritzBoxDiscoveryResult discovered)
+        {
+            _routers = [discovered];
+            _selectedRouter = discovered;
+            _hostAddress = discovered.HostAddress;
+            return;
+        }
+
         try
         {
-            _routers = (await FritzBoxDiscovery.DiscoverAsync(TimeSpan.FromSeconds(3), _cancellationTokenSource.Token)).ToList();
+            _routers = (await FritzBoxDiscovery.DiscoverAsync(SsdpSearch, TimeSpan.FromSeconds(3), _cancellationTokenSource.Token)).ToList();
         }
         catch (OperationCanceledException) when (_cancellationTokenSource.IsCancellationRequested)
         {
@@ -247,6 +262,9 @@
             RouterSubject.Username = NormalizedUsername;
             RouterSubject.Password = string.IsNullOrEmpty(_password) ? null : _password;
             RouterSubject.PublicKeyPin = result.PublicKeyPin;
+
+            // Every edit of the address clears the selection, so a router picked from the list is the checked one.
+            RouterSubject.Udn = _selectedRouter?.Udn;
 
             // Without this, every router added here would be titled with the default name.
             var routerName = _selectedRouter?.FriendlyName ?? result.Model;
