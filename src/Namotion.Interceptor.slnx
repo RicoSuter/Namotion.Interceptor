@@ -88,6 +88,8 @@
     <Project Path="HomeBlaze/Namotion.Devices.Tesla/Namotion.Devices.Tesla.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Tesla.Tests/Namotion.Devices.Tesla.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Tesla.HomeBlaze/Namotion.Devices.Tesla.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Hyundai/Namotion.Devices.Hyundai.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Hyundai.Tests/Namotion.Devices.Hyundai.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Ecowitt/Namotion.Devices.Ecowitt.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Ecowitt.Tests/Namotion.Devices.Ecowitt.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Ecowitt.HomeBlaze/Namotion.Devices.Ecowitt.HomeBlaze.csproj" />
