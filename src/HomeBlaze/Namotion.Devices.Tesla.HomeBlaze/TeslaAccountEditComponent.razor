@@ -92,10 +92,10 @@
     private static string FormatInterval(TimeSpan interval) => interval.ToString("c", CultureInfo.InvariantCulture);
 
     private static bool TryParseInterval(string text, out TimeSpan interval) =>
-        TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out interval) && interval > TimeSpan.Zero;
+        TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out interval) && interval > TimeSpan.Zero && interval <= TimeSpan.FromDays(1);
 
     private static string? ValidateInterval(string text) =>
-        TryParseInterval(text, out _) ? null : "Enter a positive duration such as 00:05:00";
+        TryParseInterval(text, out _) ? null : "Enter a positive duration of at most one day such as 00:05:00";
 
     private string Snapshot() => string.Join("|",
         _name, _statePollingInterval, _activePollingInterval, _idlePollingInterval, _idleTimeout, _sleepWindow, _retryInterval);

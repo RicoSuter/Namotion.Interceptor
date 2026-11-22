@@ -11,6 +11,9 @@ public partial class TeslaAccount
     private const string MissingRefreshTokenMessage = "Missing refresh token";
 
     private static readonly TimeSpan MinimumInterval = TimeSpan.FromSeconds(10);
+
+    // Task.Delay throws for delays above about 49.7 days, which would end the loop.
+    private static readonly TimeSpan MaximumDelay = TimeSpan.FromDays(1);
     private static readonly TimeSpan WakeUpTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan WakeUpCheckInterval = TimeSpan.FromSeconds(5);
 
@@ -43,7 +46,7 @@ public partial class TeslaAccount
                 _logger.LogError(exception, "The polling loop of the Tesla account failed.");
                 Status = ServiceStatus.Error;
                 StatusMessage = exception.Message;
-                delay = AtLeastMinimum(RetryInterval);
+                delay = Limit(RetryInterval);
             }
 
             await WaitAsync(delay, configurationChanged.Task, stoppingToken);
@@ -74,7 +77,7 @@ public partial class TeslaAccount
         {
             if (!IsRefreshTokenReplaced())
             {
-                return pause;
+                return AtMostMaximum(pause);
             }
 
             _pausedUntil = DateTimeOffset.MinValue;
@@ -105,12 +108,15 @@ public partial class TeslaAccount
             return Timeout.InfiniteTimeSpan;
         }
 
-        var delay = AtLeastMinimum(Status == ServiceStatus.Error ? RetryInterval : StatePollingInterval);
-        var pause = _pausedUntil - _timeProvider.GetUtcNow();
+        var delay = Limit(Status == ServiceStatus.Error ? RetryInterval : StatePollingInterval);
+        var pause = AtMostMaximum(_pausedUntil - _timeProvider.GetUtcNow());
         return pause > delay ? pause : delay;
     }
 
-    private static TimeSpan AtLeastMinimum(TimeSpan interval) => interval < MinimumInterval ? MinimumInterval : interval;
+    /// <summary>Limits a configured interval to between <see cref="MinimumInterval"/> and <see cref="MaximumDelay"/>.</summary>
+    private static TimeSpan Limit(TimeSpan interval) => interval < MinimumInterval ? MinimumInterval : AtMostMaximum(interval);
+
+    private static TimeSpan AtMostMaximum(TimeSpan delay) => delay > MaximumDelay ? MaximumDelay : delay;
 
     /// <summary>
     /// One polling cycle: reads the vehicle list with the cached snapshots, then the data of each awake vehicle that is due.
@@ -148,7 +154,7 @@ public partial class TeslaAccount
         catch (TeslaApiException exception) when (exception.RetryAfter is { } retryAfter)
         {
             _logger.LogWarning(exception, "Tesla limits the requests of the account; pausing for {RetryAfter}.", retryAfter);
-            _pausedUntil = _timeProvider.GetUtcNow() + retryAfter;
+            _pausedUntil = _timeProvider.GetUtcNow() + AtMostMaximum(retryAfter);
             Status = ServiceStatus.Error;
             StatusMessage = exception.Message;
         }
@@ -327,6 +333,11 @@ public partial class TeslaAccount
     /// </summary>
     private async Task WakeUpAsync(TeslaVehicle vehicle, CancellationToken cancellationToken)
     {
+        if (_isDisposed)
+        {
+            throw new InvalidOperationException("The Tesla account was disposed; it cannot wake a vehicle anymore.");
+        }
+
         await _pollLock.WaitAsync(cancellationToken);
         try
         {

@@ -48,7 +48,7 @@ Refresh tokens last about three months and rotate on every refresh, so a running
 | `SleepWindow` | TimeSpan | 21 minutes | How long reading pauses so that an idle vehicle can fall asleep. |
 | `RetryInterval` | TimeSpan | 1 minute | Wait after a failed poll. |
 
-`StatePollingInterval` and `RetryInterval` are at least 10 seconds. The account restarts its loop when the configuration is applied; the access token is kept, so a restart does not refresh again.
+`StatePollingInterval` and `RetryInterval` are at least 10 seconds and at most one day, and the edit dialog accepts intervals of at most one day. The account restarts its loop when the configuration is applied; the access token is kept, so a restart does not refresh again.
 
 ```json
 {

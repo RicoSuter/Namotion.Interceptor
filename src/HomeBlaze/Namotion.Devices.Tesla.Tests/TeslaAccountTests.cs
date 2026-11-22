@@ -331,6 +331,45 @@ public class TeslaAccountTests
     }
 
     [Fact]
+    public async Task WhenRetryAfterIsFarInTheFuture_ThenThePauseIsLimitedToOneDay()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler()
+            .Respond(TokenPath, HttpStatusCode.OK, TokenJson)
+            .Respond(ProductsPath, HttpStatusCode.TooManyRequests, """{"error":"too many requests"}""", ("Retry-After", "Fri, 01 Jan 2100 00:00:00 GMT"));
+        var (account, _, _) = Create(handler);
+
+        // Act
+        var delayAfterLimit = await account.RunIterationAsync(CancellationToken.None);
+        var delayDuringPause = await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromDays(1), delayAfterLimit);
+        Assert.Equal(TimeSpan.FromDays(1), delayDuringPause);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAnIntervalExceedsOneDay_ThenTheDelayIsLimitedToOneDay(bool failPoll)
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler()
+            .Respond(TokenPath, HttpStatusCode.OK, TokenJson)
+            .Respond(ProductsPath, failPoll ? HttpStatusCode.BadGateway : HttpStatusCode.OK, failPoll ? """{"error":"bad gateway"}""" : FixtureLoader.Load("products.json"))
+            .Respond(VehicleDataPath, HttpStatusCode.OK, FixtureLoader.Load("vehicle-data.json"));
+        var (account, _, _) = Create(handler);
+        account.StatePollingInterval = TimeSpan.FromDays(100);
+        account.RetryInterval = TimeSpan.FromDays(100);
+
+        // Act
+        var delay = await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromDays(1), delay);
+    }
+
+    [Fact]
     public async Task WhenConfigurationChangesDuringARequestLimitPause_ThenThePauseIsKeptUnlessTheRefreshTokenIsReplaced()
     {
         // Arrange
@@ -630,6 +669,21 @@ public class TeslaAccountTests
         // Act & Assert
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => account.Vehicles.Single().Value.WakeUpAsync(CancellationToken.None));
         Assert.Single(logger.Warnings, message => message.StartsWith("Waking Tesla vehicle", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WhenWakeUpIsInvokedAfterDispose_ThenAnInvalidOperationExceptionIsThrown()
+    {
+        // Arrange
+        var (account, handler, _) = Create();
+        handler.Respond(WakeUpPath, HttpStatusCode.OK, """{"response":{"state":"online"}}""");
+        await account.PollOnceAsync(CancellationToken.None);
+        var vehicle = account.Vehicles.Single().Value;
+        account.Dispose();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => vehicle.WakeUpAsync(CancellationToken.None));
+        Assert.Equal(0, CountRequests(handler, WakeUpPath));
     }
 
     [Fact]

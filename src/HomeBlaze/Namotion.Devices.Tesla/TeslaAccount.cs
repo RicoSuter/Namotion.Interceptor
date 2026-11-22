@@ -36,6 +36,8 @@ public partial class TeslaAccount : BackgroundService,
     // dictionary are only touched while it is held.
     private readonly SemaphoreSlim _pollLock = new(1, 1);
 
+    private volatile bool _isDisposed;
+
     public TeslaAccount(TimeProvider timeProvider, ILoggerFactory loggerFactory)
         : this(timeProvider, loggerFactory, TeslaHttp.CreateClient)
     {
@@ -178,6 +180,8 @@ public partial class TeslaAccount : BackgroundService,
 
     public override void Dispose()
     {
+        _isDisposed = true;
+
         // Cancels the stopping token first, so that the loop does not start another poll on the disposed client.
         // _pollLock is not disposed: it never creates a wait handle, and a poll still running when Dispose is called
         // without StopAsync releases it afterwards.
