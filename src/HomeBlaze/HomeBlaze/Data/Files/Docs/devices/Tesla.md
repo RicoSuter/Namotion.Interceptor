@@ -40,7 +40,6 @@ Refresh tokens last about three months and rotate on every refresh, so a running
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `Name` | string | "" | Display name. Empty shows "Tesla" before the sign in and "Tesla: " with the email of the account after it. |
-| `Provider` | enum | `OwnerApi` | Where the data comes from. Only `OwnerApi` exists in this version. |
 | `RefreshToken` | string | "" | Refresh token of the account (stored as a secret). Tesla rotates it with every refresh and HomeBlaze stores the new one. |
 | `StatePollingInterval` | TimeSpan | 1 minute | How often the vehicle list with state and cached data is read. |
 | `ActivePollingInterval` | TimeSpan | 1 minute | How often the data of an awake vehicle is read while it charges, drives or has a user present. |
@@ -55,7 +54,6 @@ Refresh tokens last about three months and rotate on every refresh, so a running
 {
   "$type": "Namotion.Devices.Tesla.TeslaAccount",
   "name": "Tesla",
-  "provider": "OwnerApi",
   "refreshToken": "",
   "statePollingInterval": "00:01:00",
   "activePollingInterval": "00:01:00",
@@ -258,7 +256,7 @@ A failure of one vehicle does not stop the others. Tesla's request limit (429) p
 ## Known Limitations
 
 - **Read only.** The integration cannot start or stop charging, set the charge limit, open the charge port, lock or unlock, or control the climate. Since 2024, Tesla vehicles except the pre-2021 Model S and X accept only commands signed with a key that the vehicle trusts, and reject unsigned commands. `CommandSigning` shows what the vehicle requires. A key can only be enrolled with a Fleet API developer application, or over Bluetooth with a tap of the key card, and the Owner API does not forward signed commands. Only `Wake Up` is available.
-- **Phase 2: Teslemetry or Tessie.** The design prepares a second provider, Teslemetry or Tessie, which are paid services that send the signed commands for you, to add commands such as the charge limit, starting and stopping charging, the charge schedule and the charge port. Provider is configuration already (`Provider`), and both services serve the same paths and payloads as Tesla's Fleet API. It is not implemented yet.
+- **Phase 2: Teslemetry or Tessie.** A second provider, Teslemetry or Tessie, which are paid services that send the signed commands for you, would add commands such as the charge limit, starting and stopping charging, the charge schedule and the charge port. Both services serve the same paths and payloads as Tesla's Fleet API. It is not implemented yet, and this version has no setting to choose a provider.
 - **Phase 3: own command signing.** Signing commands in HomeBlaze itself would need a key enrolled over Bluetooth and commands sent over Bluetooth from a device near the vehicle. It is only planned if it turns out to be feasible.
 - **The Owner API is unofficial.** It changed twice in 2026 (the login redirect and the vehicle list endpoint), and can break without notice. Tesla can also change what it demands of the clients, as it did with HTTP/2 and TLS 1.3 in June 2026. Updates of this integration may be needed then. To spot a change, search the log for `Tesla API changed?`: a value of an unexpected type, an unknown state text or protobuf enum number, and a missing core field (such as the battery level or the odometer) are logged as a warning once each.
 - **The Tesla Wall Connector is not supported.** The Wall Connector integration of HomeBlaze v1 was not migrated.

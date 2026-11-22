@@ -1,7 +1,6 @@
 {
   "$type": "Namotion.Devices.Tesla.TeslaAccount",
   "name": "Tesla",
-  "provider": "OwnerApi",
   "refreshToken": "",
   "statePollingInterval": "00:01:00",
   "activePollingInterval": "00:01:00",

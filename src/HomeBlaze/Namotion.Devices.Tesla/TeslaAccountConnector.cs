@@ -32,6 +32,19 @@ public sealed record TeslaConnection(string RefreshToken, string? Email, IReadOn
 }
 
 /// <summary>
+/// A started browser login: open <see cref="Url"/>, then exchange the code of the pasted callback with <see cref="CodeVerifier"/>.
+/// <see cref="object.ToString"/> leaves out the code verifier.
+/// </summary>
+public sealed record TeslaLogin(string Url, string State, string CodeVerifier)
+{
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append(CultureInfo.InvariantCulture, $"Url = {Url}, State = {State}");
+        return true;
+    }
+}
+
+/// <summary>
 /// Connects a Tesla account for the setup: checks a refresh token or a browser login and lists the vehicles. Never wakes a vehicle.
 /// </summary>
 /// <remarks>

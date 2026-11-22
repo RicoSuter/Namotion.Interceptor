@@ -18,19 +18,6 @@ internal sealed record TeslaTokens(string AccessToken, string RefreshToken, Date
 }
 
 /// <summary>
-/// A started browser login: open <see cref="Url"/>, then exchange the code of the pasted callback with <see cref="CodeVerifier"/>.
-/// <see cref="object.ToString"/> leaves out the code verifier.
-/// </summary>
-public sealed record TeslaLogin(string Url, string State, string CodeVerifier)
-{
-    private bool PrintMembers(StringBuilder builder)
-    {
-        builder.Append(CultureInfo.InvariantCulture, $"Url = {Url}, State = {State}");
-        return true;
-    }
-}
-
-/// <summary>
 /// Calls the Tesla authorization server for the Owner API client.
 /// </summary>
 internal sealed class TeslaAuthClient

@@ -51,7 +51,6 @@ public partial class TeslaAccount : BackgroundService,
         _apiClient = new TeslaOwnerApiClient(_httpClient, timeProvider, _logger);
 
         Name = string.Empty;
-        Provider = TeslaProvider.OwnerApi;
         RefreshToken = string.Empty;
         StatePollingInterval = TimeSpan.FromMinutes(1);
         ActivePollingInterval = TimeSpan.FromMinutes(1);
@@ -74,9 +73,6 @@ public partial class TeslaAccount : BackgroundService,
     /// <summary>The display name of the account; empty to show "Tesla: " with the email of the account.</summary>
     [Configuration]
     public partial string Name { get; set; }
-
-    [Configuration]
-    public partial TeslaProvider Provider { get; set; }
 
     /// <summary>The refresh token. Tesla rotates it with every refresh, and the rotated token is written back to the configuration.</summary>
     [Configuration(IsSecret = true)]
