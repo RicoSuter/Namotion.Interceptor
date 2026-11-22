@@ -37,7 +37,7 @@
             var isExpanded = includedItems.Count > 0 && _list.IsExpanded(row);
             @* The row is a container, because the expander is a button of its own and must not sit inside the select
                button. *@
-            <div class="subject-discovery-row" @key="row">
+            <div class="subject-discovery-row" @key="(row.Discovered.SubjectType, result.Key)">
                 <div class="subject-discovery-row-line">
                     @if (row.Discovered.ExistingSubject is { } existingSubject)
                     {
