@@ -54,7 +54,7 @@ public partial class TeslaVehicle :
 
         Charge = new TeslaChargeState(logger);
         Climate = new TeslaClimateState(logger);
-        Drive = new TeslaDriveState(this, logger);
+        Drive = new TeslaDriveState(this);
         Body = new TeslaVehicleBody();
         Media = new TeslaMedia(logger);
         SoftwareUpdate = new TeslaSoftwareUpdate(logger);

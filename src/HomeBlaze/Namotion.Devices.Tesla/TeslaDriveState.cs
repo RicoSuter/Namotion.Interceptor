@@ -2,7 +2,6 @@ using CarServer;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
-using Microsoft.Extensions.Logging;
 using Namotion.Devices.Tesla.Client.Dto;
 using Namotion.Devices.Tesla.Mapping;
 using Namotion.Interceptor.Attributes;
@@ -18,7 +17,6 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
 {
     // The owner, never an intercepted property: an intercepted property holding it would attach the vehicle under its own child.
     private readonly TeslaVehicle _vehicle;
-    private readonly ILogger _logger;
 
     // The cached snapshot has separate timestamps for the location and the drive section.
     private readonly TeslaSectionClock _locationClock = new();
@@ -31,11 +29,6 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
 
     public string IconName => "Speed";
 
-    /// <summary>The location in the coordinate system of <see cref="NativeLocationType"/>, which differs from <see cref="TeslaVehicle.Location"/> only in some regions.</summary>
-    [State(Position = 2)] public partial GeoCoordinate? NativeLocation { get; internal set; }
-
-    [State(Position = 3)] public partial TeslaGpsCoordinateType? NativeLocationType { get; internal set; }
-    [State(IsDiscrete = true, Position = 4)] public partial bool? IsNativeLocationSupported { get; internal set; }
     [State(Unit = StateUnit.Degree, Position = 5)] public partial decimal? Heading { get; internal set; }
 
     /// <summary>The time of the last GPS fix.</summary>
@@ -64,13 +57,9 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
 
     [State(Position = 12)] public partial TeslaNavigation Navigation { get; internal set; }
 
-    internal TeslaDriveState(TeslaVehicle vehicle, ILogger logger)
+    internal TeslaDriveState(TeslaVehicle vehicle)
     {
         _vehicle = vehicle;
-        _logger = logger;
-        NativeLocation = null;
-        NativeLocationType = null;
-        IsNativeLocationSupported = null;
         Heading = null;
         GpsTime = null;
         IsHomelinkNearby = null;
@@ -133,9 +122,6 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
     private void UpdateLocationFromJson(TeslaDriveStateDto dto)
     {
         _vehicle.Location = TeslaValues.Coordinate(TeslaValues.ToFloatPrecision(dto.Latitude), TeslaValues.ToFloatPrecision(dto.Longitude));
-        NativeLocation = TeslaValues.Coordinate(TeslaValues.ToFloatPrecision(dto.NativeLatitude), TeslaValues.ToFloatPrecision(dto.NativeLongitude));
-        NativeLocationType = TeslaValues.Enum<TeslaGpsCoordinateType>(dto.NativeType, _logger);
-        IsNativeLocationSupported = dto.NativeLocationSupported is { } supported ? supported > 0 : null;
         Heading = dto.Heading;
         GpsTime = TeslaValues.FromUnixSeconds(dto.GpsAsOf);
     }
@@ -155,17 +141,10 @@ public partial class TeslaDriveState : ITitleProvider, IIconProvider
         {
             _vehicle.Location = TeslaValues.Coordinate(TeslaValues.Decimal(proto.Latitude), TeslaValues.Decimal(proto.Longitude));
         }
-
-        if (proto.OptionalNativeLatitudeCase != LocationState.OptionalNativeLatitudeOneofCase.None && proto.OptionalNativeLongitudeCase != LocationState.OptionalNativeLongitudeOneofCase.None)
-        {
-            NativeLocation = TeslaValues.Coordinate(TeslaValues.Decimal(proto.NativeLatitude), TeslaValues.Decimal(proto.NativeLongitude));
-        }
     }
 
     private void UpdateLocationDetailsFromProtobuf(LocationState proto)
     {
-        if (proto.NativeType is { } nativeType && TeslaProtoValues.CoordinateType(nativeType) is { } mappedType) NativeLocationType = mappedType;
-        if (proto.OptionalNativeLocationSupportedCase != LocationState.OptionalNativeLocationSupportedOneofCase.None) IsNativeLocationSupported = proto.NativeLocationSupported;
         if (proto.OptionalHeadingCase != LocationState.OptionalHeadingOneofCase.None) Heading = proto.Heading;
         if (proto.OptionalGpsAsOfCase != LocationState.OptionalGpsAsOfOneofCase.None) GpsTime = TeslaValues.FromUnixSeconds((long)proto.GpsAsOf);
         if (proto.OptionalHomelinkNearbyCase != LocationState.OptionalHomelinkNearbyOneofCase.None) UpdateHomelinkNearby(proto.HomelinkNearby, proto.Timestamp?.ToDateTimeOffset());

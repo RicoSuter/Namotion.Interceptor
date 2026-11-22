@@ -61,15 +61,12 @@ public class TeslaVehicleDetailsTests
         Assert.Null(media.CurrentTrackArtist);
         Assert.Null(media.CurrentTrackAlbum);
         Assert.Null(media.Station);
-        Assert.Equal(5.6667m, media.AudioVolume);
-        Assert.Equal(10.33333m, media.AudioVolumeMaximum);
-        Assert.Equal(0.3333330m, media.AudioVolumeIncrement);
         Assert.Null(media.CurrentTrackImageUri);
         Assert.Null(media.CurrentTrackUri);
     }
 
     [Fact]
-    public void WhenTheMaximumVolumeIsMissing_ThenTheVolumeFractionIsNull()
+    public void WhenTheMaximumVolumeIsZero_ThenTheVolumeIsNull()
     {
         // Arrange
         var media = new TeslaMedia(NullLogger.Instance);
@@ -79,8 +76,63 @@ public class TeslaVehicleDetailsTests
         media.Update(dto);
 
         // Assert
-        Assert.Equal(3m, media.AudioVolume);
         Assert.Null(media.Volume);
+    }
+
+    [Fact]
+    public void WhenTheMaximumVolumeIsMissingInTheFirstUpdate_ThenTheVolumeIsNull()
+    {
+        // Arrange
+        var media = new TeslaMedia(NullLogger.Instance);
+        var dto = new TeslaVehicleStateDto { MediaInfo = new TeslaMediaInfoDto { AudioVolume = 3m }, Timestamp = FixtureTimestamp };
+
+        // Act
+        media.Update(dto);
+
+        // Assert
+        Assert.Null(media.Volume);
+    }
+
+    [Fact]
+    public void WhenTheJsonVolumeHasNoMaximum_ThenTheKnownMaximumIsKept()
+    {
+        // Arrange
+        var media = CreateMediaFromFixture();
+        var dto = new TeslaVehicleStateDto { MediaInfo = new TeslaMediaInfoDto { AudioVolume = 5.1666665m }, Timestamp = FixtureTimestamp + 1000 };
+
+        // Act
+        media.Update(dto);
+
+        // Assert
+        Assert.Equal(0.5m, Math.Round(media.Volume!.Value, 4));
+    }
+
+    [Fact]
+    public void WhenTheProtobufVolumeHasNoMaximum_ThenTheKnownMaximumIsKept()
+    {
+        // Arrange
+        var media = CreateMediaFromFixture();
+        var state = new MediaState { AudioVolume = 5.1666665f, Timestamp = Timestamp(60_000) };
+
+        // Act
+        media.Update(state);
+
+        // Assert
+        Assert.Equal(0.5m, Math.Round(media.Volume!.Value, 4));
+    }
+
+    [Fact]
+    public void WhenOnlyTheProtobufMaximumArrives_ThenTheVolumeIsRecomputed()
+    {
+        // Arrange
+        var media = CreateMediaFromFixture();
+        var state = new MediaState { AudioVolumeMax = 11.333333f, Timestamp = Timestamp(60_000) };
+
+        // Act
+        media.Update(state);
+
+        // Assert
+        Assert.Equal(0.5m, Math.Round(media.Volume!.Value, 4));
     }
 
     [Fact]
@@ -119,8 +171,7 @@ public class TeslaVehicleDetailsTests
         Assert.Equal(TimeSpan.FromSeconds(200), media.CurrentTrackDuration);
         Assert.Equal(TimeSpan.FromSeconds(5), media.CurrentTrackPosition);
         Assert.Equal(TeslaMediaPlaybackStatus.Playing, media.PlaybackStatus);
-        Assert.Equal(7.5m, media.AudioVolume);
-        Assert.Equal(10.33333m, media.AudioVolumeMaximum); // absent in the snapshot, unchanged
+        Assert.Equal(Math.Round(7.5m / 10.33333m, 4), Math.Round(media.Volume!.Value, 4)); // the maximum is absent in the snapshot, unchanged
         Assert.True(media.IsRemoteControlEnabled); // absent in the snapshot, unchanged
     }
 
@@ -211,9 +262,6 @@ public class TeslaVehicleDetailsTests
             Assert.Equal(json.Station, media.Station);
             Assert.Equal(json.CurrentTrackDuration, media.CurrentTrackDuration);
             Assert.Equal(json.CurrentTrackPosition, media.CurrentTrackPosition);
-            Assert.Equal(json.AudioVolume, media.AudioVolume);
-            Assert.Equal(json.AudioVolumeMaximum, media.AudioVolumeMaximum);
-            Assert.Equal(json.AudioVolumeIncrement, media.AudioVolumeIncrement);
             Assert.Equal(json.Volume, media.Volume);
             Assert.Equal(json.IsRemoteControlEnabled, media.IsRemoteControlEnabled);
         }

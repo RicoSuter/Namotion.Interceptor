@@ -18,7 +18,7 @@
             </MudStack>
             <MudSpacer />
             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
-                     Color="@(Vehicle?.IsAwake == true ? Color.Info : Color.Default)">
+                     Color="@GetStateColor(Vehicle?.VehicleState)">
                 @(Vehicle?.VehicleState.ToString() ?? "Unknown")
             </MudChip>
         </MudStack>
@@ -85,4 +85,11 @@
     public IInterceptorSubject? Subject { get; set; }
 
     private TeslaVehicle? Vehicle => Subject as TeslaVehicle;
+
+    private static Color GetStateColor(TeslaVehicleState? state) => state switch
+    {
+        TeslaVehicleState.Online => Color.Success,
+        TeslaVehicleState.Asleep => Color.Warning,
+        _ => Color.Default
+    };
 }

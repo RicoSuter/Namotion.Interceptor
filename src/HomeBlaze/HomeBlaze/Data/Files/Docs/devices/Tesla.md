@@ -180,7 +180,6 @@ The title is the name set in the vehicle, else the display name of the account, 
 
 | Property | Unit | Description |
 |----------|------|-------------|
-| `NativeLocation`, `NativeLocationType`, `IsNativeLocationSupported` | | The location in the coordinate system of `NativeLocationType` (`Wgs` or `Gcj`), which differs from the `Location` of the vehicle only in some regions |
 | `Heading` | degrees | Heading |
 | `GpsTime` | | Time of the last location |
 | `Speed` | km/h | Speed, which Tesla omits while the vehicle is parked |
@@ -215,7 +214,7 @@ The title is the name set in the vehicle, else the display name of the account, 
 
 | Subject | Properties |
 |---------|------------|
-| `TeslaMedia` | `PlaybackStatus`, `Source`, `CurrentTrackTitle`, `CurrentTrackArtist`, `CurrentTrackAlbum`, `Station`, `CurrentTrackDuration`, `CurrentTrackPosition`, `AudioVolume`, `AudioVolumeMaximum`, `AudioVolumeIncrement`, `IsRemoteControlEnabled`, and `Volume` as the fraction of the maximum |
+| `TeslaMedia` | `PlaybackStatus`, `Source`, `CurrentTrackTitle`, `CurrentTrackArtist`, `CurrentTrackAlbum`, `Station`, `CurrentTrackDuration`, `CurrentTrackPosition`, `IsRemoteControlEnabled`, and `Volume` as the fraction of Tesla's own maximum, from 0 to 1 |
 | `TeslaSoftwareUpdate` | `Status`, `Version`, `DownloadProgress`, `InstallProgress` (percent), `ExpectedDuration` |
 | `TeslaSpeedLimitMode` | `IsActive`, `CurrentLimit`, `MinimumLimit`, `MaximumLimit` (km/h), `IsPinCodeSet` |
 | `TeslaVehicleSpecification` | `CarType`, `CarSpecialType`, `TrimBadging`, colors, trims, wheel type, roof, spoiler, seats, drive unit, charge port type, lamps, package and version numbers, `UtcOffset`, and the feature flags `HasSunRoof`, `HasSeatCooling`, `HasAirSuspension`, `IsRightHandDrive`, `IsEuVehicle`, `CanActuateTrunks` and others, from `vehicle_config` |

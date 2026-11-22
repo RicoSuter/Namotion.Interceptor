@@ -134,13 +134,6 @@ internal static class TeslaProtoValues
         _ => null
     };
 
-    public static TeslaGpsCoordinateType? CoordinateType(LocationState.Types.GPSCoordinateType type) => type.TypeCase switch
-    {
-        LocationState.Types.GPSCoordinateType.TypeOneofCase.WGS => TeslaGpsCoordinateType.Wgs,
-        LocationState.Types.GPSCoordinateType.TypeOneofCase.GCJ => TeslaGpsCoordinateType.Gcj,
-        _ => null
-    };
-
     public static TeslaMediaPlaybackStatus? MediaPlaybackStatus(CarServer.MediaPlaybackStatus status) => status switch
     {
         CarServer.MediaPlaybackStatus.Stopped => TeslaMediaPlaybackStatus.Stopped,

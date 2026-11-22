@@ -388,12 +388,6 @@ namespace Namotion.Devices.Tesla
         public bool? IsDriving { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
         public bool? IsHomelinkNearby { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
-        public bool? IsNativeLocationSupported { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
-        public HomeBlaze.Abstractions.Common.GeoCoordinate? NativeLocation { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=3)]
-        public Namotion.Devices.Tesla.TeslaGpsCoordinateType? NativeLocationType { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=12)]
         public Namotion.Devices.Tesla.TeslaNavigation Navigation { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=9, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
@@ -411,12 +405,6 @@ namespace Namotion.Devices.Tesla
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
-    public enum TeslaGpsCoordinateType
-    {
-        Unknown = 0,
-        Wgs = 1,
-        Gcj = 2,
-    }
     public enum TeslaHvacAutoRequest
     {
         Unknown = 0,
@@ -427,12 +415,6 @@ namespace Namotion.Devices.Tesla
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class TeslaMedia : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Media.IMediaTrackState, HomeBlaze.Abstractions.Media.IVolumeState, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
-        [HomeBlaze.Abstractions.Attributes.State(Position=4)]
-        public decimal? AudioVolume { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=6)]
-        public decimal? AudioVolumeIncrement { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=5)]
-        public decimal? AudioVolumeMaximum { get; }
         public string? CurrentTrackAlbum { get; }
         public string? CurrentTrackArtist { get; }
         public System.TimeSpan? CurrentTrackDuration { get; }
@@ -442,7 +424,7 @@ namespace Namotion.Devices.Tesla
         public string? CurrentTrackUri { get; }
         public string IconName { get; }
         public bool? IsMuted { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
         public bool? IsRemoteControlEnabled { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
         public Namotion.Devices.Tesla.TeslaMediaPlaybackStatus? PlaybackStatus { get; }
@@ -451,7 +433,7 @@ namespace Namotion.Devices.Tesla
         [HomeBlaze.Abstractions.Attributes.State(Position=3)]
         public string? Station { get; }
         public string Title { get; }
-        [Namotion.Interceptor.Attributes.Derived]
+        [HomeBlaze.Abstractions.Attributes.State(Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         public decimal? Volume { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;

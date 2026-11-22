@@ -115,11 +115,11 @@ Every field of `vehicle_data` and `cached_data` that describes the car is expose
 | `TeslaChargeState` | charging state (enum), battery level, usable battery level, charge limit with minimum, maximum and standard, charging power, currents (actual, requested, maximum, pilot), voltage, phases, added energy and range, remaining time, fast charger present, brand and type, cable, charge port door, latch and color, battery heater, scheduled charging mode and start, scheduled departure, off-peak and preconditioning settings, estimated battery capacity (v1, derived) |
 | `TeslaClimateState` | climate on, auto conditioning, preconditioning, inside, outside, driver and passenger temperature, minimum and maximum settable temperature, fan, defrosters, cabin overheat protection and its activation temperature, climate keeper mode, battery heater, mirror and wiper heaters |
 | `TeslaSeatHeaters` | levels of the front left, front right, rear left, rear center and rear right seats (physical sides, `FrontLeftLevel` and so on), auto seat climate of the front left and right seats, and the steering wheel heater (on, level, auto), which therefore is not in `TeslaClimateState` |
-| `TeslaDriveState` | native location, heading, speed, shift state (enum), derived `IsDriving`, drive power, GPS time |
+| `TeslaDriveState` | heading, speed, shift state (enum), derived `IsDriving`, drive power, GPS time |
 | `TeslaNavigation` | active route destination, minutes and distance to arrival, energy at arrival, traffic delay, destination location |
 | `TeslaVehicleBody` | lock state, each door, window, frunk and trunk open, derived "any open" flags, sentry mode, valet mode, user present, remote start, dashcam state, homelink nearby, center display state |
 | `TeslaTire` | pressure (bar), recommended pressure, soft and hard warning, last seen |
-| `TeslaMedia` | playback status, source, title, artist, album, station, duration, elapsed, volume and maximum (`IMediaTrackState`, `IVolumeState`) |
+| `TeslaMedia` | playback status, source, title, artist, album, station, duration, elapsed, volume as a fraction of Tesla's own maximum (`IMediaTrackState`, `IVolumeState`) |
 | `TeslaSoftwareUpdate` | status, version, download and install progress, expected duration |
 | `TeslaSpeedLimitMode` | active, current, minimum and maximum limit (km/h), PIN set |
 | `TeslaVehicleSpecification` | car type, special type, trim badging, colors, wheel type, seat and roof options, drive unit, charge port type, feature flags (`vehicle_config`) |
@@ -209,7 +209,7 @@ In `Namotion.Devices.Tesla.HomeBlaze`, following the Wallbox and Hue components:
 | Vehicle selection | All vehicles of the account discovered |
 | Charge, climate, drive and vehicle state (all `vehicle_data` fields) | Children of `TeslaVehicle`, typed and normalized |
 | Odometer in meters | `TotalDrivenDistance` in km |
-| Locations as `GeoCoordinate` | `Location`, native location, navigation destination |
+| Locations as `GeoCoordinate` | `Location`, navigation destination |
 | Estimated battery capacity | `TeslaChargeState`, derived |
 | `IsConnected`, `LastUpdated` | `IConnectionState`, `ILastUpdatedProvider` |
 | Wake up | `Wake Up` operation |

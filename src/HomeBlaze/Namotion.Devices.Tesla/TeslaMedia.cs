@@ -21,6 +21,10 @@ public partial class TeslaMedia : ITitleProvider, IIconProvider, IMediaTrackStat
     private readonly TeslaSectionClock _stateClock = new();
     private readonly TeslaSectionClock _detailClock = new();
 
+    // Tesla's own volume scale, which ends at the maximum. A source that sends the volume without the maximum keeps the last known maximum.
+    private decimal? _audioVolume;
+    private decimal? _audioVolumeMaximum;
+
     public string Title => "Media";
 
     public string IconName => "MusicNote";
@@ -44,20 +48,10 @@ public partial class TeslaMedia : ITitleProvider, IIconProvider, IMediaTrackStat
 
     public partial TimeSpan? CurrentTrackPosition { get; internal set; }
 
-    /// <summary>The volume on Tesla's own scale, which ends at <see cref="AudioVolumeMaximum"/>.</summary>
-    [State(Position = 4)] public partial decimal? AudioVolume { get; internal set; }
+    [State(IsDiscrete = true, Position = 4)] public partial bool? IsRemoteControlEnabled { get; internal set; }
 
-    /// <summary>The highest volume on Tesla's own scale.</summary>
-    [State(Position = 5)] public partial decimal? AudioVolumeMaximum { get; internal set; }
-
-    /// <summary>The step of one volume key press on Tesla's own scale.</summary>
-    [State(Position = 6)] public partial decimal? AudioVolumeIncrement { get; internal set; }
-
-    [State(IsDiscrete = true, Position = 7)] public partial bool? IsRemoteControlEnabled { get; internal set; }
-
-    /// <summary>The volume as a fraction of the maximum, from 0 to 1.</summary>
-    [Derived]
-    public decimal? Volume => AudioVolumeMaximum is > 0 ? AudioVolume / AudioVolumeMaximum : null;
+    /// <summary>The volume as a fraction of the maximum, from 0 to 1. Null while the maximum is unknown or 0.</summary>
+    [State(Unit = StateUnit.Percent, Position = 5)] public partial decimal? Volume { get; internal set; }
 
     /// <summary>Tesla does not report whether the audio is muted.</summary>
     public bool? IsMuted => null;
@@ -77,10 +71,8 @@ public partial class TeslaMedia : ITitleProvider, IIconProvider, IMediaTrackStat
         Station = null;
         CurrentTrackDuration = null;
         CurrentTrackPosition = null;
-        AudioVolume = null;
-        AudioVolumeMaximum = null;
-        AudioVolumeIncrement = null;
         IsRemoteControlEnabled = null;
+        Volume = null;
     }
 
     internal void Update(TeslaVehicleStateDto dto)
@@ -132,9 +124,9 @@ public partial class TeslaMedia : ITitleProvider, IIconProvider, IMediaTrackStat
             PlaybackStatus = TeslaValues.Enum<TeslaMediaPlaybackStatus>(info.MediaPlaybackStatus, _logger);
             CurrentTrackTitle = TeslaValues.Text(info.NowPlayingTitle);
             CurrentTrackArtist = TeslaValues.Text(info.NowPlayingArtist);
-            AudioVolume = TeslaValues.ToFloatPrecision(info.AudioVolume);
-            AudioVolumeMaximum = TeslaValues.ToFloatPrecision(info.AudioVolumeMax);
-            AudioVolumeIncrement = TeslaValues.ToFloatPrecision(info.AudioVolumeIncrement);
+            _audioVolume = TeslaValues.ToFloatPrecision(info.AudioVolume);
+            _audioVolumeMaximum = TeslaValues.ToFloatPrecision(info.AudioVolumeMax) ?? _audioVolumeMaximum;
+            UpdateVolume();
         }
     }
 
@@ -161,10 +153,12 @@ public partial class TeslaMedia : ITitleProvider, IIconProvider, IMediaTrackStat
 
     private void UpdateVolumeFromProtobuf(MediaState proto)
     {
-        if (proto.OptionalAudioVolumeCase != MediaState.OptionalAudioVolumeOneofCase.None) AudioVolume = TeslaValues.Decimal(proto.AudioVolume);
-        if (proto.OptionalAudioVolumeMaxCase != MediaState.OptionalAudioVolumeMaxOneofCase.None) AudioVolumeMaximum = TeslaValues.Decimal(proto.AudioVolumeMax);
-        if (proto.OptionalAudioVolumeIncrementCase != MediaState.OptionalAudioVolumeIncrementOneofCase.None) AudioVolumeIncrement = TeslaValues.Decimal(proto.AudioVolumeIncrement);
+        if (proto.OptionalAudioVolumeCase != MediaState.OptionalAudioVolumeOneofCase.None) _audioVolume = TeslaValues.Decimal(proto.AudioVolume);
+        if (proto.OptionalAudioVolumeMaxCase != MediaState.OptionalAudioVolumeMaxOneofCase.None) _audioVolumeMaximum = TeslaValues.Decimal(proto.AudioVolumeMax) ?? _audioVolumeMaximum;
+        UpdateVolume();
     }
+
+    private void UpdateVolume() => Volume = _audioVolumeMaximum is > 0 ? _audioVolume / _audioVolumeMaximum : null;
 
     private void UpdateDetailsFromProtobuf(MediaDetailState proto)
     {

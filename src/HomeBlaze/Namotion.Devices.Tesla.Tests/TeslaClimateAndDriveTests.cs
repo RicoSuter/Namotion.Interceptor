@@ -280,9 +280,6 @@ public class TeslaClimateAndDriveTests
         var drive = CreateVehicleFromDriveFixture().Drive;
 
         // Assert
-        Assert.Equal(new GeoCoordinate(47.0, 8.0), drive.NativeLocation);
-        Assert.Equal(TeslaGpsCoordinateType.Wgs, drive.NativeLocationType);
-        Assert.True(drive.IsNativeLocationSupported);
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1795293363), drive.GpsTime);
         Assert.Equal(0m, drive.Power);
         Assert.Null(drive.IsHomelinkNearby);
@@ -395,7 +392,6 @@ public class TeslaClimateAndDriveTests
         // Assert
         Assert.Equal(47.5, vehicle.Location!.Value.Latitude, 3);
         Assert.Equal(90m, drive.Heading);
-        Assert.Equal(new GeoCoordinate(47.0, 8.0), drive.NativeLocation); // not in the snapshot, unchanged
         Assert.Equal(TeslaShiftState.Park, drive.ShiftState); // drive section is not part of the location snapshot
     }
 
@@ -406,10 +402,6 @@ public class TeslaClimateAndDriveTests
         var vehicle = CreateVehicleFromDriveFixture();
         var drive = vehicle.Drive;
         var snapshot = CreateSnapshot(60_000);
-        snapshot.LocationState.NativeLatitude = 47.75f;
-        snapshot.LocationState.NativeLongitude = 8.75f;
-        snapshot.LocationState.NativeType = new LocationState.Types.GPSCoordinateType { GCJ = new CarServer.Void() };
-        snapshot.LocationState.NativeLocationSupported = false;
         snapshot.LocationState.GpsAsOf = 1795293999;
         snapshot.LocationState.HomelinkNearby = true;
 
@@ -418,10 +410,6 @@ public class TeslaClimateAndDriveTests
 
         // Assert
         Assert.Equal(8.5, vehicle.Location!.Value.Longitude, 3);
-        Assert.Equal(47.75, drive.NativeLocation!.Value.Latitude, 3);
-        Assert.Equal(8.75, drive.NativeLocation.Value.Longitude, 3);
-        Assert.Equal(TeslaGpsCoordinateType.Gcj, drive.NativeLocationType);
-        Assert.False(drive.IsNativeLocationSupported);
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1795293999), drive.GpsTime);
         Assert.True(drive.IsHomelinkNearby);
     }
@@ -567,8 +555,6 @@ public class TeslaClimateAndDriveTests
         {
             Latitude = 47.123456789m,
             Longitude = 8.987654321m,
-            NativeLatitude = 47.123456789m,
-            NativeLongitude = 8.987654321m,
             ActiveRouteDestination = "Test Destination",
             ActiveRouteLatitude = 47.123456789m,
             ActiveRouteLongitude = 8.987654321m,
@@ -577,8 +563,6 @@ public class TeslaClimateAndDriveTests
         var snapshot = CreateSnapshot(0);
         snapshot.LocationState.Latitude = 47.123456789f;
         snapshot.LocationState.Longitude = 8.987654321f;
-        snapshot.LocationState.NativeLatitude = 47.123456789f;
-        snapshot.LocationState.NativeLongitude = 8.987654321f;
         snapshot.DriveState.ActiveRouteDestination = "Test Destination";
         snapshot.DriveState.ActiveRouteCoordinates = new LatLong { Latitude = 47.123456789f, Longitude = 8.987654321f };
         var protobufVehicle = CreateVehicle();
@@ -591,7 +575,6 @@ public class TeslaClimateAndDriveTests
         // Assert
         Assert.NotNull(jsonVehicle.Location);
         Assert.Equal(jsonVehicle.Location, protobufVehicle.Location);
-        Assert.Equal(jsonDrive.NativeLocation, protobufDrive.NativeLocation);
         Assert.Equal(jsonDrive.Navigation.DestinationLocation, protobufDrive.Navigation.DestinationLocation);
     }
 

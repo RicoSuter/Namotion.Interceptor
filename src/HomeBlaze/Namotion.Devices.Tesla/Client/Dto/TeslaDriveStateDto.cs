@@ -15,10 +15,6 @@ internal sealed class TeslaDriveStateDto
     [JsonPropertyName("heading")] public int? Heading { get; init; }
     [JsonPropertyName("latitude")] public decimal? Latitude { get; init; }
     [JsonPropertyName("longitude")] public decimal? Longitude { get; init; }
-    [JsonPropertyName("native_latitude")] public decimal? NativeLatitude { get; init; }
-    [JsonPropertyName("native_longitude")] public decimal? NativeLongitude { get; init; }
-    [JsonPropertyName("native_location_supported")] public int? NativeLocationSupported { get; init; }
-    [JsonPropertyName("native_type")] public string? NativeType { get; init; }
     [JsonPropertyName("power")] public int? Power { get; init; }
     [JsonPropertyName("shift_state")] public string? ShiftState { get; init; }
     [JsonPropertyName("speed")] public decimal? Speed { get; init; }
