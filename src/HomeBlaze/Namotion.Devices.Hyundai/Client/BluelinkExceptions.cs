@@ -59,7 +59,7 @@ public sealed class BluelinkPinRejectedException(HttpStatusCode statusCode, stri
 /// <summary>Hyundai rejected the credentials, or asks to accept new terms; the user has to sign in again.</summary>
 public sealed class BluelinkReauthenticationRequiredException(string message) : Exception(message);
 
-/// <summary>The credentials were replaced while a token manager of the previous ones signed in; the next poll uses the replacement.</summary>
+/// <summary>The credentials were replaced while the previous ones were in use; the request was not sent with the replaced credentials.</summary>
 public sealed class BluelinkCredentialsReplacedException(string message) : Exception(message);
 
 /// <summary>The daily request limit of the account is reached; requests resume after local midnight.</summary>

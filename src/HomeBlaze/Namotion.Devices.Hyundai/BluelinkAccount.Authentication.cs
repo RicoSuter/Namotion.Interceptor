@@ -45,8 +45,8 @@ public partial class BluelinkAccount
     }
 
     /// <summary>
-    /// Returns the token manager, kept across polls and configuration changes and replaced only when the stored tokens
-    /// or the device ID were replaced. New tokens read the vehicle list again.
+    /// Returns the token manager, kept across polls and configuration changes. It is replaced when the stored tokens
+    /// change, or when a device registration or a device ID reset dropped it. New tokens read the vehicle list again.
     /// </summary>
     /// <remarks>Call it only while <see cref="_lock"/> is held, after <see cref="EnsureDeviceIdAsync"/>.</remarks>
     /// <exception cref="BluelinkReauthenticationRequiredException">The stored tokens are not valid.</exception>
@@ -224,7 +224,8 @@ public partial class BluelinkAccount
             _tokenManager = null;
         }
 
-        await WriteConfigurationAsync(throwOnFailure: false, cancellationToken);
+        // Not canceled: the registered device ID must be stored even when the caller gives up.
+        await WriteConfigurationAsync(throwOnFailure: false, CancellationToken.None);
     }
 
     /// <summary>Clears the device ID after Hyundai answered 4002 to a call of the manager, so that the next poll registers again.</summary>

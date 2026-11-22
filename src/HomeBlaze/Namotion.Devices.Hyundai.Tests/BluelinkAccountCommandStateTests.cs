@@ -87,4 +87,19 @@ public class BluelinkAccountCommandStateTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => account.Vehicles[Kona].RefreshAsync(CancellationToken.None));
         Assert.Equal(requestCount, handler.Requests.Count);
     }
+
+    [Fact]
+    public async Task WhenCredentialsAreRemoved_ThenCommandThrowsBeforeAnyRequest()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        account.Tokens = string.Empty;
+        var requestCount = handler.Requests.Count;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => account.Vehicles[Kona].Charge.StartChargingAsync(CancellationToken.None));
+        Assert.Equal("The Bluelink account has no credentials.", exception.Message);
+        Assert.Equal(requestCount, handler.Requests.Count);
+    }
 }

@@ -61,6 +61,8 @@ internal sealed class BluelinkTokenManager
     /// <summary>Calls the vehicle API with an access token; after a token expired answer it refreshes once and calls again.</summary>
     /// <exception cref="BluelinkReauthenticationRequiredException">The refresh is rejected and no password is stored, or the sign in is rejected.</exception>
     /// <exception cref="BluelinkApiException">Any other failure, including a token expired answer after the refresh; the caller retries later.</exception>
+    /// <exception cref="BluelinkCredentialsReplacedException">The login delegate refused to sign in, because the credentials were replaced.</exception>
+    /// <exception cref="Exception">The exception of a failed persist callback; the next call retries only the persist.</exception>
     public async Task<T> CallAsync<T>(Func<string, Task<T>> call, CancellationToken cancellationToken)
     {
         var accessToken = await GetAccessTokenAsync(cancellationToken);
@@ -88,6 +90,8 @@ internal sealed class BluelinkTokenManager
     /// <summary>Makes sure a fresh access token is available, so that a refresh or sign in fails here and not inside a vehicle call.</summary>
     /// <exception cref="BluelinkReauthenticationRequiredException">The refresh is rejected and no password is stored, or the sign in is rejected.</exception>
     /// <exception cref="BluelinkApiException">The refresh or the token exchange failed otherwise; the caller retries later.</exception>
+    /// <exception cref="BluelinkCredentialsReplacedException">The login delegate refused to sign in, because the credentials were replaced.</exception>
+    /// <exception cref="Exception">The exception of a failed persist callback; the next call retries only the persist.</exception>
     public Task EnsureAccessTokenAsync(CancellationToken cancellationToken) => GetAccessTokenAsync(cancellationToken);
 
     private async Task<string> GetAccessTokenAsync(CancellationToken cancellationToken)

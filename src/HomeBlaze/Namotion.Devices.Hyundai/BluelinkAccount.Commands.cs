@@ -90,6 +90,11 @@ public partial class BluelinkAccount
         BluelinkTokenManager? tokenManager = null;
         try
         {
+            if (string.IsNullOrWhiteSpace(Email) || string.IsNullOrWhiteSpace(Tokens))
+            {
+                throw new InvalidOperationException("The Bluelink account has no credentials.");
+            }
+
             if (!IsAuthenticated)
             {
                 throw new InvalidOperationException("The Bluelink account is not connected.");
