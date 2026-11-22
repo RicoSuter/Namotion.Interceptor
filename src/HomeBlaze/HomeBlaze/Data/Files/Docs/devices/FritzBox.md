@@ -33,6 +33,7 @@ The Discover page of the create dialog finds FRITZ!Box routers and repeaters ove
 |---|---|---|---|
 | `Name` | string | `FRITZ!Box` | Title |
 | `HostAddress` | string | | IP address or host name of the router. Empty stops the subject. |
+| `Udn` | string | | Unique device name from the router's TR-064 description. Set from discovery and used to recognize the router as already added. |
 | `Username` | string | | FRITZ!Box user with the FRITZ!Box settings permission |
 | `Password` | string | | Password of that user, stored as a secret |
 | `PublicKeyPin` | string | | Base64 SHA-256 of the trusted certificate's public key. Empty trusts the key the router presents next and stores it. |
@@ -46,6 +47,7 @@ Both intervals accept 5 seconds to 1 hour; a value outside that range is clamped
   "$type": "Namotion.Devices.FritzBox.FritzBox",
   "name": "FRITZ!Box",
   "hostAddress": "192.168.178.1",
+  "udn": null,
   "username": "homeblaze",
   "password": null,
   "publicKeyPin": null,

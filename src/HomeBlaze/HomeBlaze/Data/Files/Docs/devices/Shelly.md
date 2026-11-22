@@ -32,6 +32,7 @@ The Discover page of the create dialog finds Shelly devices of the second genera
 |----------|------|---------|-------------|
 | `Name` | string | "" | Display name (falls back to the device name from the API) |
 | `HostAddress` | string | null | Device IP address or hostname |
+| `DeviceId` | string | null | Device ID, such as `shellyplus1pm-a8032ab12345`. Set from discovery and used to recognize the device as already added |
 | `Password` | string | null | Reserved, device authentication is not supported yet |
 | `PollingInterval` | TimeSpan | 15 seconds | Normal polling rate |
 | `RetryInterval` | TimeSpan | 30 seconds | Delay before reconnecting after a connection or poll error |
