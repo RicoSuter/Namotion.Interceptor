@@ -7,7 +7,8 @@ using Namotion.Interceptor.Attributes;
 namespace Namotion.Devices.Tesla;
 
 /// <summary>
-/// The units and the clock format of the display of a Tesla vehicle. The values are Tesla's own texts, such as "km/hr", "C" or "Bar".
+/// The units and the clock format the owner set for the display of a Tesla vehicle. The values are Tesla's own texts, such as "km/hr", "C" or "Bar".
+/// They do not affect the other subjects, whose values always use metric units.
 /// </summary>
 [ExcludeFromCreation]
 [InterceptorSubject]
