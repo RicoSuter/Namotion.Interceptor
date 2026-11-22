@@ -114,9 +114,11 @@ public class ConfigurableSubjectSerializer
             $"Subject must be registered to exclude its properties. Type: {type.FullName}");
         var result = new JsonObject { [TypeDiscriminatorPropertyName] = type.FullName };
 
-        // The properties, their names and their filter are those of the serializer, so that the result
-        // equals Serialize apart from what is excluded.
-        foreach (var property in options.GetTypeInfo(type).Properties)
+        // The properties, their names, their filter and the callback of the type are those of the serializer, so that
+        // the result equals Serialize apart from what is excluded.
+        var typeInfo = options.GetTypeInfo(type);
+        typeInfo.OnSerializing?.Invoke(subject);
+        foreach (var property in typeInfo.Properties)
         {
             // The resolver creates every property from a member of the type and adds none of its own. A property
             // without a registered counterpart is skipped, as the filter of the serializer skips it.

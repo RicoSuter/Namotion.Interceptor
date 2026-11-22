@@ -134,33 +134,59 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
-    public void WhenATypeHasASecretPropertyThatIsNotAString_ThenItsTypeInfoThrows()
+    public void WhenASubjectHasASecretPropertyThatIsNotAString_ThenSerializingOrDeserializingItThrows()
     {
         // Arrange
-        var typeProvider = new TypeProvider();
-        typeProvider.AddTypes([typeof(InvalidSecretTypeDevice)]);
-        var options = new JsonSerializerOptions
-        {
-            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider, new ServiceCollection().BuildServiceProvider())
-        };
+        var options = CreateResolverOptions();
 
         // Act & Assert
-        var exception = Assert.Throws<InvalidOperationException>(() => options.GetTypeInfo(typeof(InvalidSecretTypeDevice)));
-        Assert.Contains(nameof(InvalidSecretTypeDevice.Pin), exception.Message);
+        var serializing = Assert.Throws<InvalidOperationException>(() => JsonSerializer.Serialize(new InvalidSecretTypeDevice(), options));
+        var deserializing = Assert.Throws<InvalidOperationException>(() => JsonSerializer.Deserialize<InvalidSecretTypeDevice>("{}", options));
+        Assert.Contains(nameof(InvalidSecretTypeDevice.Pin), serializing.Message);
+        Assert.Equal(serializing.Message, deserializing.Message);
     }
 
     [Fact]
-    public void WhenAPlainObjectHasASecretProperty_ThenItsTypeInfoThrows()
+    public void WhenAPlainObjectHasASecretProperty_ThenSerializingOrDeserializingItThrows()
     {
         // Arrange
-        var options = new JsonSerializerOptions
-        {
-            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(new TypeProvider(), new ServiceCollection().BuildServiceProvider())
-        };
+        var options = CreateResolverOptions();
 
         // Act & Assert
-        var exception = Assert.Throws<InvalidOperationException>(() => options.GetTypeInfo(typeof(SecretCredentials)));
-        Assert.Contains(nameof(SecretCredentials.Password), exception.Message);
+        var serializing = Assert.Throws<InvalidOperationException>(() => JsonSerializer.Serialize(new SecretCredentials("admin", "hunter2"), options));
+        var deserializing = Assert.Throws<InvalidOperationException>(() => JsonSerializer.Deserialize<SecretCredentials>("{}", options));
+        Assert.Contains(nameof(SecretCredentials.Password), serializing.Message);
+        Assert.Equal(serializing.Message, deserializing.Message);
+    }
+
+    [Fact]
+    public void WhenATypeWithAnUnsupportedSecretIsRegistered_ThenOtherSubjectsStillRoundTrip()
+    {
+        // Arrange
+        var (serializer, _) = CreateSerializer();
+        var device = Deserialize(serializer, DeviceJson(password: null, childPassword: "inner"));
+
+        // Act
+        var json = serializer.Serialize(device);
+
+        // Assert
+        Assert.Equal("10.0.0.2", ReadString(json, "child", "host"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenASubjectHasASecretPropertyThatIsNotAString_ThenTheSerializerThrowsWhenItIsSerialized(bool excludesProperties)
+    {
+        // Arrange
+        var (serializer, _) = CreateSerializer();
+        var device = new InvalidSecretTypeDevice(CreateContext());
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => excludesProperties
+            ? serializer.Serialize(device, static _ => false)
+            : serializer.Serialize(device));
+        Assert.Contains(nameof(InvalidSecretTypeDevice.Pin), exception.Message);
     }
 
     [Theory]
@@ -278,7 +304,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     public void WhenASecretPropertyIsNotAString_ThenDeserializingThrows()
     {
         // Arrange
-        var (serializer, _) = CreateSerializer(withInvalidSecretType: true);
+        var (serializer, _) = CreateSerializer();
         var json = $$"""{ "$type": "{{typeof(InvalidSecretTypeDevice).FullName}}" }""";
 
         // Act & Assert
@@ -286,27 +312,18 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         Assert.Contains(nameof(InvalidSecretTypeDevice.Pin), exception.Message);
     }
 
-    // A type with an unsupported secret is only registered on request: serializing any subject as IConfigurable resolves
-    // every registered type, so it would make every serialization throw.
-    internal (ConfigurableSubjectSerializer Serializer, SecretStore Store) CreateSerializer(
-        bool withStore = true, bool hasRegistry = true, bool withInvalidSecretType = false)
+    // InvalidSecretTypeDevice is registered next to the valid type, as the type of another library would be, so that
+    // every test also shows that it only fails for itself.
+    internal (ConfigurableSubjectSerializer Serializer, SecretStore Store) CreateSerializer(bool withStore = true, bool hasRegistry = true)
     {
         var typeProvider = new TypeProvider();
-        typeProvider.AddTypes(withInvalidSecretType
-            ? [typeof(SecretTestDevice), typeof(InvalidSecretTypeDevice)]
-            : [typeof(SecretTestDevice)]);
+        typeProvider.AddTypes([typeof(SecretTestDevice), typeof(InvalidSecretTypeDevice)]);
 
         var store = new SecretStore(StorePath);
         var services = new ServiceCollection();
         if (hasRegistry)
         {
-            services.AddSingleton(InterceptorSubjectContext.Create()
-                .WithFullPropertyTracking()
-                .WithRegistry()
-                .WithLifecycle()
-                .WithService<IPropertyLifecycleHandler>(
-                    () => new PropertyAttributeInitializer(),
-                    handler => handler is PropertyAttributeInitializer));
+            services.AddSingleton(CreateContext());
         }
 
         if (withStore)
@@ -316,6 +333,20 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
 
         return (new ConfigurableSubjectSerializer(typeProvider, services.BuildServiceProvider()), store);
     }
+
+    internal static IInterceptorSubjectContext CreateContext() =>
+        InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithService<IPropertyLifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
+
+    internal static JsonSerializerOptions CreateResolverOptions() => new()
+    {
+        TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(new TypeProvider(), new ServiceCollection().BuildServiceProvider())
+    };
 
     internal static SecretTestDevice Deserialize(ConfigurableSubjectSerializer serializer, string json) =>
         Assert.IsType<SecretTestDevice>(serializer.Deserialize(json));

@@ -52,14 +52,22 @@ internal sealed class SecretReferences
         return false;
     }
 
+    /// <summary>
+    /// Gets the message of the exception for a secret property that is no <see cref="string"/> property of a subject, or
+    /// null for a supported one.
+    /// </summary>
+    public static string? GetUnsupportedMessage(Type declaringType, string propertyName, Type propertyType) =>
+        propertyType != typeof(string) || !typeof(IInterceptorSubject).IsAssignableFrom(declaringType)
+            ? $"The secret configuration property '{propertyName}' of '{declaringType.FullName}' must be a string property of a subject."
+            : null;
+
     /// <summary>Throws for a secret property that is no <see cref="string"/> property of a subject.</summary>
     /// <exception cref="InvalidOperationException">The property is not supported as a secret.</exception>
     public static void EnsureSupported(Type declaringType, string propertyName, Type propertyType)
     {
-        if (propertyType != typeof(string) || !typeof(IInterceptorSubject).IsAssignableFrom(declaringType))
+        if (GetUnsupportedMessage(declaringType, propertyName, propertyType) is { } message)
         {
-            throw new InvalidOperationException(
-                $"The secret configuration property '{propertyName}' of '{declaringType.FullName}' must be a string property of a subject.");
+            throw new InvalidOperationException(message);
         }
     }
 

@@ -95,6 +95,7 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
         // Filter [Configuration] properties for all object types
         if (typeInfo.Kind == JsonTypeInfoKind.Object)
         {
+            string? unsupportedSecretMessage = null;
             foreach (var property in typeInfo.Properties)
             {
                 var propertyName = (property.AttributeProvider as MemberInfo)?.Name ?? property.Name;
@@ -113,8 +114,11 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                 if (property.AttributeProvider is PropertyInfo propertyInfo && SecretReferences.IsSecret(propertyInfo))
                 {
                     // Also without a store, so that the same type fails whether or not secrets are stored.
-                    SecretReferences.EnsureSupported(type, propertyInfo.Name, propertyInfo.PropertyType);
-                    if (Secrets is { } secrets)
+                    if (SecretReferences.GetUnsupportedMessage(type, propertyInfo.Name, propertyInfo.PropertyType) is { } message)
+                    {
+                        unsupportedSecretMessage ??= message;
+                    }
+                    else if (Secrets is { } secrets)
                     {
                         WrapSecret(property, propertyInfo.Name, secrets);
                     }
@@ -140,6 +144,15 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                     // For non-subject types (value objects) or subjects without registry, fall back to reflection
                     return HasConfigurationAttribute(property);
                 };
+            }
+
+            if (unsupportedSecretMessage is not null)
+            {
+                // Thrown when the type is used, not here: the type info of IConfigurable builds that of every registered
+                // type, so throwing here would fail every type.
+                Action<object> fail = _ => throw new InvalidOperationException(unsupportedSecretMessage);
+                typeInfo.OnSerializing = fail;
+                typeInfo.OnDeserializing = fail;
             }
         }
 
