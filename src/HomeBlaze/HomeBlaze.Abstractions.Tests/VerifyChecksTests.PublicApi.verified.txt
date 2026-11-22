@@ -552,9 +552,8 @@ namespace HomeBlaze.Abstractions.Discovery
     }
     public sealed class SsdpResponse : System.IEquatable<HomeBlaze.Abstractions.Discovery.SsdpResponse>
     {
-        public SsdpResponse(System.Uri Location, string? UniqueServiceName, string SearchTarget) { }
+        public SsdpResponse(System.Uri Location, string? UniqueServiceName) { }
         public System.Uri Location { get; init; }
-        public string SearchTarget { get; init; }
         public string? UniqueServiceName { get; init; }
     }
     public abstract class SubjectDiscoverer<TSubject, TResult> : HomeBlaze.Abstractions.Discovery.ISubjectDiscoverer

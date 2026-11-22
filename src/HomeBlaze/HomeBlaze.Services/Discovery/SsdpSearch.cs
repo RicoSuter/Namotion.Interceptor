@@ -46,7 +46,7 @@ internal sealed class SsdpSearch : ISsdpSearch
             // Other devices can answer a search with any notification type.
             if (device.NotificationType == searchTarget && device.DescriptionLocation is { IsAbsoluteUri: true } location)
             {
-                responses.Add(new SsdpResponse(location, device.Usn, device.NotificationType));
+                responses.Add(new SsdpResponse(location, device.Usn));
                 if (responses.Count == MaximumResponses)
                 {
                     break;

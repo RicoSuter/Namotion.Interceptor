@@ -26,7 +26,6 @@ public class SsdpSearchTests
         var response = Assert.Single(responses);
         Assert.Equal("192.168.178.1", response.Location.Host);
         Assert.Equal("uuid:router", response.UniqueServiceName);
-        Assert.Equal(SearchTarget, response.SearchTarget);
     }
 
     private static DiscoveredSsdpDevice Create(string notificationType, string usn, Uri location)

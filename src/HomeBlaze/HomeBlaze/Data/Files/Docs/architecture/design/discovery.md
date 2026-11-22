@@ -125,7 +125,7 @@ public interface IMulticastDnsBrowser
 }
 ```
 
-- `SsdpResponse` carries the location, unique service name and search target of an answer for exactly the searched target.
+- `SsdpResponse` carries the location and unique service name of an answer for exactly the searched target.
 - `MulticastDnsService` carries the instance name, host name, addresses, port and TXT records.
 
 SSDP uses Rssdp, which `HomeBlaze.Services` references, and searches every IPv4 adapter with a listening window of about 3 seconds.
