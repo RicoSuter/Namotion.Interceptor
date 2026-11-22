@@ -7,8 +7,10 @@ namespace Namotion.Devices.Sonos.Client;
 
 internal static class SonosDiscovery
 {
-    private const string ZonePlayerSearchTarget = "urn:schemas-upnp-org:device:ZonePlayer:1";
-    private const string SonosUsnPrefix = "uuid:RINCON_";
+    internal const string ZonePlayerSearchTarget = "urn:schemas-upnp-org:device:ZonePlayer:1";
+    private const string UuidPrefix = "uuid:";
+    private const string SonosUsnPrefix = UuidPrefix + "RINCON_";
+    private const string UsnSeparator = "::";
     private static readonly TimeSpan SearchTime = TimeSpan.FromSeconds(5);
 
     /// <summary>
@@ -119,6 +121,27 @@ internal static class SonosDiscovery
     /// </summary>
     internal static bool IsZonePlayer(DiscoveredSsdpDevice device) =>
         device.NotificationType == ZonePlayerSearchTarget &&
-        device.Usn?.StartsWith(SonosUsnPrefix, StringComparison.Ordinal) == true &&
+        GetSpeakerId(device.Usn) is not null &&
         device.DescriptionLocation is not null;
+
+    /// <summary>
+    /// Returns the RINCON ID of a Sonos speaker from the USN of its answer, such as <c>RINCON_000E58A0123401400</c>
+    /// from <c>uuid:RINCON_000E58A0123401400::urn:schemas-upnp-org:device:ZonePlayer:1</c>, or null when the USN is not
+    /// that of a Sonos speaker.
+    /// </summary>
+    internal static string? GetSpeakerId(string? uniqueServiceName)
+    {
+        if (uniqueServiceName is null || !uniqueServiceName.StartsWith(SonosUsnPrefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var end = uniqueServiceName.IndexOf(UsnSeparator, SonosUsnPrefix.Length, StringComparison.Ordinal);
+        if (end < 0)
+        {
+            end = uniqueServiceName.Length;
+        }
+
+        return end > SonosUsnPrefix.Length ? uniqueServiceName[UuidPrefix.Length..end] : null;
+    }
 }

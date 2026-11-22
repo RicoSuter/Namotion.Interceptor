@@ -1,5 +1,8 @@
+@using global::HomeBlaze.Abstractions.Discovery
+
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(SonosSystem))]
 @implements ISubjectEditComponent
+@implements ISubjectDiscoveryComponent
 
 <MudForm>
     <MudTextField @bind-Value="_seedHost"
@@ -54,6 +57,9 @@
     [Parameter]
     public bool IsCreating { get; set; }
 
+    [Parameter]
+    public IDiscoveryResult? DiscoveryResult { get; set; }
+
     private SonosSystem? SystemSubject => Subject as SonosSystem;
 
     private string? _seedHost;
@@ -92,6 +98,12 @@
         _pollingIntervalSeconds = (int)(SystemSubject?.PollingInterval.TotalSeconds ?? SonosSystem.DefaultIntervalSeconds);
         _retryIntervalSeconds = (int)(SystemSubject?.RetryInterval.TotalSeconds ?? SonosSystem.DefaultIntervalSeconds);
         StoreOriginals();
+
+        // A household picked on the Discover page pins the system to it; the originals stay, so the value counts as unsaved.
+        if (IsCreating && DiscoveryResult is SonosDiscoveredHousehold household)
+        {
+            _seedHost = household.SeedHost;
+        }
     }
 
     private void OnFieldChanged()
