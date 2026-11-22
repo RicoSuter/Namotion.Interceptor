@@ -28,6 +28,26 @@ public class BluelinkAccountPollingTests
     }
 
     [Fact]
+    public async Task WhenTheConfigurationIsAppliedWhileTheLoopWaits_ThenItPollsAgainAtOnceAndStopsWhenStopped()
+    {
+        // Arrange
+        var (account, handler, time) = TestAccount.Create();
+        await account.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => account.Status == ServiceStatus.Running);
+
+        // Act
+        await account.ApplyConfigurationAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Count(BluelinkResponses.ParkLocationPath("VEHICLE-2")) == 2);
+        await account.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(TestAccount.Start, time.GetUtcNow());
+        Assert.Equal(ServiceStatus.Stopped, account.Status);
+        Assert.Null(account.StatusMessage);
+        account.Dispose();
+    }
+
+    [Fact]
     public async Task WhenAccountPolls_ThenOnlyStoredStatusEndpointsAreCalled()
     {
         // Arrange

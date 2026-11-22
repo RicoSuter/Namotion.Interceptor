@@ -1,7 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Time.Testing;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
@@ -13,6 +12,9 @@ internal static class TestAccount
 {
     public static readonly DateTimeOffset Start = new(2026, 11, 22, 10, 30, 0, TimeSpan.Zero);
 
+    // The shortest timeout of a Bluelink request.
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
+
     public static FakeHttpMessageHandler CreateHandler() => new FakeHttpMessageHandler()
         .Respond(BluelinkResponses.RefreshPath, HttpStatusCode.OK, BluelinkResponses.Tokens(1))
         .Respond(BluelinkResponses.ExchangePath, HttpStatusCode.OK, BluelinkResponses.Ccs(1))
@@ -22,11 +24,11 @@ internal static class TestAccount
         .Respond(BluelinkResponses.ParkLocationPath("VEHICLE-1"), HttpStatusCode.OK, FixtureLoader.Load("location-park.json"))
         .Respond(BluelinkResponses.ParkLocationPath("VEHICLE-2"), HttpStatusCode.OK, FixtureLoader.Load("location-park.json"));
 
-    public static (BluelinkAccount Account, FakeHttpMessageHandler Handler, FakeTimeProvider Time) Create(
+    public static (BluelinkAccount Account, FakeHttpMessageHandler Handler, TestTimeProvider Time) Create(
         FakeHttpMessageHandler? handler = null, string password = "", string pin = "", ILoggerFactory? loggerFactory = null)
     {
         handler ??= CreateHandler();
-        var time = new FakeTimeProvider(Start);
+        var time = new TestTimeProvider(Start);
         var account = new BluelinkAccount(time, loggerFactory ?? NullLoggerFactory.Instance, () => new HttpClient(handler))
         {
             Email = "user@example.invalid",
@@ -42,14 +44,17 @@ internal static class TestAccount
     public static TestConfigurationWriter AttachWriter(BluelinkAccount account, FakeHttpMessageHandler handler) =>
         new(InterceptorSubjectContext.Create().WithParents()) { Handler = handler, Account = account };
 
-    /// <summary>Advances the fake clock in 5 second steps until the task completes, then awaits it.</summary>
-    public static async Task AdvanceUntilCompletedAsync(FakeTimeProvider time, Task task)
+    /// <summary>
+    /// Advances the fake clock to each delay of the task until it completes, then awaits it. A request timeout never
+    /// fires, so that a fake request still in flight on a slow runner does not time out.
+    /// </summary>
+    public static async Task AdvanceUntilCompletedAsync(TestTimeProvider time, Task task)
     {
         await AsyncTestHelpers.WaitUntilAsync(() =>
         {
             if (!task.IsCompleted)
             {
-                time.Advance(TimeSpan.FromSeconds(5));
+                time.AdvanceToNextTimer(RequestTimeout);
             }
 
             return task.IsCompleted;

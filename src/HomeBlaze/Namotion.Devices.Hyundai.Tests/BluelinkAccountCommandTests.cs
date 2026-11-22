@@ -1,6 +1,5 @@
 using System.Net;
 using HomeBlaze.Abstractions;
-using Microsoft.Extensions.Time.Testing;
 using Namotion.Devices.Hyundai.Client;
 using Namotion.Devices.Hyundai.Tests.Testing;
 using Namotion.Interceptor.Testing;
@@ -17,7 +16,7 @@ public class BluelinkAccountCommandTests
     private const string Kona = "TESTVIN0000000001";
     private const string Ioniq = "TESTVIN0000000002";
 
-    private static async Task<(BluelinkAccount Account, FakeHttpMessageHandler Handler, FakeTimeProvider Time)> CreatePolledAsync(string pin = "", RecordingLogger? logger = null)
+    private static async Task<(BluelinkAccount Account, FakeHttpMessageHandler Handler, TestTimeProvider Time)> CreatePolledAsync(string pin = "", RecordingLogger? logger = null)
     {
         var (account, handler, time) = TestAccount.Create(pin: pin, loggerFactory: logger is null ? null : new RecordingLoggerFactory(logger));
         await account.PollOnceAsync(CancellationToken.None);
