@@ -320,13 +320,16 @@ public class SubjectSetupDialogTests
                     .filter(row => row.height > 0 && row.top >= list.top - 0.5 && row.bottom <= list.bottom + 0.5 && isInViewport(row));
                 const content = document.querySelector('.mud-dialog-content');
                 const cancel = document.querySelector("[data-testid='cancel-button']").getBoundingClientRect();
-                return [visibleRows.length, content.scrollHeight - content.clientHeight, isInViewport(cancel) ? 1 : 0];
+                const toggle = document.querySelector("[data-testid='picker-mode-toggle']");
+                const isToggleWhole = toggle === null || (toggle.clientHeight >= toggle.scrollHeight && isInViewport(toggle.getBoundingClientRect()));
+                return [visibleRows.length, content.scrollHeight - content.clientHeight, isInViewport(cancel) ? 1 : 0, isToggleWhole ? 1 : 0];
             }
             """);
 
         Assert.True(pickerLayout[0] >= minimumVisibleRows, $"Only {pickerLayout[0]} type rows are completely visible in the list.");
         Assert.True(pickerLayout[1] <= 0, $"The dialog content scrolls by {pickerLayout[1]} pixels, although only the list should.");
         Assert.True(pickerLayout[2] == 1, "The cancel button is outside the viewport.");
+        Assert.True(pickerLayout[3] == 1, "The toggle between the type list and the Discover page is clipped or outside the viewport.");
 
         // Act
         await PickTypeAsync(page, "shellydevice");
