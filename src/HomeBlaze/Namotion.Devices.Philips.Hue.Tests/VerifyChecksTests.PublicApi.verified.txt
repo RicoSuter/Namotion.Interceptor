@@ -68,6 +68,13 @@ namespace Namotion.Devices.Philips.Hue
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public static System.TimeSpan GetEffectiveInterval(System.TimeSpan configured, int defaultSeconds) { }
     }
+    public sealed class HueBridgeDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscoverer<Namotion.Devices.Philips.Hue.HueBridge, Namotion.Devices.Philips.Hue.HueDiscoveredBridge>
+    {
+        public HueBridgeDiscoverer() { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Philips.Hue.HueBridgeDiscoverer.<DiscoverAsync>d__1))]
+        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Philips.Hue.HueDiscoveredBridge> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
+        protected override bool Matches(Namotion.Devices.Philips.Hue.HueBridge existing, Namotion.Devices.Philips.Hue.HueDiscoveredBridge result) { }
+    }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class HueButton : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Inputs.IButtonDevice, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged, System.IDisposable, System.IObservable<HomeBlaze.Abstractions.Inputs.ButtonEvent>
     {
@@ -170,6 +177,16 @@ namespace Namotion.Devices.Philips.Hue
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public sealed class HueDiscoveredBridge : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, System.IEquatable<Namotion.Devices.Philips.Hue.HueDiscoveredBridge>
+    {
+        public HueDiscoveredBridge(string BridgeId, string HostAddress, string Name) { }
+        public string BridgeId { get; init; }
+        public string? Detail { get; }
+        public string DisplayName { get; }
+        public string HostAddress { get; init; }
+        public string Key { get; }
+        public string Name { get; init; }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class HueGroup : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.Devices.Light.IBrightnessController, HomeBlaze.Abstractions.Devices.Light.IBrightnessState, HomeBlaze.Abstractions.Devices.Light.IColorController, HomeBlaze.Abstractions.Devices.Light.IColorState, HomeBlaze.Abstractions.Devices.Light.IColorTemperatureController, HomeBlaze.Abstractions.Devices.Light.IColorTemperatureState, HomeBlaze.Abstractions.Devices.Light.ILightbulb, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.IVirtualSubject, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
