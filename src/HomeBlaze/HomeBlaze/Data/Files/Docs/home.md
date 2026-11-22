@@ -57,6 +57,7 @@ Per-device documentation and setup guides.
 - [Ecowitt](devices/Ecowitt.md): Ecowitt weather station gateways (GW1000/GW2000 family)
 - [FRITZ!Box](devices/FritzBox.md): AVM FRITZ!Box routers over the local TR-064 interface, with clients and presence, mesh access points, internet connection and WLANs
 - [GPIO](devices/Gpio.md): Raspberry Pi / Linux GPIO with optional MCP3008 and ADS1115 ADCs
+- [Hyundai Bluelink](devices/Bluelink.md): Hyundai electric vehicles in Europe, with charging and climate commands
 - [Luxtronik](devices/Luxtronik.md): Luxtronik 2.1 heat pumps (Alpha Innotec, Novelan) via the Smart Home Interface, read only
 - [myStrom](devices/MyStrom.md): myStrom WiFi switches with power metering
 - [Nuki](devices/Nuki.md): Nuki smart locks, Smart Doors and Openers through the local bridge HTTP API

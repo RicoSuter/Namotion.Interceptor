@@ -537,6 +537,20 @@ namespace HomeBlaze.Abstractions.Devices.Vehicles
         decimal? TotalDrivenDistance { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Starts and stops the charging of a vehicle and sets its charge limit.")]
+    public interface IVehicleChargingController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="BatteryChargingFull", Position=3, Title="Set Charge Limit")]
+        [System.ComponentModel.Category("Charging")]
+        System.Threading.Tasks.Task SetChargeLimitAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal chargeLimit, System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="EvStation", Position=1, Title="Start Charging")]
+        [System.ComponentModel.Category("Charging")]
+        System.Threading.Tasks.Task StartChargingAsync(System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Stop", Position=2, Title="Stop Charging")]
+        [System.ComponentModel.Category("Charging")]
+        System.Threading.Tasks.Task StopChargingAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports the charging state of a vehicle: plug, charging, power, battery level, ch" +
         "arge limit, remaining time and range.")]
     public interface IVehicleChargingState : HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Devices.Energy.IChargingState
@@ -550,6 +564,17 @@ namespace HomeBlaze.Abstractions.Devices.Vehicles
         [HomeBlaze.Abstractions.Attributes.State(Position=342)]
         [System.ComponentModel.Category("Charging")]
         System.TimeSpan? RemainingChargingTime { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Starts and stops the climate control of a vehicle.")]
+    public interface IVehicleClimateController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Thermostat", Position=1, Title="Start Climate")]
+        [System.ComponentModel.Category("Climate")]
+        System.Threading.Tasks.Task StartClimateAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)] decimal temperature, System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Stop", Position=2, Title="Stop Climate")]
+        [System.ComponentModel.Category("Climate")]
+        System.Threading.Tasks.Task StopClimateAsync(System.Threading.CancellationToken cancellationToken);
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports whether the climate of a vehicle runs and its inside and outside temperat" +
