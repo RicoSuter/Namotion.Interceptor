@@ -113,7 +113,7 @@ public partial class TeslaAccount
         _isRotatedRefreshTokenUnsaved = !isWritten;
         if (!isWritten)
         {
-            _logger.LogWarning("The configuration writer did not save the rotated Tesla refresh token; saving is retried with the next poll.");
+            _logger.LogWarning("The rotated Tesla refresh token was not saved, because the account is not stored in a file or the storage is not connected; it is kept in memory and saving is retried with each poll.");
         }
     }
 

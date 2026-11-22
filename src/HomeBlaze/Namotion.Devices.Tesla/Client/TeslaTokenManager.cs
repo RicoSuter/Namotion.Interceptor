@@ -89,6 +89,9 @@ internal sealed class TeslaTokenManager
             return state.AccessToken!;
         }
 
+        // A canceled caller must not start a refresh, which could outlive a disposal that already checked for one.
+        cancellationToken.ThrowIfCancellationRequested();
+
         TaskCompletionSource<TokenState>? completion = null;
         Task<TokenState> refresh;
         lock (_lock)
