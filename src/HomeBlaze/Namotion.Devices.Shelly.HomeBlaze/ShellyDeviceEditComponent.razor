@@ -1,7 +1,9 @@
 @using Namotion.Interceptor
+@using global::HomeBlaze.Abstractions.Discovery
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(ShellyDevice))]
 @implements ISubjectEditComponent
+@implements ISubjectDiscoveryComponent
 
 <MudForm>
     <MudTextField @bind-Value="_name"
@@ -82,6 +84,9 @@
     [Parameter]
     public bool IsCreating { get; set; }
 
+    [Parameter]
+    public IDiscoveryResult? DiscoveryResult { get; set; }
+
     private ShellyDevice? DeviceSubject => Subject as ShellyDevice;
 
     private string _name = string.Empty;
@@ -89,6 +94,7 @@
     private string? _password;
     private int _pollingIntervalSeconds = 15;
     private int _retryIntervalSeconds = 30;
+    private string? _deviceId;
 
     private string _originalName = string.Empty;
     private string? _originalHostAddress;
@@ -121,6 +127,17 @@
             _originalPassword = _password;
             _originalPollingIntervalSeconds = _pollingIntervalSeconds;
             _originalRetryIntervalSeconds = _retryIntervalSeconds;
+
+            // A device picked on the Discover page fills in the form; the originals stay, so the values count as unsaved.
+            if (IsCreating && DiscoveryResult is ShellyDiscoveredDevice discovered)
+            {
+                _hostAddress = discovered.HostAddress;
+                _deviceId = discovered.DeviceId;
+                if (string.IsNullOrWhiteSpace(_name))
+                {
+                    _name = discovered.Name;
+                }
+            }
         }
     }
 
@@ -136,6 +153,10 @@
         {
             DeviceSubject.Name = _name;
             DeviceSubject.HostAddress = _hostAddress;
+            if (_deviceId is not null)
+            {
+                DeviceSubject.DeviceId = _deviceId;
+            }
             DeviceSubject.Password = _password;
             DeviceSubject.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
             DeviceSubject.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);

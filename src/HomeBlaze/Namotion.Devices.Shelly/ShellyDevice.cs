@@ -50,6 +50,12 @@ public partial class ShellyDevice : BackgroundService,
     [Configuration]
     public partial string? HostAddress { get; set; }
 
+    /// <summary>
+    /// The device ID, such as <c>shellyplus1pm-a8032ab12345</c>, which discovery recognizes the device by, or null.
+    /// </summary>
+    [Configuration]
+    public partial string? DeviceId { get; set; }
+
     [Configuration(IsSecret = true)]
     public partial string? Password { get; set; }
 

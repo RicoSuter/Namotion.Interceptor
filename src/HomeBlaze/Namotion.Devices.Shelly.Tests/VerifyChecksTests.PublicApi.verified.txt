@@ -93,6 +93,8 @@ namespace Namotion.Devices.Shelly
         public string? AvailableSoftwareUpdate { get; }
         [HomeBlaze.Abstractions.Attributes.State]
         public Namotion.Devices.Shelly.ShellyCover[] Covers { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? DeviceId { get; set; }
         [HomeBlaze.Abstractions.Attributes.State(Position=400)]
         [Namotion.Interceptor.Attributes.Derived]
         public string? DeviceName { get; }
@@ -173,6 +175,24 @@ namespace Namotion.Devices.Shelly
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public sealed class ShellyDeviceDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscoverer<Namotion.Devices.Shelly.ShellyDevice, Namotion.Devices.Shelly.ShellyDiscoveredDevice>
+    {
+        public ShellyDeviceDiscoverer() { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Shelly.ShellyDeviceDiscoverer.<DiscoverAsync>d__2))]
+        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Shelly.ShellyDiscoveredDevice> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
+        protected override bool Matches(Namotion.Devices.Shelly.ShellyDevice existing, Namotion.Devices.Shelly.ShellyDiscoveredDevice result) { }
+    }
+    public sealed class ShellyDiscoveredDevice : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, System.IEquatable<Namotion.Devices.Shelly.ShellyDiscoveredDevice>
+    {
+        public ShellyDiscoveredDevice(string DeviceId, string HostAddress, string? Application, string Name) { }
+        public string? Application { get; init; }
+        public string? Detail { get; }
+        public string DeviceId { get; init; }
+        public string DisplayName { get; }
+        public string HostAddress { get; init; }
+        public string Key { get; }
+        public string Name { get; init; }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class ShellyEnergyMeter : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IPowerMeter, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
