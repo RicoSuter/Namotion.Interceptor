@@ -8,6 +8,7 @@ using Namotion.Devices.Hyundai.Mapping;
 using Namotion.Devices.Hyundai.Tests.Testing;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Devices.Hyundai.Tests;
@@ -347,6 +348,68 @@ public class BluelinkVehicleTests
         // Assert
         Assert.False(vehicle.Charge.StartCharging_IsEnabled);
         Assert.Contains(nameof(BluelinkChargeState.StartCharging_IsEnabled), firedEvents);
+    }
+
+    [Fact]
+    public void WhenVehicleBecomesBusy_ThenAllOperationsAreDisabledUntilItEnds()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var (vehicle, _) = Create(context: context);
+        ((IInterceptorSubject)vehicle).Context.AddFallbackContext(context);
+        Assert.True(vehicle.Refresh_IsEnabled);
+        var firedEvents = new List<string>();
+        ((INotifyPropertyChanged)vehicle).PropertyChanged += (_, arguments) => firedEvents.Add(arguments.PropertyName!);
+        ((INotifyPropertyChanged)vehicle.Charge).PropertyChanged += (_, arguments) => firedEvents.Add(arguments.PropertyName!);
+        ((INotifyPropertyChanged)vehicle.Climate).PropertyChanged += (_, arguments) => firedEvents.Add(arguments.PropertyName!);
+
+        // Act
+        var started = vehicle.TryStartOperation();
+
+        // Assert
+        Assert.True(started);
+        Assert.True(vehicle.IsBusy);
+        Assert.False(vehicle.TryStartOperation());
+        Assert.False(vehicle.Refresh_IsEnabled);
+        Assert.False(vehicle.Charge.StartCharging_IsEnabled);
+        Assert.False(vehicle.Charge.StopCharging_IsEnabled);
+        Assert.False(vehicle.Charge.SetChargeLimit_IsEnabled);
+        Assert.False(vehicle.Charge.SetChargeLimits_IsEnabled);
+        Assert.False(vehicle.Climate.StartClimate_IsEnabled);
+        Assert.False(vehicle.Climate.StartClimateWithDefrost_IsEnabled);
+        Assert.False(vehicle.Climate.StopClimate_IsEnabled);
+        Assert.Contains(nameof(BluelinkVehicle.Refresh_IsEnabled), firedEvents);
+        Assert.Contains(nameof(BluelinkChargeState.StartCharging_IsEnabled), firedEvents);
+        Assert.Contains(nameof(BluelinkClimateState.StopClimate_IsEnabled), firedEvents);
+
+        vehicle.EndOperation();
+        Assert.False(vehicle.IsBusy);
+        Assert.True(vehicle.Refresh_IsEnabled);
+        Assert.True(vehicle.Charge.StartCharging_IsEnabled);
+        Assert.True(vehicle.Climate.StopClimate_IsEnabled);
+        Assert.True(vehicle.TryStartOperation());
+    }
+
+    [Fact]
+    public async Task WhenTwoOperationsStartAtTheSameTime_ThenExactlyOneProceeds()
+    {
+        // Arrange
+        var (vehicle, _) = Create();
+        using var barrier = new Barrier(2);
+        bool StartAfterBarrier()
+        {
+            barrier.SignalAndWait();
+            return vehicle.TryStartOperation();
+        }
+
+        // Act
+        var results = await Task.WhenAll(
+            DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(StartAfterBarrier),
+            DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(StartAfterBarrier));
+
+        // Assert
+        Assert.Single(results, started => started);
+        Assert.True(vehicle.IsBusy);
     }
 
     [Fact]

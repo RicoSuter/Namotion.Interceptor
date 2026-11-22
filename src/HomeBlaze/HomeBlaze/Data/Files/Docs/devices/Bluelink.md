@@ -126,6 +126,7 @@ Every value has one path. The vehicle holds its identity, the odometer, the loca
 | `Location` | | Stored parking location; kept when a read returns none |
 | `AuxiliaryBatteryLevel` | Percent | 12 V battery; `null` when the vehicle reports its sensor as unreliable |
 | `LastUpdated` | | Time of the stored status; the read time when the status has none |
+| `IsBusy` | | `true` while a `Refresh` or command of this vehicle runs |
 
 The title is the nickname, else "Hyundai: " and the last six characters of the VIN. The icon is green while the vehicle charges.
 
@@ -176,6 +177,8 @@ The title is the nickname, else "Hyundai: " and the last six characters of the V
 | `Stop Climate` | `Climate` | Yes | Stops the climate. A `Ccs2` vehicle needs the PIN. |
 
 A command fails before any call when the account has no credentials, is not connected, is paused after Hyundai's request limit or has spent its budget, when a `Ccs2` vehicle needs a PIN that is not stored, and when the temperature, a charge limit or `ClimateDuration` is invalid. A command waits for its result: the account checks the notification records of the vehicle every 10 seconds for at most 90 seconds, then reads the stored status and parking location once. A rejected command, a vehicle that does not respond and a result that does not arrive in time fail the operation with the reason. Hyundai rejecting the PIN fails the command without a retry, because five wrong PINs lock PIN entry for a while. Values change only from what the vehicle reports, never from what a command asked for. Canceling a command does not change the status of the account. The operations are disabled while the account is not connected or has spent its budget, and the commands that need the PIN while a `Ccs2` vehicle has none; `Refresh` also while the 12 V battery is below the minimum or unknown.
+
+While one operation of a vehicle runs, `IsBusy` is `true` and the other operations of that vehicle are disabled. A call that arrives anyway fails at once with "Another operation of this vehicle is running.", before any call. An operation of another vehicle of the same account waits until the running one and any poll in progress have finished.
 
 A HomeBlaze automation can call `Refresh` on a schedule when fresher values are needed; the 12 V guard and the call budget apply.
 

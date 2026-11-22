@@ -49,15 +49,15 @@ public partial class BluelinkClimateState : IVehicleClimateState, IVehicleClimat
 
     [Derived]
     [PropertyAttribute("StartClimate", KnownAttributes.IsEnabled)]
-    public bool StartClimate_IsEnabled => _vehicle.Commands.CanSendCommands(_vehicle.Protocol);
+    public bool StartClimate_IsEnabled => !_vehicle.IsBusy && _vehicle.Commands.CanSendCommands(_vehicle.Protocol);
 
     [Derived]
     [PropertyAttribute("StartClimateWithDefrost", KnownAttributes.IsEnabled)]
-    public bool StartClimateWithDefrost_IsEnabled => _vehicle.Commands.CanSendCommands(_vehicle.Protocol);
+    public bool StartClimateWithDefrost_IsEnabled => !_vehicle.IsBusy && _vehicle.Commands.CanSendCommands(_vehicle.Protocol);
 
     [Derived]
     [PropertyAttribute("StopClimate", KnownAttributes.IsEnabled)]
-    public bool StopClimate_IsEnabled => _vehicle.Commands.CanSendCommands(_vehicle.Protocol);
+    public bool StopClimate_IsEnabled => !_vehicle.IsBusy && _vehicle.Commands.CanSendCommands(_vehicle.Protocol);
 
     /// <inheritdoc />
     public Task StartClimateAsync(decimal temperature, CancellationToken cancellationToken) =>

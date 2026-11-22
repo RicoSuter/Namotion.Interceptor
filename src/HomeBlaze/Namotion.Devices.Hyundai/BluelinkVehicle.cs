@@ -18,6 +18,9 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
 {
     private DateTimeOffset? _appliedStatusTime;
 
+    // 1 while a refresh or command of this vehicle runs; only the caller that set it writes IsBusy.
+    private int _operationRunning;
+
     internal BluelinkVehicle(IBluelinkVehicleCommands commands, BluelinkVehicleInfo info)
     {
         Commands = commands;
@@ -62,6 +65,9 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
     /// <summary>The time of the stored status; the read time when the status has none.</summary>
     [State(Position = 6)] public partial DateTimeOffset? LastUpdated { get; internal set; }
 
+    /// <summary>True while a Refresh or command of this vehicle runs.</summary>
+    [State(IsDiscrete = true, Position = 7)] public partial bool IsBusy { get; internal set; }
+
     [State(Position = 400)] public partial BluelinkChargeState Charge { get; internal set; }
     [State(Position = 401)] public partial BluelinkClimateState Climate { get; internal set; }
     [State(Position = 402)] public partial BluelinkVehicleBody Body { get; internal set; }
@@ -103,12 +109,32 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
 
     [Derived]
     [PropertyAttribute("Refresh", KnownAttributes.IsEnabled)]
-    public bool Refresh_IsEnabled => Commands.CanRefresh(AuxiliaryBatteryLevel);
+    public bool Refresh_IsEnabled => !IsBusy && Commands.CanRefresh(AuxiliaryBatteryLevel);
 
     /// <summary>Asks the vehicle to upload its status, then reads it. Reaches the vehicle and costs 12 V battery.</summary>
     [Operation(Title = "Refresh", Icon = "Refresh", RequiresConfirmation = true,
         Description = "Asks the vehicle to upload its status. Reaches the vehicle and costs 12 V battery, so use it rarely. Refused while the 12 V battery is low.")]
     public Task RefreshAsync(CancellationToken cancellationToken) => Commands.RefreshAsync(this, cancellationToken);
+
+    /// <summary>Marks the vehicle busy unless another operation of it runs; a true result must be paired with <see cref="EndOperation"/>.</summary>
+    internal bool TryStartOperation()
+    {
+        if (Interlocked.CompareExchange(ref _operationRunning, 1, 0) != 0)
+        {
+            return false;
+        }
+
+        IsBusy = true;
+        return true;
+    }
+
+    /// <summary>Ends the operation started with a successful <see cref="TryStartOperation"/>.</summary>
+    internal void EndOperation()
+    {
+        // Cleared before the slot is freed, so that it cannot overwrite the true of the next operation.
+        IsBusy = false;
+        Volatile.Write(ref _operationRunning, 0);
+    }
 
     internal void UpdateInfo(BluelinkVehicleInfo info)
     {

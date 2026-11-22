@@ -30,7 +30,7 @@ public partial class BluelinkAccount
             throw new InvalidOperationException("Refresh is refused while the 12 V battery is below the minimum level or unknown.");
         }
 
-        await RunAsync(async tokenManager =>
+        await RunAsync(vehicle, async tokenManager =>
         {
             _logger.LogInformation("Asking the Bluelink vehicle {Vin} to upload its status.", vehicle.Vin);
             await tokenManager.CallAsync(accessToken => _apiClient.RequestStatusAsync(CreateRequest(tokenManager, accessToken, vehicle), cancellationToken), cancellationToken);
@@ -86,7 +86,7 @@ public partial class BluelinkAccount
             throw new InvalidOperationException("A PIN is required for commands of this vehicle; enter it in the account settings.");
         }
 
-        await RunAsync(async tokenManager =>
+        await RunAsync(vehicle, async tokenManager =>
         {
             _logger.LogInformation("Sending a command to the Bluelink vehicle {Vin}.", vehicle.Vin);
             var messageId = await tokenManager.CallAsync(async accessToken =>
@@ -100,9 +100,28 @@ public partial class BluelinkAccount
         }, cancellationToken);
     }
 
+    /// <summary>Runs a refresh or command of the vehicle; the vehicle is busy from before the account lock is awaited until it ends.</summary>
+    /// <exception cref="InvalidOperationException">Another operation of the vehicle is running; nothing was sent.</exception>
+    private async Task RunAsync(BluelinkVehicle vehicle, Func<BluelinkTokenManager, Task> action, CancellationToken cancellationToken)
+    {
+        if (!vehicle.TryStartOperation())
+        {
+            throw new InvalidOperationException("Another operation of this vehicle is running.");
+        }
+
+        try
+        {
+            await RunLockedAsync(action, cancellationToken);
+        }
+        finally
+        {
+            vehicle.EndOperation();
+        }
+    }
+
     /// <summary>Runs a refresh or command under the account lock, after checks that fail before any call.</summary>
     /// <exception cref="BluelinkRequestLimitException">The daily request limit is reached; nothing was sent.</exception>
-    private async Task RunAsync(Func<BluelinkTokenManager, Task> action, CancellationToken cancellationToken)
+    private async Task RunLockedAsync(Func<BluelinkTokenManager, Task> action, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);
         BluelinkTokenManager? tokenManager = null;

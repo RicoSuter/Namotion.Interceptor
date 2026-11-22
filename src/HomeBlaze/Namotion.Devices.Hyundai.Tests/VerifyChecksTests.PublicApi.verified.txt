@@ -231,6 +231,8 @@ namespace Namotion.Devices.Hyundai
         public string? IconColor { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
+        public bool IsBusy { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=6)]
         public System.DateTimeOffset? LastUpdated { get; }
         public HomeBlaze.Abstractions.Common.GeoCoordinate? Location { get; }

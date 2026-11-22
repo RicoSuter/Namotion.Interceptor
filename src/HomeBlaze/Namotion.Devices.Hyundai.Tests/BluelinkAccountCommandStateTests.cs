@@ -6,10 +6,12 @@ using Namotion.Interceptor.Testing;
 
 namespace Namotion.Devices.Hyundai.Tests;
 
-/// <summary>How refreshes and commands affect the account state: cancellation, the device ID and the request budget.</summary>
+/// <summary>How refreshes and commands affect the account and vehicle state: cancellation, the device ID, the request budget and the busy vehicle.</summary>
 public class BluelinkAccountCommandStateTests
 {
     private const string Kona = "TESTVIN0000000001";
+    private const string Ioniq = "TESTVIN0000000002";
+    private const string BusyMessage = "Another operation of this vehicle is running.";
 
     [Fact]
     public async Task WhenCommandIsCanceledDuringTheResultWait_ThenAccountStateIsUnchanged()
@@ -116,6 +118,156 @@ public class BluelinkAccountCommandStateTests
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => account.Vehicles[Kona].Charge.StartChargingAsync(CancellationToken.None));
         Assert.Equal("The Bluelink account has no credentials.", exception.Message);
+        Assert.Equal(requestCount, handler.Requests.Count);
+        Assert.False(account.Vehicles[Kona].IsBusy);
+    }
+
+    [Fact]
+    public async Task WhenRefreshIsRunning_ThenTheVehicleIsBusyUntilItCompletes()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        var heldResponse = TestAccount.CreateHeldResponse();
+        handler.RespondAfter(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1"), heldResponse.Task);
+        var kona = account.Vehicles[Kona];
+
+        // Act
+        var refresh = kona.RefreshAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Count(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1")) == 1);
+
+        // Assert
+        Assert.True(kona.IsBusy);
+        Assert.False(kona.Refresh_IsEnabled);
+        Assert.False(kona.Charge.StartCharging_IsEnabled);
+        Assert.False(kona.Charge.SetChargeLimits_IsEnabled);
+        Assert.False(kona.Climate.StartClimate_IsEnabled);
+        Assert.False(kona.Climate.StopClimate_IsEnabled);
+
+        heldResponse.SetResult(TestAccount.CreateResponse(HttpStatusCode.OK, BluelinkResponses.Success()));
+        await refresh;
+        Assert.False(kona.IsBusy);
+        Assert.True(kona.Refresh_IsEnabled);
+        Assert.True(kona.Charge.StartCharging_IsEnabled);
+        Assert.True(kona.Climate.StartClimate_IsEnabled);
+    }
+
+    [Fact]
+    public async Task WhenAnotherOperationOfTheVehicleRuns_ThenACallFailsAtOnceWithoutARequest()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        var heldResponse = TestAccount.CreateHeldResponse();
+        handler.RespondAfter(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1"), heldResponse.Task);
+        var kona = account.Vehicles[Kona];
+        var refresh = kona.RefreshAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Count(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1")) == 1);
+        var requestCount = handler.Requests.Count;
+
+        // Act
+        var secondRefresh = kona.RefreshAsync(CancellationToken.None);
+        var command = kona.Charge.StartChargingAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(secondRefresh.IsFaulted);
+        Assert.True(command.IsFaulted);
+        var refreshException = await Assert.ThrowsAsync<InvalidOperationException>(() => secondRefresh);
+        var commandException = await Assert.ThrowsAsync<InvalidOperationException>(() => command);
+        Assert.Equal(BusyMessage, refreshException.Message);
+        Assert.Equal(BusyMessage, commandException.Message);
+        Assert.Equal(requestCount, handler.Requests.Count);
+        Assert.True(kona.IsBusy);
+
+        heldResponse.SetResult(TestAccount.CreateResponse(HttpStatusCode.OK, BluelinkResponses.Success()));
+        await refresh;
+        Assert.Equal(1, handler.Count(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1")));
+        Assert.Equal(0, handler.Count(BluelinkResponses.LegacyChargePath("VEHICLE-1")));
+    }
+
+    [Fact]
+    public async Task WhenAnOperationOfAnotherVehicleRuns_ThenACommandWaitsForItInsteadOfFailing()
+    {
+        // Arrange
+        var (account, handler, time) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        var heldResponse = TestAccount.CreateHeldResponse();
+        handler.RespondAfter(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1"), heldResponse.Task)
+            .Respond(BluelinkResponses.ChargeTargetPath("VEHICLE-2"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-7"))
+            .Respond(BluelinkResponses.RecordsPath("VEHICLE-2"), HttpStatusCode.OK, BluelinkResponses.Records("MSG-7", "success"));
+        var refresh = account.Vehicles[Kona].RefreshAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Count(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1")) == 1);
+        var ioniq = account.Vehicles[Ioniq];
+
+        // Act
+        var command = ioniq.Charge.SetChargeLimitsAsync(0.8m, 0.9m, CancellationToken.None);
+
+        // Assert
+        Assert.False(command.IsCompleted);
+        Assert.True(ioniq.IsBusy);
+        Assert.False(ioniq.Charge.SetChargeLimits_IsEnabled);
+        Assert.Equal(0, handler.Count(BluelinkResponses.ChargeTargetPath("VEHICLE-2")));
+
+        heldResponse.SetResult(TestAccount.CreateResponse(HttpStatusCode.OK, BluelinkResponses.Success()));
+        await refresh;
+        await TestAccount.AdvanceUntilCompletedAsync(time, command);
+        Assert.Equal(1, handler.Count(BluelinkResponses.ChargeTargetPath("VEHICLE-2")));
+        Assert.False(ioniq.IsBusy);
+    }
+
+    [Fact]
+    public async Task WhenCommandFails_ThenTheVehicleIsNoLongerBusy()
+    {
+        // Arrange
+        var (account, handler, time) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        handler.Respond(BluelinkResponses.LegacyChargePath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-7"))
+            .Respond(BluelinkResponses.RecordsPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Records("MSG-7", "fail"));
+        var kona = account.Vehicles[Kona];
+
+        // Act
+        await Assert.ThrowsAsync<BluelinkCommandException>(() =>
+            TestAccount.AdvanceUntilCompletedAsync(time, kona.Charge.StartChargingAsync(CancellationToken.None)));
+
+        // Assert
+        Assert.False(kona.IsBusy);
+        Assert.True(kona.Charge.StartCharging_IsEnabled);
+    }
+
+    [Fact]
+    public async Task WhenCommandIsCanceled_ThenTheVehicleIsNoLongerBusy()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        handler.RespondNever(BluelinkResponses.LegacyChargePath("VEHICLE-1"));
+        var kona = account.Vehicles[Kona];
+        using var cancellation = new CancellationTokenSource();
+        var command = kona.Charge.StartChargingAsync(cancellation.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Count(BluelinkResponses.LegacyChargePath("VEHICLE-1")) == 1);
+        Assert.True(kona.IsBusy);
+
+        // Act
+        await cancellation.CancelAsync();
+
+        // Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => command);
+        Assert.False(kona.IsBusy);
+        Assert.True(kona.Charge.StartCharging_IsEnabled);
+    }
+
+    [Fact]
+    public async Task WhenTemperatureIsInvalid_ThenTheVehicleIsNotBusy()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        var kona = account.Vehicles[Kona];
+        var requestCount = handler.Requests.Count;
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => kona.Climate.StartClimateAsync(40m, CancellationToken.None));
+        Assert.False(kona.IsBusy);
         Assert.Equal(requestCount, handler.Requests.Count);
     }
 }

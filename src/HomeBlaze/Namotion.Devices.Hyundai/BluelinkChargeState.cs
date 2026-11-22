@@ -60,20 +60,20 @@ public partial class BluelinkChargeState : IVehicleChargingState, IVehicleChargi
 
     [Derived]
     [PropertyAttribute("StartCharging", KnownAttributes.IsEnabled)]
-    public bool StartCharging_IsEnabled => _vehicle.Commands.CanSendCommands(_vehicle.Protocol);
+    public bool StartCharging_IsEnabled => !_vehicle.IsBusy && _vehicle.Commands.CanSendCommands(_vehicle.Protocol);
 
     [Derived]
     [PropertyAttribute("StopCharging", KnownAttributes.IsEnabled)]
-    public bool StopCharging_IsEnabled => _vehicle.Commands.CanSendCommands(_vehicle.Protocol);
+    public bool StopCharging_IsEnabled => !_vehicle.IsBusy && _vehicle.Commands.CanSendCommands(_vehicle.Protocol);
 
     // Charge limits need no PIN, also on a CCS2 vehicle.
     [Derived]
     [PropertyAttribute("SetChargeLimit", KnownAttributes.IsEnabled)]
-    public bool SetChargeLimit_IsEnabled => _vehicle.Commands.CanSendCommands(BluelinkProtocol.Legacy);
+    public bool SetChargeLimit_IsEnabled => !_vehicle.IsBusy && _vehicle.Commands.CanSendCommands(BluelinkProtocol.Legacy);
 
     [Derived]
     [PropertyAttribute("SetChargeLimits", KnownAttributes.IsEnabled)]
-    public bool SetChargeLimits_IsEnabled => _vehicle.Commands.CanSendCommands(BluelinkProtocol.Legacy);
+    public bool SetChargeLimits_IsEnabled => !_vehicle.IsBusy && _vehicle.Commands.CanSendCommands(BluelinkProtocol.Legacy);
 
     /// <inheritdoc />
     public Task StartChargingAsync(CancellationToken cancellationToken) =>
