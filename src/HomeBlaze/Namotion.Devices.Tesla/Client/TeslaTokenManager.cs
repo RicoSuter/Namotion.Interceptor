@@ -41,6 +41,18 @@ internal sealed class TeslaTokenManager
     /// <summary>The time of the last successful refresh, or null.</summary>
     public DateTimeOffset? AuthenticatedAt => _state.AuthenticatedAt;
 
+    /// <summary>The token refresh in progress, or a completed task. It faults when the refresh fails.</summary>
+    public Task PendingRefresh
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _refresh ?? Task.CompletedTask;
+            }
+        }
+    }
+
     /// <summary>
     /// Calls the API with an access token. After a 401 it refreshes the token once and calls again; a second 401
     /// requires re-authentication.

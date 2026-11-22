@@ -83,6 +83,7 @@ namespace Namotion.Devices.Tesla
         protected void RaisePropertyChanged(string propertyName) { }
         public void ReplaceRefreshToken(string refreshToken) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public override System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
     }
     public static class TeslaAccountConnector
     {

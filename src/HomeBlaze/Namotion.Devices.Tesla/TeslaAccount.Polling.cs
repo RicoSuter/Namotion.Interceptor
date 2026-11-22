@@ -113,6 +113,7 @@ public partial class TeslaAccount
                 Status = ServiceStatus.Starting;
             }
 
+            await SaveUnsavedRefreshTokenAsync(cancellationToken);
             var tokenManager = GetTokenManager();
             var products = await tokenManager.CallAsync(
                 accessToken => _apiClient.GetVehicleProductsAsync(accessToken, cancellationToken), cancellationToken);

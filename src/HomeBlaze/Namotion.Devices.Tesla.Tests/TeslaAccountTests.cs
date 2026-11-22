@@ -473,6 +473,79 @@ public class TeslaAccountTests
         Assert.Equal("refresh-2", account.RefreshToken);
     }
 
+    [Fact]
+    public async Task WhenTheWriterDoesNotStoreTheRotatedToken_ThenTheTokenIsUsedAndTheWriteIsRetriedWithTheNextPoll()
+    {
+        // Arrange
+        var (account, handler, time) = Create();
+        var writer = new TestConfigurationWriter(InterceptorSubjectContext.Create().WithParents()) { Handler = handler, Account = account, IsWriteAccepted = false };
+        await account.PollOnceAsync(CancellationToken.None);
+        var statusAfterRejectedWrite = account.Status;
+        var productRequestsAfterRejectedWrite = CountRequests(handler, ProductsPath);
+
+        // Act
+        writer.IsWriteAccepted = true;
+        time.Advance(TimeSpan.FromMinutes(1));
+        await account.PollOnceAsync(CancellationToken.None);
+        time.Advance(TimeSpan.FromMinutes(1));
+        await account.PollOnceAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, statusAfterRejectedWrite);
+        Assert.Equal(1, productRequestsAfterRejectedWrite);
+        Assert.Equal(1, CountRequests(handler, TokenPath));
+        Assert.Equal(["refresh-2", "refresh-2"], writer.Writes.Select(write => write.RefreshToken));
+    }
+
+    [Fact]
+    public async Task WhenStoppedDuringATokenRefresh_ThenStopWaitsUntilTheRotatedTokenIsSaved()
+    {
+        // Arrange
+        var tokenResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new FakeHttpMessageHandler()
+            .Respond(TokenPath, () => tokenResponse.Task)
+            .Respond(ProductsPath, HttpStatusCode.OK, FixtureLoader.Load("products.json"));
+        var (account, _, _) = Create(handler);
+        var writer = new TestConfigurationWriter(InterceptorSubjectContext.Create().WithParents()) { Handler = handler, Account = account };
+        await account.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => CountRequests(handler, TokenPath) == 1);
+
+        // Act
+        var stop = account.StopAsync(CancellationToken.None);
+        var isStoppedBeforeTokenResponse = stop.IsCompleted;
+        tokenResponse.SetResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(TokenJson) });
+        await stop;
+        account.Dispose();
+
+        // Assert
+        Assert.False(isStoppedBeforeTokenResponse);
+        Assert.Equal("refresh-2", account.RefreshToken);
+        Assert.Equal(["refresh-2"], writer.Writes.Select(write => write.RefreshToken));
+    }
+
+    [Fact]
+    public async Task WhenDisposedDuringATokenRefresh_ThenTheRefreshStillCompletes()
+    {
+        // Arrange
+        var tokenResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new FakeHttpMessageHandler().Respond(TokenPath, () => tokenResponse.Task);
+        var (account, _, _) = Create(handler);
+        var writer = new TestConfigurationWriter(InterceptorSubjectContext.Create().WithParents()) { Handler = handler, Account = account };
+        using var cancellation = new CancellationTokenSource();
+        var poll = account.PollOnceAsync(cancellation.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => CountRequests(handler, TokenPath) == 1);
+        await cancellation.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => poll);
+
+        // Act
+        account.Dispose();
+        tokenResponse.SetResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(TokenJson) });
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => writer.Writes.Count == 1);
+        Assert.Equal("refresh-2", account.RefreshToken);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -670,12 +743,15 @@ public partial class TestConfigurationWriter : IConfigurationWriter
 
     public bool ShouldFail { get; set; }
 
+    /// <summary>What the write returns; false like a storage that is reconnecting.</summary>
+    public bool IsWriteAccepted { get; set; } = true;
+
     /// <summary>The refresh token of each write with the number of HTTP requests sent before it.</summary>
     internal IReadOnlyList<(string RefreshToken, int RequestCount)> Writes => _writes;
 
     public Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         _writes.Add((((TeslaAccount)subject).RefreshToken, Handler?.Requests.Count ?? 0));
-        return ShouldFail ? throw new IOException("The disk is full.") : Task.FromResult(true);
+        return ShouldFail ? throw new IOException("The disk is full.") : Task.FromResult(IsWriteAccepted);
     }
 }

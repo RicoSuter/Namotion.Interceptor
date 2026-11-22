@@ -18,6 +18,9 @@ public partial class TeslaAccount
     private TeslaTokenManager? _tokenManager;
     private string? _tokenManagerRefreshToken;
 
+    // Set by a rotation whose write the configuration writer did not store; the next poll retries the write.
+    private volatile bool _isRotatedRefreshTokenUnsaved;
+
     /// <summary>
     /// Replaces the refresh token with one the user entered. A rotation of the previous token that completes later does
     /// not overwrite it. Apply the configuration afterwards so that polling uses the new token.
@@ -61,7 +64,8 @@ public partial class TeslaAccount
     /// <summary>
     /// Stores the rotated refresh token in the configuration before the token manager hands out the new access token.
     /// A failed write throws, so that the token manager keeps the token pending and retries only the write with the next
-    /// call. Without a configuration writer that stores the account, the token is kept in memory only.
+    /// call. A write that the configuration writer does not store, for example while its storage reconnects, is retried
+    /// at the start of each poll. Without a configuration writer that stores the account, the token is kept in memory only.
     /// </summary>
     private async Task OnRefreshTokenRotatedAsync(TeslaTokenManager tokenManager, string refreshToken)
     {
@@ -79,20 +83,60 @@ public partial class TeslaAccount
         }
 
         var writer = this.TryGetFirstParent<IConfigurationWriter>();
+        if (writer is null)
+        {
+            _isRotatedRefreshTokenUnsaved = false;
+            _logger.LogWarning("The rotated Tesla refresh token is kept in memory only, because no configuration writer stores the account.");
+            return;
+        }
+
         bool isWritten;
         try
         {
             // Not canceled: Tesla has already invalidated the previous refresh token.
-            isWritten = writer is not null && await writer.WriteConfigurationAsync(this, CancellationToken.None);
+            isWritten = await writer.WriteConfigurationAsync(this, CancellationToken.None);
         }
         catch (Exception exception)
         {
             throw new InvalidOperationException("The rotated refresh token could not be saved; saving is retried with the next poll.", exception);
         }
 
+        _isRotatedRefreshTokenUnsaved = !isWritten;
         if (!isWritten)
         {
-            _logger.LogWarning("The rotated Tesla refresh token is kept in memory only, because no configuration writer stores the account.");
+            _logger.LogWarning("The configuration writer did not save the rotated Tesla refresh token; saving is retried with the next poll.");
+        }
+    }
+
+    /// <summary>Saves a rotated refresh token that the configuration writer did not store. Never throws except for cancellation.</summary>
+    /// <remarks>Call it only while the poll lock is held.</remarks>
+    private async Task SaveUnsavedRefreshTokenAsync(CancellationToken cancellationToken)
+    {
+        if (!_isRotatedRefreshTokenUnsaved || this.TryGetFirstParent<IConfigurationWriter>() is not { } writer)
+        {
+            return;
+        }
+
+        try
+        {
+            if (await writer.WriteConfigurationAsync(this, cancellationToken))
+            {
+                _isRotatedRefreshTokenUnsaved = false;
+                _logger.LogInformation("The rotated Tesla refresh token was saved.");
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(exception, "Saving the rotated Tesla refresh token failed; saving is retried with the next poll.");
+        }
+    }
+
+    /// <returns>The token refresh in progress, or a completed task. It may fault.</returns>
+    private Task GetPendingTokenRefresh()
+    {
+        lock (_refreshTokenLock)
+        {
+            return _tokenManager?.PendingRefresh ?? Task.CompletedTask;
         }
     }
 

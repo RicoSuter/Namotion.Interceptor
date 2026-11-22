@@ -76,7 +76,8 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 
         if (factory is not null)
         {
-            return await factory();
+            // Like a real handler, a held-back request ends when the client cancels it or is disposed.
+            return await factory().WaitAsync(cancellationToken);
         }
 
         return new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("{\"error\":\"not_found\"}") };

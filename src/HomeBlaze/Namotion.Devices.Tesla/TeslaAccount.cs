@@ -168,12 +168,34 @@ public partial class TeslaAccount : BackgroundService,
         return Task.CompletedTask;
     }
 
+    /// <summary>Stops polling and waits until a token refresh in progress has saved the rotated refresh token.</summary>
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await base.StopAsync(cancellationToken);
+
+        // Tesla may already have rotated the refresh token; disposing the client afterwards would lose it. A failed
+        // refresh was reported to its caller.
+        await GetPendingTokenRefresh()
+            .WaitAsync(_httpClient.Timeout, cancellationToken)
+            .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+    }
+
     public override void Dispose()
     {
         // Cancels the stopping token first, so that the loop does not start another poll on the disposed client.
         // _pollLock is not disposed: it never creates a wait handle, and a poll still running when Dispose is called
         // without StopAsync releases it afterwards.
         base.Dispose();
-        _httpClient.Dispose();
+
+        // A token refresh in progress keeps the client until it completes, so that the rotated refresh token is not lost.
+        var refresh = GetPendingTokenRefresh();
+        if (refresh.IsCompleted)
+        {
+            _httpClient.Dispose();
+        }
+        else
+        {
+            _ = refresh.ContinueWith(_ => _httpClient.Dispose(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
     }
 }
