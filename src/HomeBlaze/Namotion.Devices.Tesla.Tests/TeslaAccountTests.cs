@@ -714,6 +714,33 @@ public class TeslaAccountTests
     }
 
     [Fact]
+    public async Task WhenDisposedWhileWakeUpWaitsForAPoll_ThenTheWakeUpThrowsAnInvalidOperationException()
+    {
+        // Arrange
+        var productsResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new FakeHttpMessageHandler()
+            .Respond(TokenPath, HttpStatusCode.OK, TokenJson)
+            .Respond(ProductsPath, HttpStatusCode.OK, FixtureLoader.Load("products.json"))
+            .Respond(ProductsPath, () => productsResponse.Task)
+            .Respond(VehicleDataPath, HttpStatusCode.OK, FixtureLoader.Load("vehicle-data.json"))
+            .Respond(WakeUpPath, HttpStatusCode.OK, """{"response":{"state":"online"}}""");
+        var (account, _, _) = Create(handler);
+        await account.PollOnceAsync(CancellationToken.None);
+        var vehicle = account.Vehicles.Single().Value;
+        var poll = account.PollOnceAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => CountRequests(handler, ProductsPath) == 2);
+        var wakeUp = vehicle.WakeUpAsync(CancellationToken.None);
+
+        // Act
+        account.Dispose();
+        await poll;
+
+        // Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => wakeUp);
+        Assert.Equal(0, CountRequests(handler, WakeUpPath));
+    }
+
+    [Fact]
     public async Task WhenWakeUpIsCanceledByTheCaller_ThenNoWarningIsLogged()
     {
         // Arrange

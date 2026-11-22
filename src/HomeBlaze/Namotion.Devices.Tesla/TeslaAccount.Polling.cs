@@ -335,12 +335,15 @@ public partial class TeslaAccount
     /// </summary>
     private async Task WakeUpAsync(TeslaVehicle vehicle, CancellationToken cancellationToken)
     {
+        ThrowIfDisposed();
+        await _pollLock.WaitAsync(cancellationToken);
         if (_isDisposed)
         {
-            throw new InvalidOperationException("The Tesla account was disposed; it cannot wake a vehicle anymore.");
+            // Disposed while waiting for a poll; the HTTP client is gone.
+            _pollLock.Release();
+            ThrowIfDisposed();
         }
 
-        await _pollLock.WaitAsync(cancellationToken);
         try
         {
             var tokenManager = GetTokenManager();
@@ -383,6 +386,14 @@ public partial class TeslaAccount
         finally
         {
             _pollLock.Release();
+        }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_isDisposed)
+        {
+            throw new InvalidOperationException("The Tesla account was disposed; it cannot wake a vehicle anymore.");
         }
     }
 
