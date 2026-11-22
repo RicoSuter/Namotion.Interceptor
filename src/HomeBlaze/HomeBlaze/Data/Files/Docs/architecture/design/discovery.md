@@ -33,7 +33,7 @@ Implemented (one pull request):
 - The Discover page in the create dialog and the handoff to the Setup or Edit component
 - Discoverers for FRITZ!Box (SSDP), Hue (mDNS), Nuki (cloud lookup) and Shelly (mDNS)
 
-Follow-up pull requests, stacked on the first, one each:
+Implemented in the follow-up pull request, stacked on the first:
 
 - Sonos (SSDP), which adds the response headers to `SsdpResponse`
 - Ecowitt (its UDP broadcast request)
@@ -125,7 +125,7 @@ public interface IMulticastDnsBrowser
 }
 ```
 
-- `SsdpResponse` carries the location, unique service name and headers of an answer for exactly the searched target. Headers are looked up by name ignoring case, and the values of a repeated header are joined by commas.
+- `SsdpResponse` carries the location, unique service name and headers of an answer for exactly the searched target. Headers are looked up by name ignoring case, and the values of a repeated header are joined by `, `.
 - `MulticastDnsService` carries the instance name, host name, addresses, port and TXT records.
 
 SSDP uses Rssdp, which `HomeBlaze.Services` references, and searches every IPv4 adapter with a listening window of about 3 seconds.
@@ -149,7 +149,7 @@ The picker page of `SubjectSetupDialog` gets a toggle at the top: All types or D
 - A row whose `ExistingSubject` is set is shown disabled as "already added" and links to that subject.
 - While the scan runs, the header shows a progress indicator; afterwards it shows the number of devices found.
 - With nothing found, the page says so and points to All types for adding a device by its address. Battery devices that sleep only answer while awake, which the hint mentions.
-- The page always shows a hint that a container on a bridge network receives no multicast, so devices there are added by address or HomeBlaze runs with host networking. A container still has an adapter that claims multicast support, so the case cannot be detected reliably.
+- The page always shows a hint that a container on a bridge network receives no multicast and no broadcast, so devices there are added by address or HomeBlaze runs with host networking. A container still has an adapter that claims multicast support, so the case cannot be detected reliably.
 
 ### Handoff
 
