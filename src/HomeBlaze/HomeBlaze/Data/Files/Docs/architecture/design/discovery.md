@@ -176,7 +176,7 @@ Picking a row opens the configure page for the result's type, as picking the typ
 |---|---|---|---|
 | `FritzBox` | `FritzBoxDiscovery` through the shared `ISsdpSearch`, plus the `fritz.box` fallback | `FritzBoxDiscoveryResult`, key `Udn` or else host address | A new persisted `Udn`, or the host address: either one matching is enough, so a router that moved is recognized by its UDN and a router replaced at the same address counts as added |
 | `HueBridge` | mDNS `_hue._tcp`, local only | A new record with bridge ID and address, key bridge ID | The persisted `BridgeId`, ignoring case; `HueBridge` itself compares bridge IDs ignoring case as well |
-| `NukiBridge` | The Nuki cloud lookup, which runs when the user first opens the Discover page and on Scan again | `NukiDiscoveredBridge`, key bridge ID | The host address and port. Whether the bridge ID the discovery service returns equals the runtime `ServerId` of a real bridge is still open until the manual verification, and a match on it is added only if they agree |
+| `NukiBridge` | The Nuki cloud lookup, which runs when the user first opens the Discover page and on Scan again | `NukiDiscoveredBridge`, key bridge ID | The host address and port |
 | `ShellyDevice` | mDNS `_shelly._tcp` | `ShellyDiscoveredDevice(DeviceId, HostAddress, Application, DisplayName)`, key device ID | The device ID the running subject read from the device, otherwise a new persisted `DeviceId`, otherwise the host address |
 
 - A Gen2+ Shelly announces two `_shelly._tcp` instances with the same SRV host, one named by its device ID and one by its user-given name. The discoverer takes the device ID from the SRV host name (without `.local`, lower case) and skips an instance without one, whose name could be the user-given one; it merges the instances into one result and shows the user-given name, or the device ID when there is none. `Application` comes from the `app` TXT record.
@@ -212,4 +212,4 @@ This repository has no component test framework, so the Discover page keeps its 
 
 One E2E test with a fake discoverer: open Discover, pick the result, create, and find the stored subject.
 
-Manual verification before the pull request is finalized, agreed while planning: a real Shelly, FRITZ!Box, Hue bridge and Nuki bridge, run directly and under Docker bridge networking. Legacy unicast mDNS is confirmed against real Shelly and Hue devices (see above). Docker bridge networking and the Nuki bridge ID question are still open until that verification has run.
+Manual verification against a real network: the Discover page found a FRITZ!Box with three repeaters, a Hue bridge, a Nuki bridge and several Shelly Gen2 devices, each Shelly once, under its user-given name when it has one. Docker bridge networking was not tested; the page shows a hint for it.
