@@ -6,4 +6,4 @@ namespace Namotion.Devices.Sonos;
 /// <param name="Id">The RINCON ID of the speaker, such as <c>RINCON_000E58A0123401400</c>.</param>
 /// <param name="HostAddress">The host of its device description, as <see cref="Uri.Host"/> returns it.</param>
 /// <param name="Port">The port of its device description.</param>
-public sealed record SonosDiscoveredSpeaker(string Id, string HostAddress, int Port);
+internal sealed record SonosDiscoveredSpeaker(string Id, string HostAddress, int Port);
