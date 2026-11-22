@@ -1,7 +1,9 @@
 @using Namotion.Interceptor
+@using global::HomeBlaze.Abstractions.Discovery
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(EcowittGateway))]
 @implements ISubjectEditComponent
+@implements ISubjectDiscoveryComponent
 
 <MudForm>
     <MudTextField @bind-Value="_name"
@@ -79,6 +81,9 @@
     [Parameter]
     public bool IsCreating { get; set; }
 
+    [Parameter]
+    public IDiscoveryResult? DiscoveryResult { get; set; }
+
     private EcowittGateway? GatewaySubject => Subject as EcowittGateway;
 
     private string _name = string.Empty;
@@ -121,6 +126,12 @@
             _originalHiddenSensors = new HashSet<string>(_hiddenSensors, StringComparer.OrdinalIgnoreCase);
 
             _allSensorKeys = GetAllSensorKeys();
+
+            // A gateway picked on the Discover page fills in the form; the originals stay, so the value counts as unsaved.
+            if (IsCreating && DiscoveryResult is EcowittDiscoveredGateway discovered)
+            {
+                _hostAddress = discovered.HostAddress;
+            }
         }
     }
 

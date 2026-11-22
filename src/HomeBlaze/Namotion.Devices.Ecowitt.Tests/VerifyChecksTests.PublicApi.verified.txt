@@ -12,6 +12,17 @@ namespace Namotion.Devices.Ecowitt
         public System.Threading.Tasks.Task<Namotion.Devices.Ecowitt.Models.EcowittSensorInfo[]> GetSensorsInfoAsync(System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<Namotion.Devices.Ecowitt.Models.EcowittVersionInfo> GetVersionAsync(System.Threading.CancellationToken cancellationToken) { }
     }
+    public sealed class EcowittDiscoveredGateway : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, System.IEquatable<Namotion.Devices.Ecowitt.EcowittDiscoveredGateway>
+    {
+        public EcowittDiscoveredGateway(string MacAddress, string HostAddress, string? DeviceName, string? FirmwareVersion) { }
+        public string? Detail { get; }
+        public string? DeviceName { get; init; }
+        public string DisplayName { get; }
+        public string? FirmwareVersion { get; init; }
+        public string HostAddress { get; init; }
+        public string Key { get; }
+        public string MacAddress { get; init; }
+    }
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("Cloud")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     [System.ComponentModel.Category("Climate")]
@@ -118,6 +129,13 @@ namespace Namotion.Devices.Ecowitt
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public sealed class EcowittGatewayDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscoverer<Namotion.Devices.Ecowitt.EcowittGateway, Namotion.Devices.Ecowitt.EcowittDiscoveredGateway>
+    {
+        public EcowittGatewayDiscoverer(Microsoft.Extensions.Logging.ILogger<Namotion.Devices.Ecowitt.EcowittGatewayDiscoverer> logger) { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Ecowitt.EcowittGatewayDiscoverer.<DiscoverAsync>d__3))]
+        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Ecowitt.EcowittDiscoveredGateway> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
+        protected override bool Matches(Namotion.Devices.Ecowitt.EcowittGateway existing, Namotion.Devices.Ecowitt.EcowittDiscoveredGateway result) { }
     }
     public static class EcowittServiceCollectionExtensions
     {
