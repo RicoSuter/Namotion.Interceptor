@@ -1,0 +1,223 @@
+@using HomeBlaze.Abstractions.Discovery
+@using HomeBlaze.Services.Discovery
+@using HomeBlaze.Services.Navigation
+
+@inject SubjectDiscoveryService DiscoveryService
+@inject SubjectPathResolver PathResolver
+
+@implements IDisposable
+
+<div class="subject-discovery-page" data-testid="subject-discovery-page">
+    <div class="subject-discovery-header">
+        @if (_isScanning)
+        {
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+            <MudText Typo="Typo.body2" data-testid="discovery-status">Searching your network...</MudText>
+        }
+        else if (_hasScanned)
+        {
+            <MudText Typo="Typo.body2" data-testid="discovery-status">@GetFoundText()</MudText>
+        }
+        <MudSpacer />
+        <MudButton Variant="Variant.Text"
+                   StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="StartScan"
+                   data-testid="discovery-scan-again-button">Scan again</MudButton>
+    </div>
+
+    <div class="subject-type-list">
+        @foreach (var row in _list.Rows)
+        {
+            var result = row.Discovered.Result;
+            @if (row.Discovered.ExistingSubject is { } existingSubject)
+            {
+                <div class="subject-type-row subject-discovery-row-existing" data-testid="discovery-row-existing">
+                    <MudIcon Icon="@MudBlazorIconResolver.Resolve(row.Descriptor.IconName)" />
+                    <span class="subject-type-row-text">
+                        <span>@result.DisplayName</span>
+                        <span class="subject-type-row-description">@GetCaption(row), already added</span>
+                    </span>
+                    @if (GetBrowserUrl(existingSubject) is { } url)
+                    {
+                        <MudIconButton Href="@url"
+                                       Icon="@Icons.Material.Filled.OpenInNew"
+                                       Size="Size.Small"
+                                       aria-label="Open the subject of this device"
+                                       OnClick="OnNavigating" />
+                    }
+                </div>
+            }
+            else
+            {
+                <button type="button"
+                        class="subject-type-row"
+                        @onclick="() => OnSelected.InvokeAsync(row.Discovered)"
+                        data-testid="discovery-row">
+                    <MudIcon Icon="@MudBlazorIconResolver.Resolve(row.Descriptor.IconName)" />
+                    <span class="subject-type-row-text">
+                        <span>@result.DisplayName</span>
+                        <span class="subject-type-row-description">@GetCaption(row)</span>
+                    </span>
+                </button>
+            }
+        }
+
+        @foreach (var failure in _list.Failures)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="discovery-failure">@failure</MudText>
+        }
+
+        @if (_hasScanned && !_isScanning && _list.Rows.Count == 0)
+        {
+            <div class="subject-type-empty" role="status" data-testid="discovery-empty-state">
+                <MudText Typo="Typo.body2">No devices found</MudText>
+            </div>
+        }
+    </div>
+
+    <MudText Typo="Typo.caption" Class="mud-text-secondary subject-discovery-hint">
+        Missing a device? Pick its type under "All types" and enter its address. In a container on a bridge network,
+        multicast does not reach the devices: run HomeBlaze with host networking or add them by address. Battery
+        devices are only found while they are awake.
+    </MudText>
+</div>
+
+<style>
+    .subject-discovery-page {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+        gap: 8px;
+    }
+
+    .subject-discovery-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .subject-discovery-row-existing {
+        opacity: 0.6;
+        cursor: default;
+    }
+</style>
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<SubjectTypeDescriptor> Types { get; set; } = [];
+
+    [Parameter, EditorRequired]
+    public IReadOnlyCollection<IInterceptorSubject> ExistingSubjects { get; set; } = [];
+
+    /// <summary>
+    /// Whether the page is shown. The first time it is, the page starts a scan.
+    /// </summary>
+    [Parameter]
+    public bool IsActive { get; set; }
+
+    [Parameter]
+    public EventCallback<DiscoveredSubject> OnSelected { get; set; }
+
+    /// <summary>
+    /// Raised when the user follows the link to an existing subject, before the browser navigates.
+    /// </summary>
+    [Parameter]
+    public EventCallback OnNavigating { get; set; }
+
+    private readonly SubjectDiscoveryList _list = new();
+    private Dictionary<Type, SubjectTypeDescriptor> _descriptors = [];
+    private IReadOnlyList<SubjectTypeDescriptor>? _describedTypes;
+    private CancellationTokenSource? _scanCancellation;
+    private bool _isScanning;
+    private bool _hasScanned;
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_describedTypes, Types))
+        {
+            _descriptors = Types.ToDictionary(descriptor => descriptor.Type);
+            _describedTypes = Types;
+        }
+
+        if (IsActive && !_hasScanned && !_isScanning)
+        {
+            StartScan();
+        }
+    }
+
+    private void StartScan()
+    {
+        // Canceled but not disposed: the running scan still reads the token after this.
+        _scanCancellation?.Cancel();
+        var scanCancellation = new CancellationTokenSource();
+        _scanCancellation = scanCancellation;
+
+        _list.Clear();
+        _isScanning = true;
+        _ = RunScanAsync(scanCancellation.Token);
+    }
+
+    private async Task RunScanAsync(CancellationToken cancellationToken)
+    {
+        var descriptors = _descriptors;
+        try
+        {
+            await DiscoveryService.ScanAsync(
+                descriptors.Keys,
+                ExistingSubjects,
+                discovered => _ = InvokeAsync(() =>
+                {
+                    if (!cancellationToken.IsCancellationRequested && descriptors.TryGetValue(discovered.SubjectType, out var descriptor))
+                    {
+                        _list.Add(discovered, descriptor);
+                        StateHasChanged();
+                    }
+                }),
+                subjectType => _ = InvokeAsync(() =>
+                {
+                    if (!cancellationToken.IsCancellationRequested && descriptors.TryGetValue(subjectType, out var descriptor))
+                    {
+                        _list.AddFailure(descriptor);
+                        StateHasChanged();
+                    }
+                }),
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // A new scan or the disposal of the page took over.
+            return;
+        }
+
+        // Posted after every result of the scan, so the dispatcher runs it after them.
+        await InvokeAsync(() =>
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                _isScanning = false;
+                _hasScanned = true;
+                StateHasChanged();
+            }
+        });
+    }
+
+    private string GetFoundText()
+    {
+        var count = _list.Rows.Count;
+        return count == 1 ? "Found 1 device" : $"Found {count} devices";
+    }
+
+    private static string GetCaption(SubjectDiscoveryRow row) =>
+        row.Discovered.Result.Detail is { } detail
+            ? $"{row.Descriptor.DisplayName}, {detail}"
+            : row.Descriptor.DisplayName;
+
+    private string? GetBrowserUrl(IInterceptorSubject subject) =>
+        PathResolver.GetPath(subject, PathStyle.Route) is { } routePath ? BrowserUrls.FromRoutePath(routePath) : null;
+
+    public void Dispose()
+    {
+        _scanCancellation?.Cancel();
+    }
+}

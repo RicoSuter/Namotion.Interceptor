@@ -1706,6 +1706,25 @@ namespace HomeBlaze.Components.Dialogs
         public static string GetMemberKey(string parameterName, string memberName) { }
         public static bool IsEnteredPerMember(HomeBlaze.Abstractions.Metadata.MethodParameter parameter) { }
     }
+    public class SubjectDiscoveryPage : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public SubjectDiscoveryPage() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.IInterceptorSubject> ExistingSubjects { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsActive { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnNavigating { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<HomeBlaze.Abstractions.Discovery.DiscoveredSubject> OnSelected { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.SubjectTypeDescriptor> Types { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnParametersSet() { }
+    }
     public class SubjectEditDialog : Microsoft.AspNetCore.Components.ComponentBase
     {
         public SubjectEditDialog() { }

@@ -1,11 +1,14 @@
 @using HomeBlaze.Components.Editors
 @using Microsoft.JSInterop
+@using HomeBlaze.Abstractions.Discovery
+@using HomeBlaze.Services.Discovery
 
 @inject SubjectTypeCatalog TypeCatalog
 @inject SubjectFactory SubjectFactory
 @inject RootManager RootManager
 @inject ISnackbar Snackbar
 @inject IJSRuntime JsRuntime
+@inject SubjectDiscoveryService DiscoveryService
 
 @implements IDisposable
 
@@ -16,9 +19,35 @@
         <MudText Typo="Typo.h6" data-testid="create-dialog-title">@GetTitle()</MudText>
     </TitleContent>
     <DialogContent>
-        @* The picker stays in the tree while the configure page is shown, so its search and group survive "Back". *@
+        @* The picker stays in the tree while the configure page is shown, so its search and group survive "Back".
+           The Discover page stays as well, so its results survive "Back". *@
         <div class="subject-setup-picker-page" hidden="@(_selectedType is not null)">
-            <SubjectTypePicker @ref="_typePicker" Types="_types" OnTypeSelected="SelectType" />
+            @if (_isDiscoverAvailable)
+            {
+                <MudToggleGroup T="PickerMode"
+                                Value="_pickerMode"
+                                ValueChanged="OnPickerModeChanged"
+                                SelectionMode="SelectionMode.SingleSelection"
+                                Size="Size.Small"
+                                Class="mb-2"
+                                data-testid="picker-mode-toggle">
+                    <MudToggleItem Value="PickerMode.Types" Text="All types" data-testid="picker-mode-types" />
+                    <MudToggleItem Value="PickerMode.Discover" Text="Discover" data-testid="picker-mode-discover" />
+                </MudToggleGroup>
+            }
+            <div class="subject-setup-picker-mode" hidden="@(_pickerMode != PickerMode.Types)">
+                <SubjectTypePicker @ref="_typePicker" Types="_types" OnTypeSelected="SelectType" />
+            </div>
+            @if (_isDiscoverAvailable)
+            {
+                <div class="subject-setup-picker-mode" hidden="@(_pickerMode != PickerMode.Discover)">
+                    <SubjectDiscoveryPage Types="_types"
+                                          ExistingSubjects="_existingSubjects"
+                                          IsActive="@(_pickerMode == PickerMode.Discover)"
+                                          OnSelected="SelectDiscovered"
+                                          OnNavigating="Cancel" />
+                </div>
+            }
         </div>
         @if (_selectedType is not null && _createdSubject is not null)
         {
@@ -47,6 +76,7 @@
                                   @ref="_editPanel"
                                   Subject="_createdSubject"
                                   IsCreating="true"
+                                  DiscoveryResult="_discoveredSubject?.Result"
                                   IsValidChanged="OnEditPanelIsValidChanged" />
             </MudStack>
         }
@@ -106,6 +136,14 @@
         flex: 1 1 auto;
         min-height: 0;
     }
+
+    /* :not([hidden]) keeps display: flex from overriding the hidden attribute. */
+    .subject-setup-picker-page > .subject-setup-picker-mode:not([hidden]) {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+    }
 </style>
 
 @code {
@@ -118,6 +156,10 @@
     public SubjectSetupOptions Options { get; set; } = new();
 
     private IReadOnlyList<SubjectTypeDescriptor> _types = [];
+    private IReadOnlyCollection<IInterceptorSubject> _existingSubjects = [];
+    private bool _isDiscoverAvailable;
+    private PickerMode _pickerMode = PickerMode.Types;
+    private DiscoveredSubject? _discoveredSubject;
     private SubjectTypePicker? _typePicker;
     private bool _isSearchFocusPending;
     private MudTextField<string>? _nameField;
@@ -139,11 +181,12 @@
 
     protected override void OnInitialized()
     {
-        IEnumerable<IInterceptorSubject> existingSubjects =
-            RootManager.Root?.Context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys
-            ?? Enumerable.Empty<IInterceptorSubject>();
+        _existingSubjects =
+            RootManager.Root?.Context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys.ToArray()
+            ?? [];
 
-        _types = TypeCatalog.GetCreatableTypes(existingSubjects);
+        _types = TypeCatalog.GetCreatableTypes(_existingSubjects);
+        _isDiscoverAvailable = Options.Type is null && DiscoveryService.HasDiscoverers(_types.Select(descriptor => descriptor.Type).ToArray());
 
         // A normal handler would re-render the dialog, and with it the form, each time the pointer enters the button.
         _refreshEditPanelIsValid = new NonRenderingEventReceiver(RefreshEditPanelIsValidAsync).HandleAsync;
@@ -161,6 +204,19 @@
 
     private void SelectType(SubjectTypeDescriptor descriptor)
     {
+        ShowConfigurePage(descriptor, null);
+    }
+
+    private void SelectDiscovered(DiscoveredSubject discoveredSubject)
+    {
+        if (_types.FirstOrDefault(descriptor => descriptor.Type == discoveredSubject.SubjectType) is { } descriptor)
+        {
+            ShowConfigurePage(descriptor, discoveredSubject);
+        }
+    }
+
+    private void ShowConfigurePage(SubjectTypeDescriptor descriptor, DiscoveredSubject? discoveredSubject)
+    {
         DiscardCreatedSubject();
 
         try
@@ -174,11 +230,14 @@
         }
 
         _selectedType = descriptor;
+        _discoveredSubject = discoveredSubject;
         _isEditPanelValid = false;
 
         if (Options.NameField is { } nameOptions && !_isNameEdited)
         {
-            _subjectName = nameOptions.SuggestName(descriptor.Type);
+            _subjectName = discoveredSubject is null
+                ? nameOptions.SuggestName(descriptor.Type)
+                : nameOptions.SuggestName(discoveredSubject.Result.DisplayName, descriptor.Type);
         }
 
         _nameError = ValidateName(_subjectName);
@@ -190,10 +249,13 @@
     {
         DiscardCreatedSubject();
         _selectedType = null;
+        _discoveredSubject = null;
         _editPanel = null;
         _isEditPanelValid = false;
         _isNameFocusPending = false;
-        _isSearchFocusPending = _hasFinePointer;
+
+        // Back returns to the page the type was picked on; only the type list has a search to focus.
+        _isSearchFocusPending = _hasFinePointer && _pickerMode == PickerMode.Types;
         RefreshDialog();
     }
 
@@ -203,7 +265,7 @@
         {
             // Focusing a field opens the on-screen keyboard of a touch device, over the list or the form.
             _hasFinePointer = await HasFinePointerAsync();
-            _isSearchFocusPending = _hasFinePointer && _selectedType is null;
+            _isSearchFocusPending = _hasFinePointer && _selectedType is null && _pickerMode == PickerMode.Types;
         }
 
         // The picker is hidden until the render that follows "Back", and a hidden field cannot take the focus.
@@ -370,6 +432,18 @@
 
         _createdSubject = null;
         _isCreatedSubjectHandedOver = false;
+    }
+
+    private void OnPickerModeChanged(PickerMode pickerMode)
+    {
+        _pickerMode = pickerMode;
+        _isSearchFocusPending = _hasFinePointer && pickerMode == PickerMode.Types;
+    }
+
+    private enum PickerMode
+    {
+        Types,
+        Discover
     }
 
     public void Dispose()
