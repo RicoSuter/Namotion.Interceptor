@@ -163,14 +163,20 @@ public partial class TeslaVehicleBody : IDoorLockState, ITitleProvider, IIconPro
         UpdateLastSeenFromProtobuf(proto);
     }
 
+    // True when one is open; otherwise null when one is unknown, because that one might be open.
     private static bool? Any(bool? first, bool? second, bool? third, bool? fourth)
     {
-        if (first is null && second is null && third is null && fourth is null)
+        if (first == true || second == true || third == true || fourth == true)
+        {
+            return true;
+        }
+
+        if (first is null || second is null || third is null || fourth is null)
         {
             return null;
         }
 
-        return first == true || second == true || third == true || fourth == true;
+        return false;
     }
 
     // Tesla reports an open closure as a number other than 0.

@@ -152,6 +152,34 @@ public class TeslaVehicleBodyTests
     }
 
     [Fact]
+    public void WhenOneDoorIsUnknownAndNoneIsOpen_ThenAnyDoorOpenIsNull()
+    {
+        // Arrange
+        var body = new TeslaVehicleBody();
+
+        // Act
+        body.IsDriverFrontDoorOpen = false;
+        body.IsDriverRearDoorOpen = false;
+        body.IsPassengerFrontDoorOpen = false;
+
+        // Assert
+        Assert.Null(body.IsAnyDoorOpen);
+    }
+
+    [Fact]
+    public void WhenOneDoorIsOpenAndAnotherUnknown_ThenAnyDoorOpenIsTrue()
+    {
+        // Arrange
+        var body = new TeslaVehicleBody();
+
+        // Act
+        body.IsPassengerRearDoorOpen = true;
+
+        // Assert
+        Assert.True(body.IsAnyDoorOpen);
+    }
+
+    [Fact]
     public void WhenSnapshotIsNewer_ThenLockAndTiresUpdate()
     {
         // Arrange
