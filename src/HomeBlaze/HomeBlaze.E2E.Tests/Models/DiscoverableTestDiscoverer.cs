@@ -21,9 +21,9 @@ public sealed class DiscoverableTestDiscoverer : SubjectDiscoverer<DiscoverableT
 
     public const string HubName = "Discoverable test hub";
 
-    public const string HubHostAddress = "192.0.2.19";
+    private const string HubHostAddress = "192.0.2.19";
 
-    public static readonly IReadOnlyList<DiscoveredItem> HubItems =
+    private static readonly IReadOnlyList<DiscoveredItem> HubItems =
     [
         new("Kitchen speaker", "Test model, 192.0.2.20"),
         new("Office speaker", null)

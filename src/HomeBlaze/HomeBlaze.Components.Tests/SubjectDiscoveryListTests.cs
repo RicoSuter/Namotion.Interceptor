@@ -179,6 +179,25 @@ public class SubjectDiscoveryListTests
     }
 
     [Fact]
+    public void WhenAnExpandedRowIsMarkedAdded_ThenItStaysExpanded()
+    {
+        // Arrange
+        var list = new SubjectDiscoveryList();
+        var found = Found(Hue, "Alpha");
+        list.Add(found, Hue);
+        list.Add(Found(Hue, "Beta"), Hue);
+        list.ToggleExpanded(list.Rows[0]);
+
+        // Act
+        list.MarkAdded(found, Mock.Of<IInterceptorSubject>());
+
+        // Assert
+        Assert.Equal(["Beta", "Alpha"], Names(list));
+        Assert.True(list.IsExpanded(list.Rows[1]));
+        Assert.False(list.IsExpanded(list.Rows[0]));
+    }
+
+    [Fact]
     public void WhenTheListIsClearedForANewScan_ThenTheSameDeviceIsCollapsedAgain()
     {
         // Arrange
