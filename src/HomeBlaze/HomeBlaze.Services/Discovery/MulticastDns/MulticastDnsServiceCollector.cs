@@ -9,10 +9,14 @@ namespace HomeBlaze.Services.Discovery.MulticastDns;
 internal sealed class MulticastDnsServiceCollector
 {
     private const int MaximumRecords = 4096;
+    private const int MaximumBytes = 256 * 1024;
     private const int MaximumServices = 64;
 
     private readonly Lock _lock = new();
     private readonly List<(DnsRecord Record, IPAddress Sender)> _records = [];
+
+    private int _bytes;
+    private bool _isFull;
 
     /// <summary>
     /// Gets the DNS name of a service type, such as <c>_hue._tcp.local</c> for <c>_hue._tcp</c>.
@@ -24,16 +28,24 @@ internal sealed class MulticastDnsServiceCollector
     }
 
     /// <summary>
-    /// Adds the records of one answer, up to a total that bounds what the hosts of a network can make it hold.
+    /// Adds the records of one answer, up to a number of records and a size of their names and text that bound what
+    /// the hosts of a network can make it hold. Once a record does not fit, it and every later record are dropped.
     /// </summary>
     public void Add(IReadOnlyList<DnsRecord> records, IPAddress sender)
     {
         lock (_lock)
         {
-            var count = Math.Min(records.Count, MaximumRecords - _records.Count);
-            for (var index = 0; index < count; index++)
+            foreach (var record in records)
             {
-                _records.Add((records[index], sender));
+                var bytes = GetSize(record);
+                if (_isFull || _records.Count == MaximumRecords || bytes > MaximumBytes - _bytes)
+                {
+                    _isFull = true;
+                    return;
+                }
+
+                _records.Add((record, sender));
+                _bytes += bytes;
             }
         }
     }
@@ -98,6 +110,22 @@ internal sealed class MulticastDnsServiceCollector
         }
 
         return services;
+    }
+
+    /// <summary>
+    /// Gets the bytes that the strings of a record hold in memory.
+    /// </summary>
+    private static int GetSize(DnsRecord record)
+    {
+        var characters = record.Name.Length + record switch
+        {
+            PointerRecord pointer => pointer.Target.Length,
+            ServiceRecord service => service.Target.Length,
+            TextRecord text => text.Entries.Sum(entry => entry.Length),
+            _ => 0
+        };
+
+        return characters * sizeof(char);
     }
 
     private static bool IsName(string name, string expected) =>

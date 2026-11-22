@@ -139,16 +139,42 @@ public class MulticastDnsServiceCollectorTests
     [Fact]
     public void WhenMoreRecordsArriveThanTheLimit_ThenTheCollectorStopsAtTheLimit()
     {
-        // Arrange
+        // Arrange: the names are short, so the records stay far below the limit of their size.
         var collector = new MulticastDnsServiceCollector();
         var records = Enumerable.Range(0, 4095)
-            .Select(index => (DnsRecord)new PointerRecord("_http._tcp.local", $"Device{index}._http._tcp.local"))
+            .Select(index => (DnsRecord)new PointerRecord("a.local", $"{index}.local"))
             .ToList();
         records.Add(new PointerRecord("_hue._tcp.local", "Kept._hue._tcp.local"));
         records.Add(new PointerRecord("_hue._tcp.local", "Dropped._hue._tcp.local"));
 
         // Act
         collector.Add(records, Sender);
+        collector.Add([new PointerRecord("_hue._tcp.local", "AlsoDropped._hue._tcp.local")], Sender);
+
+        // Assert
+        var service = Assert.Single(collector.GetServices("_hue._tcp"));
+        Assert.Equal("Kept", service.InstanceName);
+    }
+
+    [Fact]
+    public void WhenTheRecordsHoldMoreTextThanTheLimit_ThenTheCollectorDropsTheRecordThatDoesNotFitAndAllLaterOnes()
+    {
+        // Arrange: each text record holds 32 768 characters, which are 64 KiB, so a fourth does not fit into 256 KiB
+        // beside the pointer.
+        var collector = new MulticastDnsServiceCollector();
+        var text = new string('a', 32768 - "Filler.local".Length);
+        var fillers = Enumerable.Range(0, 3)
+            .Select(_ => (DnsRecord)new TextRecord("Filler.local", [text]))
+            .ToList();
+        collector.Add(fillers, Sender);
+        collector.Add([new PointerRecord("_hue._tcp.local", "Kept._hue._tcp.local")], Sender);
+
+        // Act
+        collector.Add(
+        [
+            new TextRecord("Filler.local", [text]),
+            new PointerRecord("_hue._tcp.local", "Dropped._hue._tcp.local")
+        ], Sender);
         collector.Add([new PointerRecord("_hue._tcp.local", "AlsoDropped._hue._tcp.local")], Sender);
 
         // Assert
