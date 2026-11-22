@@ -76,16 +76,19 @@ public partial class BluelinkChargeState : IVehicleChargingState, IVehicleChargi
     public bool SetChargeLimits_IsEnabled => !_vehicle.IsBusy && _vehicle.Commands.CanSendCommands(BluelinkProtocol.Legacy);
 
     /// <inheritdoc />
+    [Category("")]
     public Task StartChargingAsync(CancellationToken cancellationToken) =>
         _vehicle.Commands.SetChargingAsync(_vehicle, start: true, cancellationToken);
 
     /// <inheritdoc />
+    [Category("")]
     public Task StopChargingAsync(CancellationToken cancellationToken) =>
         _vehicle.Commands.SetChargingAsync(_vehicle, start: false, cancellationToken);
 
     /// <summary>Sets the AC charge limit and keeps the current DC charge limit, because the API always takes both.</summary>
     /// <exception cref="ArgumentOutOfRangeException">The limit is not 0.5 to 1.0 in steps of 0.1.</exception>
     /// <exception cref="InvalidOperationException">The DC charge limit is not known yet or is not a setting.</exception>
+    [Category("")]
     public Task SetChargeLimitAsync(decimal chargeLimit, CancellationToken cancellationToken)
     {
         var acPercent = BluelinkValues.ToChargeLimitPercent(chargeLimit, nameof(chargeLimit));
@@ -110,7 +113,6 @@ public partial class BluelinkChargeState : IVehicleChargingState, IVehicleChargi
     /// <summary>Sets the AC and the DC charge limit.</summary>
     /// <exception cref="ArgumentOutOfRangeException">A limit is not 0.5 to 1.0 in steps of 0.1.</exception>
     [Operation(Title = "Set Charge Limits", Icon = "BatteryChargingFull", Position = 4, Description = "Sets the AC and the DC fast charge limit, each from 0.5 to 1.0 in steps of 0.1.")]
-    [Category("Charging")]
     public Task SetChargeLimitsAsync(
         [OperationParameter(Unit = StateUnit.Percent)] decimal chargeLimit,
         [OperationParameter(Unit = StateUnit.Percent)] decimal fastChargeLimit,

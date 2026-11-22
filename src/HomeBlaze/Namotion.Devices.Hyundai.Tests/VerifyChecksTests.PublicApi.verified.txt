@@ -123,12 +123,14 @@ namespace Namotion.Devices.Hyundai
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
+        [System.ComponentModel.Category("")]
         public System.Threading.Tasks.Task SetChargeLimitAsync(decimal chargeLimit, System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the AC and the DC fast charge limit, each from 0.5 to 1.0 in steps of 0.1.", Icon="BatteryChargingFull", Position=4, Title="Set Charge Limits")]
-        [System.ComponentModel.Category("Charging")]
         public System.Threading.Tasks.Task SetChargeLimitsAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal chargeLimit, [HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal fastChargeLimit, System.Threading.CancellationToken cancellationToken) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        [System.ComponentModel.Category("")]
         public System.Threading.Tasks.Task StartChargingAsync(System.Threading.CancellationToken cancellationToken) { }
+        [System.ComponentModel.Category("")]
         public System.Threading.Tasks.Task StopChargingAsync(System.Threading.CancellationToken cancellationToken) { }
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
@@ -169,11 +171,12 @@ namespace Namotion.Devices.Hyundai
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        [System.ComponentModel.Category("")]
         public System.Threading.Tasks.Task StartClimateAsync(decimal temperature, System.Threading.CancellationToken cancellationToken) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Starts the climate with the front windshield defrost, for the duration set in the" +
             " account.", Icon="AcUnit", Position=3, Title="Start Climate With Defrost")]
-        [System.ComponentModel.Category("Climate")]
         public System.Threading.Tasks.Task StartClimateWithDefrostAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)] decimal temperature, System.Threading.CancellationToken cancellationToken) { }
+        [System.ComponentModel.Category("")]
         public System.Threading.Tasks.Task StopClimateAsync(System.Threading.CancellationToken cancellationToken) { }
     }
     public sealed class BluelinkConnection : System.IEquatable<Namotion.Devices.Hyundai.BluelinkConnection>

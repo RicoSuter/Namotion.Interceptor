@@ -19,6 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
     <ProjectReference Include="..\Namotion.Devices.Hyundai\Namotion.Devices.Hyundai.csproj" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />

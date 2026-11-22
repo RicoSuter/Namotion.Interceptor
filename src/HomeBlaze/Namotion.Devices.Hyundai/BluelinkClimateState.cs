@@ -60,17 +60,18 @@ public partial class BluelinkClimateState : IVehicleClimateState, IVehicleClimat
     public bool StopClimate_IsEnabled => !_vehicle.IsBusy && _vehicle.Commands.CanSendCommands(_vehicle.Protocol);
 
     /// <inheritdoc />
+    [Category("")]
     public Task StartClimateAsync(decimal temperature, CancellationToken cancellationToken) =>
         StartAsync(temperature, defrost: false, cancellationToken);
 
     /// <summary>Starts the climate with the front windshield defrost.</summary>
     /// <exception cref="ArgumentOutOfRangeException">The temperature is not 14.0 to 31.5 °C in steps of 0.5.</exception>
     [Operation(Title = "Start Climate With Defrost", Icon = "AcUnit", Position = 3, Description = "Starts the climate with the front windshield defrost, for the duration set in the account.")]
-    [Category("Climate")]
     public Task StartClimateWithDefrostAsync([OperationParameter(Unit = StateUnit.DegreeCelsius)] decimal temperature, CancellationToken cancellationToken) =>
         StartAsync(temperature, defrost: true, cancellationToken);
 
     /// <inheritdoc />
+    [Category("")]
     public Task StopClimateAsync(CancellationToken cancellationToken) =>
         _vehicle.Commands.StopClimateAsync(_vehicle, cancellationToken);
 
