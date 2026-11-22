@@ -8,17 +8,11 @@ namespace HomeBlaze.Abstractions.Devices.Energy;
 /// </summary>
 [SubjectAbstraction]
 [Description("Electric vehicle charger state with charge level and power.")]
-public interface IVehicleChargerState : IEnergyChargerState
+public interface IVehicleChargerState : IChargingState
 {
     /// <summary>
     /// The current charge level of the connected vehicle (0..1).
     /// </summary>
     [State(Unit = StateUnit.Percent)]
     decimal? ChargeLevel { get; }
-
-    /// <summary>
-    /// The current charging power in watts.
-    /// </summary>
-    [State(Unit = StateUnit.Watt)]
-    decimal? ChargingPower { get; }
 }

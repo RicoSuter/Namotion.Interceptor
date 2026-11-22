@@ -1,0 +1,904 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Devices.Tesla.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Devices.Tesla.Client
+{
+    public class TeslaApiException : System.Exception
+    {
+        public string? Error { get; }
+        public System.TimeSpan? RetryAfter { get; }
+        public System.Net.HttpStatusCode StatusCode { get; }
+    }
+    public sealed class TeslaReauthenticationRequiredException : System.Exception
+    {
+        public string? Error { get; }
+    }
+}
+namespace Namotion.Devices.Tesla
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("DirectionsCar")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Vehicles")]
+    [System.ComponentModel.Description("Tesla account with its vehicles, read through the Tesla Owner API without waking " +
+        "the vehicles")]
+    [System.ComponentModel.DisplayName("Tesla account")]
+    public class TeslaAccount : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Security.IAuthenticatedSubject, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public TeslaAccount(System.TimeProvider timeProvider, Microsoft.Extensions.Logging.ILoggerFactory loggerFactory) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan ActivePollingInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? AuthenticatedAt { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? AuthenticatedUser { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan IdlePollingInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan IdleTimeout { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public bool IsAuthenticated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public bool IsReauthenticationRequired { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
+        public string RefreshToken { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan RetryInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan SleepWindow { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan StatePollingInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Tesla.TeslaVehicle> Vehicles { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        public override void Dispose() { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        public void ReplaceRefreshToken(string refreshToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public override System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    public static class TeslaAccountConnector
+    {
+        public static System.Threading.Tasks.Task<Namotion.Devices.Tesla.TeslaConnection> ConnectWithLoginAsync(Namotion.Devices.Tesla.TeslaLogin login, string pastedCallback, System.TimeProvider timeProvider, System.Threading.CancellationToken cancellationToken) { }
+        public static System.Threading.Tasks.Task<Namotion.Devices.Tesla.TeslaConnection> ConnectWithRefreshTokenAsync(string refreshToken, System.TimeProvider timeProvider, System.Threading.CancellationToken cancellationToken) { }
+        public static Namotion.Devices.Tesla.TeslaLogin CreateLogin() { }
+    }
+    public enum TeslaCabinOverheatProtection
+    {
+        Unknown = 0,
+        Off = 1,
+        On = 2,
+        FanOnly = 3,
+    }
+    public enum TeslaCabinOverheatProtectionTemperature
+    {
+        Unknown = 0,
+        Low = 1,
+        Medium = 2,
+        High = 3,
+    }
+    public enum TeslaChargePortLatch
+    {
+        Unknown = 0,
+        Engaged = 1,
+        Disengaged = 2,
+        Blocking = 3,
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class TeslaChargeState : HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Devices.Energy.IChargingState, HomeBlaze.Abstractions.Devices.Vehicles.IVehicleChargingState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=18, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        public decimal? AddedEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=40, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        public decimal? AddedIdealRange { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=19, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        public decimal? AddedRange { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? BatteryLevel { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=24)]
+        public string? ChargeCable { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        [System.ComponentModel.Category("")]
+        public decimal? ChargeLimit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=27)]
+        public string? ChargePortColor { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=26)]
+        public Namotion.Devices.Tesla.TeslaChargePortLatch? ChargePortLatch { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=39, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.KilometerPerHour)]
+        public decimal? ChargeRate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=17)]
+        public int? ChargerPhases { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=16, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Volt)]
+        public decimal? ChargerVoltage { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=12, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
+        public decimal? ChargingCurrent { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=38, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
+        public decimal? ChargingCurrentSetting { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=11, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [System.ComponentModel.Category("")]
+        public decimal? ChargingPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        public Namotion.Devices.Tesla.TeslaChargingState? ChargingState { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsEstimated=true, Position=50, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? EstimatedBatteryCapacity { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsEstimated=true, Position=10, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        public decimal? EstimatedRange { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=22)]
+        public string? FastChargerBrand { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=23)]
+        public string? FastChargerType { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=9, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        public decimal? IdealRange { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=41)]
+        public bool? IsChargeEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=42)]
+        public bool? IsChargeEnabledByUser { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=28)]
+        public bool? IsChargePortColdWeatherMode { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=25)]
+        public bool? IsChargePortDoorOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=49)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("")]
+        public bool? IsCharging { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=21)]
+        public bool? IsFastChargerPresent { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=34)]
+        public bool? IsOffPeakChargingEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=48)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("")]
+        public bool? IsPluggedIn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=35)]
+        public bool? IsPreconditioningEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=31)]
+        public bool? IsScheduledChargingPending { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=44)]
+        public bool? IsSuperchargerSessionFromTripPlanner { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=36)]
+        public bool? IsTripCharging { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=6, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? MaximumChargeLimit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=51, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("")]
+        public decimal? MaximumChargingPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=37)]
+        public int? MaximumRangeChargeCounter { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=14, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
+        public decimal? MaximumRequestedChargingCurrent { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? MinimumChargeLimit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=45)]
+        public Namotion.Devices.Tesla.TeslaScheduleDays? OffPeakChargingDays { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=46)]
+        public System.TimeSpan? OffPeakChargingEndTime { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=15, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
+        public decimal? PilotCurrent { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=47)]
+        public Namotion.Devices.Tesla.TeslaScheduleDays? PreconditioningDays { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=8, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        [System.ComponentModel.Category("")]
+        public decimal? Range { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=20)]
+        [System.ComponentModel.Category("")]
+        public System.TimeSpan? RemainingChargingTime { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=13, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Ampere)]
+        public decimal? RequestedChargingCurrent { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=30)]
+        public Namotion.Devices.Tesla.TeslaScheduledChargingMode? ScheduledChargingMode { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=32)]
+        public System.TimeSpan? ScheduledChargingStartTime { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=33)]
+        public System.TimeSpan? ScheduledDepartureTime { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=7, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? StandardChargeLimit { get; }
+        public string Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? UsableBatteryLevel { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public enum TeslaChargingState
+    {
+        Unknown = 0,
+        Disconnected = 1,
+        NoPower = 2,
+        Starting = 3,
+        Charging = 4,
+        Complete = 5,
+        Stopped = 6,
+        Calibrating = 7,
+    }
+    public enum TeslaClimateKeeperMode
+    {
+        Unknown = 0,
+        Off = 1,
+        On = 2,
+        Dog = 3,
+        Camp = 4,
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class TeslaClimateState : HomeBlaze.Abstractions.Devices.Vehicles.IVehicleClimateState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=25)]
+        public Namotion.Devices.Tesla.TeslaCabinOverheatProtection? CabinOverheatProtection { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=27)]
+        public Namotion.Devices.Tesla.TeslaCabinOverheatProtectionTemperature? CabinOverheatProtectionTemperature { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=14)]
+        public Namotion.Devices.Tesla.TeslaClimateKeeperMode? ClimateKeeperMode { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=15)]
+        public int? DefrostMode { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=6, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? DriverTemperatureSetting { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=10)]
+        public int? FanStatus { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=13)]
+        public Namotion.Devices.Tesla.TeslaHvacAutoRequest? HvacAutoRequest { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [System.ComponentModel.Category("")]
+        public decimal? InsideTemperature { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=2)]
+        public bool? IsAutoConditioningOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=20)]
+        public bool? IsBatteryHeaterOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=21)]
+        public bool? IsBatteryHeaterWithoutPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=23)]
+        public bool? IsCabinOverheatProtectionAllowed { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=26)]
+        public bool? IsCabinOverheatProtectionCooling { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [System.ComponentModel.Category("")]
+        public bool? IsClimateOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=24)]
+        public bool? IsFanOnlyCabinOverheatProtectionSupported { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=16)]
+        public bool? IsFrontDefrosterOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        public bool? IsPreconditioning { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=17)]
+        public bool? IsRearDefrosterOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=22)]
+        public bool? IsRemoteHeaterControlEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=18)]
+        public bool? IsSideMirrorHeaterOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=19)]
+        public bool? IsWiperBladeHeaterOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=11)]
+        public int? LeftTemperatureDirection { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=9, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? MaximumTemperatureSetting { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=8, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? MinimumTemperatureSetting { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [System.ComponentModel.Category("")]
+        public decimal? OutsideTemperature { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=7, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? PassengerTemperatureSetting { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=12)]
+        public int? RightTemperatureDirection { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=28)]
+        public Namotion.Devices.Tesla.TeslaSeatHeaters SeatHeaters { get; }
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public enum TeslaCommandSigning
+    {
+        Unknown = 0,
+        Off = 1,
+        Allowed = 2,
+        Required = 3,
+    }
+    public sealed class TeslaConnection : System.IEquatable<Namotion.Devices.Tesla.TeslaConnection>
+    {
+        public TeslaConnection(string RefreshToken, string? Email, System.Collections.Generic.IReadOnlyList<Namotion.Devices.Tesla.TeslaVehicleSummary> Vehicles, string? VehicleListError = null) { }
+        public string? Email { get; init; }
+        public string RefreshToken { get; init; }
+        public string? VehicleListError { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Namotion.Devices.Tesla.TeslaVehicleSummary> Vehicles { get; init; }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class TeslaDisplaySettings : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public TeslaDisplaySettings(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public string? ChargeRateUnits { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3)]
+        public string? DistanceUnits { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        public bool? Is24HourTime { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4)]
+        public string? RangeDisplay { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
+        public bool? ShowsRangeUnits { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5)]
+        public string? TemperatureUnits { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=6)]
+        public string? TirePressureUnits { get; }
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class TeslaDriveState : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=6)]
+        public System.DateTimeOffset? GpsTime { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Degree)]
+        public decimal? Heading { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=11)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsDriving { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
+        public bool? IsHomelinkNearby { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=12)]
+        public Namotion.Devices.Tesla.TeslaNavigation Navigation { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=9, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        public decimal? Power { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=10)]
+        public Namotion.Devices.Tesla.TeslaShiftState? ShiftState { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=8, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.KilometerPerHour)]
+        public decimal? Speed { get; }
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public enum TeslaHvacAutoRequest
+    {
+        Unknown = 0,
+        On = 1,
+        Override = 2,
+    }
+    public sealed class TeslaLogin : System.IEquatable<Namotion.Devices.Tesla.TeslaLogin>
+    {
+        public TeslaLogin(string Url, string State, string CodeVerifier) { }
+        public string CodeVerifier { get; init; }
+        public string State { get; init; }
+        public string Url { get; init; }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class TeslaMedia : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Media.IMediaTrackState, HomeBlaze.Abstractions.Media.IVolumeState, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public string? CurrentTrackAlbum { get; }
+        public string? CurrentTrackArtist { get; }
+        public System.TimeSpan? CurrentTrackDuration { get; }
+        public string? CurrentTrackImageUri { get; }
+        public System.TimeSpan? CurrentTrackPosition { get; }
+        public string? CurrentTrackTitle { get; }
+        public string? CurrentTrackUri { get; }
+        public string IconName { get; }
+        public bool? IsMuted { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
+        public bool? IsRemoteControlEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        public Namotion.Devices.Tesla.TeslaMediaPlaybackStatus? PlaybackStatus { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public string? Source { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3)]
+        public string? Station { get; }
+        public string Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? Volume { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public enum TeslaMediaPlaybackStatus
+    {
+        Unknown = 0,
+        Stopped = 1,
+        Playing = 2,
+        Paused = 3,
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class TeslaNavigation : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public TeslaNavigation(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
+        public string? Destination { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public HomeBlaze.Abstractions.Common.GeoCoordinate? DestinationLocation { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        public decimal? DistanceToArrival { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? EnergyAtArrival { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3)]
+        public System.TimeSpan? TimeToArrival { get; }
+        public string Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=6)]
+        public System.TimeSpan? TrafficDelay { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public enum TeslaScheduleDays
+    {
+        Unknown = 0,
+        AllWeek = 1,
+        Weekdays = 2,
+    }
+    public enum TeslaScheduledChargingMode
+    {
+        Unknown = 0,
+        Off = 1,
+        StartAt = 2,
+        DepartBy = 3,
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class TeslaSeatHeaters : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public TeslaSeatHeaters(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
+        public int? FrontLeftLevel { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public int? FrontRightLevel { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=6)]
+        public bool? IsAutoSeatClimateFrontLeftOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
+        public bool? IsAutoSeatClimateFrontRightOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=10)]
+        public bool? IsAutoSteeringWheelHeatOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=8)]
+        public bool? IsSteeringWheelHeaterOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4)]
+        public int? RearCenterLevel { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3)]
+        public int? RearLeftLevel { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5)]
+        public int? RearRightLevel { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=9)]
+        public int? SteeringWheelHeatLevel { get; }
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public static class TeslaServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddTeslaAccount(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Tesla.TeslaAccount>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+    }
+    public enum TeslaShiftState
+    {
+        Unknown = 0,
+        Park = 1,
+        Reverse = 2,
+        Neutral = 3,
+        Drive = 4,
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class TeslaSoftwareUpdate : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=3, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? DownloadProgress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5)]
+        public System.TimeSpan? ExpectedDuration { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? InstallProgress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        public Namotion.Devices.Tesla.TeslaSoftwareUpdateStatus? Status { get; }
+        public string Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public string? Version { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public enum TeslaSoftwareUpdateStatus
+    {
+        Unknown = 0,
+        Available = 1,
+        Scheduled = 2,
+        Installing = 3,
+        Downloading = 4,
+        DownloadingWifiWait = 5,
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class TeslaSpeedLimitMode : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public TeslaSpeedLimitMode(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.KilometerPerHour)]
+        public decimal? CurrentLimit { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        public bool? IsActive { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=5)]
+        public bool? IsPinCodeSet { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.KilometerPerHour)]
+        public decimal? MaximumLimit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.KilometerPerHour)]
+        public decimal? MinimumLimit { get; }
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class TeslaTire : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
+        public bool? HasHardWarning { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        public bool? HasSoftWarning { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5)]
+        public System.DateTimeOffset? LastSeen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Bar)]
+        public decimal? Pressure { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Bar)]
+        public decimal? RecommendedPressure { get; }
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class TeslaVehicle : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.Devices.Vehicles.IElectricVehicle, HomeBlaze.Abstractions.Devices.Vehicles.IVehicle, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? AvailableSoftwareUpdate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=403)]
+        public Namotion.Devices.Tesla.TeslaVehicleBody Body { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=400)]
+        public Namotion.Devices.Tesla.TeslaChargeState Charge { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=401)]
+        public Namotion.Devices.Tesla.TeslaClimateState Climate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=5)]
+        public Namotion.Devices.Tesla.TeslaCommandSigning? CommandSigning { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public string? DisplayName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=408)]
+        public Namotion.Devices.Tesla.TeslaDisplaySettings DisplaySettings { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=402)]
+        public Namotion.Devices.Tesla.TeslaDriveState Drive { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? HardwareRevision { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsAwake { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=9)]
+        public bool IsBusy { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool IsConnected { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=6)]
+        public bool? IsInService { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=8)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        public HomeBlaze.Abstractions.Common.GeoCoordinate? Location { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Manufacturer { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=404)]
+        public Namotion.Devices.Tesla.TeslaMedia Media { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Model { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? ProductCode { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? SerialNumber { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=405)]
+        public Namotion.Devices.Tesla.TeslaSoftwareUpdate SoftwareUpdate { get; }
+        public string? SoftwareVersion { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=407)]
+        public Namotion.Devices.Tesla.TeslaVehicleSpecification Specification { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=406)]
+        public Namotion.Devices.Tesla.TeslaSpeedLimitMode SpeedLimit { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public decimal? TotalDrivenDistance { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3)]
+        public string? VehicleName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
+        public Namotion.Devices.Tesla.TeslaVehicleState VehicleState { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
+        public string Vin { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("WakeUp", "IsEnabled")]
+        public bool WakeUp_IsEnabled { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Wakes the vehicle so that its data is read. Waking costs battery; the vehicle fal" +
+            "ls asleep again by itself.", Icon="Alarm", Title="Wake Up")]
+        public System.Threading.Tasks.Task WakeUpAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class TeslaVehicleBody : HomeBlaze.Abstractions.Devices.Locks.IDoorLockState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public TeslaVehicleBody(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=28)]
+        public string? AutoparkState { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=26)]
+        public int? CenterDisplayState { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=24)]
+        public string? DashcamState { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=32)]
+        public Namotion.Devices.Tesla.TeslaTire FrontLeftTire { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=33)]
+        public Namotion.Devices.Tesla.TeslaTire FrontRightTire { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=12)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsAnyDoorOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=13)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsAnyWindowOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=25)]
+        public bool? IsDashcamClipSaveAvailable { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=2)]
+        public bool? IsDriverFrontDoorOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=8)]
+        public bool? IsDriverFrontWindowOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
+        public bool? IsDriverRearDoorOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=10)]
+        public bool? IsDriverRearWindowOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=6)]
+        public bool? IsFrunkOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=22)]
+        public bool? IsInServiceMode { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=23)]
+        public bool? IsInServiceModePlus { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        public bool? IsPassengerFrontDoorOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=9)]
+        public bool? IsPassengerFrontWindowOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=5)]
+        public bool? IsPassengerRearDoorOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=11)]
+        public bool? IsPassengerRearWindowOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=19)]
+        public bool? IsRemoteStartActive { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=20)]
+        public bool? IsRemoteStartEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=21)]
+        public bool? IsRemoteStartSupported { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=31)]
+        public bool? IsSelfTestRequested { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=16)]
+        public bool? IsSentryModeAvailable { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=15)]
+        public bool? IsSentryModeOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
+        public bool? IsTrunkOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=14)]
+        public bool? IsUserPresent { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=17)]
+        public bool? IsValetModeOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=18)]
+        public bool? IsValetPinNeeded { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=27)]
+        public bool? IsWebcamAvailable { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        public HomeBlaze.Abstractions.Devices.Locks.DoorLockState? LockState { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=34)]
+        public Namotion.Devices.Tesla.TeslaTire RearLeftTire { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=35)]
+        public Namotion.Devices.Tesla.TeslaTire RearRightTire { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=29)]
+        public int? SantaMode { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=30)]
+        public int? SelfTestProgress { get; }
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class TeslaVehicleSpecification : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public TeslaVehicleSpecification(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=19)]
+        public string? AuxiliaryParkLamps { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=23)]
+        public int? BadgeVersion { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=38)]
+        public bool? CanAcceptNavigationRequests { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=39)]
+        public bool? CanActuateTrunks { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public string? CarSpecialType { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
+        public string? CarType { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=17)]
+        public string? ChargePortType { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=36)]
+        public bool? DefaultsChargeToMaximum { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=16)]
+        public string? DriverAssist { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=14)]
+        public string? EfficiencyPackage { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4)]
+        public string? ExteriorColor { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5)]
+        public string? ExteriorTrim { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=6)]
+        public string? ExteriorTrimOverride { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=28)]
+        public bool? HasAirSuspension { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=35)]
+        public bool? HasEceRestrictions { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=29)]
+        public bool? HasLudicrousMode { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=30)]
+        public bool? HasMotorizedChargePort { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=32)]
+        public bool? HasPedestrianWarningSpeaker { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=31)]
+        public bool? HasPowerLiftgate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=27)]
+        public bool? HasSeatCooling { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=25)]
+        public bool? HasSunRoof { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=26)]
+        public bool? HasWheelCaps { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=18)]
+        public string? HeadlampType { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=8)]
+        public string? InteriorTrimType { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=46)]
+        public bool? IsCabinOverheatProtectionTemperatureSupported { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=40)]
+        public bool? IsDashcamClipSaveSupported { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=34)]
+        public bool? IsEuVehicle { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=45)]
+        public bool? IsQrPairingSupported { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=33)]
+        public bool? IsRightHandDrive { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=44)]
+        public bool? IsSentryPreviewSupported { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=43)]
+        public bool? IsWebcamInteriorOnly { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=42)]
+        public bool? IsWebcamSelfieSupported { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=41)]
+        public bool? IsWebcamSupported { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=24)]
+        public int? KeyVersion { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=7)]
+        public string? PaintColorOverride { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=13)]
+        public string? PerformancePackage { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=15)]
+        public string? RearDriveUnit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=20)]
+        public int? RearSeatHeaters { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=21)]
+        public int? RearSeatType { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=9)]
+        public string? RoofColor { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=22)]
+        public int? SeatType { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=11)]
+        public string? SpoilerType { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=12)]
+        public string? ThirdRowSeats { get; }
+        public string Title { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3)]
+        public string? TrimBadging { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=37)]
+        public bool? UsesRangeBadging { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=47)]
+        public System.TimeSpan? UtcOffset { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=10)]
+        public string? WheelType { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public enum TeslaVehicleState
+    {
+        Unknown = 0,
+        Online = 1,
+        Asleep = 2,
+        Offline = 3,
+    }
+    public sealed class TeslaVehicleSummary : System.IEquatable<Namotion.Devices.Tesla.TeslaVehicleSummary>
+    {
+        public TeslaVehicleSummary(string Vin, string? DisplayName, Namotion.Devices.Tesla.TeslaVehicleState? State) { }
+        public string? DisplayName { get; init; }
+        public Namotion.Devices.Tesla.TeslaVehicleState? State { get; init; }
+        public string Vin { get; init; }
+        public string VinSuffix { get; }
+    }
+}

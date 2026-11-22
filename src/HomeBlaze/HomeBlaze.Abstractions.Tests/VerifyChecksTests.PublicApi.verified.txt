@@ -150,6 +150,8 @@ namespace HomeBlaze.Abstractions.Attributes
         AmpereHour = 35,
         WattPerSquareMeter = 36,
         DecibelMilliwatt = 37,
+        KilometerPerHour = 38,
+        Bar = 39,
     }
     [System.AttributeUsage(System.AttributeTargets.Interface)]
     public class SubjectAbstractionAttribute : System.Attribute
@@ -367,22 +369,29 @@ namespace HomeBlaze.Abstractions.Devices.Energy
         decimal? BatteryLevel { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
-    [System.ComponentModel.Description("Energy charger device with plug-in and charging state.")]
-    public interface IEnergyCharger : HomeBlaze.Abstractions.Devices.Energy.IEnergyChargerState { }
-    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
-    [System.ComponentModel.Description("Reports whether a charger is plugged in and actively charging.")]
-    public interface IEnergyChargerState
+    [System.ComponentModel.Description("Reports whether a charging cable is plugged in, whether it charges and with which" +
+        " power.")]
+    public interface IChargingState
     {
-        [HomeBlaze.Abstractions.Attributes.State(Position=102)]
-        bool? IsCharging { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=101)]
-        bool? IsPluggedIn { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=330, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [System.ComponentModel.Category("Charging")]
+        decimal? ChargingPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=102)]
+        [System.ComponentModel.Category("Charging")]
+        bool? IsCharging { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=101)]
+        [System.ComponentModel.Category("Charging")]
+        bool? IsPluggedIn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=331, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [System.ComponentModel.Category("Charging")]
         decimal? MaximumChargingPower { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Energy charger device with plug-in and charging state.")]
+    public interface IEnergyCharger : HomeBlaze.Abstractions.Devices.Energy.IChargingState { }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Electric vehicle charger with state and control.")]
-    public interface IVehicleCharger : HomeBlaze.Abstractions.Devices.Energy.IEnergyChargerState, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerController, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerState { }
+    public interface IVehicleCharger : HomeBlaze.Abstractions.Devices.Energy.IChargingState, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerController, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerState { }
     public interface IVehicleChargerController
     {
         System.Threading.Tasks.Task PauseChargingAsync(System.Threading.CancellationToken cancellationToken);
@@ -390,12 +399,10 @@ namespace HomeBlaze.Abstractions.Devices.Energy
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Electric vehicle charger state with charge level and power.")]
-    public interface IVehicleChargerState : HomeBlaze.Abstractions.Devices.Energy.IEnergyChargerState
+    public interface IVehicleChargerState : HomeBlaze.Abstractions.Devices.Energy.IChargingState
     {
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         decimal? ChargeLevel { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
-        decimal? ChargingPower { get; }
     }
 }
 namespace HomeBlaze.Abstractions.Devices.Light
@@ -505,6 +512,59 @@ namespace HomeBlaze.Abstractions.Devices.Locks
         [HomeBlaze.Abstractions.Attributes.State(Position=130)]
         [System.ComponentModel.Category("Lock")]
         HomeBlaze.Abstractions.Devices.Locks.DoorLockState? LockState { get; }
+    }
+}
+namespace HomeBlaze.Abstractions.Devices.Vehicles
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Electric vehicle with driven distance, location and the charging state of its bat" +
+        "tery.")]
+    public interface IElectricVehicle : HomeBlaze.Abstractions.Devices.Vehicles.IVehicle
+    {
+        HomeBlaze.Abstractions.Devices.Vehicles.IVehicleChargingState Charge { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Vehicle with driven distance, location, climate and door locks.")]
+    public interface IVehicle
+    {
+        HomeBlaze.Abstractions.Devices.Locks.IDoorLockState? Body { get; }
+        HomeBlaze.Abstractions.Devices.Vehicles.IVehicleClimateState? Climate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=225)]
+        [System.ComponentModel.Category("Vehicle")]
+        HomeBlaze.Abstractions.Common.GeoCoordinate? Location { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=224, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        [System.ComponentModel.Category("Vehicle")]
+        decimal? TotalDrivenDistance { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports the charging state of a vehicle: plug, charging, power, battery level, ch" +
+        "arge limit, remaining time and range.")]
+    public interface IVehicleChargingState : HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Devices.Energy.IChargingState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=341, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        [System.ComponentModel.Category("Charging")]
+        decimal? ChargeLimit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=343, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        [System.ComponentModel.Category("Charging")]
+        decimal? Range { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=342)]
+        [System.ComponentModel.Category("Charging")]
+        System.TimeSpan? RemainingChargingTime { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether the climate of a vehicle runs and its inside and outside temperat" +
+        "ure.")]
+    public interface IVehicleClimateState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=201, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [System.ComponentModel.Category("Climate")]
+        decimal? InsideTemperature { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=153)]
+        [System.ComponentModel.Category("Climate")]
+        bool? IsClimateOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=202, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [System.ComponentModel.Category("Climate")]
+        decimal? OutsideTemperature { get; }
     }
 }
 namespace HomeBlaze.Abstractions
