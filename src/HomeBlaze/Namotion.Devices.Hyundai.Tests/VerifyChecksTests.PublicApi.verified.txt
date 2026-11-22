@@ -1,0 +1,370 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Devices.Hyundai.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Devices.Hyundai
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("DirectionsCar")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Vehicles")]
+    [System.ComponentModel.Description("Hyundai Bluelink account (Europe) with its electric vehicles, read from the statu" +
+        "s stored on Hyundai\'s servers")]
+    [System.ComponentModel.DisplayName("Hyundai Bluelink account")]
+    public class BluelinkAccount : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Security.IAuthenticatedSubject, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public BluelinkAccount(System.TimeProvider timeProvider, Microsoft.Extensions.Logging.ILoggerFactory loggerFactory) { }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.DateTimeOffset? AuthenticatedAt { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? AuthenticatedUser { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan ClimateDuration { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int DailyRequestLimit { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string DeviceId { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Email { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public bool IsAuthenticated { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public bool IsReauthenticationRequired { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public decimal MinimumAuxiliaryBatteryLevel { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
+        public string Password { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
+        public string Pin { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public int RequestsToday { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan RetryInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan StatusPollingInterval { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
+        public string Tokens { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public System.Collections.Generic.Dictionary<string, Namotion.Devices.Hyundai.BluelinkVehicle> Vehicles { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        public override void Dispose() { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        public void ReplaceCredentials(Namotion.Devices.Hyundai.BluelinkConnection connection) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public override System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    public static class BluelinkAccountConnector
+    {
+        public static System.Threading.Tasks.Task<Namotion.Devices.Hyundai.BluelinkConnection> ConnectAsync(string email, string password, string pin, System.TimeProvider timeProvider, System.Threading.CancellationToken cancellationToken) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class BluelinkChargeState : HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Devices.Energy.IChargingState, HomeBlaze.Abstractions.Devices.Vehicles.IVehicleChargingController, HomeBlaze.Abstractions.Devices.Vehicles.IVehicleChargingState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=1, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? BatteryLevel { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        [System.ComponentModel.Category("")]
+        public decimal? ChargeLimit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=4, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [System.ComponentModel.Category("")]
+        public decimal? ChargingPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=6, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? FastChargeLimit { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        [System.ComponentModel.Category("")]
+        public bool? IsCharging { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=2)]
+        [System.ComponentModel.Category("")]
+        public bool? IsPluggedIn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=9, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("")]
+        public decimal? MaximumChargingPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=8, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        [System.ComponentModel.Category("")]
+        public decimal? Range { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=7)]
+        [System.ComponentModel.Category("")]
+        public System.TimeSpan? RemainingChargingTime { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetChargeLimit", "IsEnabled")]
+        public bool SetChargeLimit_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("SetChargeLimits", "IsEnabled")]
+        public bool SetChargeLimits_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("StartCharging", "IsEnabled")]
+        public bool StartCharging_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("StopCharging", "IsEnabled")]
+        public bool StopCharging_IsEnabled { get; }
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        public System.Threading.Tasks.Task SetChargeLimitAsync(decimal chargeLimit, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Sets the AC and the DC fast charge limit, each from 0.5 to 1.0 in steps of 0.1.", Icon="BatteryChargingFull", Position=4, Title="Set Charge Limits")]
+        [System.ComponentModel.Category("Charging")]
+        public System.Threading.Tasks.Task SetChargeLimitsAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal chargeLimit, [HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal fastChargeLimit, System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public System.Threading.Tasks.Task StartChargingAsync(System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task StopChargingAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class BluelinkClimateState : HomeBlaze.Abstractions.Devices.Vehicles.IVehicleClimateController, HomeBlaze.Abstractions.Devices.Vehicles.IVehicleClimateState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("")]
+        public decimal? InsideTemperature { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        [System.ComponentModel.Category("")]
+        public bool? IsClimateOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        public bool? IsDefrostOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
+        public bool? IsSteeringWheelHeaterOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=6, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [System.ComponentModel.Category("")]
+        public decimal? OutsideTemperature { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("StartClimateWithDefrost", "IsEnabled")]
+        public bool StartClimateWithDefrost_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("StartClimate", "IsEnabled")]
+        public bool StartClimate_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("StopClimate", "IsEnabled")]
+        public bool StopClimate_IsEnabled { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? TemperatureSetting { get; }
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public System.Threading.Tasks.Task StartClimateAsync(decimal temperature, System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Starts the climate with the front windshield defrost, for the duration set in the" +
+            " account.", Icon="AcUnit", Position=3, Title="Start Climate With Defrost")]
+        [System.ComponentModel.Category("Climate")]
+        public System.Threading.Tasks.Task StartClimateWithDefrostAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)] decimal temperature, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task StopClimateAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    public sealed class BluelinkConnection : System.IEquatable<Namotion.Devices.Hyundai.BluelinkConnection>
+    {
+        public BluelinkConnection(string Email, string Password, string Pin, string Tokens, string DeviceId, System.Collections.Generic.IReadOnlyList<Namotion.Devices.Hyundai.BluelinkVehicleSummary> Vehicles) { }
+        public string DeviceId { get; init; }
+        public string Email { get; init; }
+        public string Password { get; init; }
+        public string Pin { get; init; }
+        public string Tokens { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Namotion.Devices.Hyundai.BluelinkVehicleSummary> Vehicles { get; init; }
+    }
+    public enum BluelinkProtocol
+    {
+        Legacy = 0,
+        Ccs2 = 1,
+    }
+    public static class BluelinkServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddBluelinkAccount(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.Hyundai.BluelinkAccount>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class BluelinkTire : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        public bool? IsPressureLow { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Bar)]
+        public decimal? Pressure { get; }
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class BluelinkVehicle : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.Devices.Vehicles.IElectricVehicle, HomeBlaze.Abstractions.Devices.Vehicles.IVehicle, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=5, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        public decimal? AuxiliaryBatteryLevel { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=402)]
+        public Namotion.Devices.Hyundai.BluelinkVehicleBody Body { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=400)]
+        public Namotion.Devices.Hyundai.BluelinkChargeState Charge { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=401)]
+        public Namotion.Devices.Hyundai.BluelinkClimateState Climate { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? HardwareRevision { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=6)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        public HomeBlaze.Abstractions.Common.GeoCoordinate? Location { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Manufacturer { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Model { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=3)]
+        public string? ModelName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=2)]
+        public string? Nickname { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? ProductCode { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
+        public Namotion.Devices.Hyundai.BluelinkProtocol Protocol { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("Refresh", "IsEnabled")]
+        public bool Refresh_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? SerialNumber { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        public decimal? TotalDrivenDistance { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=1)]
+        public string Vin { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Asks the vehicle to upload its status. Reaches the vehicle and costs 12 V battery" +
+            ", so use it rarely. Refused while the 12 V battery is low.", Icon="Refresh", RequiresConfirmation=true, Title="Refresh")]
+        public System.Threading.Tasks.Task RefreshAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public class BluelinkVehicleBody : HomeBlaze.Abstractions.Devices.Locks.IDoorLockState, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public BluelinkVehicleBody(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        [HomeBlaze.Abstractions.Attributes.State(Position=14)]
+        public Namotion.Devices.Hyundai.BluelinkTire FrontLeftTire { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=15)]
+        public Namotion.Devices.Hyundai.BluelinkTire FrontRightTire { get; }
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=12)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsAnyDoorOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=13)]
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsAnyWindowOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=2)]
+        public bool? IsFrontLeftDoorOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=8)]
+        public bool? IsFrontLeftWindowOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        public bool? IsFrontRightDoorOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=9)]
+        public bool? IsFrontRightWindowOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=7)]
+        public bool? IsHoodOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
+        public bool? IsRearLeftDoorOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=10)]
+        public bool? IsRearLeftWindowOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=5)]
+        public bool? IsRearRightDoorOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=11)]
+        public bool? IsRearRightWindowOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=6)]
+        public bool? IsTrunkOpen { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=1)]
+        public HomeBlaze.Abstractions.Devices.Locks.DoorLockState? LockState { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=16)]
+        public Namotion.Devices.Hyundai.BluelinkTire RearLeftTire { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=17)]
+        public Namotion.Devices.Hyundai.BluelinkTire RearRightTire { get; }
+        public string Title { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public sealed class BluelinkVehicleSummary : System.IEquatable<Namotion.Devices.Hyundai.BluelinkVehicleSummary>
+    {
+        public BluelinkVehicleSummary(string Vin, string? Nickname, string? Model, string? Type, Namotion.Devices.Hyundai.BluelinkProtocol Protocol) { }
+        public bool IsSupported { get; }
+        public string? Model { get; init; }
+        public string? Nickname { get; init; }
+        public Namotion.Devices.Hyundai.BluelinkProtocol Protocol { get; init; }
+        public string? Type { get; init; }
+        public string Vin { get; init; }
+        public string VinSuffix { get; }
+    }
+}
+namespace Namotion.Devices.Hyundai.Client
+{
+    public class BluelinkApiException : System.Exception
+    {
+        public BluelinkApiException(System.Net.HttpStatusCode statusCode, string? code, string? message) { }
+        public string? Code { get; }
+        public System.Net.HttpStatusCode StatusCode { get; }
+    }
+    public sealed class BluelinkCommandException : System.Exception
+    {
+        public BluelinkCommandException(Namotion.Devices.Hyundai.Client.BluelinkCommandResult result) { }
+        public Namotion.Devices.Hyundai.Client.BluelinkCommandResult Result { get; }
+    }
+    public enum BluelinkCommandResult
+    {
+        Pending = 0,
+        Success = 1,
+        Failed = 2,
+        NoResponse = 3,
+        TimedOut = 4,
+    }
+    public sealed class BluelinkCredentialsReplacedException : System.Exception
+    {
+        public BluelinkCredentialsReplacedException(string message) { }
+    }
+    public sealed class BluelinkPinRejectedException : Namotion.Devices.Hyundai.Client.BluelinkApiException
+    {
+        public BluelinkPinRejectedException(System.Net.HttpStatusCode statusCode, string? code) { }
+    }
+    public sealed class BluelinkReauthenticationRequiredException : System.Exception
+    {
+        public BluelinkReauthenticationRequiredException(string message) { }
+    }
+    public sealed class BluelinkRequestLimitException : System.Exception
+    {
+        public BluelinkRequestLimitException() { }
+    }
+}
