@@ -101,6 +101,11 @@ public partial class TeslaVehicle
 
     private void ApplyCachedData(string cachedData)
     {
+        if (string.Equals(cachedData, _appliedCachedData, StringComparison.Ordinal))
+        {
+            return;
+        }
+
         VehicleData snapshot;
         try
         {
@@ -124,6 +129,7 @@ public partial class TeslaVehicle
 
         _hasWarnedAboutCachedData = false;
         ApplySnapshot(snapshot);
+        _appliedCachedData = cachedData;
     }
 
     private void ApplySnapshot(VehicleData snapshot)

@@ -35,6 +35,9 @@ public partial class TeslaVehicle :
     private Func<TeslaVehicle, CancellationToken, Task>? _wakeUp;
     private bool _hasWarnedAboutCachedData;
 
+    // The last cached data that was parsed; a sleeping vehicle returns the same snapshot with every poll.
+    private string? _appliedCachedData;
+
     internal TeslaVehicle(long id, string vin, TimeProvider timeProvider, ILogger logger)
     {
         Id = id;

@@ -237,6 +237,24 @@ public class TeslaVehicleTests
     }
 
     [Fact]
+    public void WhenTheSameCachedDataIsAppliedAgain_ThenItIsNotParsedAgain()
+    {
+        // Arrange
+        var vehicle = Create();
+        var product = CachedProduct(vehicle, VehicleDataBuilder.Create(Now));
+        vehicle.ApplyProduct(product);
+
+        // A snapshot with an equal timestamp applies, so only a skipped parse keeps this value.
+        vehicle.Charge.BatteryLevel = 0.5m;
+
+        // Act
+        vehicle.ApplyProduct(product);
+
+        // Assert
+        Assert.Equal(0.5m, vehicle.Charge.BatteryLevel);
+    }
+
+    [Fact]
     public void WhenCachedDataHasOdometerAndSpeedLimit_ThenTheyAreApplied()
     {
         // Arrange
