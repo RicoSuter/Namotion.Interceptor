@@ -35,15 +35,17 @@ public sealed record BluelinkConnection(
 }
 
 /// <summary>
-/// Connects a Bluelink account for the setup: signs in, registers a device and lists the vehicles. Never reaches a
+/// Connects a Bluelink account for the setup: registers a device, signs in and lists the vehicles. Never reaches a
 /// vehicle. Checks the PIN only when a PIN is given and the account has a CCS2 electric vehicle, because five wrong
-/// PINs lock PIN entry.
+/// PINs lock PIN entry. The email and the PIN are trimmed.
 /// </summary>
 public static class BluelinkAccountConnector
 {
     /// <exception cref="BluelinkReauthenticationRequiredException">Hyundai rejected the credentials or asks to accept new terms.</exception>
     /// <exception cref="BluelinkPinRejectedException">Hyundai rejected the PIN.</exception>
     /// <exception cref="BluelinkApiException">Hyundai failed otherwise.</exception>
+    /// <exception cref="HttpRequestException">The network failed.</exception>
+    /// <exception cref="OperationCanceledException">The call was canceled, or an HTTP request timed out.</exception>
     public static async Task<BluelinkConnection> ConnectAsync(string email, string password, string pin, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
         using var httpClient = BluelinkHttp.CreateClient();
@@ -53,6 +55,7 @@ public static class BluelinkAccountConnector
     internal static async Task<BluelinkConnection> ConnectAsync(HttpClient httpClient, string email, string password, string pin, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
         email = email.Trim();
+        pin = pin.Trim();
 
         // The few calls of a connect are not counted; the account counts its own calls from its first poll.
         var apiClient = new BluelinkVehicleApiClient(httpClient, timeProvider, new BluelinkRequestBudget(timeProvider, () => int.MaxValue));

@@ -89,6 +89,22 @@ public class BluelinkAccountCommandStateTests
     }
 
     [Fact]
+    public async Task WhenTheAuxiliaryBatteryLevelIsUnknown_ThenRefreshIsDisabledAndThrowsBeforeAnyRequest()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        var kona = account.Vehicles[Kona];
+        kona.AuxiliaryBatteryLevel = null;
+        var requestCount = handler.Requests.Count;
+
+        // Act & Assert
+        Assert.False(kona.Refresh_IsEnabled);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => kona.RefreshAsync(CancellationToken.None));
+        Assert.Equal(requestCount, handler.Requests.Count);
+    }
+
+    [Fact]
     public async Task WhenCredentialsAreRemoved_ThenCommandThrowsBeforeAnyRequest()
     {
         // Arrange

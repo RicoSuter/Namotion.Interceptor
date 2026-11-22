@@ -81,6 +81,7 @@ public class BluelinkAccountCommandTests
         var (account, handler, time) = await CreatePolledAsync();
         handler.Respond(BluelinkResponses.LegacyTemperaturePath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-7"))
             .Respond(BluelinkResponses.RecordsPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Records("MSG-7", null));
+        var start = time.GetUtcNow();
 
         // Act
         var exception = await Assert.ThrowsAsync<BluelinkCommandException>(() =>
@@ -89,6 +90,7 @@ public class BluelinkAccountCommandTests
         // Assert
         Assert.Equal(BluelinkCommandResult.TimedOut, exception.Result);
         Assert.Equal(9, handler.Count(BluelinkResponses.RecordsPath("VEHICLE-1")));
+        Assert.True(time.GetUtcNow() - start >= TimeSpan.FromSeconds(90));
     }
 
     [Fact]
@@ -208,19 +210,25 @@ public class BluelinkAccountCommandTests
     }
 
     [Fact]
-    public async Task WhenCcs2VehicleIsRefreshed_ThenItWaitsTwentyFiveSecondsBeforeReading()
+    public async Task WhenCcs2VehicleIsRefreshed_ThenItRequestsThenWaitsTwentyFiveSecondsThenReads()
     {
         // Arrange
         var (account, handler, time) = await CreatePolledAsync();
         handler.Respond(BluelinkResponses.Ccs2StatusRequestPath("VEHICLE-2"), HttpStatusCode.OK, BluelinkResponses.Success());
-        var start = time.GetUtcNow();
 
         // Act
-        await TestAccount.AdvanceUntilCompletedAsync(time, account.Vehicles[Ioniq].RefreshAsync(CancellationToken.None));
+        var refresh = account.Vehicles[Ioniq].RefreshAsync(CancellationToken.None);
 
         // Assert
-        Assert.True(time.GetUtcNow() - start >= TimeSpan.FromSeconds(25));
         Assert.Equal(1, handler.Count(BluelinkResponses.Ccs2StatusRequestPath("VEHICLE-2")));
+        Assert.Equal(1, handler.Count(BluelinkResponses.StatusPath("VEHICLE-2")));
+
+        time.Advance(TimeSpan.FromSeconds(24));
+        Assert.False(refresh.IsCompleted);
+        Assert.Equal(1, handler.Count(BluelinkResponses.StatusPath("VEHICLE-2")));
+
+        time.Advance(TimeSpan.FromSeconds(1));
+        await refresh;
         Assert.Equal(2, handler.Count(BluelinkResponses.StatusPath("VEHICLE-2")));
     }
 
@@ -250,7 +258,8 @@ public class BluelinkAccountCommandTests
         var requestCount = handler.Requests.Count;
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => charge.StartChargingAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => charge.StartChargingAsync(CancellationToken.None));
+        Assert.Contains("paused", exception.Message, StringComparison.Ordinal);
         Assert.Equal(requestCount, handler.Requests.Count);
         Assert.Equal(ServiceStatus.Error, account.Status);
     }
