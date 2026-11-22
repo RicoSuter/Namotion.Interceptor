@@ -143,7 +143,6 @@ public class TeslaChargeStateTests
         Assert.Equal(6m, charge.ChargingCurrentSetting);
         Assert.False(charge.IsChargeEnabled);
         Assert.Null(charge.IsChargeEnabledByUser);
-        Assert.Null(charge.IsNotEnoughPowerToHeat);
         Assert.False(charge.IsSuperchargerSessionFromTripPlanner);
         Assert.Equal(TeslaScheduleDays.AllWeek, charge.OffPeakChargingDays);
         Assert.Equal(TeslaScheduleDays.Weekdays, charge.PreconditioningDays);

@@ -152,12 +152,11 @@ The title is the name set in the vehicle, else the display name of the account, 
 | `IsFastChargerPresent`, `FastChargerBrand`, `FastChargerType` | | Fast charger information |
 | `ChargeCable` | | Cable type |
 | `IsChargePortDoorOpen`, `ChargePortLatch`, `ChargePortColor`, `IsChargePortColdWeatherMode` | | Charge port |
-| `IsBatteryHeaterOn` | | Battery heater |
 | `ScheduledChargingMode`, `IsScheduledChargingPending`, `ScheduledChargingStartTime`, `ScheduledDepartureTime` | | Scheduled charging and departure, times as time of day |
 | `IsOffPeakChargingEnabled`, `OffPeakChargingDays`, `OffPeakChargingEndTime` | | Off-peak charging |
 | `IsPreconditioningEnabled`, `PreconditioningDays` | | Preconditioning before departure |
 | `IsTripCharging`, `IsSuperchargerSessionFromTripPlanner` | | Trip charging |
-| `IsChargeEnabled`, `IsChargeEnabledByUser`, `IsNotEnoughPowerToHeat`, `MaximumRangeChargeCounter` | | Further flags of the charge state |
+| `IsChargeEnabled`, `IsChargeEnabledByUser`, `MaximumRangeChargeCounter` | | Further flags of the charge state |
 | `EstimatedBatteryCapacity` | Wh | Derived estimate of the battery capacity from a charging session, `null` for short sessions |
 
 ### Climate

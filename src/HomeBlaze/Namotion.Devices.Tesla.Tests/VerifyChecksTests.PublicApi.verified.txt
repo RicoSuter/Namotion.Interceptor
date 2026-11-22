@@ -160,8 +160,6 @@ namespace Namotion.Devices.Tesla
         public string IconName { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=9, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
         public decimal? IdealRange { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=29)]
-        public bool? IsBatteryHeaterOn { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=41)]
         public bool? IsChargeEnabled { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=42)]
@@ -176,8 +174,6 @@ namespace Namotion.Devices.Tesla
         public bool? IsCharging { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=21)]
         public bool? IsFastChargerPresent { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=43)]
-        public bool? IsNotEnoughPowerToHeat { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=34)]
         public bool? IsOffPeakChargingEnabled { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=48)]

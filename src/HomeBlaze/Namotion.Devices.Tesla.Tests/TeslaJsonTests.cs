@@ -73,7 +73,7 @@ public class TeslaJsonTests
                   "scheduled_charging_start_time": "1795316400",
                   "scheduled_departure_time": 1e30,
                   "charge_enable_request": "true",
-                  "battery_heater_on": "maybe",
+                  "charge_port_door_open": "maybe",
                   "fast_charger_present": {"x": 1},
                   "trip_charging": 1,
                   "charging_state": "Complete"
@@ -109,7 +109,7 @@ public class TeslaJsonTests
         Assert.Equal(1795316400L, charge.ScheduledChargingStartTime);
         Assert.Null(charge.ScheduledDepartureTime);
         Assert.True(charge.ChargeEnableRequest);
-        Assert.Null(charge.BatteryHeaterOn);
+        Assert.Null(charge.ChargePortDoorOpen);
         Assert.Null(charge.FastChargerPresent);
         Assert.Null(charge.TripCharging);
         Assert.Equal("Complete", charge.ChargingState);

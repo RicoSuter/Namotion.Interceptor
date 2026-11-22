@@ -4,7 +4,6 @@ namespace Namotion.Devices.Tesla.Client.Dto;
 
 internal sealed class TeslaChargeStateDto
 {
-    [JsonPropertyName("battery_heater_on")] public bool? BatteryHeaterOn { get; init; }
     [JsonPropertyName("battery_level")] public int? BatteryLevel { get; init; }
     [JsonPropertyName("battery_range")] public decimal? BatteryRange { get; init; }
     [JsonPropertyName("charge_amps")] public int? ChargeAmps { get; init; }
@@ -37,7 +36,6 @@ internal sealed class TeslaChargeStateDto
     [JsonPropertyName("ideal_battery_range")] public decimal? IdealBatteryRange { get; init; }
     [JsonPropertyName("max_range_charge_counter")] public int? MaxRangeChargeCounter { get; init; }
     [JsonPropertyName("minutes_to_full_charge")] public int? MinutesToFullCharge { get; init; }
-    [JsonPropertyName("not_enough_power_to_heat")] public bool? NotEnoughPowerToHeat { get; init; }
     [JsonPropertyName("off_peak_charging_enabled")] public bool? OffPeakChargingEnabled { get; init; }
     [JsonPropertyName("off_peak_charging_times")] public string? OffPeakChargingTimes { get; init; }
     [JsonPropertyName("off_peak_hours_end_time")] public int? OffPeakHoursEndTime { get; init; }

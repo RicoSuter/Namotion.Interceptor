@@ -78,7 +78,6 @@ public partial class TeslaChargeState : IVehicleChargingState, ITitleProvider, I
     [State(IsDiscrete = true, Position = 26)] public partial TeslaChargePortLatch? ChargePortLatch { get; internal set; }
     [State(Position = 27)] public partial string? ChargePortColor { get; internal set; }
     [State(IsDiscrete = true, Position = 28)] public partial bool? IsChargePortColdWeatherMode { get; internal set; }
-    [State(IsDiscrete = true, Position = 29)] public partial bool? IsBatteryHeaterOn { get; internal set; }
     [State(IsDiscrete = true, Position = 30)] public partial TeslaScheduledChargingMode? ScheduledChargingMode { get; internal set; }
     [State(IsDiscrete = true, Position = 31)] public partial bool? IsScheduledChargingPending { get; internal set; }
 
@@ -109,9 +108,6 @@ public partial class TeslaChargeState : IVehicleChargingState, ITitleProvider, I
 
     /// <summary>Whether the user enabled charging.</summary>
     [State(IsDiscrete = true, Position = 42)] public partial bool? IsChargeEnabledByUser { get; internal set; }
-
-    /// <summary>Whether the charger power does not suffice to heat the battery.</summary>
-    [State(IsDiscrete = true, Position = 43)] public partial bool? IsNotEnoughPowerToHeat { get; internal set; }
 
     /// <summary>Whether the Supercharger session was started from the trip planner.</summary>
     [State(IsDiscrete = true, Position = 44)] public partial bool? IsSuperchargerSessionFromTripPlanner { get; internal set; }
@@ -189,7 +185,6 @@ public partial class TeslaChargeState : IVehicleChargingState, ITitleProvider, I
         ChargePortLatch = null;
         ChargePortColor = null;
         IsChargePortColdWeatherMode = null;
-        IsBatteryHeaterOn = null;
         ScheduledChargingMode = null;
         IsScheduledChargingPending = null;
         ScheduledChargingStartTime = null;
@@ -203,7 +198,6 @@ public partial class TeslaChargeState : IVehicleChargingState, ITitleProvider, I
         AddedIdealRange = null;
         IsChargeEnabled = null;
         IsChargeEnabledByUser = null;
-        IsNotEnoughPowerToHeat = null;
         IsSuperchargerSessionFromTripPlanner = null;
         OffPeakChargingDays = null;
         OffPeakChargingEndTime = null;
@@ -279,8 +273,6 @@ public partial class TeslaChargeState : IVehicleChargingState, ITitleProvider, I
         ChargePortLatch = TeslaValues.Enum<TeslaChargePortLatch>(dto.ChargePortLatch, _logger);
         ChargePortColor = TeslaValues.Text(dto.ChargePortColor);
         IsChargePortColdWeatherMode = dto.ChargePortColdWeatherMode;
-        IsBatteryHeaterOn = dto.BatteryHeaterOn;
-        IsNotEnoughPowerToHeat = dto.NotEnoughPowerToHeat;
         IsChargeEnabled = dto.ChargeEnableRequest;
         IsChargeEnabledByUser = dto.UserChargeEnableRequest;
         IsSuperchargerSessionFromTripPlanner = dto.SuperchargerSessionTripPlanner;
