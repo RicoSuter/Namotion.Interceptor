@@ -1,13 +1,12 @@
 using System.Net;
-using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace Namotion.Devices.Hyundai.Client;
 
-/// <summary>Reads the redirect query and the cookies of the login responses and maps a failed sign in to its exception.</summary>
-internal static class BluelinkLoginParser
+/// <summary>Reads the answers of the login: the public key, the cookies, the query of the sign in redirect and the exception of a failed sign in.</summary>
+internal static class BluelinkLoginResponses
 {
-    private const int MaximumPasswordLengthHint = 20;
+    private const int MaximumDescriptionLength = 200;
 
     /// <summary>Reads the RSA key of the certs response, or null when it has none.</summary>
     public static (string KeyId, string Modulus, string Exponent)? ParsePublicKey(string text)
@@ -15,7 +14,7 @@ internal static class BluelinkLoginParser
         try
         {
             using var document = JsonDocument.Parse(text);
-            if (document.RootElement.Find("retValue") is { } key && key.GetString("n") is { } modulus && key.GetString("e") is { } exponent)
+            if (document.RootElement.Find("retValue") is { } key && key.GetString("n") is { Length: > 0 } modulus && key.GetString("e") is { Length: > 0 } exponent)
             {
                 return (key.GetString("kid") ?? string.Empty, modulus, exponent);
             }
@@ -26,20 +25,6 @@ internal static class BluelinkLoginParser
         }
 
         return null;
-    }
-
-    /// <summary>Encrypts the password with the RSA key of the login.</summary>
-    /// <exception cref="BluelinkApiException">The key is malformed or cannot encrypt the password.</exception>
-    public static string EncryptPassword(string password, string modulus, string exponent)
-    {
-        try
-        {
-            return BluelinkPasswordEncryptor.Encrypt(password, modulus, exponent);
-        }
-        catch (Exception exception) when (exception is FormatException or CryptographicException)
-        {
-            throw new BluelinkApiException(HttpStatusCode.OK, null, "The login returned no usable RSA key.");
-        }
     }
 
     /// <summary>Reads the query of a redirect address; the first value of a repeated name wins.</summary>
@@ -106,14 +91,19 @@ internal static class BluelinkLoginParser
     }
 
     /// <summary>Maps a sign in redirect without a code to the exception that tells the user what to do.</summary>
-    public static Exception CreateSignInException(string location, Dictionary<string, string> query, string password)
+    public static Exception CreateSignInException(string location, Dictionary<string, string> query, bool isLongPassword)
     {
-        if (query.ContainsKey("error"))
+        if (query.TryGetValue("error", out var error) && error.Length > 0)
         {
-            var description = query.GetValueOrDefault("error_description", "unknown");
-            return string.Equals(description.Trim(), "invalid credentials", StringComparison.OrdinalIgnoreCase)
-                ? CreateInvalidCredentialsException(password)
-                : new BluelinkReauthenticationRequiredException($"Hyundai rejected the sign in: {description}.");
+            var description = query.GetValueOrDefault("error_description", string.Empty).Trim();
+            if (description.Length == 0)
+            {
+                description = "unknown";
+            }
+
+            return string.Equals(description, "invalid credentials", StringComparison.OrdinalIgnoreCase)
+                ? CreateInvalidCredentialsException(isLongPassword)
+                : new BluelinkReauthenticationRequiredException($"Hyundai rejected the sign in: {Truncate(description)}.");
         }
 
         if (location.Contains("/web/v1/user/authorization", StringComparison.Ordinal))
@@ -122,12 +112,20 @@ internal static class BluelinkLoginParser
         }
 
         return location.Contains("authorize", StringComparison.Ordinal)
-            ? CreateInvalidCredentialsException(password)
+            ? CreateInvalidCredentialsException(isLongPassword)
             : new BluelinkApiException(HttpStatusCode.Found, null, "The sign in redirected to an unexpected address.");
     }
 
-    private static BluelinkReauthenticationRequiredException CreateInvalidCredentialsException(string password) =>
-        new(password.Length > MaximumPasswordLengthHint
+    /// <summary>Maps a sign in answer that is not a redirect: a 4xx answer is a rejection and is never retried, so that a wrong password does not lock the account.</summary>
+    public static Exception CreateSignInStatusException(HttpStatusCode statusCode) => (int)statusCode is >= 400 and < 500
+        ? new BluelinkReauthenticationRequiredException("Hyundai rejected the sign in.")
+        : new BluelinkApiException(statusCode, null, "The sign in failed.");
+
+    private static string Truncate(string description) =>
+        description.Length <= MaximumDescriptionLength ? description : description[..MaximumDescriptionLength];
+
+    private static BluelinkReauthenticationRequiredException CreateInvalidCredentialsException(bool isLongPassword) =>
+        new(isLongPassword
             ? "Hyundai rejected the email or password. Some accounts accept only the first 20 characters of a longer password."
             : "Hyundai rejected the email or password.");
 }

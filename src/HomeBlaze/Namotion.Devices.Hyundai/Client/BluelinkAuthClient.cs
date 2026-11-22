@@ -11,6 +11,7 @@ namespace Namotion.Devices.Hyundai.Client;
 internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider timeProvider)
 {
     private const int MaximumRedirects = 10;
+    private const int MaximumPasswordLengthHint = 20;
     private const decimal OneYearInSeconds = 31_536_000m;
     private const decimal MaximumLifetimeInSeconds = 2_592_000m;
 
@@ -25,7 +26,7 @@ internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider tim
         var cookies = new CookieContainer();
         await AuthorizeAsync(cookies, cancellationToken);
         var (keyId, modulus, exponent) = await GetPublicKeyAsync(cookies, cancellationToken);
-        var code = await SignInAsync(email, password, keyId, BluelinkLoginParser.EncryptPassword(password, modulus, exponent), cookies, cancellationToken);
+        var code = await SignInAsync(email, password, keyId, BluelinkPasswordEncryptor.Encrypt(password, modulus, exponent), cookies, cancellationToken);
         return await ExchangeCodeAsync(code, deviceId, cancellationToken);
     }
 
@@ -45,7 +46,7 @@ internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider tim
         var refreshed = ReadCciTokens(root, tokens);
 
         // An updated exchangeable token may arrive in the cookie t instead of the body.
-        return BluelinkLoginParser.GetCookie(response, "t") is { Length: > 0 } exchangeableToken
+        return BluelinkLoginResponses.GetCookie(response, "t") is { Length: > 0 } exchangeableToken
             ? refreshed with { Tokens = refreshed.Tokens with { ExchangeableAccessToken = exchangeableToken } }
             : refreshed;
     }
@@ -79,9 +80,8 @@ internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider tim
     }
 
     /// <summary>
-    /// Reads <c>expiresTime</c>, which hyundai_kia_connect_api reads as a lifetime in seconds and evcc as a Unix
-    /// timestamp: a value above one year is a timestamp, a missing value is one hour. Never throws: a lifetime or a
-    /// timestamp more than 30 days ahead is implausible and also becomes one hour.
+    /// A value above one year is a Unix timestamp; a missing or non-positive value, a past timestamp, or anything more
+    /// than 30 days ahead is one hour. Never throws.
     /// </summary>
     internal static DateTimeOffset GetExpiry(decimal? expiresTime, DateTimeOffset now)
     {
@@ -97,7 +97,9 @@ internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider tim
             return value <= MaximumLifetimeInSeconds ? now + TimeSpan.FromSeconds((double)value) : defaultExpiry;
         }
 
-        return value <= now.ToUnixTimeSeconds() + MaximumLifetimeInSeconds
+        // hyundai_kia_connect_api reads expiresTime as a lifetime in seconds and evcc as a Unix timestamp, so both are accepted.
+        var nowSeconds = now.ToUnixTimeSeconds();
+        return value > nowSeconds && value <= nowSeconds + MaximumLifetimeInSeconds
             ? DateTimeOffset.FromUnixTimeSeconds((long)value)
             : defaultExpiry;
     }
@@ -139,7 +141,7 @@ internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider tim
             throw new BluelinkApiException(response.StatusCode, null, "The RSA key of the login could not be read.");
         }
 
-        return BluelinkLoginParser.ParsePublicKey(text)
+        return BluelinkLoginResponses.ParsePublicKey(text)
             ?? throw new BluelinkApiException(response.StatusCode, null, "The login returned no RSA key.");
     }
 
@@ -163,14 +165,14 @@ internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider tim
         using var response = await SendLoginAsync(HttpMethod.Post, new Uri(BluelinkAppConstants.LoginHost + "/auth/account/signin"), form, cookies, cancellationToken);
         if (response.StatusCode != HttpStatusCode.Found)
         {
-            throw new BluelinkApiException(response.StatusCode, null, "The sign in failed.");
+            throw BluelinkLoginResponses.CreateSignInStatusException(response.StatusCode);
         }
 
-        var location = response.Headers.Location?.ToString() ?? string.Empty;
-        var query = BluelinkLoginParser.ParseQuery(location);
+        var location = response.Headers.Location?.OriginalString ?? string.Empty;
+        var query = BluelinkLoginResponses.ParseQuery(location);
         return query.TryGetValue("code", out var code) && code.Length > 0
             ? code
-            : throw BluelinkLoginParser.CreateSignInException(location, query, password);
+            : throw BluelinkLoginResponses.CreateSignInException(location, query, password.Length > MaximumPasswordLengthHint);
     }
 
     private async Task<BluelinkCciTokens> ExchangeCodeAsync(string code, string deviceId, CancellationToken cancellationToken)
@@ -227,7 +229,7 @@ internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider tim
         }
 
         var response = await httpClient.SendAsync(request, cancellationToken);
-        BluelinkLoginParser.StoreCookies(cookies, uri, response);
+        BluelinkLoginResponses.StoreCookies(cookies, uri, response);
         return response;
     }
 }
