@@ -212,7 +212,7 @@ public partial class TeslaVehicle :
         try
         {
             IsBusy = true;
-            await _wakeUp(this, cancellationToken).ConfigureAwait(false);
+            await _wakeUp(this, cancellationToken);
         }
         finally
         {

@@ -207,7 +207,7 @@ The title is the name set in the vehicle, else the display name of the account, 
 | `IsDriverFrontDoorOpen`, `IsDriverRearDoorOpen`, `IsPassengerFrontDoorOpen`, `IsPassengerRearDoorOpen` | Doors, named after Tesla's sides as the vehicle reports them |
 | `IsFrunkOpen`, `IsTrunkOpen` | Frunk and trunk |
 | `IsDriverFrontWindowOpen`, `IsPassengerFrontWindowOpen`, `IsDriverRearWindowOpen`, `IsPassengerRearWindowOpen` | Windows |
-| `IsAnyDoorOpen`, `IsAnyWindowOpen` | Derived: any of the four is open |
+| `IsAnyDoorOpen`, `IsAnyWindowOpen` | Derived: any of the four is open; `null` when none is open but one is unreported |
 | `IsUserPresent` | Someone is in the vehicle |
 | `IsSentryModeOn`, `IsSentryModeAvailable` | Sentry mode |
 | `IsValetModeOn`, `IsValetPinNeeded` | Valet mode |

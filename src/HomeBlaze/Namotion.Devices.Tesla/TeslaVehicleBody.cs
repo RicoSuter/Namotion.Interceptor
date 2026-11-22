@@ -37,11 +37,12 @@ public partial class TeslaVehicleBody : IDoorLockState, ITitleProvider, IIconPro
     [State(IsDiscrete = true, Position = 10)] public partial bool? IsDriverRearWindowOpen { get; internal set; }
     [State(IsDiscrete = true, Position = 11)] public partial bool? IsPassengerRearWindowOpen { get; internal set; }
 
-    /// <summary>Whether any of the four doors is open. The frunk and the trunk are not included.</summary>
+    /// <summary>Whether any of the four doors is open; null when none is open but one is unreported. The frunk and the trunk are not included.</summary>
     [Derived]
     [State(IsDiscrete = true, Position = 12)]
     public bool? IsAnyDoorOpen => Any(IsDriverFrontDoorOpen, IsDriverRearDoorOpen, IsPassengerFrontDoorOpen, IsPassengerRearDoorOpen);
 
+    /// <summary>Whether any of the four windows is open; null when none is open but one is unreported.</summary>
     [Derived]
     [State(IsDiscrete = true, Position = 13)]
     public bool? IsAnyWindowOpen => Any(IsDriverFrontWindowOpen, IsPassengerFrontWindowOpen, IsDriverRearWindowOpen, IsPassengerRearWindowOpen);
