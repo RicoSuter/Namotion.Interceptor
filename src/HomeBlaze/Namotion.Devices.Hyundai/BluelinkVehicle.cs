@@ -1,0 +1,143 @@
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Common;
+using HomeBlaze.Abstractions.Devices;
+using HomeBlaze.Abstractions.Devices.Locks;
+using HomeBlaze.Abstractions.Devices.Vehicles;
+using Namotion.Devices.Hyundai.Client;
+using Namotion.Devices.Hyundai.Mapping;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
+
+namespace Namotion.Devices.Hyundai;
+
+/// <summary>An electric vehicle of a Bluelink account, discovered from the account and keyed by VIN.</summary>
+[ExcludeFromCreation]
+[InterceptorSubject]
+public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdatedProvider, ITitleProvider, IIconProvider
+{
+    internal BluelinkVehicle(IBluelinkVehicleCommands commands, BluelinkVehicleInfo info)
+    {
+        Commands = commands;
+        VehicleId = info.VehicleId;
+
+        Vin = info.Vin;
+        Nickname = null;
+        ModelName = null;
+        Protocol = info.Protocol;
+        AuxiliaryBatteryLevel = null;
+        LastUpdated = null;
+        TotalDrivenDistance = null;
+        Location = null;
+
+        Charge = new BluelinkChargeState(this);
+        Climate = new BluelinkClimateState(this);
+        Body = new BluelinkVehicleBody();
+
+        UpdateInfo(info);
+    }
+
+    /// <summary>The account, held in a plain property so that it is not attached under its own vehicle.</summary>
+    internal IBluelinkVehicleCommands Commands { get; }
+
+    /// <summary>The ID of the vehicle in the vehicle API.</summary>
+    internal string VehicleId { get; private set; }
+
+    /// <summary>The vehicle identification number.</summary>
+    [State(Position = 1)] public partial string Vin { get; internal set; }
+
+    /// <summary>The name of the vehicle in the Bluelink app.</summary>
+    [State(Position = 2)] public partial string? Nickname { get; internal set; }
+
+    /// <summary>The model name from the vehicle list, such as KONA.</summary>
+    [State(Position = 3)] public partial string? ModelName { get; internal set; }
+
+    [State(IsDiscrete = true, Position = 4)] public partial BluelinkProtocol Protocol { get; internal set; }
+
+    /// <summary>The charge of the 12 V battery; null when the sensor is unreliable.</summary>
+    [State(Unit = StateUnit.Percent, Position = 5)] public partial decimal? AuxiliaryBatteryLevel { get; internal set; }
+
+    /// <summary>The time of the stored status; the read time when the status has none.</summary>
+    [State(Position = 6)] public partial DateTimeOffset? LastUpdated { get; internal set; }
+
+    [State(Position = 400)] public partial BluelinkChargeState Charge { get; internal set; }
+    [State(Position = 401)] public partial BluelinkClimateState Climate { get; internal set; }
+    [State(Position = 402)] public partial BluelinkVehicleBody Body { get; internal set; }
+
+    // IElectricVehicle
+
+    public partial decimal? TotalDrivenDistance { get; internal set; }
+
+    /// <summary>The stored parking location.</summary>
+    public partial GeoCoordinate? Location { get; internal set; }
+
+    IVehicleChargingState IElectricVehicle.Charge => Charge;
+
+    IVehicleClimateState? IVehicle.Climate => Climate;
+
+    IDoorLockState? IVehicle.Body => Body;
+
+    // IDeviceInfo
+
+    [Derived] public string? Manufacturer => "Hyundai";
+
+    [Derived] public string? Model => ModelName;
+
+    [Derived] public string? ProductCode => null;
+
+    [Derived] public string? SerialNumber => Vin;
+
+    [Derived] public string? HardwareRevision => null;
+
+    // Display
+
+    [Derived] public string? Title => Nickname ?? $"Hyundai: {BluelinkValues.VinSuffix(Vin)}";
+
+    [Derived] public string IconName => "DirectionsCar";
+
+    [Derived] public string? IconColor => Charge.IsCharging == true ? "Success" : null;
+
+    // Operations
+
+    [Derived]
+    [PropertyAttribute("Refresh", KnownAttributes.IsEnabled)]
+    public bool Refresh_IsEnabled => Commands.CanRefresh(AuxiliaryBatteryLevel);
+
+    /// <summary>Asks the vehicle to upload its status, then reads it. Reaches the vehicle and costs 12 V battery.</summary>
+    [Operation(Title = "Refresh", Icon = "Refresh", RequiresConfirmation = true,
+        Description = "Asks the vehicle to upload its status. Reaches the vehicle and costs 12 V battery, so use it rarely. Refused while the 12 V battery is low.")]
+    public Task RefreshAsync(CancellationToken cancellationToken) => Commands.RefreshAsync(this, cancellationToken);
+
+    internal void UpdateInfo(BluelinkVehicleInfo info)
+    {
+        VehicleId = info.VehicleId;
+        Nickname = string.IsNullOrWhiteSpace(info.Nickname) ? null : info.Nickname;
+        ModelName = string.IsNullOrWhiteSpace(info.ModelName) ? null : info.ModelName;
+        Protocol = info.Protocol;
+    }
+
+    /// <summary>Applies a stored status; a status older than the applied one is skipped.</summary>
+    internal void ApplyStatus(BluelinkVehicleStatus status, DateTimeOffset readTime)
+    {
+        if (status.Time is { } time && LastUpdated is { } lastUpdated && time < lastUpdated)
+        {
+            return;
+        }
+
+        LastUpdated = status.Time ?? readTime;
+        TotalDrivenDistance = status.TotalDrivenDistance;
+        AuxiliaryBatteryLevel = status.AuxiliaryBatteryLevel;
+        Charge.Apply(status);
+        Climate.Apply(status);
+        Body.Apply(status);
+    }
+
+    /// <summary>Applies the stored parking location; a missing location keeps the previous one.</summary>
+    internal void ApplyLocation(GeoCoordinate? location)
+    {
+        if (location is not null)
+        {
+            Location = location;
+        }
+    }
+}
