@@ -85,6 +85,21 @@ public class SsdpSearchTests
         Assert.Equal("first, second", Assert.Single(headers).Value);
     }
 
+    [Fact]
+    public void WhenAHeaderThatHttpJoinsWithASpaceIsRepeated_ThenItsValuesAreJoinedWithACommaToo()
+    {
+        // Arrange
+        using var message = new HttpResponseMessage();
+        message.Headers.TryAddWithoutValidation("SERVER", "Linux");
+        message.Headers.TryAddWithoutValidation("SERVER", "UPnP/1.0");
+
+        // Act
+        var headers = SsdpSearch.ToHeaders(message.Headers);
+
+        // Assert
+        Assert.Equal("Linux, UPnP/1.0", Assert.Single(headers).Value);
+    }
+
     private static DiscoveredSsdpDevice Create(string notificationType, string usn, Uri location)
     {
         using var response = new HttpResponseMessage();

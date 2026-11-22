@@ -79,7 +79,8 @@ internal sealed class SsdpSearch : ISsdpSearch
             // A cut name would be another header, so an overlong name is dropped while an overlong value is cut.
             if (header.Key.Length <= MaximumHeaderLength)
             {
-                var value = header.Value.ToString();
+                // Joined explicitly, because HttpHeaders joins the values of some headers, such as SERVER, with a space.
+                var value = header.Value.Count == 1 ? header.Value.ToString() : string.Join(", ", header.Value);
                 result.TryAdd(header.Key, value.Length <= MaximumHeaderLength ? value : value[..MaximumHeaderLength]);
             }
         }
