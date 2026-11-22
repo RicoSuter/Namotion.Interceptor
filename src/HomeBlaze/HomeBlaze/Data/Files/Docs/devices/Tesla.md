@@ -40,7 +40,6 @@ Refresh tokens last about three months and rotate on every refresh, so a running
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `Name` | string | "" | Display name. Empty shows "Tesla" before the sign in and "Tesla: " with the email of the account after it. |
-| `Provider` | enum | `OwnerApi` | Where the data comes from. Only `OwnerApi` exists in this version. |
 | `RefreshToken` | string | "" | Refresh token of the account (stored as a secret). Tesla rotates it with every refresh and HomeBlaze stores the new one. |
 | `StatePollingInterval` | TimeSpan | 1 minute | How often the vehicle list with state and cached data is read. |
 | `ActivePollingInterval` | TimeSpan | 1 minute | How often the data of an awake vehicle is read while it charges, drives or has a user present. |
@@ -49,13 +48,12 @@ Refresh tokens last about three months and rotate on every refresh, so a running
 | `SleepWindow` | TimeSpan | 21 minutes | How long reading pauses so that an idle vehicle can fall asleep. |
 | `RetryInterval` | TimeSpan | 1 minute | Wait after a failed poll. |
 
-`StatePollingInterval` and `RetryInterval` are at least 10 seconds. The account restarts its loop when the configuration is applied; the access token is kept, so a restart does not refresh again.
+`StatePollingInterval` and `RetryInterval` are at least 10 seconds and at most one day, and the edit dialog accepts intervals of at most one day. The account restarts its loop when the configuration is applied; the access token is kept, so a restart does not refresh again.
 
 ```json
 {
   "$type": "Namotion.Devices.Tesla.TeslaAccount",
   "name": "Tesla",
-  "provider": "OwnerApi",
   "refreshToken": "",
   "statePollingInterval": "00:01:00",
   "activePollingInterval": "00:01:00",
@@ -98,7 +96,7 @@ TeslaAccount                                   tokens and polling
 
 Vehicles are discovered, not configured, and keyed by VIN. A vehicle that appears in the account is added, one that disappears is removed, and a known vehicle is updated in place, so paths and history stay stable.
 
-All readings are `null` until the vehicle reported them. Percentages are fractions from 0 to 1, distances are in km, speeds in km/h, tire pressures in bar, temperatures in °C, power in W, energy in Wh, currents in A and times of day or durations are `TimeSpan`. Values that Tesla reports as placeholders, such as a charger voltage of 0 to 2 V when not charging, `<invalid>`, a blank software version or an empty vehicle name, are `null`. Unknown enum values are `Unknown` and logged once.
+All readings are `null` until the vehicle reported them. Percentages are fractions from 0 to 1, distances are in km, speeds in km/h, tire pressures in bar, temperatures in °C, power in W, energy in Wh, currents in A and times of day or durations are `TimeSpan`. Values that Tesla reports as placeholders, such as a charger voltage of 0 to 2 V when not charging, `<invalid>`, a blank software version or an empty vehicle name, are `null`. Unknown enum values are `Unknown`; the first unknown value of each enum type is logged once per process. Unknown shift states are not logged.
 
 | Subject | Interfaces |
 |---------|------------|
@@ -132,7 +130,7 @@ Every value has one path. The vehicle holds its identity, the odometer and the l
 | `VehicleState` | | `Online`, `Asleep`, `Offline` or `Unknown` |
 | `IsAwake` | | `true` when online, `false` when asleep or offline, `null` when unknown; discrete, so history records every wake and sleep |
 | `IsBusy` | | `true` while a `Wake Up` of the vehicle runs |
-| `IsConnected` | | `true` when online or asleep, `false` when offline: an asleep vehicle is still reachable through Tesla's servers |
+| `IsConnected` | | `true` when online or asleep, `false` when offline or unknown: an asleep vehicle is still reachable through Tesla's servers |
 | `CommandSigning` | | Whether the vehicle requires signed commands (`Off`, `Allowed`, `Required`) |
 | `IsInService` | | Whether the vehicle is in service at Tesla |
 | `LastUpdated` | | Time of the newest data: the newest section timestamp of the data, and the read time only when the vehicle data has no timestamp |
@@ -153,7 +151,7 @@ The title is the name set in the vehicle, else the display name of the account, 
 | `ChargeLimit`, `MinimumChargeLimit`, `MaximumChargeLimit`, `StandardChargeLimit` | Percent | Charge limit with its bounds and the standard limit |
 | `Range`, `IdealRange`, `EstimatedRange` | km | Rated, ideal and estimated range |
 | `ChargingPower` | W | Current charging power |
-| `MaximumChargingPower` | W | Derived: power at the highest current that the charger offers and the vehicle can request; `null` when the vehicle does not charge. The phases come from the measured power, because Tesla reports 2 phases while charging on 3-phase AC. |
+| `MaximumChargingPower` | W | Derived: charger voltage times the highest current that the charger offers and the vehicle can request; not `null` whenever a charger voltage is reported, for example while plugged in. The phases come from the measured power, because Tesla reports 2 phases while charging on 3-phase AC. |
 | `ChargingCurrent`, `RequestedChargingCurrent`, `MaximumRequestedChargingCurrent`, `PilotCurrent`, `ChargingCurrentSetting` | A | Actual, requested, maximum requested and charger offered current, and the current setting of the vehicle |
 | `ChargerVoltage` | V | Charger voltage, `null` when not charging |
 | `ChargerPhases` | | Number of phases as Tesla reports it |
@@ -253,12 +251,12 @@ The account makes three kinds of calls, and only one can wake a vehicle:
 
 The cached data (`cached_data`) is a snapshot that Tesla's servers keep for each vehicle and return in the vehicle list, decoded from Tesla's protobuf `VehicleData` message. It is applied on every poll of the list, also while the vehicle is awake, so values appear within a minute of the first poll even for a vehicle that has been asleep since HomeBlaze started, as far as Tesla's snapshot holds them. Both sources, the cached data and the JSON of `vehicle_data`, fill the same properties with the same conversion, and every section carries Tesla's timestamp: a snapshot older than the data already read never overwrites it.
 
-A failure of one vehicle does not stop the others. Tesla's request limit (429) pauses polling for the `Retry-After` time, 5 minutes if it is missing, and `403 account disabled: EXCEEDED_LIMIT` pauses for 15 minutes. A server error or a network error waits `RetryInterval`. A 401 refreshes the access token once and repeats the call. The log of the account records every wake with its reason at information level and every `vehicle_data` read at debug level, so that a vehicle that does not sleep can be traced.
+A failure of one vehicle does not stop the others. Tesla's request limit (429) pauses polling for the `Retry-After` time, at most one day and 5 minutes if it is missing, and `403 account disabled: EXCEEDED_LIMIT` pauses for 15 minutes. A server error or a network error waits `RetryInterval`. A 401 from the vehicle list or a wake up refreshes the access token once and repeats the call, and a second 401 fails that call without requiring re-authentication. A 401 from the data of a vehicle fails only that vehicle and does not refresh, because the vehicle list accepted the same token moments before. The log of the account records every wake with its reason at information level and every `vehicle_data` read at debug level, so that a vehicle that does not sleep can be traced.
 
 ## Known Limitations
 
 - **Read only.** The integration cannot start or stop charging, set the charge limit, open the charge port, lock or unlock, or control the climate. Since 2024, Tesla vehicles except the pre-2021 Model S and X accept only commands signed with a key that the vehicle trusts, and reject unsigned commands. `CommandSigning` shows what the vehicle requires. A key can only be enrolled with a Fleet API developer application, or over Bluetooth with a tap of the key card, and the Owner API does not forward signed commands. Only `Wake Up` is available.
-- **Phase 2: Teslemetry or Tessie.** The design prepares a second provider, Teslemetry or Tessie, which are paid services that send the signed commands for you, to add commands such as the charge limit, starting and stopping charging, the charge schedule and the charge port. Provider is configuration already (`Provider`), and both services serve the same paths and payloads as Tesla's Fleet API. It is not implemented yet.
+- **Phase 2: Teslemetry or Tessie.** A second provider, Teslemetry or Tessie, which are paid services that send the signed commands for you, would add commands such as the charge limit, starting and stopping charging, the charge schedule and the charge port. Both services serve the same paths and payloads as Tesla's Fleet API. It is not implemented yet, and this version has no setting to choose a provider.
 - **Phase 3: own command signing.** Signing commands in HomeBlaze itself would need a key enrolled over Bluetooth and commands sent over Bluetooth from a device near the vehicle. It is only planned if it turns out to be feasible.
 - **The Owner API is unofficial.** It changed twice in 2026 (the login redirect and the vehicle list endpoint), and can break without notice. Tesla can also change what it demands of the clients, as it did with HTTP/2 and TLS 1.3 in June 2026. Updates of this integration may be needed then. To spot a change, search the log for `Tesla API changed?`: a value of an unexpected type, an unknown state text or protobuf enum number, and a missing core field (such as the battery level or the odometer) are logged as a warning once each.
 - **The Tesla Wall Connector is not supported.** The Wall Connector integration of HomeBlaze v1 was not migrated.
@@ -280,7 +278,7 @@ The integration uses two Tesla hosts. The Owner API is unofficial and not docume
 | `POST /oauth2/v3/token` (`grant_type=authorization_code`) | `auth.tesla.com` | Exchanges the code of [Sign in with Tesla](#sign-in-with-tesla) (PKCE) |
 | `GET /oauth2/v3/authorize` | `auth.tesla.com` | Sign in address of Sign in with Tesla, redirects to `tesla://auth/callback` |
 | `GET /api/1/products` | `owner-api.teslamotors.com` | Vehicle list with state, `command_signing`, `in_service` and `cached_data`. Never wakes a vehicle. |
-| `GET /api/1/vehicles/{id}/vehicle_data` | `owner-api.teslamotors.com` | Full data of an online vehicle (`charge_state`, `climate_state`, `closures_state`, `drive_state`, `gui_settings`, `location_data`, `vehicle_config`, `vehicle_state`). 408 when the vehicle is asleep. |
+| `GET /api/1/vehicles/{id}/vehicle_data` | `owner-api.teslamotors.com` | Full data of an online vehicle (`charge_state`, `climate_state`, `closures_state`, `drive_state`, `gui_settings`, `location_data`, `vehicle_config`, `vehicle_state`, `vehicle_data_combo`). 408 when the vehicle is asleep. |
 | `POST /api/1/vehicles/{id}/wake_up` | `owner-api.teslamotors.com` | Wakes the vehicle, only from the `Wake Up` operation |
 
 The access token lives in memory and is refreshed when it has less than an hour or half of its lifetime left, and after a 401. Tesla's vehicle protobuf schemas (`teslamotors/vehicle-command`, Apache 2.0) are vendored in the library to decode `cached_data`.

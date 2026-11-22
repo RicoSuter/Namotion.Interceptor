@@ -5,21 +5,12 @@ namespace Namotion.Devices.Tesla.Client
 {
     public class TeslaApiException : System.Exception
     {
-        public TeslaApiException(System.Net.HttpStatusCode statusCode, string? error, System.TimeSpan? retryAfter = default) { }
         public string? Error { get; }
         public System.TimeSpan? RetryAfter { get; }
         public System.Net.HttpStatusCode StatusCode { get; }
     }
-    public sealed class TeslaLogin : System.IEquatable<Namotion.Devices.Tesla.Client.TeslaLogin>
-    {
-        public TeslaLogin(string Url, string State, string CodeVerifier) { }
-        public string CodeVerifier { get; init; }
-        public string State { get; init; }
-        public string Url { get; init; }
-    }
     public sealed class TeslaReauthenticationRequiredException : System.Exception
     {
-        public TeslaReauthenticationRequiredException(string? error) { }
         public string? Error { get; }
     }
 }
@@ -54,8 +45,6 @@ namespace Namotion.Devices.Tesla
         public bool IsReauthenticationRequired { get; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
         public string Name { get; set; }
-        [HomeBlaze.Abstractions.Attributes.Configuration]
-        public Namotion.Devices.Tesla.TeslaProvider Provider { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration(IsSecret=true)]
         public string RefreshToken { get; set; }
         [HomeBlaze.Abstractions.Attributes.Configuration]
@@ -87,9 +76,9 @@ namespace Namotion.Devices.Tesla
     }
     public static class TeslaAccountConnector
     {
-        public static System.Threading.Tasks.Task<Namotion.Devices.Tesla.TeslaConnection> ConnectWithLoginAsync(Namotion.Devices.Tesla.Client.TeslaLogin login, string pastedCallback, System.TimeProvider timeProvider, System.Threading.CancellationToken cancellationToken) { }
+        public static System.Threading.Tasks.Task<Namotion.Devices.Tesla.TeslaConnection> ConnectWithLoginAsync(Namotion.Devices.Tesla.TeslaLogin login, string pastedCallback, System.TimeProvider timeProvider, System.Threading.CancellationToken cancellationToken) { }
         public static System.Threading.Tasks.Task<Namotion.Devices.Tesla.TeslaConnection> ConnectWithRefreshTokenAsync(string refreshToken, System.TimeProvider timeProvider, System.Threading.CancellationToken cancellationToken) { }
-        public static Namotion.Devices.Tesla.Client.TeslaLogin CreateLogin() { }
+        public static Namotion.Devices.Tesla.TeslaLogin CreateLogin() { }
     }
     public enum TeslaCabinOverheatProtection
     {
@@ -408,6 +397,13 @@ namespace Namotion.Devices.Tesla
         On = 1,
         Override = 2,
     }
+    public sealed class TeslaLogin : System.IEquatable<Namotion.Devices.Tesla.TeslaLogin>
+    {
+        public TeslaLogin(string Url, string State, string CodeVerifier) { }
+        public string CodeVerifier { get; init; }
+        public string State { get; init; }
+        public string Url { get; init; }
+    }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class TeslaMedia : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Media.IMediaTrackState, HomeBlaze.Abstractions.Media.IVolumeState, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
@@ -473,10 +469,6 @@ namespace Namotion.Devices.Tesla
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
-    }
-    public enum TeslaProvider
-    {
-        OwnerApi = 0,
     }
     public enum TeslaScheduleDays
     {

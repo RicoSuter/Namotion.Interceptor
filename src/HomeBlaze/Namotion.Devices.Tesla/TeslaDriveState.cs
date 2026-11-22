@@ -9,7 +9,7 @@ using Namotion.Interceptor.Attributes;
 namespace Namotion.Devices.Tesla;
 
 /// <summary>
-/// The driving state of a Tesla vehicle: heading, native location, speed, shift state and navigation. It sets the location of its vehicle from the location section.
+/// The driving state of a Tesla vehicle: heading, GPS time, speed, power, shift state and navigation. It sets the location of its vehicle from the location section.
 /// </summary>
 [ExcludeFromCreation]
 [InterceptorSubject]

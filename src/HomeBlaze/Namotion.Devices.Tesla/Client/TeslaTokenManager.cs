@@ -54,13 +54,28 @@ internal sealed class TeslaTokenManager
     }
 
     /// <summary>
-    /// Calls the API with an access token. After a 401 it refreshes the token once and calls again; a second 401
-    /// requires re-authentication.
+    /// Calls the API with an access token. After a 401 it refreshes the token once and calls again; a second 401 is
+    /// thrown as it is, because Tesla accepted the refresh token.
     /// </summary>
-    /// <exception cref="TeslaReauthenticationRequiredException">Tesla rejected the refresh token or the refreshed access token.</exception>
-    public async Task<T> CallAsync<T>(Func<string, Task<T>> call, CancellationToken cancellationToken)
+    /// <exception cref="TeslaReauthenticationRequiredException">Tesla rejected the refresh token.</exception>
+    /// <exception cref="TeslaApiException">The call failed, also with a 401 after the refresh.</exception>
+    public Task<T> CallAsync<T>(Func<string, Task<T>> call, CancellationToken cancellationToken) =>
+        CallAsync(call, refreshOnUnauthorized: true, cancellationToken);
+
+    /// <summary>
+    /// Calls the API with an access token. With <paramref name="refreshOnUnauthorized"/>, a 401 refreshes the token once
+    /// and calls again; without, a 401 is thrown as it is, for a call whose access token another call just accepted.
+    /// </summary>
+    /// <exception cref="TeslaReauthenticationRequiredException">Tesla rejected the refresh token.</exception>
+    /// <exception cref="TeslaApiException">The call failed.</exception>
+    public async Task<T> CallAsync<T>(Func<string, Task<T>> call, bool refreshOnUnauthorized, CancellationToken cancellationToken)
     {
         var accessToken = await GetAccessTokenAsync(null, cancellationToken);
+        if (!refreshOnUnauthorized)
+        {
+            return await call(accessToken);
+        }
+
         try
         {
             return await call(accessToken);
@@ -71,14 +86,7 @@ internal sealed class TeslaTokenManager
             accessToken = await GetAccessTokenAsync(accessToken, cancellationToken);
         }
 
-        try
-        {
-            return await call(accessToken);
-        }
-        catch (TeslaApiException exception) when (exception.StatusCode == HttpStatusCode.Unauthorized)
-        {
-            throw new TeslaReauthenticationRequiredException(exception.Error);
-        }
+        return await call(accessToken);
     }
 
     private async Task<string> GetAccessTokenAsync(string? rejectedAccessToken, CancellationToken cancellationToken)

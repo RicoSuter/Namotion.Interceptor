@@ -1,8 +1,5 @@
 namespace Namotion.Devices.Tesla;
 
-/// <summary>The account provider through which the vehicles are read.</summary>
-public enum TeslaProvider { OwnerApi }
-
 /// <summary>Whether a vehicle is reachable and awake.</summary>
 public enum TeslaVehicleState { Unknown, Online, Asleep, Offline }
 

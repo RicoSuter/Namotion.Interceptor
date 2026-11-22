@@ -44,5 +44,6 @@ internal static class Snapshots
             new TrafficInfo(5m, 120m, 40m, 250m),
             wlans ?? Wlans(),
             hosts ?? Hosts(),
-            mesh ?? Mesh());
+            mesh ?? Mesh(),
+            null);
 }

@@ -39,7 +39,7 @@ internal sealed class TeslaVehiclePollingPolicy
         return _lastRead is null || now - _lastRead.Value >= interval;
     }
 
-    /// <summary>Records a successful read with the activity it showed and starts the sleep window once the vehicle could sleep for IdleTimeout.</summary>
+    /// <summary>Records a read attempt, successful or failed, with the activity it showed and starts the sleep window once the vehicle could sleep for IdleTimeout.</summary>
     public void OnRead(DateTimeOffset now, bool isActive, bool canSleep, TeslaPollingSettings settings)
     {
         _lastRead = now;

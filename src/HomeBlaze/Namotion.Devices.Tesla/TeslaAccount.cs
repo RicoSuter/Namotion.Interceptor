@@ -36,6 +36,8 @@ public partial class TeslaAccount : BackgroundService,
     // dictionary are only touched while it is held.
     private readonly SemaphoreSlim _pollLock = new(1, 1);
 
+    private volatile bool _isDisposed;
+
     public TeslaAccount(TimeProvider timeProvider, ILoggerFactory loggerFactory)
         : this(timeProvider, loggerFactory, TeslaHttp.CreateClient)
     {
@@ -51,7 +53,6 @@ public partial class TeslaAccount : BackgroundService,
         _apiClient = new TeslaOwnerApiClient(_httpClient, timeProvider, _logger);
 
         Name = string.Empty;
-        Provider = TeslaProvider.OwnerApi;
         RefreshToken = string.Empty;
         StatePollingInterval = TimeSpan.FromMinutes(1);
         ActivePollingInterval = TimeSpan.FromMinutes(1);
@@ -74,9 +75,6 @@ public partial class TeslaAccount : BackgroundService,
     /// <summary>The display name of the account; empty to show "Tesla: " with the email of the account.</summary>
     [Configuration]
     public partial string Name { get; set; }
-
-    [Configuration]
-    public partial TeslaProvider Provider { get; set; }
 
     /// <summary>The refresh token. Tesla rotates it with every refresh, and the rotated token is written back to the configuration.</summary>
     [Configuration(IsSecret = true)]
@@ -182,6 +180,8 @@ public partial class TeslaAccount : BackgroundService,
 
     public override void Dispose()
     {
+        _isDisposed = true;
+
         // Cancels the stopping token first, so that the loop does not start another poll on the disposed client.
         // _pollLock is not disposed: it never creates a wait handle, and a poll still running when Dispose is called
         // without StopAsync releases it afterwards.

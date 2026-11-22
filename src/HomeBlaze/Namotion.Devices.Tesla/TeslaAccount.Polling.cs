@@ -11,6 +11,9 @@ public partial class TeslaAccount
     private const string MissingRefreshTokenMessage = "Missing refresh token";
 
     private static readonly TimeSpan MinimumInterval = TimeSpan.FromSeconds(10);
+
+    // Task.Delay throws for delays above about 49.7 days, which would end the loop.
+    private static readonly TimeSpan MaximumDelay = TimeSpan.FromDays(1);
     private static readonly TimeSpan WakeUpTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan WakeUpCheckInterval = TimeSpan.FromSeconds(5);
 
@@ -43,7 +46,7 @@ public partial class TeslaAccount
                 _logger.LogError(exception, "The polling loop of the Tesla account failed.");
                 Status = ServiceStatus.Error;
                 StatusMessage = exception.Message;
-                delay = AtLeastMinimum(RetryInterval);
+                delay = Limit(RetryInterval);
             }
 
             await WaitAsync(delay, configurationChanged.Task, stoppingToken);
@@ -74,7 +77,7 @@ public partial class TeslaAccount
         {
             if (!IsRefreshTokenReplaced())
             {
-                return pause;
+                return AtMostMaximum(pause);
             }
 
             _pausedUntil = DateTimeOffset.MinValue;
@@ -105,12 +108,15 @@ public partial class TeslaAccount
             return Timeout.InfiniteTimeSpan;
         }
 
-        var delay = AtLeastMinimum(Status == ServiceStatus.Error ? RetryInterval : StatePollingInterval);
-        var pause = _pausedUntil - _timeProvider.GetUtcNow();
+        var delay = Limit(Status == ServiceStatus.Error ? RetryInterval : StatePollingInterval);
+        var pause = AtMostMaximum(_pausedUntil - _timeProvider.GetUtcNow());
         return pause > delay ? pause : delay;
     }
 
-    private static TimeSpan AtLeastMinimum(TimeSpan interval) => interval < MinimumInterval ? MinimumInterval : interval;
+    /// <summary>Limits a configured interval to between <see cref="MinimumInterval"/> and <see cref="MaximumDelay"/>.</summary>
+    private static TimeSpan Limit(TimeSpan interval) => interval < MinimumInterval ? MinimumInterval : AtMostMaximum(interval);
+
+    private static TimeSpan AtMostMaximum(TimeSpan delay) => delay > MaximumDelay ? MaximumDelay : delay;
 
     /// <summary>
     /// One polling cycle: reads the vehicle list with the cached snapshots, then the data of each awake vehicle that is due.
@@ -148,7 +154,7 @@ public partial class TeslaAccount
         catch (TeslaApiException exception) when (exception.RetryAfter is { } retryAfter)
         {
             _logger.LogWarning(exception, "Tesla limits the requests of the account; pausing for {RetryAfter}.", retryAfter);
-            _pausedUntil = _timeProvider.GetUtcNow() + retryAfter;
+            _pausedUntil = _timeProvider.GetUtcNow() + AtMostMaximum(retryAfter);
             Status = ServiceStatus.Error;
             StatusMessage = exception.Message;
         }
@@ -262,7 +268,9 @@ public partial class TeslaAccount
         try
         {
             _logger.LogDebug("Reading Tesla vehicle {Vin} (active: {IsActive}).", vehicle.Vin, vehicle.IsActive);
-            if (!await ReadVehicleAsync(tokenManager, vehicle, cancellationToken))
+            // The vehicle list accepted the access token moments ago, so a 401 concerns this vehicle only. Refreshing for it
+            // would rotate and save the refresh token on every read while the vehicle keeps rejecting it.
+            if (!await ReadVehicleAsync(tokenManager, vehicle, refreshOnUnauthorized: false, cancellationToken))
             {
                 _logger.LogDebug("Tesla vehicle {Vin} fell asleep before it was read.", vehicle.Vin);
                 vehicle.VehicleState = TeslaVehicleState.Asleep;
@@ -285,10 +293,10 @@ public partial class TeslaAccount
 
     /// <summary>Reads the data of a vehicle and applies it.</summary>
     /// <returns>False when the vehicle is asleep or offline.</returns>
-    private async Task<bool> ReadVehicleAsync(TeslaTokenManager tokenManager, TeslaVehicle vehicle, CancellationToken cancellationToken)
+    private async Task<bool> ReadVehicleAsync(TeslaTokenManager tokenManager, TeslaVehicle vehicle, bool refreshOnUnauthorized, CancellationToken cancellationToken)
     {
         var data = await tokenManager.CallAsync(
-            accessToken => _apiClient.GetVehicleDataAsync(accessToken, vehicle.Id, cancellationToken), cancellationToken);
+            accessToken => _apiClient.GetVehicleDataAsync(accessToken, vehicle.Id, cancellationToken), refreshOnUnauthorized, cancellationToken);
         if (data is null)
         {
             return false;
@@ -327,7 +335,15 @@ public partial class TeslaAccount
     /// </summary>
     private async Task WakeUpAsync(TeslaVehicle vehicle, CancellationToken cancellationToken)
     {
+        ThrowIfDisposed();
         await _pollLock.WaitAsync(cancellationToken);
+        if (_isDisposed)
+        {
+            // Disposed while waiting for a poll; the HTTP client is gone.
+            _pollLock.Release();
+            ThrowIfDisposed();
+        }
+
         try
         {
             var tokenManager = GetTokenManager();
@@ -341,7 +357,7 @@ public partial class TeslaAccount
             var deadline = _timeProvider.GetUtcNow() + WakeUpTimeout;
             while (true)
             {
-                if (await ReadVehicleAsync(tokenManager, vehicle, cancellationToken))
+                if (await ReadVehicleAsync(tokenManager, vehicle, refreshOnUnauthorized: true, cancellationToken))
                 {
                     var policy = GetPollingPolicy(vehicle);
                     policy.OnActivityObserved();
@@ -370,6 +386,14 @@ public partial class TeslaAccount
         finally
         {
             _pollLock.Release();
+        }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_isDisposed)
+        {
+            throw new InvalidOperationException("The Tesla account was disposed; it cannot wake a vehicle anymore.");
         }
     }
 
