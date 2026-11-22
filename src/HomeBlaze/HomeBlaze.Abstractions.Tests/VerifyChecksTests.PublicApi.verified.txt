@@ -507,6 +507,65 @@ namespace HomeBlaze.Abstractions.Devices.Locks
         HomeBlaze.Abstractions.Devices.Locks.DoorLockState? LockState { get; }
     }
 }
+namespace HomeBlaze.Abstractions.Discovery
+{
+    public sealed class DiscoveredSubject : System.IEquatable<HomeBlaze.Abstractions.Discovery.DiscoveredSubject>
+    {
+        public DiscoveredSubject(System.Type SubjectType, HomeBlaze.Abstractions.Discovery.IDiscoveryResult Result, Namotion.Interceptor.IInterceptorSubject? ExistingSubject) { }
+        public Namotion.Interceptor.IInterceptorSubject? ExistingSubject { get; init; }
+        public HomeBlaze.Abstractions.Discovery.IDiscoveryResult Result { get; init; }
+        public System.Type SubjectType { get; init; }
+    }
+    public sealed class DiscoveryScan
+    {
+        public DiscoveryScan(HomeBlaze.Abstractions.Discovery.ISsdpSearch ssdpSearch, HomeBlaze.Abstractions.Discovery.IMulticastDnsBrowser multicastDnsBrowser, System.Threading.CancellationToken cancellationToken) { }
+        public HomeBlaze.Abstractions.Discovery.IMulticastDnsBrowser MulticastDns { get; }
+        public HomeBlaze.Abstractions.Discovery.ISsdpSearch Ssdp { get; }
+    }
+    public interface IDiscoveryResult
+    {
+        string? Detail { get; }
+        string DisplayName { get; }
+        string Key { get; }
+    }
+    public interface IMulticastDnsBrowser
+    {
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.MulticastDnsService>> BrowseAsync(string serviceType, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface ISsdpSearch
+    {
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.SsdpResponse>> SearchAsync(string searchTarget, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface ISubjectDiscoverer
+    {
+        System.Type SubjectType { get; }
+        System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.DiscoveredSubject> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.IInterceptorSubject> existingSubjects, System.Threading.CancellationToken cancellationToken);
+    }
+    public sealed class MulticastDnsService : System.IEquatable<HomeBlaze.Abstractions.Discovery.MulticastDnsService>
+    {
+        public MulticastDnsService(string InstanceName, string? HostName, int Port, System.Collections.Generic.IReadOnlyList<System.Net.IPAddress> Addresses, System.Collections.Generic.IReadOnlyDictionary<string, string> Properties) { }
+        public System.Collections.Generic.IReadOnlyList<System.Net.IPAddress> Addresses { get; init; }
+        public string? HostName { get; init; }
+        public string InstanceName { get; init; }
+        public int Port { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, string> Properties { get; init; }
+    }
+    public sealed class SsdpResponse : System.IEquatable<HomeBlaze.Abstractions.Discovery.SsdpResponse>
+    {
+        public SsdpResponse(System.Uri Location, string? UniqueServiceName, string SearchTarget) { }
+        public System.Uri Location { get; init; }
+        public string SearchTarget { get; init; }
+        public string? UniqueServiceName { get; init; }
+    }
+    public abstract class SubjectDiscoverer<TSubject, TResult> : HomeBlaze.Abstractions.Discovery.ISubjectDiscoverer
+        where TSubject :  class, Namotion.Interceptor.IInterceptorSubject
+        where TResult :  class, HomeBlaze.Abstractions.Discovery.IDiscoveryResult
+    {
+        protected SubjectDiscoverer() { }
+        protected abstract System.Collections.Generic.IAsyncEnumerable<TResult> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, System.Threading.CancellationToken cancellationToken);
+        protected abstract bool Matches(TSubject existing, TResult result);
+    }
+}
 namespace HomeBlaze.Abstractions
 {
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
