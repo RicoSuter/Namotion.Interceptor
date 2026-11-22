@@ -5,6 +5,7 @@ using HomeBlaze.Services.Components;
 using HomeBlaze.Services.Discovery;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Xunit;
 
@@ -152,50 +153,33 @@ public sealed class EditOnlyDiscoveryTestEditComponent : ISubjectDiscoveryCompon
     public IDiscoveryResult? DiscoveryResult { get; set; }
 }
 
-public sealed class SplitTestDiscoverer : SubjectDiscoverer<SplitDiscoveryTestSubject, TestDiscoveryResult>
+/// <summary>
+/// A discoverer that finds nothing, for the tests that only ask which discoverers the registry creates.
+/// </summary>
+public abstract class TestDiscoverer<TSubject> : SubjectDiscoverer<TSubject, TestDiscoveryResult>
+    where TSubject : class, IInterceptorSubject
 {
     protected override IAsyncEnumerable<TestDiscoveryResult> DiscoverAsync(DiscoveryScan scan, CancellationToken cancellationToken) => TestScans.Yield();
 
-    protected override bool Matches(SplitDiscoveryTestSubject existing, TestDiscoveryResult result) => false;
+    protected override bool Matches(TSubject existing, TestDiscoveryResult result) => false;
 }
 
-public sealed class EditOnlyTestDiscoverer : SubjectDiscoverer<EditOnlyDiscoveryTestSubject, TestDiscoveryResult>
-{
-    protected override IAsyncEnumerable<TestDiscoveryResult> DiscoverAsync(DiscoveryScan scan, CancellationToken cancellationToken) => TestScans.Yield();
+public sealed class SplitTestDiscoverer : TestDiscoverer<SplitDiscoveryTestSubject>;
 
-    protected override bool Matches(EditOnlyDiscoveryTestSubject existing, TestDiscoveryResult result) => false;
+public sealed class EditOnlyTestDiscoverer : TestDiscoverer<EditOnlyDiscoveryTestSubject>;
+
+public sealed class AcceptedTestDiscoverer : TestDiscoverer<DiscoveryTestSubject>;
+
+public sealed class RejectedTestDiscoverer : TestDiscoverer<OtherDiscoveryTestSubject>;
+
+public sealed class ThrowingTestDiscoverer : TestDiscoverer<DiscoveryTestSubject>
+{
+    public ThrowingTestDiscoverer() => throw new InvalidOperationException("The discoverer is broken.");
 }
 
 public sealed class TestDependency;
 
-public sealed class AcceptedTestDiscoverer : SubjectDiscoverer<DiscoveryTestSubject, TestDiscoveryResult>
-{
-    protected override IAsyncEnumerable<TestDiscoveryResult> DiscoverAsync(DiscoveryScan scan, CancellationToken cancellationToken) => TestScans.Yield();
-
-    protected override bool Matches(DiscoveryTestSubject existing, TestDiscoveryResult result) => false;
-}
-
-public sealed class RejectedTestDiscoverer : SubjectDiscoverer<OtherDiscoveryTestSubject, TestDiscoveryResult>
-{
-    protected override IAsyncEnumerable<TestDiscoveryResult> DiscoverAsync(DiscoveryScan scan, CancellationToken cancellationToken) => TestScans.Yield();
-
-    protected override bool Matches(OtherDiscoveryTestSubject existing, TestDiscoveryResult result) => false;
-}
-
-public sealed class ThrowingTestDiscoverer : SubjectDiscoverer<DiscoveryTestSubject, TestDiscoveryResult>
-{
-    public ThrowingTestDiscoverer() => throw new InvalidOperationException("The discoverer is broken.");
-
-    protected override IAsyncEnumerable<TestDiscoveryResult> DiscoverAsync(DiscoveryScan scan, CancellationToken cancellationToken) => TestScans.Yield();
-
-    protected override bool Matches(DiscoveryTestSubject existing, TestDiscoveryResult result) => false;
-}
-
-public sealed class InjectedTestDiscoverer(TestDependency dependency) : SubjectDiscoverer<DiscoveryTestSubject, TestDiscoveryResult>
+public sealed class InjectedTestDiscoverer(TestDependency dependency) : TestDiscoverer<DiscoveryTestSubject>
 {
     public TestDependency Dependency => dependency;
-
-    protected override IAsyncEnumerable<TestDiscoveryResult> DiscoverAsync(DiscoveryScan scan, CancellationToken cancellationToken) => TestScans.Yield();
-
-    protected override bool Matches(DiscoveryTestSubject existing, TestDiscoveryResult result) => false;
 }

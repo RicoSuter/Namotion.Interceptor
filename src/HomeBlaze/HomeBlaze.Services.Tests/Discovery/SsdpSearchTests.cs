@@ -31,8 +31,6 @@ public class SsdpSearchTests
 
     private static DiscoveredSsdpDevice Create(string notificationType, string usn, Uri location)
     {
-        // The notification type is read only and the response headers are required, so the object initializer of the
-        // plan does not compile against Rssdp.
         using var response = new HttpResponseMessage();
         return new DiscoveredSsdpDevice(notificationType, response.Headers) { Usn = usn, DescriptionLocation = location };
     }
