@@ -48,7 +48,7 @@ internal static class BluelinkJson
     public static int? GetInt32(this JsonElement element, string path) =>
         element.GetDecimal(path) is { } value && value == decimal.Truncate(value) && value is >= int.MinValue and <= int.MaxValue ? (int)value : null;
 
-    /// <summary>Reads a string, or a number as invariant text; null when missing.</summary>
+    /// <summary>Reads a string, or a number as its raw text; null when missing, and for booleans, objects and arrays.</summary>
     public static string? GetString(this JsonElement element, string path) => element.Find(path) switch
     {
         { ValueKind: JsonValueKind.String } text => text.GetString(),

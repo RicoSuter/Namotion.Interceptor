@@ -2,11 +2,12 @@ using System.Net;
 
 namespace Namotion.Devices.Hyundai.Client;
 
-/// <summary>A Bluelink call failed. The message never contains a token, a password or a response body.</summary>
+/// <summary>A Bluelink call failed. The message never contains a token, a password or a response body, only a short server message, at most 200 characters.</summary>
 public class BluelinkApiException(HttpStatusCode statusCode, string? code, string? message)
     : Exception(CreateMessage(statusCode, code, message))
 {
     private const string TokenExpiredMessage = "Key not authorized";
+    private const int MaxServerMessageLength = 200;
 
     private readonly string? _rawMessage = message;
 
@@ -18,7 +19,7 @@ public class BluelinkApiException(HttpStatusCode statusCode, string? code, strin
     internal bool IsRateLimited => Code == "5091";
 
     internal bool IsTokenExpired =>
-        StatusCode == HttpStatusCode.Unauthorized || Code == "7501" ||
+        Code == "7501" ||
         _rawMessage?.Contains(TokenExpiredMessage, StringComparison.OrdinalIgnoreCase) == true;
 
     internal bool IsDeviceNotRegistered => Code == "4002";
@@ -43,9 +44,12 @@ public class BluelinkApiException(HttpStatusCode statusCode, string? code, strin
         }
 
         var codeText = code is null ? "" : $" {code}";
-        var messageText = message is null ? "." : $": {message}";
+        var messageText = message is null ? "." : $": {Truncate(message)}";
         return $"Bluelink returned {(int)statusCode}{codeText}{messageText}";
     }
+
+    private static string Truncate(string message) =>
+        message.Length <= MaxServerMessageLength ? message : message[..MaxServerMessageLength];
 }
 
 /// <summary>Hyundai rejected the credentials, or asks to accept new terms; the user has to sign in again.</summary>
@@ -65,12 +69,15 @@ public enum BluelinkCommandResult
 }
 
 /// <summary>A command did not succeed.</summary>
-public sealed class BluelinkCommandException(BluelinkCommandResult result) : Exception(result switch
-{
-    BluelinkCommandResult.Failed => "The vehicle rejected the command.",
-    BluelinkCommandResult.NoResponse => "The vehicle did not respond to the command.",
-    _ => "The result of the command did not arrive within 90 seconds."
-})
+public sealed class BluelinkCommandException(BluelinkCommandResult result) : Exception(CreateMessage(result))
 {
     public BluelinkCommandResult Result { get; } = result;
+
+    private static string CreateMessage(BluelinkCommandResult result) => result switch
+    {
+        BluelinkCommandResult.Failed => "The vehicle rejected the command.",
+        BluelinkCommandResult.NoResponse => "The vehicle did not respond to the command.",
+        BluelinkCommandResult.TimedOut => "The result of the command did not arrive in time.",
+        _ => throw new ArgumentOutOfRangeException(nameof(result), result, "Only a failed, unanswered or timed out command is an exception.")
+    };
 }
