@@ -27,6 +27,10 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
 
     private const string Nonce = "4A3B2C1D0E0F1A2B";
 
+    // Returned by an answer to have the request answered with the "no such entry" fault, as the router does for an
+    // unknown host.
+    private const string NoSuchEntry = "\u0000714";
+
     private readonly WebApplication _application;
     private readonly ConcurrentDictionary<string, Hold> _holds = new(StringComparer.Ordinal);
     private int _failedLogins;
@@ -67,6 +71,11 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     internal string MeshListJson { get; set; } = Fixtures.Read("meshlist.json");
 
     /// <summary>
+    /// The value of <c>NewFilterProfileList</c> that <c>GetFilterProfiles</c> returns.
+    /// </summary>
+    internal string FilterProfilesXml { get; set; } = Fixtures.Read("filterprofiles.xml");
+
+    /// <summary>
     /// The values of an answer by <c>serviceType#action</c>, overriding the defaults.
     /// </summary>
     internal ConcurrentDictionary<string, string> Answers { get; } = new(StringComparer.Ordinal);
@@ -88,6 +97,12 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
     /// by aborting the connection before any response is sent, simulating a reset rather than an HTTP status error.
     /// </summary>
     internal ConcurrentDictionary<string, bool> AbortedPaths { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The IPv4 addresses whose internet access <c>DisallowWANAccessByIP</c> blocked (true) or allowed (false). The host
+    /// list and <c>GetWANAccessByIP</c> report it for the item of that address.
+    /// </summary>
+    internal ConcurrentDictionary<string, bool> InternetAccessBlocks { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
     /// The authenticated actions received, in order.
@@ -269,6 +284,12 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
         }
 
         var values = await AnswerAsync(serviceType, action, request);
+        if (values == NoSuchEntry)
+        {
+            await WriteAsync(context, StatusCodes.Status500InternalServerError, "text/xml", CreateFault(714));
+            return;
+        }
+
         if (values is null)
         {
             await WriteAsync(context, StatusCodes.Status500InternalServerError, "text/xml", CreateFault(401));
@@ -290,7 +311,7 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
 
         (string Body, string ContentType)? list = pathAndQuery switch
         {
-            HostListPath => (HostListXml, "text/xml"),
+            HostListPath => (ApplyInternetAccessBlocks(HostListXml), "text/xml"),
             MeshListPath => (MeshListJson, "application/json"),
             _ => null
         };
@@ -372,6 +393,12 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
             return string.Empty;
         }
 
+        if (serviceType is Tr64Services.Hosts or Tr64Services.HostFilter &&
+            await AnswerHostAsync(action, request) is { } hostAnswer)
+        {
+            return hostAnswer;
+        }
+
         if (serviceType == GuestWlanServiceType && action == "GetInfo")
         {
             var isEnabled = _isGuestWlanEnabled;
@@ -414,9 +441,93 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
             ("urn:dslforum-org:service:WLANConfiguration:2", "GetTotalAssociations") => "<NewTotalAssociations>5</NewTotalAssociations>",
             (GuestWlanServiceType, "GetTotalAssociations") => "<NewTotalAssociations>0</NewTotalAssociations>",
             (Tr64Services.Hosts, "X_AVM-DE_GetHostListPath") => $"<NewX_AVM-DE_HostListPath>{WebUtility.HtmlEncode(HostListPath)}</NewX_AVM-DE_HostListPath>",
+            (Tr64Services.HostFilter, "GetFilterProfiles") =>
+                $"<NewFilterProfileList>{WebUtility.HtmlEncode(FilterProfilesXml)}</NewFilterProfileList>",
             (Tr64Services.Hosts, "X_AVM-DE_GetMeshListPath") => $"<NewX_AVM-DE_MeshListPath>{WebUtility.HtmlEncode(MeshListPath)}</NewX_AVM-DE_MeshListPath>",
             _ => null
         };
+    }
+
+    /// <returns>The answer to a host or host filter action that reads or changes the host list state, or null for any
+    /// other action.</returns>
+    private async Task<string?> AnswerHostAsync(string action, HttpRequest request) => action switch
+    {
+        "GetSpecificHostEntry" => await AnswerSpecificHostEntryAsync(request),
+        "X_AVM-DE_GetSpecificHostEntryByIP" => await AnswerSpecificHostEntryByIpAsync(request),
+        "DisallowWANAccessByIP" or "GetWANAccessByIP" => await AnswerInternetAccessAsync(action, request),
+        _ => null
+    };
+
+    private async Task<string?> AnswerInternetAccessAsync(string action, HttpRequest request)
+    {
+        using var reader = new StreamReader(request.Body);
+        var body = await reader.ReadToEndAsync();
+        var ipAddress = NewIpv4AddressRegex().Match(body).Groups[1].Value;
+        if (action == "DisallowWANAccessByIP")
+        {
+            InternetAccessBlocks[ipAddress] = NewDisallowRegex().Match(body).Groups[1].Value == "1";
+            return string.Empty;
+        }
+
+        // Reported like the host list does, so both answers agree for an address the test did not block or allow.
+        var item = ApplyInternetAccessBlocks(HostListXml).Split("</Item>").FirstOrDefault(entry => IpAddressRegex().Match(entry).Groups[1].Value == ipAddress);
+        if (item is null)
+        {
+            return null;
+        }
+
+        var wanAccess = WanAccessRegex().Match(item).Value;
+        var disallow = DisallowRegex().Match(item).Value;
+        return wanAccess.Replace("X_AVM-DE_WANAccess", "NewWANAccess", StringComparison.Ordinal) +
+            disallow.Replace("X_AVM-DE_Disallow", "NewDisallow", StringComparison.Ordinal);
+    }
+
+    /// <returns>The IP address and activity of the host list item of the MAC address in the request, or
+    /// <see cref="NoSuchEntry"/> for an unknown one.</returns>
+    private async Task<string?> AnswerSpecificHostEntryAsync(HttpRequest request)
+    {
+        using var reader = new StreamReader(request.Body);
+        var macAddress = NewMacAddressRegex().Match(await reader.ReadToEndAsync()).Groups[1].Value;
+        var item = HostListXml.Split("</Item>").FirstOrDefault(entry =>
+            string.Equals(MacAddressRegex().Match(entry).Groups[1].Value, macAddress, StringComparison.OrdinalIgnoreCase));
+        if (item is null)
+        {
+            return NoSuchEntry;
+        }
+
+        return $"<NewIPAddress>{IpAddressRegex().Match(item).Groups[1].Value}</NewIPAddress><NewActive>{ActiveRegex().Match(item).Groups[1].Value}</NewActive>";
+    }
+
+    /// <returns>The MAC address of the first host list item with the IP address in the request, or
+    /// <see cref="NoSuchEntry"/> for an unknown one.</returns>
+    private async Task<string> AnswerSpecificHostEntryByIpAsync(HttpRequest request)
+    {
+        using var reader = new StreamReader(request.Body);
+        var ipAddress = NewIpAddressRegex().Match(await reader.ReadToEndAsync()).Groups[1].Value;
+        var item = HostListXml.Split("</Item>").FirstOrDefault(entry => IpAddressRegex().Match(entry).Groups[1].Value == ipAddress);
+        return item is null
+            ? NoSuchEntry
+            : $"<NewMACAddress>{MacAddressRegex().Match(item).Groups[1].Value}</NewMACAddress><NewActive>{ActiveRegex().Match(item).Groups[1].Value}</NewActive>";
+    }
+
+    private string ApplyInternetAccessBlocks(string hostListXml)
+    {
+        if (InternetAccessBlocks.IsEmpty)
+        {
+            return hostListXml;
+        }
+
+        return HostListItemRegex().Replace(hostListXml, item =>
+        {
+            var ipAddress = IpAddressRegex().Match(item.Value).Groups[1].Value;
+            if (!InternetAccessBlocks.TryGetValue(ipAddress, out var isBlocked))
+            {
+                return item.Value;
+            }
+
+            var value = WanAccessRegex().Replace(item.Value, $"<X_AVM-DE_WANAccess>{(isBlocked ? "denied" : "granted")}</X_AVM-DE_WANAccess>");
+            return DisallowRegex().Replace(value, $"<X_AVM-DE_Disallow>{(isBlocked ? 1 : 0)}</X_AVM-DE_Disallow>");
+        });
     }
 
     private bool IsAuthorized(HttpRequest request)
@@ -482,6 +593,36 @@ internal sealed partial class FakeFritzBox : IAsyncDisposable
 
     [GeneratedRegex("<NewEnable>(\\d)</NewEnable>")]
     private static partial Regex NewEnableRegex();
+
+    [GeneratedRegex("<NewIPv4Address>([^<]*)</NewIPv4Address>")]
+    private static partial Regex NewIpv4AddressRegex();
+
+    [GeneratedRegex("<NewIPAddress>([^<]*)</NewIPAddress>")]
+    private static partial Regex NewIpAddressRegex();
+
+    [GeneratedRegex("<NewMACAddress>([^<]*)</NewMACAddress>")]
+    private static partial Regex NewMacAddressRegex();
+
+    [GeneratedRegex("<MACAddress>([^<]*)</MACAddress>")]
+    private static partial Regex MacAddressRegex();
+
+    [GeneratedRegex("<Active>([^<]*)</Active>")]
+    private static partial Regex ActiveRegex();
+
+    [GeneratedRegex("<NewDisallow>(\\d)</NewDisallow>")]
+    private static partial Regex NewDisallowRegex();
+
+    [GeneratedRegex("<Item>.*?</Item>", RegexOptions.Singleline)]
+    private static partial Regex HostListItemRegex();
+
+    [GeneratedRegex("<IPAddress>([^<]*)</IPAddress>")]
+    private static partial Regex IpAddressRegex();
+
+    [GeneratedRegex("<X_AVM-DE_WANAccess>[^<]*</X_AVM-DE_WANAccess>")]
+    private static partial Regex WanAccessRegex();
+
+    [GeneratedRegex("<X_AVM-DE_Disallow>[^<]*</X_AVM-DE_Disallow>")]
+    private static partial Regex DisallowRegex();
 
     /// <summary>
     /// A request held by the fake: <see cref="Taken"/> completes when it arrives, and it is answered once the test
