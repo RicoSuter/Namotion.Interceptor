@@ -15,10 +15,11 @@ public class EcowittGatewayDiscovererTests
     private const string MacAddress = "3C:8A:1F:32:E1:57";
     private const string HostAddress = "192.168.1.216";
 
-    private static EcowittBroadcastReply Reply(string macAddress = MacAddress, string ipAddress = HostAddress, string name = "GW2000A-WIFIE157 V3.3.3") =>
-        new(macAddress, IPAddress.Parse(ipAddress), name);
+    private static EcowittBroadcastReply Reply(string macAddress = MacAddress, string name = "GW2000A-WIFIE157 V3.3.3") =>
+        new(macAddress, name);
 
-    private static UdpDatagram Datagram(string macAddress = MacAddress, string ipAddress = HostAddress, string name = "GW2000A-WIFIE157 V3.3.3")
+    private static UdpDatagram Datagram(
+        string macAddress = MacAddress, string ipAddress = HostAddress, string name = "GW2000A-WIFIE157 V3.3.3", string? senderAddress = null)
     {
         var nameBytes = Encoding.UTF8.GetBytes(name);
         var frame = new byte[18 + nameBytes.Length + 1];
@@ -32,7 +33,7 @@ public class EcowittGatewayDiscovererTests
         frame[17] = (byte)nameBytes.Length;
         nameBytes.CopyTo(frame, 18);
         frame[^1] = EcowittBroadcastReply.ComputeChecksum(frame.AsSpan(2, frame.Length - 3));
-        return new UdpDatagram(frame, IPAddress.Parse(ipAddress));
+        return new UdpDatagram(frame, IPAddress.Parse(senderAddress ?? ipAddress));
     }
 
     private static EcowittDiscoveredGateway Found(string macAddress = MacAddress, string hostAddress = HostAddress) =>
@@ -126,6 +127,20 @@ public class EcowittGatewayDiscovererTests
         Assert.Same(existing, Assert.Single(discovered).ExistingSubject);
     }
 
+    [Fact]
+    public async Task WhenTheReplyNamesAnotherAddressThanItCameFrom_ThenTheSenderIsTheHostAddress()
+    {
+        // Arrange
+        var udpDiscovery = new FakeUdpDiscovery(Datagram(ipAddress: "10.0.0.99", senderAddress: HostAddress));
+
+        // Act
+        var discovered = await DiscoverAsync(udpDiscovery);
+
+        // Assert
+        var gateway = Assert.IsType<EcowittDiscoveredGateway>(Assert.Single(discovered).Result);
+        Assert.Equal(HostAddress, gateway.HostAddress);
+    }
+
     [Theory]
     [InlineData("GW2000A-WIFIE157 V3.3.3", "GW2000A-WIFIE157", "V3.3.3", "GW2000A-WIFIE157", "V3.3.3, 192.168.1.216")]
     [InlineData("GW1100A-WIFI1234", "GW1100A-WIFI1234", null, "GW1100A-WIFI1234", "192.168.1.216")]
@@ -137,7 +152,7 @@ public class EcowittGatewayDiscovererTests
         var reply = Reply(name: name);
 
         // Act
-        var result = EcowittGatewayDiscoverer.ToResult(reply);
+        var result = EcowittGatewayDiscoverer.ToResult(reply, IPAddress.Parse(HostAddress));
 
         // Assert
         Assert.Equal(deviceName, result.DeviceName);

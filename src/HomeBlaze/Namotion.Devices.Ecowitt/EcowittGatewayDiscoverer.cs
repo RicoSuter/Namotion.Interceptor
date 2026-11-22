@@ -1,3 +1,4 @@
+using System.Net;
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions.Discovery;
 
@@ -22,7 +23,7 @@ public sealed class EcowittGatewayDiscoverer : SubjectDiscoverer<EcowittGateway,
             var reply = EcowittBroadcastReply.TryParse(datagram.Payload.Span);
             if (reply is not null)
             {
-                yield return ToResult(reply);
+                yield return ToResult(reply, datagram.SenderAddress);
             }
         }
     }
@@ -30,7 +31,12 @@ public sealed class EcowittGatewayDiscoverer : SubjectDiscoverer<EcowittGateway,
     /// <inheritdoc />
     protected override bool Matches(EcowittGateway existing, EcowittDiscoveredGateway result) => IsSameGateway(existing, result);
 
-    internal static EcowittDiscoveredGateway ToResult(EcowittBroadcastReply reply)
+    /// <param name="reply">The reply of the gateway.</param>
+    /// <param name="senderAddress">
+    /// The address the reply came from, which is the host address, as for the other UDP discoverers, rather than the
+    /// address the reply names.
+    /// </param>
+    internal static EcowittDiscoveredGateway ToResult(EcowittBroadcastReply reply, IPAddress senderAddress)
     {
         var name = reply.Name;
         var separatorIndex = name.IndexOf(' ');
@@ -39,7 +45,7 @@ public sealed class EcowittGatewayDiscoverer : SubjectDiscoverer<EcowittGateway,
 
         return new EcowittDiscoveredGateway(
             reply.MacAddress,
-            reply.IpAddress.ToString(),
+            senderAddress.ToString(),
             deviceName.Length == 0 ? null : deviceName,
             firmwareVersion.Length == 0 ? null : firmwareVersion);
     }

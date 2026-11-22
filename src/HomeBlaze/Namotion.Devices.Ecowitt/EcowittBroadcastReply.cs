@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Net;
 using System.Text;
 
 namespace Namotion.Devices.Ecowitt;
@@ -8,9 +7,8 @@ namespace Namotion.Devices.Ecowitt;
 /// A reply of a gateway to the broadcast request (<c>CMD_BROADCAST</c>) of the Ecowitt local API.
 /// </summary>
 /// <param name="MacAddress">The MAC address in upper case with colons, such as <c>3C:8A:1F:32:E1:57</c>.</param>
-/// <param name="IpAddress">The IPv4 address the gateway reports.</param>
 /// <param name="Name">The name the gateway reports, such as <c>GW2000A-WIFIE157 V3.3.3</c>, trimmed; can be empty.</param>
-internal sealed record EcowittBroadcastReply(string MacAddress, IPAddress IpAddress, string Name)
+internal sealed record EcowittBroadcastReply(string MacAddress, string Name)
 {
     internal const byte BroadcastCommand = 0x12;
 
@@ -46,7 +44,6 @@ internal sealed record EcowittBroadcastReply(string MacAddress, IPAddress IpAddr
 
         return new EcowittBroadcastReply(
             FormatMacAddress(datagram.Slice(5, MacAddressLength)),
-            new IPAddress(datagram.Slice(11, 4)),
             Encoding.UTF8.GetString(datagram.Slice(FixedLength, nameLength)).Trim());
     }
 

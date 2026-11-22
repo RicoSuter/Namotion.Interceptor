@@ -26,7 +26,6 @@ public class EcowittBroadcastReplyTests
         // Assert
         Assert.NotNull(reply);
         Assert.Equal("3C:8A:1F:32:E1:57", reply.MacAddress);
-        Assert.Equal(IPAddress.Parse("192.168.1.216"), reply.IpAddress);
         Assert.Equal("GW2000A-WIFIE157 V3.3.3", reply.Name);
     }
 
