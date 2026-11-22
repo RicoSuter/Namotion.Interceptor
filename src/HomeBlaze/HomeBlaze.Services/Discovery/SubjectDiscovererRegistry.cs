@@ -51,7 +51,6 @@ public sealed class SubjectDiscovererRegistry
         var discoverersBySubjectType = new Dictionary<Type, Type>();
         foreach (var type in discovererTypes)
         {
-
             try
             {
                 var discoverer = (ISubjectDiscoverer)ActivatorUtilities.CreateInstance(_serviceProvider, type);
