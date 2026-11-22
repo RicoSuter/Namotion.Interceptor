@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.Extensions.Time.Testing;
 using Namotion.Devices.Hyundai.Client;
 using Namotion.Devices.Hyundai.Tests.Testing;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Devices.Hyundai.Tests;
 
@@ -17,7 +18,41 @@ public class BluelinkAuthClientTests
     private static Task<BluelinkCciTokens> LoginAsync(FakeHttpMessageHandler handler, string password = "password-1") =>
         CreateClient(handler).LoginAsync("user@example.invalid", password, "device-1", CancellationToken.None);
 
-    private static BluelinkAuthClient CreateClient(FakeHttpMessageHandler handler) => new(new HttpClient(handler), new FakeTimeProvider(Now));
+    private static BluelinkAuthClient CreateClient(FakeHttpMessageHandler handler, TimeProvider? time = null) => new(new HttpClient(handler), time ?? new FakeTimeProvider(Now));
+
+    [Fact]
+    public async Task WhenSignInGetsNoAnswerFor30Seconds_ThenLoginThrowsTimeoutException()
+    {
+        // Arrange
+        var time = new FakeTimeProvider(Now);
+        var handler = CreateLoginHandler().Reset(BluelinkResponses.SignInPath).RespondNever(BluelinkResponses.SignInPath);
+        var task = CreateClient(handler, time).LoginAsync("user@example.invalid", "password-1", "device-1", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Count(BluelinkResponses.SignInPath) == 1);
+
+        // Act
+        time.Advance(TimeSpan.FromSeconds(30));
+
+        // Assert
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() => task);
+        Assert.Equal("The Bluelink request timed out after 30 seconds.", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenRefreshGetsNoAnswerFor30Seconds_ThenItThrowsTimeoutException()
+    {
+        // Arrange
+        var time = new FakeTimeProvider(Now);
+        var handler = new FakeHttpMessageHandler().RespondNever(BluelinkResponses.RefreshPath);
+        var task = CreateClient(handler, time).RefreshAsync(BluelinkResponses.TokenSet(0), "device-1", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Count(BluelinkResponses.RefreshPath) == 1);
+
+        // Act
+        time.Advance(TimeSpan.FromSeconds(30));
+
+        // Assert
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() => task);
+        Assert.Equal("The Bluelink request timed out after 30 seconds.", exception.Message);
+    }
 
     [Fact]
     public async Task WhenLoginSucceeds_ThenTokensAreReturnedAndThePasswordIsEncrypted()

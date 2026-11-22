@@ -35,7 +35,7 @@ internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider tim
     public async Task<BluelinkCciTokens> RefreshAsync(BluelinkTokenSet tokens, string deviceId, CancellationToken cancellationToken)
     {
         using var request = CreateCciRequest("/auth/v2/token-refresh", deviceId, tokens.Serialize());
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await httpClient.SendWithTimeoutAsync(timeProvider, request, waitsForCar: false, cancellationToken);
         var root = await ReadCciResponseAsync(response, cancellationToken);
         var refreshed = ReadCciTokens(root, tokens);
 
@@ -58,7 +58,7 @@ internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider tim
             request.Headers.TryAddWithoutValidation("non-ccs-token", tokens.NonCcsToken);
         }
 
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await httpClient.SendWithTimeoutAsync(timeProvider, request, waitsForCar: false, cancellationToken);
         var root = await ReadCciResponseAsync(response, cancellationToken);
         var accessToken = root.GetString("accessToken") ?? root.GetString("ccsAccessToken");
         if (string.IsNullOrEmpty(accessToken))
@@ -168,7 +168,7 @@ internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider tim
     private async Task<BluelinkCciTokens> ExchangeCodeAsync(string code, string deviceId, CancellationToken cancellationToken)
     {
         using var request = CreateCciRequest("/auth/v1/token?code=" + Uri.EscapeDataString(code), deviceId, string.Empty);
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await httpClient.SendWithTimeoutAsync(timeProvider, request, waitsForCar: false, cancellationToken);
         return ReadCciTokens(await ReadCciResponseAsync(response, cancellationToken), null);
     }
 
@@ -224,7 +224,7 @@ internal sealed class BluelinkAuthClient(HttpClient httpClient, TimeProvider tim
             request.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
         }
 
-        var response = await httpClient.SendAsync(request, cancellationToken);
+        var response = await httpClient.SendWithTimeoutAsync(timeProvider, request, waitsForCar: false, cancellationToken);
         BluelinkLoginResponses.StoreCookies(cookies, uri, response);
         return response;
     }

@@ -50,9 +50,12 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
     public FakeHttpMessageHandler Respond(string path, Func<HttpResponseMessage> factory) =>
         Enqueue(path, _ => Task.FromResult(factory()));
 
-    /// <summary>Answers the path with the response once the task completes, for example to hold a request while a test acts.</summary>
+    /// <summary>
+    /// Answers the path with the response once the task completes, for example to hold a request while a test acts. A
+    /// canceled request stops waiting, as a real one does.
+    /// </summary>
     public FakeHttpMessageHandler RespondAfter(string path, Task<HttpResponseMessage> response) =>
-        Enqueue(path, _ => response);
+        Enqueue(path, cancellationToken => response.WaitAsync(cancellationToken));
 
     /// <summary>Holds the request until it is canceled, as a car that never answers.</summary>
     public FakeHttpMessageHandler RespondNever(string path) =>

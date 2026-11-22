@@ -398,7 +398,7 @@ public class BluelinkVehicleTests
         using var barrier = new Barrier(2);
         bool StartAfterBarrier()
         {
-            barrier.SignalAndWait();
+            Assert.True(barrier.SignalAndWait(TestTimeouts.Default));
             return vehicle.TryStartOperation();
         }
 

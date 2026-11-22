@@ -584,14 +584,30 @@ public class BluelinkVehicleApiClientTests
         await AsyncTestHelpers.WaitUntilAsync(() => handler.Requests.Count == 1);
 
         // Act
-        time.Advance(TimeSpan.FromSeconds(30));
-        var isCompletedAfter30Seconds = task.IsCompleted;
-        time.Advance(TimeSpan.FromSeconds(60));
+        time.Advance(TimeSpan.FromSeconds(90));
 
         // Assert
-        Assert.False(isCompletedAfter30Seconds);
         var exception = await Assert.ThrowsAsync<TimeoutException>(() => task);
         Assert.Equal("The Bluelink request timed out after 90 seconds.", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenStatusRequestIsAnsweredAfter89Seconds_ThenItSucceeds()
+    {
+        // Arrange
+        var time = new FakeTimeProvider(Now);
+        var heldResponse = TestAccount.CreateHeldResponse();
+        var handler = new FakeHttpMessageHandler().RespondAfter(BluelinkResponses.LegacyStatusRequestPath(LegacyRequest.VehicleId), heldResponse.Task);
+        var (client, _, _) = Create(handler, time: time);
+        var task = client.RequestStatusAsync(LegacyRequest, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Requests.Count == 1);
+        time.Advance(TimeSpan.FromSeconds(89));
+
+        // Act
+        heldResponse.SetResult(TestAccount.CreateResponse(HttpStatusCode.OK, BluelinkResponses.Success()));
+
+        // Assert
+        await task;
     }
 
     [Fact]

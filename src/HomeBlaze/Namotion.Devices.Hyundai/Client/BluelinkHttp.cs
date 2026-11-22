@@ -5,8 +5,8 @@ namespace Namotion.Devices.Hyundai.Client;
 internal static class BluelinkHttp
 {
     /// <summary>
-    /// Creates the client for all Bluelink hosts. Its timeout of 2 minutes is the upper bound of every call, and the timeout
-    /// of the authentication calls; <see cref="BluelinkVehicleApiClient"/> applies shorter ones. Redirects are not followed, because the sign in reads the code from a
+    /// Creates the client for all Bluelink hosts. Its timeout of 2 minutes is the upper bound of every call;
+    /// <see cref="SendWithTimeoutAsync"/> applies shorter ones. Redirects are not followed, because the sign in reads the code from a
     /// 302, and cookies are handled per login (<see cref="BluelinkAuthClient"/>), so that two logins never share them.
     /// </summary>
     public static HttpClient CreateClient() => new(new SocketsHttpHandler

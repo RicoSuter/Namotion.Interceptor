@@ -266,8 +266,7 @@ public partial class BluelinkAccount
                 break;
 
             default:
-                // Caller cancellation never gets here, so a canceled task is an HTTP timeout.
-                _logger.Log(exception is BluelinkApiException or HttpRequestException or TaskCanceledException or TimeoutException ? LogLevel.Warning : LogLevel.Error,
+                _logger.Log(exception is BluelinkApiException or HttpRequestException or TimeoutException ? LogLevel.Warning : LogLevel.Error,
                     exception, "The Bluelink account failed.");
                 Status = ServiceStatus.Error;
                 StatusMessage = exception.Message;

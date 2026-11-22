@@ -66,7 +66,7 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
     [State(Position = 6)] public partial DateTimeOffset? LastUpdated { get; internal set; }
 
     /// <summary>True while a Refresh or command of this vehicle runs.</summary>
-    [State(IsDiscrete = true, Position = 7)] public partial bool IsBusy { get; internal set; }
+    [State(IsDiscrete = true, Position = 7)] public partial bool IsBusy { get; private set; }
 
     [State(Position = 400)] public partial BluelinkChargeState Charge { get; internal set; }
     [State(Position = 401)] public partial BluelinkClimateState Climate { get; internal set; }
@@ -124,7 +124,16 @@ public partial class BluelinkVehicle : IElectricVehicle, IDeviceInfo, ILastUpdat
             return false;
         }
 
-        IsBusy = true;
+        try
+        {
+            IsBusy = true;
+        }
+        catch
+        {
+            Volatile.Write(ref _operationRunning, 0);
+            throw;
+        }
+
         return true;
     }
 

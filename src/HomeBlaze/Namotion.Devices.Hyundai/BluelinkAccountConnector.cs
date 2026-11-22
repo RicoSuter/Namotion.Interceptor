@@ -45,7 +45,8 @@ public static class BluelinkAccountConnector
     /// <exception cref="BluelinkPinRejectedException">Hyundai rejected the PIN.</exception>
     /// <exception cref="BluelinkApiException">Hyundai failed otherwise.</exception>
     /// <exception cref="HttpRequestException">The network failed.</exception>
-    /// <exception cref="OperationCanceledException">The call was canceled, or an HTTP request timed out.</exception>
+    /// <exception cref="TimeoutException">A Bluelink request timed out.</exception>
+    /// <exception cref="OperationCanceledException">The call was canceled.</exception>
     public static async Task<BluelinkConnection> ConnectAsync(string email, string password, string pin, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
         using var httpClient = BluelinkHttp.CreateClient();

@@ -216,6 +216,62 @@ public class BluelinkAccountCommandStateTests
     }
 
     [Fact]
+    public async Task WhenTheFirstOperationIsStillWaitingForAPoll_ThenASecondOperationOfTheVehicleIsRejected()
+    {
+        // Arrange
+        var (account, handler, _) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        var heldStatus = TestAccount.CreateHeldResponse();
+        handler.Reset(BluelinkResponses.StatusPath("VEHICLE-1"))
+            .RespondAfter(BluelinkResponses.StatusPath("VEHICLE-1"), heldStatus.Task)
+            .Respond(BluelinkResponses.StatusPath("VEHICLE-1"), HttpStatusCode.OK, FixtureLoader.Load("carstatus-legacy-ev.json"))
+            .Respond(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Success());
+        var poll = account.PollOnceAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Count(BluelinkResponses.StatusPath("VEHICLE-1")) == 2);
+        var kona = account.Vehicles[Kona];
+        var refresh = kona.RefreshAsync(CancellationToken.None);
+
+        // Act
+        var command = kona.Charge.StartChargingAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(refresh.IsCompleted);
+        Assert.True(kona.IsBusy);
+        Assert.True(command.IsFaulted);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => command);
+        Assert.Equal(BusyMessage, exception.Message);
+
+        heldStatus.SetResult(TestAccount.CreateResponse(HttpStatusCode.OK, FixtureLoader.Load("carstatus-legacy-ev.json")));
+        await poll;
+        await refresh;
+        Assert.False(kona.IsBusy);
+        Assert.Equal(1, handler.Count(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1")));
+        Assert.Equal(0, handler.Count(BluelinkResponses.LegacyChargePath("VEHICLE-1")));
+    }
+
+    [Fact]
+    public async Task WhenRefreshTimesOut_ThenTheAccountStatusIsUnchangedAndTheVehicleIsNoLongerBusy()
+    {
+        // Arrange
+        var (account, handler, time) = TestAccount.Create();
+        await account.PollOnceAsync(CancellationToken.None);
+        handler.RespondNever(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1"));
+        var kona = account.Vehicles[Kona];
+        var refresh = kona.RefreshAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Count(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1")) == 1);
+
+        // Act
+        time.Advance(TimeSpan.FromSeconds(90));
+
+        // Assert
+        await Assert.ThrowsAsync<TimeoutException>(() => refresh);
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.Null(account.StatusMessage);
+        Assert.False(kona.IsBusy);
+        Assert.True(kona.Refresh_IsEnabled);
+    }
+
+    [Fact]
     public async Task WhenCommandFails_ThenTheVehicleIsNoLongerBusy()
     {
         // Arrange

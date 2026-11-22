@@ -178,7 +178,7 @@ The title is the nickname, else "Hyundai: " and the last six characters of the V
 
 A command fails before any call when the account has no credentials, is not connected, is paused after Hyundai's request limit or has spent its budget, when a `Ccs2` vehicle needs a PIN that is not stored, and when the temperature, a charge limit or `ClimateDuration` is invalid. A command waits for its result: the account checks the notification records of the vehicle every 10 seconds for at most 90 seconds, then reads the stored status and parking location once. A rejected command, a vehicle that does not respond and a result that does not arrive in time fail the operation with the reason. Hyundai rejecting the PIN fails the command without a retry, because five wrong PINs lock PIN entry for a while. Values change only from what the vehicle reports, never from what a command asked for. Canceling a command does not change the status of the account. The operations are disabled while the account is not connected or has spent its budget, and the commands that need the PIN while a `Ccs2` vehicle has none; `Refresh` also while the 12 V battery is below the minimum or unknown.
 
-While one operation of a vehicle runs, `IsBusy` is `true` and the other operations of that vehicle are disabled. A call that arrives anyway fails at once with "Another operation of this vehicle is running.", before any call. An operation of another vehicle of the same account waits until the running one and any poll in progress have finished.
+While one operation of a vehicle runs, `IsBusy` is `true` and all operations of that vehicle are disabled. A call that arrives anyway fails at once with "Another operation of this vehicle is running.", before any call. An operation of another vehicle of the same account waits until the running one and any poll in progress have finished.
 
 A HomeBlaze automation can call `Refresh` on a schedule when fresher values are needed; the 12 V guard and the call budget apply.
 
@@ -235,6 +235,6 @@ The integration uses region 1 ("Europe") of the community library hyundai_kia_co
 | `POST /api/v1/spa/vehicles/{id}/charge/target` | `prd.eu-ccapi.hyundai.com:8080` | Charge limits |
 | `GET /api/v1/spa/notifications/{id}/records` | `prd.eu-ccapi.hyundai.com:8080` | Results of commands |
 
-A vehicle API call times out after 30 seconds; the status request of `Refresh` waits up to 90 seconds for the vehicle, for both protocols. The calls of the sign in and the token refresh time out after 2 minutes. A timeout fails the poll of that vehicle or the `Refresh` or command that made the call.
+Every call times out after 30 seconds; the status request of `Refresh` after 90 seconds. A timeout of the status or location read fails the poll of that vehicle; any other timeout fails the poll, or the `Refresh` or command that made the call.
 
 Every vehicle API call carries the `Stamp` header of the app. The access token lives in memory and is refreshed 6 minutes before it expires, and after a call answered with an expired token; each refresh replaces the token set, which is stored before the new access token is used. The control token of the PIN is kept in memory until shortly before it expires.
