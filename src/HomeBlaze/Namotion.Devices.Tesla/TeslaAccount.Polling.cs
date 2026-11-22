@@ -362,9 +362,24 @@ public partial class TeslaAccount
             SetReauthenticationRequired(exception);
             throw;
         }
+        catch (Exception exception) when (LogWakeUpFailure(exception, vehicle))
+        {
+            // Not reached: the filter only logs and lets the exception reach the caller.
+            throw;
+        }
         finally
         {
             _pollLock.Release();
         }
+    }
+
+    private bool LogWakeUpFailure(Exception exception, TeslaVehicle vehicle)
+    {
+        if (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(exception, "Waking Tesla vehicle {Vin} failed.", vehicle.Vin);
+        }
+
+        return false;
     }
 }
