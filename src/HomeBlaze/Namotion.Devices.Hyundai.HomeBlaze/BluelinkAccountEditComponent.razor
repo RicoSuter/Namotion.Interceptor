@@ -9,9 +9,9 @@
 
     <MudText Typo="Typo.subtitle2" Class="mt-4">Polling</MudText>
     <MudTextField @bind-Value="_statusPollingInterval" @bind-Value:after="OnFieldChanged" Label="Status interval (hh:mm:ss, at least 00:15:00)"
-                  Immediate="true" Validation="@(new Func<string, string?>(ValidateInterval))" />
-    <MudTextField @bind-Value="_retryInterval" @bind-Value:after="OnFieldChanged" Label="Retry interval after a failure (hh:mm:ss)"
-                  Immediate="true" Validation="@(new Func<string, string?>(ValidateInterval))" />
+                  Immediate="true" Validation="@(new Func<string, string?>(ValidateStatusPollingInterval))" />
+    <MudTextField @bind-Value="_retryInterval" @bind-Value:after="OnFieldChanged" Label="Retry interval after a failure (hh:mm:ss, at least 00:01:00)"
+                  Immediate="true" Validation="@(new Func<string, string?>(ValidateRetryInterval))" />
     <MudNumericField T="int" @bind-Value="_dailyRequestLimit" @bind-Value:after="OnFieldChanged" Label="Daily request limit"
                      Min="20" Max="200" HelperText="Hyundai blocks an account for up to a day above about 200 requests" />
 
@@ -30,6 +30,9 @@
 </MudForm>
 
 @code {
+    private static readonly TimeSpan MinimumStatusPollingInterval = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan MinimumRetryInterval = TimeSpan.FromMinutes(1);
+
     private string _name = string.Empty;
     private string _statusPollingInterval = string.Empty;
     private string _retryInterval = string.Empty;
@@ -52,8 +55,8 @@
     private bool IsReauthenticationRequired => Account?.IsReauthenticationRequired == true;
 
     public bool IsValid =>
-        TryParseInterval(_statusPollingInterval, out _) &&
-        TryParseInterval(_retryInterval, out _) &&
+        TryParseInterval(_statusPollingInterval, MinimumStatusPollingInterval, out _) &&
+        TryParseInterval(_retryInterval, MinimumRetryInterval, out _) &&
         _climateDurationMinutes is >= 1 and <= 30 &&
         _dailyRequestLimit is >= 20 and <= 200 &&
         _minimumAuxiliaryBatteryPercent is >= 0 and <= 100;
@@ -73,7 +76,7 @@
             _retryInterval = FormatInterval(Account.RetryInterval);
             _climateDurationMinutes = (int)Account.ClimateDuration.TotalMinutes;
             _dailyRequestLimit = Account.DailyRequestLimit;
-            _minimumAuxiliaryBatteryPercent = (int)(Account.MinimumAuxiliaryBatteryLevel * 100m);
+            _minimumAuxiliaryBatteryPercent = (int)Math.Round(Account.MinimumAuxiliaryBatteryLevel * 100m, MidpointRounding.AwayFromZero);
         }
 
         _original = Snapshot();
@@ -81,11 +84,14 @@
 
     private static string FormatInterval(TimeSpan interval) => interval.ToString("c", CultureInfo.InvariantCulture);
 
-    private static bool TryParseInterval(string text, out TimeSpan interval) =>
-        TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out interval) && interval > TimeSpan.Zero;
+    private static bool TryParseInterval(string text, TimeSpan minimum, out TimeSpan interval) =>
+        TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out interval) && interval >= minimum;
 
-    private static string? ValidateInterval(string text) =>
-        TryParseInterval(text, out _) ? null : "Enter a positive duration such as 00:30:00";
+    private static string? ValidateStatusPollingInterval(string text) =>
+        TryParseInterval(text, MinimumStatusPollingInterval, out _) ? null : "Enter at least 00:15:00";
+
+    private static string? ValidateRetryInterval(string text) =>
+        TryParseInterval(text, MinimumRetryInterval, out _) ? null : "Enter at least 00:01:00";
 
     private string Snapshot() => string.Join("|",
         _name, _statusPollingInterval, _retryInterval,
@@ -117,10 +123,10 @@
             return Task.CompletedTask;
         }
 
-        TryParseInterval(_statusPollingInterval, out var statusPollingInterval);
-        TryParseInterval(_retryInterval, out var retryInterval);
+        TryParseInterval(_statusPollingInterval, MinimumStatusPollingInterval, out var statusPollingInterval);
+        TryParseInterval(_retryInterval, MinimumRetryInterval, out var retryInterval);
 
-        Account.Name = _name;
+        Account.Name = _name.Trim();
         Account.StatusPollingInterval = statusPollingInterval;
         Account.RetryInterval = retryInterval;
         Account.ClimateDuration = TimeSpan.FromMinutes(_climateDurationMinutes);

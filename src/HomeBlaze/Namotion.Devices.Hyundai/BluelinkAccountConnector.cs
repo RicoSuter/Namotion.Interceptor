@@ -82,6 +82,8 @@ public static class BluelinkAccountConnector
         }
 
         return new BluelinkConnection(email, password, pin, cciTokens.Tokens.Serialize(), deviceId,
-            vehicles.Select(vehicle => new BluelinkVehicleSummary(vehicle.Vin, vehicle.Nickname, vehicle.ModelName, vehicle.Type, vehicle.Protocol)).ToArray());
+            vehicles.Select(vehicle => new BluelinkVehicleSummary(vehicle.Vin, NullWhenBlank(vehicle.Nickname), NullWhenBlank(vehicle.ModelName), vehicle.Type, vehicle.Protocol)).ToArray());
     }
+
+    private static string? NullWhenBlank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text;
 }

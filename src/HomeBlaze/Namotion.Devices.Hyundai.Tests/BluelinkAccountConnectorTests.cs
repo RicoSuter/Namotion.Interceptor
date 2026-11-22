@@ -44,6 +44,23 @@ public class BluelinkAccountConnectorTests
     }
 
     [Fact]
+    public async Task WhenNicknameAndModelAreBlank_ThenTheVehicleSummaryHasNone()
+    {
+        // Arrange
+        var handler = CreateHandler();
+        handler.Reset(BluelinkResponses.VehiclesPath).Respond(BluelinkResponses.VehiclesPath, HttpStatusCode.OK, BluelinkResponses.Success(
+            """{"vehicles":[{"vin":"TESTVIN0000000001","vehicleId":"VEHICLE-1","vehicleName":"  ","type":"EV","nickname":" ","protocolType":0,"ccuCCS2ProtocolSupport":0}]}"""));
+
+        // Act
+        var connection = await ConnectAsync(handler);
+
+        // Assert
+        var vehicle = Assert.Single(connection.Vehicles);
+        Assert.Null(vehicle.Nickname);
+        Assert.Null(vehicle.Model);
+    }
+
+    [Fact]
     public async Task WhenPinIsGivenAndACcs2VehicleExists_ThenThePinIsChecked()
     {
         // Arrange
