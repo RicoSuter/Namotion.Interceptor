@@ -236,7 +236,7 @@ public partial class Motor
 - Must be expression-bodied (`=>`) or have only a getter
 - Cannot be `partial` (they're computed, not stored)
 - Can combine with `[State]` to display in UI
-- Computes a value; it never forwards a value of another subject or renames one, see [Modeling Subjects](#modeling-subjects)
+- Computes a value; it never forwards a value of another subject or renames a live value, see [Modeling Subjects](#modeling-subjects)
 - Automatically recalculates when `TargetSpeed` or `CurrentSpeed` changes
 - Reads another subject through intercepted properties or through a field that holds its owner (see [Shared Child Subjects](#shared-child-subjects)). Through a field that holds any other subject, it stops following that subject once the subject is detached and attached again while this one stays attached
 
@@ -290,7 +290,7 @@ A subject may be held by several collections, for example a light in a bridge's 
 
 These rules decide where a value lives and how other code reaches it.
 
-**One value, one property, one path.** Paths are permanent identifiers: history records values under them, and automations, dashboards and configuration files refer to them, so a value that appears at two paths is recorded twice and splits its consumers. `[Derived]` is for computed values, such as a flag from a state or a power from voltage and current. It never forwards the value of another subject or gives a value of the same subject a second name.
+**One live value, one property, one path.** Paths are permanent identifiers: history records values under them, and automations, dashboards and configuration files refer to them, so a live value that appears at two paths is recorded twice and splits its consumers. `[Derived]` is for computed values, such as a flag from a state or a power from voltage and current. It never forwards the value of another subject or gives a live value of the same subject a second name. A static or descriptive value (identity, model, version) may also be exposed under the name a generic interface expects, for example a vehicle's VIN as `SerialNumber`, because it never changes and so has no history to split.
 
 **Group a large device into child subjects, keep a small device flat.** Cohesive groups of a large device may be child subjects, for example the charge, the climate and the body of a vehicle, each one a typed partial property of the device. A small device stays flat and groups its properties with [`[Category]`](#categories). Repeated instances of one type, such as the phases of a meter or the tires of a vehicle, and separate physical parts are child subjects in any case (see [Child Subject Collections](#child-subject-collections)).
 
