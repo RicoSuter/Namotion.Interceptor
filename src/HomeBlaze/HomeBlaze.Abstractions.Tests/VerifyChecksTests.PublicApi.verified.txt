@@ -552,7 +552,8 @@ namespace HomeBlaze.Abstractions.Discovery
     }
     public sealed class SsdpResponse : System.IEquatable<HomeBlaze.Abstractions.Discovery.SsdpResponse>
     {
-        public SsdpResponse(System.Uri Location, string? UniqueServiceName) { }
+        public SsdpResponse(System.Uri Location, string? UniqueServiceName, System.Collections.Generic.IReadOnlyDictionary<string, string> Headers) { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, string> Headers { get; init; }
         public System.Uri Location { get; init; }
         public string? UniqueServiceName { get; init; }
     }

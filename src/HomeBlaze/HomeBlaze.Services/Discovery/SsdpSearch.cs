@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Net.Sockets;
 using HomeBlaze.Abstractions.Discovery;
 using Microsoft.Extensions.Logging;
@@ -14,6 +15,8 @@ internal sealed class SsdpSearch : ISsdpSearch
 
     // Bounds what a hostile or malfunctioning host can make one search return.
     private const int MaximumResponses = 64;
+    private const int MaximumHeaders = 32;
+    private const int MaximumHeaderLength = 256;
 
     private readonly ILogger<SsdpSearch> _logger;
 
@@ -46,7 +49,7 @@ internal sealed class SsdpSearch : ISsdpSearch
             // Other devices can answer a search with any notification type.
             if (device.NotificationType == searchTarget && device.DescriptionLocation is { IsAbsoluteUri: true } location)
             {
-                responses.Add(new SsdpResponse(location, device.Usn));
+                responses.Add(new SsdpResponse(location, device.Usn, ToHeaders(device.ResponseHeaders)));
                 if (responses.Count == MaximumResponses)
                 {
                     break;
@@ -55,5 +58,32 @@ internal sealed class SsdpSearch : ISsdpSearch
         }
 
         return responses;
+    }
+
+    internal static IReadOnlyDictionary<string, string> ToHeaders(HttpHeaders? headers)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (headers is null)
+        {
+            return result;
+        }
+
+        // NonValidated keeps the raw values, which the parsers of well-known HTTP headers would reject or rewrite.
+        foreach (var header in headers.NonValidated)
+        {
+            if (result.Count == MaximumHeaders)
+            {
+                break;
+            }
+
+            // A cut name would be another header, so an overlong name is dropped while an overlong value is cut.
+            if (header.Key.Length <= MaximumHeaderLength)
+            {
+                var value = header.Value.ToString();
+                result.TryAdd(header.Key, value.Length <= MaximumHeaderLength ? value : value[..MaximumHeaderLength]);
+            }
+        }
+
+        return result;
     }
 }
