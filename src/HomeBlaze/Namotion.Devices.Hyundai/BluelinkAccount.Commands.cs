@@ -179,7 +179,7 @@ public partial class BluelinkAccount
     }
 
     private void LogOperationFailure(BluelinkVehicle vehicle, string operation, Exception exception) =>
-        _logger.LogWarning(exception, "The Bluelink operation {Operation} of the vehicle {Vin} failed: {Message}", operation, vehicle.Vin, exception.Message);
+        _logger.LogWarning(exception, "The Bluelink operation {Operation} of the vehicle {Vin} failed.", operation, vehicle.Vin);
 
     private async Task WaitForCommandResultAsync(BluelinkTokenManager tokenManager, BluelinkVehicle vehicle, string messageId, CancellationToken cancellationToken)
     {

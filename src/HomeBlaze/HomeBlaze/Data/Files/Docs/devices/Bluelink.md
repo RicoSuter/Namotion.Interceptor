@@ -207,7 +207,7 @@ One vehicle with the default interval needs about 100 calls a day. `Refresh` nee
 ## Known Limitations
 
 - **The API is unofficial and the login breaks.** Hyundai changed the login four times between mid 2025 and late 2026 (a reCAPTCHA, a firewall against old client IDs, a signature of the app, and a removed refresh). It will break again. A message about a rejected app fingerprint (9035, 9036, 9037) or an abusing request means the login changed and the integration needs an update.
-- **Unexpected answers are logged, not shown.** A status without a field every vehicle sends, an unknown code or a text where a number belongs is logged as a warning starting with "Bluelink API changed?", once per problem until a restart; the affected value stays empty. Such a warning, like a rejected app fingerprint, usually means the API changed and the integration needs an update. A failed `Refresh` or command is logged as a warning too.
+- **Unexpected answers are logged, not shown.** A status without a field every vehicle sends, an unknown code or a core value in an unexpected format is logged as a warning starting with "Bluelink API changed?", once per problem and at most 100 distinct problems until a restart. Such a warning, like a rejected app fingerprint, usually means the API changed and the integration needs an update. A failed `Refresh` or command is logged as a warning too.
 - **Europe and Hyundai only, electric vehicles only.** Kia, Genesis, other regions and petrol, hybrid and plug-in hybrid vehicles are not supported.
 - **Values can be hours old.** Polling reads the status that Hyundai's servers stored, which the vehicle updates only at certain events.
 - **Refresh and commands cost 12 V battery.** They reach the vehicle. Frequent forced refreshes have drained the 12 V batteries of other users' vehicles, which is why polling never forces one. Hyundai rejects commands while the 12 V battery is low (about 40 %).
@@ -222,7 +222,7 @@ One vehicle with the default interval needs about 100 calls a day. `Refresh` nee
 
 ## API Reference
 
-The integration uses region 1 ("Europe") of the community library [hyundai_kia_connect_api](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api) as reference. Its status parsing rules, sign in flow and request payloads are derived from that library and used under its MIT license, which the library ships in `THIRD-PARTY-NOTICES.md`. Region 9 (GSPA) is not used, because it rejects vehicles without CCS2.
+The integration uses region 1 ("Europe") of the community library [hyundai_kia_connect_api](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api) as reference. Its status parsing rules, sign in flow and request payloads are derived from that library and used under its MIT license, whose notice this integration ships next to the app in `Licenses/Namotion.Devices.Hyundai/THIRD-PARTY-NOTICES.md`. Region 9 (GSPA) is not used, because it rejects vehicles without CCS2.
 
 | Endpoint | Host | Purpose |
 |----------|------|---------|

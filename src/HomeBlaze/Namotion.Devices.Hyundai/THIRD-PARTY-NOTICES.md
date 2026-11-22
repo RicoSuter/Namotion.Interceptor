@@ -1,6 +1,6 @@
 # Third-party notices
 
-Parts of this library are derived from the community library hyundai_kia_connect_api (https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api): the rules that parse the vehicle status (`Mapping/BluelinkStatusParser.cs`), the sign in, refresh and token exchange flow (`Client/BluelinkAuthClient.cs`, `Client/BluelinkLoginResponses.cs`, `Client/BluelinkFingerprint.cs`), and the vehicle API requests and command payloads (`Client/BluelinkVehicleApiClient.cs`). They are used under the following license.
+Parts of this library are derived from the community library hyundai_kia_connect_api (https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api): the rules that parse the vehicle status (`Mapping/BluelinkStatusParser.cs`), the sign in, refresh and token exchange flow (`Client/BluelinkAuthClient.cs`, `Client/BluelinkLoginResponses.cs`, `Client/BluelinkFingerprint.cs`), the app constants and the stamp algorithm (`Client/BluelinkAppConstants.cs`, `Client/BluelinkStamp.cs`), and the vehicle API requests and command payloads (`Client/BluelinkVehicleApiClient.cs`). They are used under the following license.
 
 ```
 MIT License

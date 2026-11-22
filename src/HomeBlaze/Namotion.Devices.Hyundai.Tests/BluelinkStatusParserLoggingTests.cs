@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Hyundai.Mapping;
 using Namotion.Devices.Hyundai.Tests.Testing;
 using Namotion.Interceptor.Testing;
@@ -76,7 +77,6 @@ public class BluelinkStatusParserLoggingTests
     }
 
     [Theory]
-    [InlineData("Green.ChargingInformation.Charging.State", 3)]
     [InlineData("Green.ChargingInformation.ConnectorFastening.State", 7)]
     [InlineData("Green.ChargingConnector.LockState", 6)]
     [InlineData("Cabin.Door.Row2.Right.Lock", 2)]
@@ -95,7 +95,6 @@ public class BluelinkStatusParserLoggingTests
     }
 
     [Theory]
-    [InlineData("Green.ChargingInformation.Charging.State", 2)]
     [InlineData("Green.ChargingConnector.LockState", 5)]
     [InlineData("Body.Windshield.Front.Defog.State", 2)]
     [InlineData("Chassis.Axle.Tire.PressureUnit", 3)]
@@ -116,13 +115,52 @@ public class BluelinkStatusParserLoggingTests
     [InlineData("Drivetrain.FuelSystem.DTE.Total", "--")]
     [InlineData("Cabin.Door.Row1.Driver.Lock", "locked")]
     [InlineData("Date", "yesterday")]
-    public void WhenCoreValueIsNotANumber_ThenItsRawTextIsLoggedOnce(string path, string value)
+    public void WhenCoreValueHasAnUnexpectedFormat_ThenItsRawTextIsLoggedOnce(string path, string value)
     {
         // Act
         var logger = ParseFixtureTwice(path, value);
 
         // Assert
-        Assert.Equal($"Bluelink API changed? {path} has the unknown value {value}.", Assert.Single(logger.Entries).Message);
+        Assert.Equal($"Bluelink API changed? {path} has the unexpected value {value}.", Assert.Single(logger.Entries).Message);
+    }
+
+    [Fact]
+    public void WhenTheFormatOfAFieldChangesWithEveryValue_ThenOnlyTheFirstValueIsLogged()
+    {
+        // Arrange
+        var logger = ParseFixtureTwice("Date", "2026-11-22T10:15:00Z");
+
+        // Act
+        var secondLogger = ParseFixtureTwice("Date", "2026-11-22T10:20:00Z");
+
+        // Assert
+        Assert.Equal("Bluelink API changed? Date has the unexpected value 2026-11-22T10:15:00Z.", Assert.Single(logger.Entries).Message);
+        Assert.Empty(secondLogger.Entries);
+    }
+
+    [Fact]
+    public void WhenUnexpectedValueIsLong_ThenItIsShortenedToFortyCharacters()
+    {
+        // Act
+        var logger = ParseFixtureTwice("Drivetrain.Odometer", new string('x', 50) + " km");
+
+        // Assert
+        Assert.Equal($"Bluelink API changed? Drivetrain.Odometer has the unexpected value {new string('x', 40)}.", Assert.Single(logger.Entries).Message);
+    }
+
+    [Fact]
+    public void WhenWarningsAreDisabled_ThenTheProblemIsLoggedByTheNextLogger()
+    {
+        // Arrange
+        using var document = JsonDocument.Parse("{}");
+        BluelinkStatusParser.Parse(document.RootElement, NullLogger.Instance);
+        var logger = new RecordingLogger();
+
+        // Act
+        BluelinkStatusParser.Parse(document.RootElement, logger);
+
+        // Assert
+        Assert.Contains("Bluelink API changed? The status has no Date.", logger.Warnings);
     }
 
     [Fact]
@@ -132,6 +170,6 @@ public class BluelinkStatusParserLoggingTests
         var logger = ParseFixtureTwice("Drivetrain.Odometer", new JsonObject { ["Value"] = 16773.9 });
 
         // Assert
-        Assert.Equal("Bluelink API changed? Drivetrain.Odometer has the unknown value Object.", Assert.Single(logger.Entries).Message);
+        Assert.Equal("Bluelink API changed? Drivetrain.Odometer has the unexpected value Object.", Assert.Single(logger.Entries).Message);
     }
 }

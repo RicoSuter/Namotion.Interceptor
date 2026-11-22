@@ -10,7 +10,7 @@ namespace Namotion.Devices.Hyundai.Mapping;
 /// <summary>
 /// Parses the CCS2 status tree (<c>resMsg.state.Vehicle</c> of <c>/ccs2/carstatus/latest</c>), which the server returns
 /// for both protocols. The rules follow <c>_update_vehicle_properties_ccs2</c> of hyundai_kia_connect_api. A missing core
-/// field, an unknown code or a core number that is not one is logged through <see cref="BluelinkApiChanges"/>.
+/// field, an unknown code or a core value in an unexpected format is logged through <see cref="BluelinkApiChanges"/>.
 /// </summary>
 internal static class BluelinkStatusParser
 {
@@ -19,7 +19,7 @@ internal static class BluelinkStatusParser
 
     public static BluelinkVehicleStatus Parse(JsonElement vehicle, ILogger logger)
     {
-        var chargingState = GetCode(vehicle, "Green.ChargingInformation.Charging.State", 2, logger);
+        var chargingState = vehicle.GetInt32("Green.ChargingInformation.Charging.State");
         var fastening = GetCode(vehicle, "Green.ChargingInformation.ConnectorFastening.State", 1, logger);
         var remainingMinutes = vehicle.GetDecimal("Green.ChargingInformation.Charging.RemainTime");
         var isCharging = GetIsCharging(chargingState, fastening, remainingMinutes);
@@ -27,7 +27,7 @@ internal static class BluelinkStatusParser
         var time = ParseTime(vehicle.GetString("Date"));
         if (time is null)
         {
-            LogMissingOrNotNumeric(vehicle, "Date", isRequired: true, logger);
+            LogMissingOrUnexpected(vehicle, "Date", isRequired: true, logger);
         }
 
         return new BluelinkVehicleStatus
@@ -119,7 +119,7 @@ internal static class BluelinkStatusParser
         var value = vehicle.GetDecimal(path);
         if (value is null)
         {
-            LogMissingOrNotNumeric(vehicle, path, isRequired, logger);
+            LogMissingOrUnexpected(vehicle, path, isRequired, logger);
         }
 
         return value;
@@ -133,24 +133,22 @@ internal static class BluelinkStatusParser
         {
             if (value < 0 || value > maximum)
             {
-                BluelinkApiChanges.LogUnknownValue(logger, path, value.ToString(CultureInfo.InvariantCulture));
+                BluelinkApiChanges.LogUnknownCode(logger, path, value);
             }
         }
         else if (isRequired)
         {
-            LogMissingOrNotNumeric(vehicle, path, isRequired: true, logger);
+            LogMissingOrUnexpected(vehicle, path, isRequired: true, logger);
         }
 
         return code;
     }
 
-    private static void LogMissingOrNotNumeric(JsonElement vehicle, string path, bool isRequired, ILogger logger)
+    private static void LogMissingOrUnexpected(JsonElement vehicle, string path, bool isRequired, ILogger logger)
     {
         if (vehicle.Find(path) is { } element)
         {
-            // Only a leaf is logged as text, so that an object never puts a part of the response into the log.
-            BluelinkApiChanges.LogUnknownValue(logger, path,
-                element.ValueKind is JsonValueKind.String or JsonValueKind.Number ? element.ToString() : element.ValueKind.ToString());
+            BluelinkApiChanges.LogUnexpectedValue(logger, path, element);
         }
         else if (isRequired)
         {

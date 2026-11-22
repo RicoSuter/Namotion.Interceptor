@@ -1,3 +1,4 @@
+// Derived from hyundai_kia_connect_api (MIT License, Copyright (c) 2021, Fuat Akgun); see THIRD-PARTY-NOTICES.md.
 namespace Namotion.Devices.Hyundai.Client;
 
 /// <summary>

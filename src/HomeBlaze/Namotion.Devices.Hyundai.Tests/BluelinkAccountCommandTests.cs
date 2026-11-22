@@ -86,11 +86,83 @@ public class BluelinkAccountCommandTests
         var warningCount = logger.Warnings.Count;
 
         // Act
-        var exception = await Assert.ThrowsAsync<BluelinkCommandException>(() =>
+        await Assert.ThrowsAsync<BluelinkCommandException>(() =>
             TestAccount.AdvanceUntilCompletedAsync(time, account.Vehicles[Kona].Climate.StartClimateAsync(21m, CancellationToken.None)));
 
         // Assert
-        Assert.Equal($"The Bluelink operation StartClimate of the vehicle {Kona} failed: {exception.Message}", Assert.Single(logger.Warnings.Skip(warningCount)));
+        Assert.Equal($"The Bluelink operation StartClimate of the vehicle {Kona} failed.", Assert.Single(logger.Warnings.Skip(warningCount)));
+    }
+
+    [Fact]
+    public async Task WhenRefreshFails_ThenOneWarningIsLogged()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var (account, handler, time) = await CreatePolledAsync(logger: logger);
+        handler.Respond(BluelinkResponses.LegacyStatusRequestPath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Failure("5031"));
+        var warningCount = logger.Warnings.Count;
+
+        // Act
+        await Assert.ThrowsAsync<BluelinkApiException>(() => TestAccount.AdvanceUntilCompletedAsync(time, account.Vehicles[Kona].RefreshAsync(CancellationToken.None)));
+
+        // Assert
+        Assert.Equal($"The Bluelink operation Refresh of the vehicle {Kona} failed.", Assert.Single(logger.Warnings.Skip(warningCount)));
+    }
+
+    [Fact]
+    public async Task WhenCallerCancelsTheCommand_ThenNothingIsLogged()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var (account, handler, _) = await CreatePolledAsync(logger: logger);
+        handler.Respond(BluelinkResponses.LegacyChargePath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Command("MSG-7"));
+        using var cancellation = new CancellationTokenSource();
+        var command = account.Vehicles[Kona].Charge.StartChargingAsync(cancellation.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => handler.Count(BluelinkResponses.LegacyChargePath("VEHICLE-1")) == 1);
+        var warningCount = logger.Warnings.Count;
+
+        // Act
+        await cancellation.CancelAsync();
+
+        // Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => command);
+        Assert.Equal(warningCount, logger.Warnings.Count);
+    }
+
+    [Fact]
+    public async Task WhenAccountIsNotConnected_ThenTheRejectedCommandIsNotLogged()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var (account, _, _) = await CreatePolledAsync(logger: logger);
+        account.IsAuthenticated = false;
+        var warningCount = logger.Warnings.Count;
+
+        // Act
+        await Assert.ThrowsAsync<InvalidOperationException>(() => account.Vehicles[Kona].Charge.StartChargingAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Equal(warningCount, logger.Warnings.Count);
+    }
+
+    [Fact]
+    public async Task WhenCommandRequiresReauthentication_ThenOnlyTheAccountLogsIt()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var (account, handler, time) = await CreatePolledAsync(logger: logger);
+        handler.Respond(BluelinkResponses.LegacyChargePath("VEHICLE-1"), HttpStatusCode.OK, BluelinkResponses.Failure("7501"))
+            .Reset(BluelinkResponses.RefreshPath)
+            .Respond(BluelinkResponses.RefreshPath, HttpStatusCode.BadRequest, BluelinkResponses.CciError(4111));
+        var warningCount = logger.Warnings.Count;
+
+        // Act
+        await Assert.ThrowsAsync<BluelinkReauthenticationRequiredException>(() =>
+            TestAccount.AdvanceUntilCompletedAsync(time, account.Vehicles[Kona].Charge.StartChargingAsync(CancellationToken.None)));
+
+        // Assert
+        Assert.True(account.IsReauthenticationRequired);
+        Assert.StartsWith("Bluelink re-authentication is required", Assert.Single(logger.Warnings.Skip(warningCount)), StringComparison.Ordinal);
     }
 
     [Fact]
