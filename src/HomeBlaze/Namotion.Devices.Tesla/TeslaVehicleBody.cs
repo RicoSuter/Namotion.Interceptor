@@ -26,8 +26,8 @@ public partial class TeslaVehicleBody : IDoorLockState, ITitleProvider, IIconPro
     [State(IsDiscrete = true, Position = 1)] public partial DoorLockState? LockState { get; internal set; }
 
     [State(IsDiscrete = true, Position = 2)] public partial bool? IsDriverFrontDoorOpen { get; internal set; }
-    [State(IsDiscrete = true, Position = 3)] public partial bool? IsDriverRearDoorOpen { get; internal set; }
-    [State(IsDiscrete = true, Position = 4)] public partial bool? IsPassengerFrontDoorOpen { get; internal set; }
+    [State(IsDiscrete = true, Position = 3)] public partial bool? IsPassengerFrontDoorOpen { get; internal set; }
+    [State(IsDiscrete = true, Position = 4)] public partial bool? IsDriverRearDoorOpen { get; internal set; }
     [State(IsDiscrete = true, Position = 5)] public partial bool? IsPassengerRearDoorOpen { get; internal set; }
     [State(IsDiscrete = true, Position = 6)] public partial bool? IsFrunkOpen { get; internal set; }
     [State(IsDiscrete = true, Position = 7)] public partial bool? IsTrunkOpen { get; internal set; }

@@ -726,7 +726,7 @@ namespace Namotion.Devices.Tesla
         public bool? IsDriverFrontDoorOpen { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=8)]
         public bool? IsDriverFrontWindowOpen { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
         public bool? IsDriverRearDoorOpen { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=10)]
         public bool? IsDriverRearWindowOpen { get; }
@@ -736,7 +736,7 @@ namespace Namotion.Devices.Tesla
         public bool? IsInServiceMode { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=23)]
         public bool? IsInServiceModePlus { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=4)]
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=3)]
         public bool? IsPassengerFrontDoorOpen { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=9)]
         public bool? IsPassengerFrontWindowOpen { get; }
