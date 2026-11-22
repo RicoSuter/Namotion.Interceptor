@@ -61,6 +61,15 @@ public partial class TeslaAccount
         return tokenManager;
     }
 
+    /// <summary>Whether the configured refresh token differs from the one the token manager uses, or there is no manager yet.</summary>
+    private bool IsRefreshTokenReplaced()
+    {
+        lock (_refreshTokenLock)
+        {
+            return _tokenManager is null || RefreshToken != _tokenManagerRefreshToken;
+        }
+    }
+
     /// <summary>
     /// Stores the rotated refresh token in the configuration before the token manager hands out the new access token.
     /// A failed write throws, so that the token manager keeps the token pending and retries only the write with the next

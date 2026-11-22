@@ -331,6 +331,33 @@ public class TeslaAccountTests
     }
 
     [Fact]
+    public async Task WhenConfigurationChangesDuringARequestLimitPause_ThenThePauseIsKeptUnlessTheRefreshTokenIsReplaced()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler()
+            .Respond(TokenPath, HttpStatusCode.OK, TokenJson)
+            .Respond(ProductsPath, HttpStatusCode.TooManyRequests, """{"error":"too many requests"}""", ("Retry-After", "600"))
+            .Respond(ProductsPath, HttpStatusCode.OK, FixtureLoader.Load("products.json"));
+        var (account, _, time) = Create(handler);
+        await account.RunIterationAsync(CancellationToken.None);
+
+        // Act
+        time.Advance(TimeSpan.FromMinutes(1));
+        account.StatePollingInterval = TimeSpan.FromMinutes(2);
+        var delayAfterUnrelatedChange = await account.RunIterationAsync(CancellationToken.None);
+        var productRequestsAfterUnrelatedChange = CountRequests(handler, ProductsPath);
+        account.RefreshToken = "refresh-new";
+        await account.RunIterationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMinutes(9), delayAfterUnrelatedChange);
+        Assert.Equal(1, productRequestsAfterUnrelatedChange);
+        Assert.Equal(2, CountRequests(handler, ProductsPath));
+        Assert.Equal(ServiceStatus.Running, account.Status);
+        Assert.Equal(TimeSpan.FromMinutes(2), account.GetNextPollDelay());
+    }
+
+    [Fact]
     public async Task WhenAccountExceedsItsLimit_ThenPollingPausesForFifteenMinutes()
     {
         // Arrange

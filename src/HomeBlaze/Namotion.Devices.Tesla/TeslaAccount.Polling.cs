@@ -58,13 +58,26 @@ public partial class TeslaAccount
         StatusMessage = null;
     }
 
-    private async Task<TimeSpan> RunIterationAsync(CancellationToken stoppingToken)
+    /// <returns>The delay until the next iteration.</returns>
+    internal async Task<TimeSpan> RunIterationAsync(CancellationToken stoppingToken)
     {
         if (string.IsNullOrWhiteSpace(RefreshToken))
         {
             Status = ServiceStatus.Stopped;
             StatusMessage = MissingRefreshTokenMessage;
             return Timeout.InfiniteTimeSpan;
+        }
+
+        // A configuration change wakes the loop early; only a replaced refresh token ends the pause Tesla asked for.
+        var pause = _pausedUntil - _timeProvider.GetUtcNow();
+        if (pause > TimeSpan.Zero)
+        {
+            if (!IsRefreshTokenReplaced())
+            {
+                return pause;
+            }
+
+            _pausedUntil = DateTimeOffset.MinValue;
         }
 
         await PollOnceAsync(stoppingToken);
