@@ -58,4 +58,24 @@ public class BluelinkValuesTests
         // Act & Assert
         Assert.Equal("000001", BluelinkValues.VinSuffix("TESTVIN0000000001"));
     }
+
+    [Fact]
+    public void WhenDurationIsWholeMinutesInRange_ThenMinutesAreReturned()
+    {
+        // Act & Assert
+        Assert.Equal(10, BluelinkValues.ToClimateMinutes(TimeSpan.FromMinutes(10)));
+        Assert.Equal(1, BluelinkValues.ToClimateMinutes(TimeSpan.FromMinutes(1)));
+        Assert.Equal(30, BluelinkValues.ToClimateMinutes(TimeSpan.FromMinutes(30)));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(31 * 60)]
+    [InlineData(90)]
+    public void WhenDurationIsOutOfRangeOrFractional_ThenItThrows(int seconds)
+    {
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => BluelinkValues.ToClimateMinutes(TimeSpan.FromSeconds(seconds)));
+        Assert.Equal("duration", exception.ParamName);
+    }
 }

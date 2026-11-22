@@ -49,4 +49,18 @@ public class BluelinkRequestBudgetTests
         // Act & Assert
         Assert.Equal(TimeSpan.FromHours(2), budget.TimeUntilReset);
     }
+
+    [Theory]
+    [InlineData(2026, 10, 24, 22, 30, 24, 30)]
+    [InlineData(2026, 3, 28, 23, 30, 22, 30)]
+    public void WhenClockChangesBeforeMidnight_ThenTimeUntilResetCountsRealTime(int year, int month, int day, int hour, int minute, int expectedHours, int expectedMinutes)
+    {
+        // Arrange (00:30 local on the day of the change in Zurich)
+        var time = new FakeTimeProvider(new DateTimeOffset(year, month, day, hour, minute, 0, TimeSpan.Zero));
+        time.SetLocalTimeZone(TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich"));
+        var budget = new BluelinkRequestBudget(time, () => 10);
+
+        // Act & Assert
+        Assert.Equal(new TimeSpan(expectedHours, expectedMinutes, 0), budget.TimeUntilReset);
+    }
 }

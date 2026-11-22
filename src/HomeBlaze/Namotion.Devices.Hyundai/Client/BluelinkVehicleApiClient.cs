@@ -83,7 +83,9 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
     /// <summary>Reads the stored parking location. Never reaches the car.</summary>
     public async Task<GeoCoordinate?> GetParkLocationAsync(BluelinkVehicleRequest request, CancellationToken cancellationToken)
     {
-        var root = await SendAsync(HttpMethod.Get, $"{SpaV1}vehicles/{request.VehicleId}/location/park", request, null, null, cancellationToken);
+        // The reference implementation sends its default headers here, so the protocol header is 0 for every vehicle.
+        var identity = new CallIdentity(request.AccessToken, request.DeviceId, BluelinkProtocol.Legacy);
+        var root = await SendAsync(HttpMethod.Get, $"{SpaV1}vehicles/{request.VehicleId}/location/park", identity, null, null, cancellationToken);
         var location = root.Find("resMsg.gpsDetail") ?? root.Find("resMsg");
         return location is { } element && element.GetDecimal("coord.lat") is { } latitude && element.GetDecimal("coord.lon") is { } longitude
             ? new GeoCoordinate((double)latitude, (double)longitude)
@@ -99,6 +101,7 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
     /// <returns>The message ID of the command.</returns>
     public async Task<string> SetChargingAsync(BluelinkVehicleRequest request, bool start, string? controlToken, CancellationToken cancellationToken)
     {
+        RequireControlToken(request, controlToken);
         var action = start ? "start" : "stop";
         if (request.Protocol == BluelinkProtocol.Legacy)
         {
@@ -117,7 +120,8 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
     /// <returns>The message ID of the command.</returns>
     public async Task<string> StartClimateAsync(BluelinkVehicleRequest request, decimal temperature, bool defrost, TimeSpan duration, string? controlToken, CancellationToken cancellationToken)
     {
-        var minutes = (int)duration.TotalMinutes;
+        RequireControlToken(request, controlToken);
+        var minutes = BluelinkValues.ToClimateMinutes(duration);
         if (request.Protocol == BluelinkProtocol.Legacy)
         {
             var temperatureCode = BluelinkValues.ToTemperatureCode(temperature);
@@ -141,7 +145,7 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
         {
             writer.WriteString("command", "start");
             writer.WriteNumber("ignitionDuration", minutes);
-            writer.WriteNumber("strgWhlHeating", 0);
+            writer.WriteNull("strgWhlHeating");
             writer.WriteNumber("hvacTempType", 1);
             writer.WriteNumber("hvacTemp", temperature);
             writer.WriteNumber("sideRearMirrorHeating", 0);
@@ -162,6 +166,7 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
     /// <returns>The message ID of the command.</returns>
     public async Task<string> StopClimateAsync(BluelinkVehicleRequest request, string? controlToken, CancellationToken cancellationToken)
     {
+        RequireControlToken(request, controlToken);
         if (request.Protocol == BluelinkProtocol.Legacy)
         {
             // The payload of the official app for a stop; only the action is evaluated.
@@ -228,7 +233,8 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
     }
 
     /// <summary>Exchanges the PIN for a control token, which CCS2 charging and climate commands need.</summary>
-    /// <exception cref="BluelinkApiException">Hyundai rejected the PIN. Five wrong PINs lock PIN entry for a while.</exception>
+    /// <exception cref="BluelinkPinRejectedException">Hyundai rejected the PIN. Five wrong PINs lock PIN entry for a while.</exception>
+    /// <exception cref="BluelinkApiException">The exchange failed for another reason.</exception>
     public async Task<BluelinkCcsToken> GetControlTokenAsync(string accessToken, string deviceId, string pin, CancellationToken cancellationToken)
     {
         budget.Consume();
@@ -243,22 +249,7 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
 
         using var response = await httpClient.SendAsync(message, cancellationToken);
         var text = await response.Content.ReadAsStringAsync(cancellationToken);
-        try
-        {
-            using var document = JsonDocument.Parse(text);
-            var root = document.RootElement;
-            if (root.GetString("controlToken") is { Length: > 0 } controlToken)
-            {
-                var lifetime = TimeSpan.FromSeconds((double)(root.GetDecimal("expiresTime") ?? 600m));
-                return new BluelinkCcsToken(controlToken, timeProvider.GetUtcNow() + lifetime);
-            }
-
-            throw new BluelinkApiException(response.StatusCode, root.GetString("errCode") ?? root.GetString("resCode"), "Hyundai rejected the PIN.");
-        }
-        catch (JsonException)
-        {
-            throw new BluelinkApiException(response.StatusCode, null, "Hyundai rejected the PIN.");
-        }
+        return BluelinkVehicleApiResponses.ParseControlToken(response.StatusCode, text, timeProvider.GetUtcNow());
     }
 
     /// <summary>The optional access token, device and protocol of a call; the device registration sends none of them.</summary>
@@ -268,6 +259,14 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
         {
             builder.Append("DeviceId = ").Append(DeviceId).Append(", Protocol = ").Append(Protocol);
             return true;
+        }
+    }
+
+    private static void RequireControlToken(BluelinkVehicleRequest request, string? controlToken)
+    {
+        if (request.Protocol == BluelinkProtocol.Ccs2 && controlToken is null)
+        {
+            throw new ArgumentNullException(nameof(controlToken), "CCS2 commands need the control token of the PIN.");
         }
     }
 
@@ -315,36 +314,6 @@ internal sealed class BluelinkVehicleApiClient(HttpClient httpClient, TimeProvid
 
         using var response = await httpClient.SendAsync(message, cancellationToken);
         var text = await response.Content.ReadAsStringAsync(cancellationToken);
-        return ParseEnvelope(response.StatusCode, text);
-    }
-
-    /// <summary>Checks the <c>retCode</c>/<c>resCode</c> envelope of the vehicle API and returns its root.</summary>
-    internal static JsonElement ParseEnvelope(HttpStatusCode statusCode, string text)
-    {
-        JsonDocument document;
-        try
-        {
-            document = JsonDocument.Parse(text);
-        }
-        catch (JsonException)
-        {
-            throw new BluelinkApiException(statusCode, null, "The response is not JSON.");
-        }
-
-        using (document)
-        {
-            var root = document.RootElement;
-            if (root.GetString("error") is { } error)
-            {
-                throw new BluelinkApiException(statusCode, null, error);
-            }
-
-            if (root.GetString("retCode") == "F" || (int)statusCode is < 200 or > 299)
-            {
-                throw new BluelinkApiException(statusCode, root.GetString("resCode"), root.Find("resMsg") is { ValueKind: JsonValueKind.String } resMsg ? resMsg.GetString() : null);
-            }
-
-            return root.Clone();
-        }
+        return BluelinkVehicleApiResponses.ParseEnvelope(response.StatusCode, text);
     }
 }

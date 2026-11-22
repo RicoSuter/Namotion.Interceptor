@@ -41,6 +41,18 @@ internal static class BluelinkValues
         return (index.ToString("X", CultureInfo.InvariantCulture) + "H").PadLeft(3, '0');
     }
 
+    /// <summary>Returns the duration of a climate run as whole minutes; Bluelink accepts 1 to 30.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">The duration is not a whole number of minutes from 1 to 30.</exception>
+    public static int ToClimateMinutes(TimeSpan duration)
+    {
+        if (duration < TimeSpan.FromMinutes(1) || duration > TimeSpan.FromMinutes(30) || duration.Ticks % TimeSpan.TicksPerMinute != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(duration), duration, "Bluelink accepts climate durations of whole minutes from 1 to 30.");
+        }
+
+        return (int)duration.TotalMinutes;
+    }
+
     /// <summary>The last six characters of the VIN, as titles show them.</summary>
     public static string VinSuffix(string vin) => vin.Length <= 6 ? vin : vin[^6..];
 }

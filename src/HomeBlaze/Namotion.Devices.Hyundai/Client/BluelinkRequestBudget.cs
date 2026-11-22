@@ -25,7 +25,14 @@ internal sealed class BluelinkRequestBudget
     public event Action<int>? CountChanged;
 
     /// <summary>The calls left today.</summary>
-    public int Remaining => Math.Max(0, _getLimit() - Update());
+    public int Remaining
+    {
+        get
+        {
+            var limit = _getLimit();
+            return Math.Max(0, limit - Update());
+        }
+    }
 
     /// <summary>The time until the counter resets at local midnight.</summary>
     public TimeSpan TimeUntilReset
@@ -33,7 +40,17 @@ internal sealed class BluelinkRequestBudget
         get
         {
             var now = _timeProvider.GetLocalNow();
-            return now.Date.AddDays(1) - now.DateTime;
+            var nextMidnight = DateTime.SpecifyKind(now.Date.AddDays(1), DateTimeKind.Unspecified);
+            try
+            {
+                // The wall-clock difference is wrong on the day the clock changes.
+                return TimeZoneInfo.ConvertTimeToUtc(nextMidnight, _timeProvider.LocalTimeZone) - _timeProvider.GetUtcNow();
+            }
+            catch (ArgumentException)
+            {
+                // Midnight does not exist in the time zone (a change at midnight).
+                return nextMidnight - now.DateTime;
+            }
         }
     }
 
@@ -61,11 +78,12 @@ internal sealed class BluelinkRequestBudget
     /// <exception cref="BluelinkRequestLimitException">The limit is reached; the call is not counted and must not be sent.</exception>
     public void Consume()
     {
+        var limit = _getLimit();
         int count;
         lock (_lock)
         {
             ResetIfNewDay();
-            if (_count >= _getLimit())
+            if (_count >= limit)
             {
                 throw new BluelinkRequestLimitException();
             }

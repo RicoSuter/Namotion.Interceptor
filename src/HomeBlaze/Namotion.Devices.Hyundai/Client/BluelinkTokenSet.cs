@@ -72,7 +72,7 @@ internal sealed record BluelinkTokenSet(
 /// <summary>A token set with the lifetime of its CCI access token.</summary>
 internal sealed record BluelinkCciTokens(BluelinkTokenSet Tokens, TimeSpan ExpiresIn);
 
-/// <summary>The CCS access token of the vehicle API and when it expires. <see cref="object.ToString"/> leaves out the token.</summary>
+/// <summary>An access or control token of the vehicle API and when it expires. <see cref="object.ToString"/> leaves out the token.</summary>
 internal sealed record BluelinkCcsToken(string AccessToken, DateTimeOffset ExpiresAt)
 {
     private bool PrintMembers(StringBuilder builder)

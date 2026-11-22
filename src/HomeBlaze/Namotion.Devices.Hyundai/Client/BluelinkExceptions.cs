@@ -52,6 +52,10 @@ public class BluelinkApiException(HttpStatusCode statusCode, string? code, strin
         message.Length <= MaxServerMessageLength ? message : message[..MaxServerMessageLength];
 }
 
+/// <summary>Hyundai rejected the PIN. Five wrong PINs lock PIN entry for a while.</summary>
+public sealed class BluelinkPinRejectedException(HttpStatusCode statusCode, string? code)
+    : BluelinkApiException(statusCode, code, "Hyundai rejected the PIN.");
+
 /// <summary>Hyundai rejected the credentials, or asks to accept new terms; the user has to sign in again.</summary>
 public sealed class BluelinkReauthenticationRequiredException(string message) : Exception(message);
 
