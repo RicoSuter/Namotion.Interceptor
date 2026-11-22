@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Namotion.Devices.Tesla.Client.Dto;
 
 namespace Namotion.Devices.Tesla.Client;
@@ -30,18 +31,18 @@ internal sealed class TeslaOwnerApiClient
     /// <exception cref="TeslaApiException">Tesla answered with an error.</exception>
     public async Task<TeslaProductDto[]> GetVehicleProductsAsync(string accessToken, CancellationToken cancellationToken)
     {
-        var json = await GetAsync("products", accessToken, cancellationToken)
+        var response = await GetAsync("products", accessToken, TeslaJsonContext.Default.TeslaResponseTeslaProductDtoArray, cancellationToken)
             ?? throw new TeslaApiException(HttpStatusCode.RequestTimeout, "products unavailable");
-        var response = JsonSerializer.Deserialize(json, TeslaJsonContext.Default.TeslaResponseTeslaProductDtoArray);
-        return response?.Response?.Where(product => product.VehicleId is not null).ToArray() ?? [];
+        return response.Response?.Where(product => product.VehicleId is not null).ToArray() ?? [];
     }
 
     /// <summary>Reads all data of an awake vehicle, or null when it is asleep or offline. Never wakes a vehicle.</summary>
     /// <exception cref="TeslaApiException">Tesla answered with an error.</exception>
     public async Task<TeslaVehicleDataDto?> GetVehicleDataAsync(string accessToken, long vehicleId, CancellationToken cancellationToken)
     {
-        var json = await GetAsync($"vehicles/{vehicleId}/vehicle_data?endpoints={VehicleDataEndpoints}", accessToken, cancellationToken);
-        return json is null ? null : JsonSerializer.Deserialize(json, TeslaJsonContext.Default.TeslaResponseTeslaVehicleDataDto)?.Response;
+        var response = await GetAsync($"vehicles/{vehicleId}/vehicle_data?endpoints={VehicleDataEndpoints}", accessToken,
+            TeslaJsonContext.Default.TeslaResponseTeslaVehicleDataDto, cancellationToken);
+        return response?.Response;
     }
 
     /// <summary>Asks the vehicle to wake up. Returns immediately; the vehicle comes online within about a minute.</summary>
@@ -53,8 +54,8 @@ internal sealed class TeslaOwnerApiClient
         await EnsureSuccessAsync(response, cancellationToken);
     }
 
-    /// <returns>The JSON, or null when Tesla answers 408 (vehicle asleep or offline).</returns>
-    private async Task<string?> GetAsync(string path, string accessToken, CancellationToken cancellationToken)
+    /// <returns>The response, or null when Tesla answers 408 (vehicle asleep or offline).</returns>
+    private async Task<TeslaResponse<T>?> GetAsync<T>(string path, string accessToken, JsonTypeInfo<TeslaResponse<T>> typeInfo, CancellationToken cancellationToken)
     {
         using var request = CreateRequest(HttpMethod.Get, path, accessToken);
         using var response = await _httpClient.SendAsync(request, cancellationToken);
@@ -64,7 +65,8 @@ internal sealed class TeslaOwnerApiClient
         }
 
         await EnsureSuccessAsync(response, cancellationToken);
-        return await response.Content.ReadAsStringAsync(cancellationToken);
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        return await JsonSerializer.DeserializeAsync(stream, typeInfo, cancellationToken) ?? new TeslaResponse<T>();
     }
 
     private HttpRequestMessage CreateRequest(HttpMethod method, string path, string accessToken)
