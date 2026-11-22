@@ -102,7 +102,7 @@ public partial class TeslaVehicle :
     [Derived]
     public bool IsConnected => VehicleState is TeslaVehicleState.Online or TeslaVehicleState.Asleep;
 
-    /// <summary>The time of the newest data: the read time of the vehicle data, or the time of the cached snapshot.</summary>
+    /// <summary>The newest section timestamp of the vehicle data or the cached snapshot; the read time when the vehicle data has none.</summary>
     [State(Position = 8)] public partial DateTimeOffset? LastUpdated { get; internal set; }
 
     // Children

@@ -9,16 +9,25 @@ The Tesla integration reads all Tesla vehicles of an account through the unoffic
 
 ## Setup
 
-1. Create a refresh token of your Tesla account with a token tool, on any device: [tesla_auth](https://github.com/adriankumpf/tesla_auth/releases) (Windows, macOS, Linux) or the app Auth app for Tesla (iOS). Use a token of its own: Tesla replaces a refresh token with every refresh, so sharing one with TeslaMate or another tool makes the tools log each other out.
+1. Create a refresh token of your Tesla account with a token tool, on any device: [tesla_auth](https://github.com/adriankumpf/tesla_auth/releases) (Windows, macOS, Linux) or the app Auth app for Tesla (iOS). Use a token of its own: Tesla replaces a refresh token with every refresh, so sharing one with TeslaMate or another tool makes the tools log each other out. Without a token tool, use the [Sign in with Tesla](#sign-in-with-tesla) tab instead.
 2. In HomeBlaze, create a **Tesla account** (group **Vehicles**).
-3. Paste the refresh token and select **Connect**. HomeBlaze refreshes the token, which makes Tesla issue a new one, and lists the vehicles of the account with their VIN and state (online or asleep). The list shows no model, because Tesla's vehicle list does not return one.
-4. Select **Save**. The new token is the only valid one from now on and is stored with the account. Canceling the dialog after **Connect**, or closing it while it connects, discards the new token and invalidates the one you pasted, so create a new token with your token tool and start again.
+3. In the **Refresh token** tab, paste the refresh token and select **Connect**. HomeBlaze refreshes the token, which makes Tesla issue a new one, and shows the connected account with its email and its vehicles. Each vehicle shows its display name, or "Tesla" when it has none, the last six characters of its VIN and its state (online or asleep). The list shows no model, because Tesla's vehicle list does not return one.
+4. Create the account, or save it when you edit it. The new token is the only valid one from now on and is stored with the account. Canceling the dialog after **Connect**, or closing it while it connects, discards the new token and invalidates the one you pasted, so create a new token and start again.
 
 The account has to live in a storage file, such as `Devices/Tesla.json`, and not in the root configuration. HomeBlaze writes the rotated refresh token back through the storage file that holds the account; an account in the root configuration keeps rotated tokens in memory only, logs a warning, and needs a new token after every restart.
 
-### Advanced: sign in with Tesla
+### Sign in with Tesla
 
-When no token tool is at hand, open **Advanced: sign in with Tesla** in the setup. It shows a Tesla sign in address with PKCE. Open it in a browser and sign in. Tesla then redirects to an address that starts with `tesla://auth/callback`, which a browser cannot open. In a desktop browser, open the developer tools before you sign in, enable **Preserve log** in the network tab, and copy the address of the failed request from there. Paste it into the field below the sign in address and select **Connect with the pasted address**. The address holds a single-use code and is cleared after use; if the sign in fails, open the new sign in address and sign in again.
+When no token tool is at hand, use the **Sign in with Tesla** tab in a desktop browser:
+
+1. Copy the sign in address and open it in a new browser tab.
+2. Sign in. The page then stays on "Loading", because Tesla redirects to a `tesla://auth/callback` address that a browser cannot open.
+3. Open the developer tools (F12, or Cmd+Option+I on a Mac), switch to the **Network** tab and enable **Preserve log**.
+4. Reload the page. Tesla redirects again right away.
+5. Copy the address of the request that starts with `callback?code=` (right-click, **Copy**, **Copy URL**), or the `location` response header of the `authorize` request.
+6. Paste it into the field of the tab within a few minutes and select **Connect**. Keep the dialog open meanwhile.
+
+The address holds a single-use code. If connecting fails after the code was sent, the tab shows a new sign in address; sign in again with it.
 
 ### Re-authentication
 
@@ -28,7 +37,7 @@ Refresh tokens last about three months and rotate on every refresh, so a running
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `Name` | string | "" | Display name. Empty shows "Tesla: " with the email of the account. |
+| `Name` | string | "" | Display name. Empty shows "Tesla" before the sign in and "Tesla: " with the email of the account after it. |
 | `Provider` | enum | `OwnerApi` | Where the data comes from. Only `OwnerApi` exists in this version. |
 | `RefreshToken` | string | "" | Refresh token of the account (stored as a secret). Tesla rotates it with every refresh and HomeBlaze stores the new one. |
 | `StatePollingInterval` | TimeSpan | 1 minute | How often the vehicle list with state and cached data is read. |
@@ -96,7 +105,7 @@ All readings are `null` until the vehicle reported them. Percentages are fractio
 | `TeslaChargeState` | `IVehicleChargingState` (with `IChargingState`, `IBatteryState`), `ITitleProvider`, `IIconProvider` |
 | `TeslaClimateState` | `IVehicleClimateState`, `ITitleProvider`, `IIconProvider` |
 | `TeslaVehicleBody` | `IDoorLockState`, `ITitleProvider`, `IIconProvider` |
-| `TeslaMedia` | `IMediaTrackState`, `IVolumeState` |
+| `TeslaMedia` | `IMediaTrackState`, `IVolumeState`, `ITitleProvider`, `IIconProvider` |
 
 ### TeslaAccount
 
@@ -123,13 +132,13 @@ Every value has one path. The vehicle holds its identity, the odometer and the l
 | `IsConnected` | | `true` when online or asleep, `false` when offline: an asleep vehicle is still reachable through Tesla's servers |
 | `CommandSigning` | | Whether the vehicle requires signed commands (`Off`, `Allowed`, `Required`) |
 | `IsInService` | | Whether the vehicle is in service at Tesla |
-| `LastUpdated` | | Time of the newest data, from the data itself and not from the read time of the poll |
+| `LastUpdated` | | Time of the newest data: the newest section timestamp of the data, and the read time only when the vehicle data has no timestamp |
 | `TotalDrivenDistance` | km | Odometer |
 | `Location` | | Coordinate of the vehicle |
 | `Manufacturer`, `Model`, `ProductCode` | | `Tesla`, the model name from the specification (Model 3, Model Y, Model S, Model X, Cybertruck) and the trim badging. `Model` and `ProductCode` are `null` until the first read of the vehicle data, because the cached data does not carry the specification. |
 | `SoftwareVersion`, `AvailableSoftwareUpdate` | | Installed version and the version of an available update |
 
-The title is the name set in the vehicle, else the display name of the account, else the model and the last six characters of the VIN, such as "Model 3: 123456".
+The title is the name set in the vehicle, else the display name of the account, else the model and the last six characters of the VIN, such as "Model 3: 123456", or "Tesla: 123456" before the model is known.
 
 ### Charge
 
@@ -254,7 +263,7 @@ A failure of one vehicle does not stop the others. Tesla's request limit (429) p
 - **The location is state like any other.** It is readable by automations, pages, history and AI agents with access to the vehicle. Restrict access accordingly.
 - **One refresh token per application.** Tesla replaces the refresh token on every refresh. Using the same token in HomeBlaze and TeslaMate, or in two HomeBlaze instances, makes the tools log each other out.
 - **Connecting rotates the token.** Connecting validates the pasted refresh token by refreshing it, which makes Tesla issue a new token and invalidate the pasted one. Canceling the dialog after **Connect**, or closing it while it connects, discards the new token, so you have to create a new one with your token tool.
-- **The account has to live in a storage file.** Rotated tokens are written back through the storage file that holds the account. In the root configuration they stay in memory only and are lost with a restart. If saving a rotated token fails, HomeBlaze keeps it in memory and retries saving with the next poll.
+- **The account has to live in a storage file.** Rotated tokens are written back through the storage file that holds the account. In the root configuration they stay in memory only and are lost with a restart. If saving a rotated token fails, or the storage cannot save it at the moment, HomeBlaze keeps it in memory and retries saving with the next poll.
 - **The vehicle list shows no model.** The model appears on the vehicle once its vehicle data was read.
 
 ## API Reference
@@ -264,8 +273,8 @@ The integration uses two Tesla hosts. The Owner API is unofficial and not docume
 | Endpoint | Host | Purpose |
 |----------|------|---------|
 | `POST /oauth2/v3/token` (`grant_type=refresh_token`) | `auth.tesla.com` | Refreshes the access token and rotates the refresh token (client `ownerapi`, scope `openid email offline_access`) |
-| `POST /oauth2/v3/token` (`grant_type=authorization_code`) | `auth.tesla.com` | Exchanges the code of the advanced sign in (PKCE) |
-| `GET /oauth2/v3/authorize` | `auth.tesla.com` | Sign in address of the advanced sign in, redirects to `tesla://auth/callback` |
+| `POST /oauth2/v3/token` (`grant_type=authorization_code`) | `auth.tesla.com` | Exchanges the code of [Sign in with Tesla](#sign-in-with-tesla) (PKCE) |
+| `GET /oauth2/v3/authorize` | `auth.tesla.com` | Sign in address of Sign in with Tesla, redirects to `tesla://auth/callback` |
 | `GET /api/1/products` | `owner-api.teslamotors.com` | Vehicle list with state, `command_signing`, `in_service` and `cached_data`. Never wakes a vehicle. |
 | `GET /api/1/vehicles/{id}/vehicle_data` | `owner-api.teslamotors.com` | Full data of an online vehicle (`charge_state`, `climate_state`, `closures_state`, `drive_state`, `gui_settings`, `location_data`, `vehicle_config`, `vehicle_state`). 408 when the vehicle is asleep. |
 | `POST /api/1/vehicles/{id}/wake_up` | `owner-api.teslamotors.com` | Wakes the vehicle, only from the `Wake Up` operation |
