@@ -100,11 +100,7 @@ public sealed class FritzBoxDiscovery(ISsdpSearch ssdpSearch) : SubjectDiscovery
         }
 
         // The devices answer in any order, and the list should look the same in every scan.
-        repeaters.Sort(static (first, second) =>
-        {
-            var byName = StringComparer.OrdinalIgnoreCase.Compare(first.DisplayName, second.DisplayName);
-            return byName != 0 ? byName : StringComparer.Ordinal.Compare(first.Detail, second.Detail);
-        });
+        repeaters.Sort(DiscoveredItem.DisplayOrder);
 
         return [router with { IncludedItems = repeaters }];
     }

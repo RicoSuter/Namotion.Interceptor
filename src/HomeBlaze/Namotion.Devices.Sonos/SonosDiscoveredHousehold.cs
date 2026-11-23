@@ -102,11 +102,7 @@ public sealed record SonosDiscoveredHousehold : IDiscoveryResult<SonosSystem>
         }
 
         // The speakers are ordered by ID; Detail breaks ties between speakers of one room, such as a sub and its player.
-        Array.Sort(items, static (first, second) =>
-        {
-            var byName = StringComparer.OrdinalIgnoreCase.Compare(first.DisplayName, second.DisplayName);
-            return byName != 0 ? byName : StringComparer.Ordinal.Compare(first.Detail, second.Detail);
-        });
+        Array.Sort(items, DiscoveredItem.DisplayOrder);
 
         return items;
     }

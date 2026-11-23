@@ -599,6 +599,7 @@ namespace HomeBlaze.Abstractions.Discovery
         public DiscoveredItem(string DisplayName, string? Detail) { }
         public string? Detail { get; init; }
         public string DisplayName { get; init; }
+        public static System.Collections.Generic.IComparer<HomeBlaze.Abstractions.Discovery.DiscoveredItem> DisplayOrder { get; }
     }
     public interface IDiscoveryResult
     {
@@ -1055,6 +1056,10 @@ namespace HomeBlaze.Abstractions.Networking
     public interface INetworkHost
     {
         string? HostAddress { get; }
+    }
+    public static class MacAddressComparison
+    {
+        public static bool AreEqual(string? macAddress, string? otherMacAddress) { }
     }
 }
 namespace HomeBlaze.Abstractions.Security

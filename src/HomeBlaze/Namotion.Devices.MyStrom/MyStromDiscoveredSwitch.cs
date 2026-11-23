@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions.Discovery;
+using HomeBlaze.Abstractions.Networking;
 
 namespace Namotion.Devices.MyStrom;
 
@@ -24,47 +25,6 @@ public sealed record MyStromDiscoveredSwitch(string MacAddress, string HostAddre
 
     /// <inheritdoc />
     public bool Matches(MyStromSwitch subject) =>
-        IsSameMacAddress(subject.MacAddress, MacAddress) ||
+        MacAddressComparison.AreEqual(subject.MacAddress, MacAddress) ||
         string.Equals(subject.HostAddress?.Trim(), HostAddress, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Compares two MAC addresses, ignoring case and the separators <c>:</c> and <c>-</c>.
-    /// </summary>
-    private static bool IsSameMacAddress(string? macAddress, string otherMacAddress)
-    {
-        if (string.IsNullOrWhiteSpace(macAddress))
-        {
-            return false;
-        }
-
-        var index = 0;
-        var otherIndex = 0;
-        while (true)
-        {
-            while (index < macAddress.Length && IsSeparator(macAddress[index]))
-            {
-                index++;
-            }
-
-            while (otherIndex < otherMacAddress.Length && IsSeparator(otherMacAddress[otherIndex]))
-            {
-                otherIndex++;
-            }
-
-            if (index == macAddress.Length || otherIndex == otherMacAddress.Length)
-            {
-                return index == macAddress.Length && otherIndex == otherMacAddress.Length;
-            }
-
-            if (char.ToUpperInvariant(macAddress[index]) != char.ToUpperInvariant(otherMacAddress[otherIndex]))
-            {
-                return false;
-            }
-
-            index++;
-            otherIndex++;
-        }
-    }
-
-    private static bool IsSeparator(char character) => character is ':' or '-';
 }
