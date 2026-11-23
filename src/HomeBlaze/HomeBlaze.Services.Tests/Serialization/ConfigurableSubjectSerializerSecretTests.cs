@@ -75,29 +75,83 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         Assert.Equal("correct horse", newValue);
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    public void WhenTheSecretIsNullOrEmpty_ThenItIsWrittenAsItIsWithoutAnEntry(string? password)
+    [Fact]
+    public void WhenTheSecretIsNull_ThenItIsLeftOutWithoutAnEntry()
     {
         // Arrange
         var (serializer, _) = CreateSerializer();
         var device = Deserialize(serializer, DeviceJson(password: null));
-        device.Password = password;
 
         // Act
         var json = serializer.Serialize(device);
 
         // Assert
-        if (password is null)
-        {
-            Assert.False(HasProperty(json, "password"));
-        }
-        else
-        {
-            Assert.Equal(password, ReadString(json, "password"));
-        }
+        Assert.False(HasProperty(json, "password"));
+        Assert.False(File.Exists(StorePath));
+    }
 
+    [Fact]
+    public void WhenTheSecretIsEmpty_ThenItIsWrittenAsItIsWithoutAnEntry()
+    {
+        // Arrange
+        var (serializer, _) = CreateSerializer();
+        var device = Deserialize(serializer, DeviceJson(password: null));
+        device.Password = "";
+
+        // Act
+        var json = serializer.Serialize(device);
+
+        // Assert
+        Assert.Equal("", ReadString(json, "password"));
+        Assert.False(File.Exists(StorePath));
+    }
+
+    [Fact]
+    public void WhenTheSerializerExcludesProperties_ThenASecretIsWrittenAsAReference()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        var device = Deserialize(serializer, DeviceJson(password: null));
+        device.Password = "hunter2";
+
+        // Act
+        var json = serializer.Serialize(device, static property => property.Name == nameof(SecretTestDevice.Host));
+
+        // Assert
+        Assert.False(HasProperty(json, "host"));
+        Assert.True(store.TryGet(KeyOf(ReadString(json, "password")), out var value));
+        Assert.Equal("hunter2", value);
+    }
+
+    [Fact]
+    public void WhenAKeyIsReadWithTheCSharpNaming_ThenItIsKeptWhenWrittenWithTheJsonNaming()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        var key = store.Add("hunter2");
+        var json = $$"""{ "$type": "{{typeof(SecretTestDevice).FullName}}", "Password": "{{Prefix + key}}" }""";
+        var device = Assert.IsType<SecretTestDevice>(serializer.Deserialize(json, ConfigurationNaming.CSharpProperty));
+
+        // Act
+        var written = serializer.Serialize(device, ConfigurationNaming.JsonProperty);
+
+        // Assert
+        Assert.Equal("hunter2", device.Password);
+        Assert.Equal(key, KeyOf(ReadString(written, "password")));
+    }
+
+    [Fact]
+    public void WhenASecretDefaultsToEmpty_ThenTheDefaultConfigurationHoldsItWithoutAnEntry()
+    {
+        // Arrange
+        var (serializer, _) = CreateSerializer();
+
+        // Act
+        var defaults = serializer.GetDefaultConfiguration(typeof(SecretDefaultDevice));
+
+        // Assert
+        Assert.NotNull(defaults);
+        Assert.Equal("", defaults.Value.GetProperty("password").GetString());
         Assert.False(File.Exists(StorePath));
     }
 
@@ -163,14 +217,18 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     public void WhenATypeWithAnUnsupportedSecretIsRegistered_ThenOtherSubjectsStillRoundTrip()
     {
         // Arrange
-        var (serializer, _) = CreateSerializer();
-        var device = Deserialize(serializer, DeviceJson(password: null, childPassword: "inner"));
+        var (serializer, store) = CreateSerializer();
+        var device = Deserialize(serializer, DeviceJson("hunter2", childPassword: "inner"));
 
         // Act
         var json = serializer.Serialize(device);
 
         // Assert
         Assert.Equal("10.0.0.2", ReadString(json, "child", "host"));
+        Assert.True(store.TryGet(KeyOf(ReadString(json, "password")), out var password));
+        Assert.Equal("hunter2", password);
+        Assert.True(store.TryGet(KeyOf(ReadString(json, "child", "password")), out var childPassword));
+        Assert.Equal("inner", childPassword);
     }
 
     [Theory]
@@ -286,6 +344,20 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
+    public void WhenNoSecretStoreIsRegistered_ThenAPlaintextSecretIsNotReportedAsUnstored()
+    {
+        // Arrange
+        var (serializer, _) = CreateSerializer(withStore: false);
+        var device = Deserialize(serializer, DeviceJson("s3cr3t"));
+
+        // Act
+        var hasUnstoredSecrets = serializer.HasUnstoredSecrets(device);
+
+        // Assert
+        Assert.False(hasUnstoredSecrets);
+    }
+
+    [Fact]
     public void WhenAPlaintextSecretWasSerialized_ThenNoSecretIsReportedAsUnstored()
     {
         // Arrange
@@ -312,12 +384,12 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         Assert.Contains(nameof(InvalidSecretTypeDevice.Pin), exception.Message);
     }
 
-    // InvalidSecretTypeDevice is registered next to the valid type, as the type of another library would be, so that
+    // InvalidSecretTypeDevice is registered next to the valid types, as the type of another library would be, so that
     // every test also shows that it only fails for itself.
     internal (ConfigurableSubjectSerializer Serializer, SecretStore Store) CreateSerializer(bool withStore = true, bool hasRegistry = true)
     {
         var typeProvider = new TypeProvider();
-        typeProvider.AddTypes([typeof(SecretTestDevice), typeof(InvalidSecretTypeDevice)]);
+        typeProvider.AddTypes([typeof(SecretTestDevice), typeof(SecretDefaultDevice), typeof(InvalidSecretTypeDevice)]);
 
         var store = new SecretStore(StorePath);
         var services = new ServiceCollection();
@@ -406,6 +478,20 @@ public partial class SecretTestDevice : IConfigurable
 
     [Configuration]
     public partial SecretTestDevice? Child { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class SecretDefaultDevice : IConfigurable
+{
+    public SecretDefaultDevice()
+    {
+        Password = string.Empty;
+    }
+
+    [Configuration(IsSecret = true)]
+    public partial string Password { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
