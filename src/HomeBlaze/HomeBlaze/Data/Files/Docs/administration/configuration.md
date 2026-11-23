@@ -59,6 +59,7 @@ HomeBlaze keeps everything it stores in one data folder: the folder that contain
 ```
 Data/
 ├── Root.json            root configuration
+├── Secrets.json         values of secret configuration properties
 ├── Files/               devices, dashboards, pages, Plugins.json, docs
 ├── Agents/              timeline, memory, chat session, run count and CLI working directory of AI agents
 ├── AutomationState/     current state and last runs of automations, one checkpoint file each
@@ -70,6 +71,14 @@ Data/
 When running from source, the data folder is `src/HomeBlaze/HomeBlaze/Data`. The container image uses `/data`; see [Installation](installation.md#data-folder).
 
 `DataProtection-Keys/` holds the secret keys that sign the browser's connection to the UI and any sign-in, so treat the folder and every backup of it like a password, or encrypt it with a certificate (see [HomeBlaze:DataProtection](#homeblazedataprotection)). To revoke the keys, for example after a backup leaked or in a copy of the data folder that runs as a second instance, stop HomeBlaze, delete the folder and start it again. Open browser tabs then need a reload.
+
+`Secrets.json` holds the values of secret configuration properties, such as passwords and API keys, so that no secret is stored in `Files/`. A file in `Files/` references a secret as `$secret:` followed by a random key, for example `"password": "$secret:9f2c41d07a6b4e1c8d3f5a2b7e9c0d14"` in a JSON file or `Password=$secret:9f2c41d07a6b4e1c8d3f5a2b7e9c0d14` in a block of a page. A value entered in the edit dialog is stored there directly.
+
+A secret can also be typed into a file in plaintext, by hand or in the raw editors of the UI. HomeBlaze then moves it to `Secrets.json` and replaces it with a reference once it has read the file. It stays in the file while another value of the same file cannot be read, until that value is corrected, and a warning in the log says so. A file that changed in the meantime is never overwritten. `Root.json` is not rewritten when it is loaded; it gets its references the next time it is saved. A plaintext value that itself starts with `$secret:` is read as a reference; enter such a value in the edit dialog instead.
+
+The file is plaintext, created with permissions that let only the user HomeBlaze runs as read it on Linux and macOS. Anyone who can log in as that user or as root can read it, so limit who can log in, run HomeBlaze as its own user, and in Docker keep the data folder on a volume only the container uses. HomeBlaze reads the file once at startup, and entries are only added, never removed. A `Secrets.json` that is not valid JSON stops the start, so a restored copy must be complete. A reference whose key is missing, for example after restoring `Files/` without `Secrets.json`, leaves its property empty with a warning in the log until the secret is entered again. Restoring `Secrets.json` while HomeBlaze runs takes effect after a restart.
+
+Secrets that were stored in plaintext before this version may still be in old backups or in the history of a synced or versioned `Files/` folder. Change them.
 
 `AutomationState/` holds one checkpoint file per automation with its current state and last runs, described in [Automations: The checkpoint](automation.md#the-checkpoint).
 
