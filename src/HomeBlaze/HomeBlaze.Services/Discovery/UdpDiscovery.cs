@@ -10,7 +10,7 @@ namespace HomeBlaze.Services.Discovery;
 /// <summary>
 /// Exchanges UDP datagrams over IPv4. A broadcast is sent to the broadcast address of the subnet of each adapter that
 /// <see cref="NetworkAdapters"/> lists, so it leaves on every adapter rather than only on that of the default route,
-/// or to <see cref="IPAddress.Broadcast"/> when no adapter is listed.
+/// or to <see cref="IPAddress.Broadcast"/> when no listed adapter has a subnet broadcast address.
 /// </summary>
 internal sealed class UdpDiscovery : IUdpDiscovery
 {
