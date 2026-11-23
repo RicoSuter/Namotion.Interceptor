@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Discovery;
 using HomeBlaze.Storage;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
@@ -57,6 +58,7 @@ public class PlaywrightFixtureTests
         var broadcastAnswers = await udpDiscovery.BroadcastAsync(46000, new byte[] { 0x01 }, TimeSpan.FromSeconds(1), CancellationToken.None).ToListAsync();
         var listenedDatagrams = await udpDiscovery.ListenAsync(7979, TimeSpan.FromSeconds(1), CancellationToken.None).ToListAsync();
         var nukiAnswer = await httpClient.GetStringAsync(NukiBridgeDiscovery.DiscoveryAddress);
+        var discoveries = services.GetRequiredService<SubjectDiscoveryRegistry>().GetSubjectDiscoveries();
 
         // Assert
         Assert.Empty(ssdpResponses);
@@ -65,6 +67,11 @@ public class PlaywrightFixtureTests
         Assert.Empty(listenedDatagrams);
         // The stub of the host answers with exactly this; the real service adds an error code.
         Assert.Equal("{\"bridges\":[]}", nukiAnswer);
+        // The subject discoveries get these services injected from the same container. One that cannot be created is
+        // left out without an error a test sees, so every subject discovery of the application must be there.
+        Assert.Equal(
+            ["DiscoverableTestDiscovery", "FritzBoxDiscovery", "HueBridgeDiscovery", "NukiBridgeDiscovery", "ShellyDeviceDiscovery"],
+            discoveries.Select(discovery => discovery.GetType().Name).Order());
     }
 
     [Fact]

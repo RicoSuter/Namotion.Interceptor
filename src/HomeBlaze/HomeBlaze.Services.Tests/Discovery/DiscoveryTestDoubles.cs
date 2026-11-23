@@ -25,19 +25,19 @@ public sealed record TestDiscoveryResult(string Key, string DisplayName = "Devic
 internal sealed class LambdaDiscovery<TSubject> : SubjectDiscovery<TSubject, TestDiscoveryResult>
     where TSubject : class, IInterceptorSubject
 {
-    private readonly Func<DiscoveryScan, CancellationToken, IAsyncEnumerable<TestDiscoveryResult>> _scan;
+    private readonly Func<CancellationToken, IAsyncEnumerable<TestDiscoveryResult>> _scan;
     private readonly Func<TSubject, TestDiscoveryResult, bool> _matches;
 
     public LambdaDiscovery(
-        Func<DiscoveryScan, CancellationToken, IAsyncEnumerable<TestDiscoveryResult>> scan,
+        Func<CancellationToken, IAsyncEnumerable<TestDiscoveryResult>> scan,
         Func<TSubject, TestDiscoveryResult, bool>? matches = null)
     {
         _scan = scan;
         _matches = matches ?? ((_, _) => false);
     }
 
-    protected override IAsyncEnumerable<TestDiscoveryResult> DiscoverAsync(DiscoveryScan scan, CancellationToken cancellationToken) =>
-        _scan(scan, cancellationToken);
+    protected override IAsyncEnumerable<TestDiscoveryResult> DiscoverAsync(CancellationToken cancellationToken) =>
+        _scan(cancellationToken);
 
     protected override bool Matches(TSubject existing, TestDiscoveryResult result) => _matches(existing, result);
 }
@@ -114,49 +114,4 @@ internal static class TestScans
 
         yield break;
     }
-
-    public static DiscoveryScan CreateScan() => new(new FakeSsdpSearch(), new FakeMulticastDnsBrowser(), new EmptyUdpDiscovery(), CancellationToken.None);
-}
-
-internal sealed class FakeSsdpSearch : ISsdpSearch
-{
-    private int _callCount;
-
-    public int CallCount => Volatile.Read(ref _callCount);
-
-    public Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken)
-    {
-        Interlocked.Increment(ref _callCount);
-        return Task.FromResult<IReadOnlyList<SsdpResponse>>([]);
-    }
-}
-
-/// <summary>
-/// Answers every browse with the services passed to <see cref="Answer"/>, once the test calls it.
-/// </summary>
-internal sealed class FakeMulticastDnsBrowser : IMulticastDnsBrowser
-{
-    private readonly TaskCompletionSource<IReadOnlyList<MulticastDnsServiceInstance>> _answer =
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    private int _callCount;
-
-    public int CallCount => Volatile.Read(ref _callCount);
-
-    public void Answer(params MulticastDnsServiceInstance[] services) => _answer.TrySetResult(services);
-
-    public Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken)
-    {
-        Interlocked.Increment(ref _callCount);
-        return _answer.Task.WaitAsync(cancellationToken);
-    }
-}
-
-internal sealed class EmptyUdpDiscovery : IUdpDiscovery
-{
-    public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken) =>
-        AsyncEnumerable.Empty<UdpDatagram>();
-
-    public IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken) =>
-        AsyncEnumerable.Empty<UdpDatagram>();
 }

@@ -70,9 +70,9 @@ namespace Namotion.Devices.Philips.Hue
     }
     public sealed class HueBridgeDiscovery : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.Philips.Hue.HueBridge, Namotion.Devices.Philips.Hue.HueDiscoveredBridge>
     {
-        public HueBridgeDiscovery() { }
-        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Philips.Hue.HueBridgeDiscovery.<DiscoverAsync>d__1))]
-        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Philips.Hue.HueDiscoveredBridge> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
+        public HueBridgeDiscovery(HomeBlaze.Abstractions.Discovery.IMulticastDnsBrowser multicastDnsBrowser) { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Philips.Hue.HueBridgeDiscovery.<DiscoverAsync>d__3))]
+        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Philips.Hue.HueDiscoveredBridge> DiscoverAsync([System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
         protected override bool Matches(Namotion.Devices.Philips.Hue.HueBridge existing, Namotion.Devices.Philips.Hue.HueDiscoveredBridge result) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]

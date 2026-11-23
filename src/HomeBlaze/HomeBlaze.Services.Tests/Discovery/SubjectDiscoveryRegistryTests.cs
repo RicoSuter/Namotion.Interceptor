@@ -200,7 +200,7 @@ public sealed class EditOnlyDiscoveryTestEditComponent : ISubjectDiscoveryCompon
 public abstract class TestDiscovery<TSubject> : SubjectDiscovery<TSubject, TestDiscoveryResult>
     where TSubject : class, IInterceptorSubject
 {
-    protected override IAsyncEnumerable<TestDiscoveryResult> DiscoverAsync(DiscoveryScan scan, CancellationToken cancellationToken) => TestScans.Yield();
+    protected override IAsyncEnumerable<TestDiscoveryResult> DiscoverAsync(CancellationToken cancellationToken) => TestScans.Yield();
 
     protected override bool Matches(TSubject existing, TestDiscoveryResult result) => false;
 }

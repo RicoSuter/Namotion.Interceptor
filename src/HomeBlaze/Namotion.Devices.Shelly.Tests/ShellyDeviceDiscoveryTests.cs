@@ -111,11 +111,10 @@ public class ShellyDeviceDiscoveryTests
     {
         // Arrange
         var browser = new AnsweringBrowser(Service("Kitchen"));
-        ISubjectDiscovery discovery = new ShellyDeviceDiscovery();
-        var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, new UnusedUdpDiscovery(), CancellationToken.None);
+        ISubjectDiscovery discovery = new ShellyDeviceDiscovery(browser);
 
         // Act
-        var discovered = await discovery.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
+        var discovered = await discovery.DiscoverAsync([], CancellationToken.None).ToListAsync();
 
         // Assert
         var single = Assert.Single(discovered);
@@ -201,23 +200,8 @@ public class ShellyDeviceDiscoveryTests
         }
     }
 
-    private sealed class EmptySsdpSearch : ISsdpSearch
-    {
-        public Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<SsdpResponse>>([]);
-    }
-
     private sealed class TestHttpClientFactory : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new();
-    }
-
-    private sealed class UnusedUdpDiscovery : IUdpDiscovery
-    {
-        public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
-        public IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
     }
 }

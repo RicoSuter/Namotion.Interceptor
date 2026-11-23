@@ -607,13 +607,6 @@ namespace HomeBlaze.Abstractions.Discovery
         public HomeBlaze.Abstractions.Discovery.IDiscoveryResult Result { get; init; }
         public System.Type SubjectType { get; init; }
     }
-    public sealed class DiscoveryScan
-    {
-        public DiscoveryScan(HomeBlaze.Abstractions.Discovery.ISsdpSearch ssdpSearch, HomeBlaze.Abstractions.Discovery.IMulticastDnsBrowser multicastDnsBrowser, HomeBlaze.Abstractions.Discovery.IUdpDiscovery udpDiscovery, System.Threading.CancellationToken cancellationToken) { }
-        public HomeBlaze.Abstractions.Discovery.IMulticastDnsBrowser MulticastDns { get; }
-        public HomeBlaze.Abstractions.Discovery.ISsdpSearch Ssdp { get; }
-        public HomeBlaze.Abstractions.Discovery.IUdpDiscovery Udp { get; }
-    }
     public interface IDiscoveryResult
     {
         string? Detail { get; }
@@ -632,7 +625,7 @@ namespace HomeBlaze.Abstractions.Discovery
     public interface ISubjectDiscovery
     {
         System.Type SubjectType { get; }
-        System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.DiscoveredSubject> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.IInterceptorSubject> existingSubjects, System.Threading.CancellationToken cancellationToken);
+        System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.DiscoveredSubject> DiscoverAsync(System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.IInterceptorSubject> existingSubjects, System.Threading.CancellationToken cancellationToken);
     }
     public interface IUdpDiscovery
     {
@@ -660,7 +653,7 @@ namespace HomeBlaze.Abstractions.Discovery
         where TResult :  class, HomeBlaze.Abstractions.Discovery.IDiscoveryResult
     {
         protected SubjectDiscovery() { }
-        protected abstract System.Collections.Generic.IAsyncEnumerable<TResult> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, System.Threading.CancellationToken cancellationToken);
+        protected abstract System.Collections.Generic.IAsyncEnumerable<TResult> DiscoverAsync(System.Threading.CancellationToken cancellationToken);
         protected abstract bool Matches(TSubject existing, TResult result);
     }
     public readonly struct UdpDatagram : System.IEquatable<HomeBlaze.Abstractions.Discovery.UdpDatagram>

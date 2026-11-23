@@ -29,14 +29,14 @@ This design covers an on-demand Discover page in the create dialog, with a contr
 Implemented (one pull request):
 
 - The discovery contract, registry and scan session
-- Shared SSDP and mDNS services
+- SSDP and mDNS services
 - The Discover page in the create dialog and the handoff to the Setup or Edit component
 - Subject discoveries for FRITZ!Box (SSDP), Hue (mDNS), Nuki (cloud lookup) and Shelly (mDNS)
 
 Implemented in the follow-up pull request, stacked on the first:
 
 - Sonos (SSDP), which adds the response headers to `SsdpResponse`
-- A shared UDP service for broadcast requests and broadcast announcements
+- A UDP service for broadcast requests and broadcast announcements
 - Ecowitt (its UDP broadcast request)
 - myStrom (the UDP announcements of its switches)
 - Included items: the speakers of a Sonos household and the repeaters of a FRITZ!Box mesh, shown under their row
@@ -62,7 +62,7 @@ The API and the rules for implementers are in [Writing a Subject Discovery](../.
 
 ### Registry
 
-`SubjectDiscoveryRegistry` in `HomeBlaze.Services` scans `TypeProvider.Types` for non-abstract `ISubjectDiscovery` types, as `SubjectComponentRegistry` does for components, so plugins provide subject discoveries without extra registration. It creates them through DI with `ActivatorUtilities`, so a constructor can ask for `IHttpClientFactory` or `ILogger<T>`. Like the components, the subject discoveries are created once, on first use, so all subject discovery types must be loaded before; types added later are not scanned.
+`SubjectDiscoveryRegistry` in `HomeBlaze.Services` scans `TypeProvider.Types` for non-abstract `ISubjectDiscovery` types, as `SubjectComponentRegistry` does for components, so plugins provide subject discoveries without extra registration. It creates them through DI with `ActivatorUtilities`, so a constructor can ask for `ISsdpSearch`, `IMulticastDnsBrowser`, `IHttpClientFactory` or `ILogger<T>`. Like the components, the subject discoveries are created once, on first use, so all subject discovery types must be loaded before; types added later are not scanned.
 
 It leaves out, with one logged error each, written the first time the create dialog asks for subject discoveries rather than at startup, and without blocking the app:
 
@@ -72,15 +72,14 @@ It leaves out, with one logged error each, written the first time the create dia
 
 The Discover page further leaves out results whose type is not creatable in the dialog, as `SubjectTypeCatalog.GetCreatableTypes` decides (excluded from creation, or single instance and already present).
 
-## Scan session and shared services
+## Scan session and services
 
-`DiscoveryScan` represents one scan. `SubjectDiscoveryService.ScanAsync` creates and owns it; the Discover page owns the cancellation of the scans it starts.
+`SubjectDiscoveryService.ScanAsync` runs one scan and passes each subject discovery the token of the scan, which is canceled when the scan ends; the Discover page owns the cancellation of the scans it starts.
 
 - A scan is canceled only by Scan again and by closing the dialog, which disposes the page. Back, picking a row, creating a subject from a row and switching to All types leave it running while the page is hidden, so its results are complete when the user returns.
 - Its deadline is 30 seconds, taken from an injected `TimeProvider`. The deadline is a cap, not a wait: the scan ends as soon as every subject discovery has completed, normally after about 6 seconds, the listening window of the myStrom subject discovery.
-- It exposes the shared services below. Within one session, a query that was already sent returns the same in-flight task, so two subject discoveries asking for the same question cause one query. SSDP queries are shared by exact search target, mDNS queries by service type ignoring case. UDP exchanges are not shared: each call is its own exchange, because a subject discovery streams the datagrams of its own request or port.
 
-`ISsdpSearch`, `IMulticastDnsBrowser` and `IUdpDiscovery`, in `HomeBlaze.Abstractions/Discovery`, are described for implementers in [Writing a Subject Discovery](../../development/subject-discovery.md#shared-services). They are implemented in `HomeBlaze.Services`.
+`ISsdpSearch`, `IMulticastDnsBrowser` and `IUdpDiscovery`, in `HomeBlaze.Abstractions/Discovery`, are described for implementers in [Writing a Subject Discovery](../../development/subject-discovery.md#services). They are implemented in `HomeBlaze.Services` and registered as singletons, and each subject discovery takes the ones it uses through its constructor. Every query is sent: no two subject discoveries ask the same question, so nothing is shared between them, and a UDP call is its own exchange in any case, because a subject discovery streams the datagrams of its own request or port. As the services are singletons, merging identical in-flight queries, if ever needed, belongs inside their implementations without a contract change.
 
 SSDP uses Rssdp, which `HomeBlaze.Services` references, and searches every IPv4 adapter with a listening window of about 3 seconds.
 
@@ -135,7 +134,7 @@ During the first setup a user adds many found devices, so the folder Create oper
 - Each subject discovery runs in its own task. An exception other than cancellation ends that subject discovery only: it is logged with the type of the subject discovery and shown as one line on the page, such as "Nuki Bridge: search failed". Results it yielded before stay listed.
 - An `OperationCanceledException` from a canceled session is neither logged nor shown.
 - An exception thrown once the scan has been canceled or has reached its deadline, such as from a library that disposes its socket, counts as the end of the scan: it is logged at debug level and not shown.
-- The shared services fail soft: no usable adapter or a socket error returns an empty answer and one debug log entry, not an exception.
+- The SSDP, mDNS and UDP services fail soft: no usable adapter or a socket error returns an empty answer, or ends a UDP call with nothing more yielded, and writes one debug log entry instead of throwing.
 - A `Matches` call that throws ends its subject discovery like any other exception.
 - A subject discovery that never completes is canceled at the session deadline. The scan ends then even when the subject discovery ignores its cancellation; the later results and failures of the abandoned subject discovery are dropped, a later exception is still logged, at debug level, and no callback of `ScanAsync` runs once it has returned.
 - Every string from the network is untrusted. Blazor renders it as text, never as markup.
@@ -144,13 +143,13 @@ During the first setup a user adds many found devices, so the folder Create oper
 
 | Type | Discovery | Result | Matches |
 |---|---|---|---|
-| `FritzBox` | `FritzBoxDiscovery` through the shared `ISsdpSearch`, plus the `fritz.box` fallback | `FritzBoxDiscoveryResult`, key `Udn` or else host address | A new persisted `Udn`, or the host address: either one matching is enough, so a router that moved is recognized by its UDN and a router replaced at the same address counts as added |
+| `FritzBox` | `FritzBoxDiscovery` through the injected `ISsdpSearch`, plus the `fritz.box` fallback | `FritzBoxDiscoveryResult`, key `Udn` or else host address | A new persisted `Udn`, or the host address: either one matching is enough, so a router that moved is recognized by its UDN and a router replaced at the same address counts as added |
 | `HueBridge` | mDNS `_hue._tcp`, local only | A new record with bridge ID and address, key bridge ID | The persisted `BridgeId`, ignoring case; `HueBridge` itself compares bridge IDs ignoring case as well |
 | `NukiBridge` | The Nuki cloud lookup, which runs when the user first opens the Discover page and on Scan again | `NukiDiscoveredBridge`, key bridge ID | The host address and port |
 | `ShellyDevice` | mDNS `_shelly._tcp` | `ShellyDiscoveredDevice(DeviceId, HostAddress, Application, DisplayName)`, key device ID | The device ID the running subject read from the device, otherwise a new persisted `DeviceId`, otherwise the host address |
-| `SonosSystem` | SSDP `urn:schemas-upnp-org:device:ZonePlayer:1` through the shared `ISsdpSearch`, then the device description of each speaker | `SonosDiscoveredHousehold` with `HouseholdId`, `SeedHost` and the speakers as included items (the speakers themselves stay internal), one per household, key household ID | Any player or satellite RINCON ID the running subject knows, or the host of its `SeedHost`, ignoring case |
-| `EcowittGateway` | The broadcast request of the Ecowitt local API to UDP port 46000, through the shared `IUdpDiscovery` | `EcowittDiscoveredGateway(MacAddress, HostAddress, DeviceName, FirmwareVersion)`, key MAC address | The MAC address the running subject read from the gateway, ignoring case and separators, or the host address, ignoring case: either one matching is enough |
-| `MyStromSwitch` | The announcements myStrom devices broadcast to UDP port 7979 about every 5 seconds, received through the shared `IUdpDiscovery` | `MyStromDiscoveredSwitch(MacAddress, HostAddress, DeviceType)`, key MAC address | The MAC address the running subject read from the switch, ignoring case and separators, or the host address, ignoring case: either one matching is enough |
+| `SonosSystem` | SSDP `urn:schemas-upnp-org:device:ZonePlayer:1` through the injected `ISsdpSearch`, then the device description of each speaker | `SonosDiscoveredHousehold` with `HouseholdId`, `SeedHost` and the speakers as included items (the speakers themselves stay internal), one per household, key household ID | Any player or satellite RINCON ID the running subject knows, or the host of its `SeedHost`, ignoring case |
+| `EcowittGateway` | The broadcast request of the Ecowitt local API to UDP port 46000, through the injected `IUdpDiscovery` | `EcowittDiscoveredGateway(MacAddress, HostAddress, DeviceName, FirmwareVersion)`, key MAC address | The MAC address the running subject read from the gateway, ignoring case and separators, or the host address, ignoring case: either one matching is enough |
+| `MyStromSwitch` | The announcements myStrom devices broadcast to UDP port 7979 about every 5 seconds, received through the injected `IUdpDiscovery` | `MyStromDiscoveredSwitch(MacAddress, HostAddress, DeviceType)`, key MAC address | The MAC address the running subject read from the switch, ignoring case and separators, or the host address, ignoring case: either one matching is enough |
 
 - A Gen2+ Shelly announces two `_shelly._tcp` instances with the same SRV host, one named by its device ID and one by its user-given name. The subject discovery takes the device ID from the SRV host name (without `.local`, lower case) and skips an instance without one, whose name could be the user-given one; it merges the instances into one result and shows the user-given name, or the device ID when there is none. `Application` comes from the `app` TXT record.
 - `FritzBox.Udn` and `ShellyDevice.DeviceId` are new `[Configuration]` properties, written by the component that receives the result. Shelly prefers the device ID the running subject read from the device over the stored one, so a Shelly created before this change is recognized while it is connected, and a stored ID that went stale when the device at the address was replaced does not decide. Subjects do not write their own configuration for discovery.
@@ -165,7 +164,7 @@ During the first setup a user adds many found devices, so the folder Create oper
 
 ## Breaking changes
 
-- `FritzBoxDiscovery.DiscoverAsync(TimeSpan, CancellationToken)` is now `SearchAsync(ISsdpSearch, TimeSpan timeout, CancellationToken)`. `timeout` now limits only the name resolution of `fritz.box` and each description request; the SSDP window is fixed at about 3 seconds. Migration: resolve `ISsdpSearch` from dependency injection (`AddHomeBlazeServices` registers it; the implementation is internal), or pass `DiscoveryScan.Ssdp` inside a subject discovery.
+- `FritzBoxDiscovery.DiscoverAsync(TimeSpan, CancellationToken)` is now `SearchAsync(ISsdpSearch, TimeSpan timeout, CancellationToken)`. `timeout` now limits only the name resolution of `fritz.box` and each description request; the SSDP window is fixed at about 3 seconds. Migration: resolve `ISsdpSearch` from dependency injection (`AddHomeBlazeServices` registers it; the implementation is internal), or inject it into the constructor of a subject discovery.
 - `Namotion.Devices.FritzBox` no longer depends on Rssdp. Migration: add your own package reference if you used it transitively.
 - `FritzBoxSetupComponent` now injects `ISsdpSearch`. Migration: a host that shows it must call `AddHomeBlazeServices` or `AddHomeBlazeHostServices`.
 - `ISubjectSetupService.CreateSubjectAsync(IStorageContainer, CancellationToken)`, which returned one `CreateSubjectResult?`, is replaced by `CreateSubjectsAsync(IStorageContainer, Func<CreateSubjectResult, CancellationToken, Task> addSubjectAsync, CancellationToken)`, which passes each created subject to the callback, also while the dialog stays open for the next one. Migration: an implementation passes the callback on, such as to `SubjectSetupOptions.OnCreatedAsync`; a caller moves the code that handled the result into the callback.
@@ -185,10 +184,9 @@ Unit tests, without sockets except where named:
 
 - The base class keeps only subjects of its type and sets `ExistingSubject` from `Matches`
 - The registry finds subject discoveries through `TypeProvider` and applies its exclusion rules
-- `DiscoveryScan` shares in-flight queries between subject discoveries
 - `SubjectDiscoveryService` isolates failing subject discoveries, honors cancellation and ends at its deadline, driven by a `TimeProvider` the test advances
 - mDNS packet parsing from captured bytes, including name compression, malformed packets and the caps
-- Each subject discovery against fake `ISsdpSearch`, `IMulticastDnsBrowser`, `IUdpDiscovery` and HTTP handlers, including its `Matches` rules, the FRITZ!Box grouping of repeaters and the Sonos descriptions with their timeout, size cap, hostile documents and fallback
+- Each subject discovery constructed with fake `ISsdpSearch`, `IMulticastDnsBrowser`, `IUdpDiscovery` or HTTP handlers, including its `Matches` rules, the FRITZ!Box grouping of repeaters and the Sonos descriptions with their timeout, size cap, hostile documents and fallback
 - Two Sonos tests that run the subject discovery with its own HTTP handler against a loopback HTTP server, to show that it requests the fixed description path and follows no redirect; their deadline runs on a `FakeTimeProvider` that is never advanced
 - The argument checks of the UDP service and the broadcast address of a subnet; its socket behavior is verified manually, see below
 
@@ -196,4 +194,4 @@ This repository has no component test framework, so the Discover page keeps its 
 
 Two E2E tests with a fake subject discovery that finds two devices and a hub with included items. The first opens Discover from the folder Create, picks the first device, creates it, sees the dialog return to the Discover page with the device listed as added after the others and Done in the footer, creates the second device without a new scan, finds both stored subjects, and sees Scan again match both devices to them; creating from the type list still closes the dialog, which the other create tests cover. The second expands the hub, on a desktop and a phone viewport, and finds its items shown and not selectable. The E2E host replaces the SSDP, mDNS and UDP services with empty ones and stubs the Nuki cloud lookup, so a scan there neither searches the network of the machine nor binds its ports, which a fixture test checks.
 
-Manual verification against a real network: the Discover page found a FRITZ!Box with three repeaters, a Hue bridge, a Nuki bridge and several Shelly Gen2 devices, each Shelly once, under its user-given name when it has one. The Sonos subject discovery, run against the same network from a console, found one household with the 10 speakers that answered, chose the same seed speaker in repeated scans, and recognized a system whose `SeedHost` named one of them. The Ecowitt subject discovery, run from a console, found a GW2000A within 30 ms in each scan and recognized a gateway configured with its address. The myStrom subject discovery, run from a console, found all 7 WiFi Switch CH v2 within 5 seconds in each of two scans, also with two scans at once, and yielded nothing, with one debug log entry, while another socket held port 7979 without address reuse. After both moved to the shared UDP service, a console run of both found the GW2000A within 16 ms through the broadcast to `192.168.1.255`, which it answered twice, and all 7 switches in each of two scans, also with two myStrom subject discoveries at once; the service again yielded nothing, with one debug log entry, while port 7979 was held without address reuse, and rethrew a cancellation by the caller. Docker bridge networking was not tested; the page shows a hint for it.
+Manual verification against a real network: the Discover page found a FRITZ!Box with three repeaters, a Hue bridge, a Nuki bridge and several Shelly Gen2 devices, each Shelly once, under its user-given name when it has one. The Sonos subject discovery, run against the same network from a console, found one household with the 10 speakers that answered, chose the same seed speaker in repeated scans, and recognized a system whose `SeedHost` named one of them. The Ecowitt subject discovery, run from a console, found a GW2000A within 30 ms in each scan and recognized a gateway configured with its address. The myStrom subject discovery, run from a console, found all 7 WiFi Switch CH v2 within 5 seconds in each of two scans, also with two scans at once, and yielded nothing, with one debug log entry, while another socket held port 7979 without address reuse. After both moved to `IUdpDiscovery`, a console run of both found the GW2000A within 16 ms through the broadcast to `192.168.1.255`, which it answered twice, and all 7 switches in each of two scans, also with two myStrom subject discoveries at once; the service again yielded nothing, with one debug log entry, while port 7979 was held without address reuse, and rethrew a cancellation by the caller. Docker bridge networking was not tested; the page shows a hint for it.

@@ -38,7 +38,7 @@ public sealed record FritzBoxDiscoveryResult(string HostAddress, string? Friendl
 /// Finds FRITZ!Box routers and repeaters on the local network over SSDP and by their usual host name,
 /// <c>fritz.box</c>. As a subject discovery, it lists the repeaters under the router when it is the only one found.
 /// </summary>
-public sealed class FritzBoxDiscovery : SubjectDiscovery<FritzBox, FritzBoxDiscoveryResult>
+public sealed class FritzBoxDiscovery(ISsdpSearch ssdpSearch) : SubjectDiscovery<FritzBox, FritzBoxDiscoveryResult>
 {
     private const string SearchTarget = "urn:dslforum-org:device:InternetGatewayDevice:1";
     private const string WellKnownHost = "fritz.box";
@@ -53,9 +53,9 @@ public sealed class FritzBoxDiscovery : SubjectDiscovery<FritzBox, FritzBoxDisco
 
     /// <inheritdoc />
     protected override async IAsyncEnumerable<FritzBoxDiscoveryResult> DiscoverAsync(
-        DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        foreach (var result in IncludeRepeaters(await SearchAsync(scan.Ssdp, DescriptionTimeout, cancellationToken)))
+        foreach (var result in IncludeRepeaters(await SearchAsync(ssdpSearch, DescriptionTimeout, cancellationToken)))
         {
             yield return result;
         }

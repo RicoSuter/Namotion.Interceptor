@@ -45,7 +45,7 @@ public abstract class SubjectDiscovery<TSubject, TResult> : ISubjectDiscovery
     where TSubject : class, IInterceptorSubject
     where TResult : class, IDiscoveryResult
 {
-    protected abstract IAsyncEnumerable<TResult> DiscoverAsync(DiscoveryScan scan, CancellationToken cancellationToken);
+    protected abstract IAsyncEnumerable<TResult> DiscoverAsync(CancellationToken cancellationToken);
 
     protected abstract bool Matches(TSubject existing, TResult result);
 }
@@ -85,21 +85,11 @@ The Setup component of the type, or its Edit component when it has none, impleme
 
 The `global::` prefix is needed in a razor file of a `*.HomeBlaze` project, because `HomeBlaze` alone resolves to the project namespace.
 
-## Shared services
+## Services
 
-`DiscoveryScan` gives every subject discovery of a scan the same services. An SSDP or mDNS question that was already asked in the scan returns the same in-flight answer, so two subject discoveries searching for the same thing cause one query on the network.
+`HomeBlaze.Abstractions.Discovery` has one service per kind of search, registered as a singleton. Inject the ones you need: a subject discovery is created through dependency injection, so its constructor takes them, as in [the example](#example).
 
 ```csharp
-public sealed class DiscoveryScan
-{
-    public DiscoveryScan(
-        ISsdpSearch ssdpSearch, IMulticastDnsBrowser multicastDnsBrowser, IUdpDiscovery udpDiscovery, CancellationToken cancellationToken);
-
-    public ISsdpSearch Ssdp { get; }
-    public IMulticastDnsBrowser MulticastDns { get; }
-    public IUdpDiscovery Udp { get; }
-}
-
 public interface ISsdpSearch
 {
     Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken);
@@ -125,16 +115,16 @@ public interface IUdpDiscovery
 public readonly record struct UdpDatagram(ReadOnlyMemory<byte> Payload, IPAddress SenderAddress);
 ```
 
-- `Ssdp.SearchAsync` sends an M-SEARCH for the search target, such as `urn:dslforum-org:device:InternetGatewayDevice:1`, listens for about 3 seconds and returns the answers for exactly that target. `Headers` are looked up by name ignoring case, such as a vendor header like `X-RINCON-HOUSEHOLD`; the values of a repeated header are joined by `, `, and headers are capped in number and length. Searches are shared by exact search target.
-- `MulticastDns.BrowseAsync` browses a service type, such as `_hue._tcp`, and returns each instance with its host name, port, addresses and TXT records in `Properties`. Browses are shared by service type ignoring case.
-- `Udp.BroadcastAsync` sends your request to the given port as a broadcast on every IPv4 adapter, repeats it once after about a second, and yields each answer as it arrives within the window, with the address it came from. A device that receives both requests answers twice, which the deduplication by `Key` absorbs.
-- `Udp.ListenAsync` listens on a port with address reuse for devices that announce themselves, and yields each datagram that arrives within the window.
-- UDP calls are not shared, because each one is its own exchange. Each payload is a copy that stays valid. A socket error, such as a port another program holds without address reuse, ends the call quietly with nothing more yielded. The call itself throws `ArgumentOutOfRangeException` for a port outside 1 to 65535, a request outside 1 to 1024 bytes, or a window of zero or less or of more than 30 seconds, and the enumeration throws only for the caller's cancellation.
-- What one query or UDP call returns is capped, see [the Subject Discovery design](../architecture/design/discovery.md#scan-session-and-shared-services).
+- `ISsdpSearch.SearchAsync` sends an M-SEARCH for the search target, such as `urn:dslforum-org:device:InternetGatewayDevice:1`, listens for about 3 seconds and returns the answers for exactly that target. `Headers` are looked up by name ignoring case, such as a vendor header like `X-RINCON-HOUSEHOLD`; the values of a repeated header are joined by `, `, and headers are capped in number and length.
+- `IMulticastDnsBrowser.BrowseAsync` browses a service type, such as `_hue._tcp`, and returns each instance with its host name, port, addresses and TXT records in `Properties`.
+- `IUdpDiscovery.BroadcastAsync` sends your request to the given port as a broadcast on every IPv4 adapter, repeats it once after about a second, and yields each answer as it arrives within the window, with the address it came from. A device that receives both requests answers twice, which the deduplication by `Key` absorbs.
+- `IUdpDiscovery.ListenAsync` listens on a port with address reuse for devices that announce themselves, and yields each datagram that arrives within the window.
+- Each UDP payload is a copy that stays valid. A socket error, such as a port another program holds without address reuse, ends the call quietly with nothing more yielded. The call itself throws `ArgumentOutOfRangeException` for a port outside 1 to 65535, a request outside 1 to 1024 bytes, or a window of zero or less or of more than 30 seconds, and the enumeration throws only for the caller's cancellation.
+- What one query or UDP call returns is capped, see [the Subject Discovery design](../architecture/design/discovery.md#scan-session-and-services).
 
 ## Your own I/O
 
-A subject discovery can do I/O of its own, such as asking a vendor's cloud service or reading a description from a device it found. It is created through dependency injection, so its constructor can ask for services such as `IHttpClientFactory`, `ILogger<T>` or `TimeProvider`:
+A subject discovery can do I/O of its own, such as asking a vendor's cloud service or reading a description from a device it found. Its constructor can ask for any other service as well, such as `IHttpClientFactory`, `ILogger<T>` or `TimeProvider`:
 
 ```csharp
 public sealed class AcmeCloudDiscovery : SubjectDiscovery<AcmeHub, AcmeDiscoveredHub>
@@ -156,7 +146,7 @@ public sealed class AcmeCloudDiscovery : SubjectDiscovery<AcmeHub, AcmeDiscovere
 
 - **Read only.** A subject discovery only asks; it never changes a device.
 - **Untrusted answers.** Any host on the network can answer. Parse defensively and never throw on received data, bound what you read and keep, and only request addresses you built yourself from an answer, never a URL a device hands you as is.
-- **Cancellation.** Honor the token. A scan ends when every subject discovery has completed, and at the latest after 30 seconds, also for a subject discovery that ignores it, see [Scan session](../architecture/design/discovery.md#scan-session-and-shared-services).
+- **Cancellation.** Honor the token. A scan ends when every subject discovery has completed, and at the latest after 30 seconds, also for a subject discovery that ignores it, see [Scan session](../architecture/design/discovery.md#scan-session-and-services).
 - **Failure.** A subject discovery that throws ends only itself, and the page shows one "search failed" line for its type, see [Error handling](../architecture/design/discovery.md#error-handling).
 - **No state.** One instance, created on first use, serves overlapping scans, so keep no state between calls.
 - **One per type.** A subject type has at most one subject discovery: the first by full type name, ordinally, that can be created is used, and the others are left out with a logged error, see [Registry](../architecture/design/discovery.md#registry).
@@ -164,20 +154,20 @@ public sealed class AcmeCloudDiscovery : SubjectDiscovery<AcmeHub, AcmeDiscovere
 ## Testing
 
 - Keep parsing and matching in `internal static` methods, which the test project of the library reaches through `InternalsVisibleTo`, as `ShellyDeviceDiscovery.ToDevices` and `IsSameDevice` are tested.
-- To run a whole subject discovery, create a `DiscoveryScan` with fake `ISsdpSearch`, `IMulticastDnsBrowser` and `IUdpDiscovery` implementations and call it through `ISubjectDiscovery.DiscoverAsync(scan, existingSubjects, cancellationToken)`, which also applies the deduplication and `Matches`.
-- The E2E host replaces the shared services with empty ones, so a subject discovery that only uses them finds nothing there and needs no setup. One that calls an address of its own, such as a vendor's cloud service, needs a stub in `WebTestingHostFactory`, as the Nuki discovery service has; that stub only reaches an `HttpClient` from `IHttpClientFactory`. The FRITZ!Box subject discovery asks `fritz.box` only when the name resolves to an address on the local network: on a CI runner it makes only a name lookup, and behind a FRITZ!Box the router answers.
+- To run a whole subject discovery, construct it with fakes of the services it takes, such as `ISsdpSearch`, `IMulticastDnsBrowser` or `IUdpDiscovery`, and call it through `ISubjectDiscovery.DiscoverAsync(existingSubjects, cancellationToken)`, which also applies the deduplication and `Matches`.
+- The E2E host replaces `ISsdpSearch`, `IMulticastDnsBrowser` and `IUdpDiscovery` with empty ones, so a subject discovery that only uses them finds nothing there and needs no setup. One that calls an address of its own, such as a vendor's cloud service, needs a stub in `WebTestingHostFactory`, as the Nuki discovery service has; that stub only reaches an `HttpClient` from `IHttpClientFactory`. The FRITZ!Box subject discovery asks `fritz.box` only when the name resolves to an address on the local network: on a CI runner it makes only a name lookup, and behind a FRITZ!Box the router answers.
 
 ## Example
 
 A subject discovery for a plug that announces `_acme._tcp` with its ID in a TXT record:
 
 ```csharp
-public sealed class AcmePlugDiscovery : SubjectDiscovery<AcmePlug, AcmeDiscoveredPlug>
+public sealed class AcmePlugDiscovery(IMulticastDnsBrowser multicastDnsBrowser) : SubjectDiscovery<AcmePlug, AcmeDiscoveredPlug>
 {
     protected override async IAsyncEnumerable<AcmeDiscoveredPlug> DiscoverAsync(
-        DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        foreach (var instance in await scan.MulticastDns.BrowseAsync("_acme._tcp", cancellationToken))
+        foreach (var instance in await multicastDnsBrowser.BrowseAsync("_acme._tcp", cancellationToken))
         {
             if (instance.Properties.TryGetValue("id", out var id) && instance.Addresses.Count > 0)
             {

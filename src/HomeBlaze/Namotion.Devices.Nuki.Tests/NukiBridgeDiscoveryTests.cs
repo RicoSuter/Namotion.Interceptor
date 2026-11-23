@@ -177,10 +177,9 @@ public class NukiBridgeDiscoveryTests
         // Arrange
         const string json = """{"bridges": [{"bridgeId": 2117604523, "ip": "192.168.1.50", "port": 8080}], "errorCode": 0}""";
         ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(json));
-        var scan = new DiscoveryScan(new EmptySsdpSearch(), new EmptyMulticastDnsBrowser(), new UnusedUdpDiscovery(), CancellationToken.None);
 
         // Act
-        var discovered = await discovery.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
+        var discovered = await discovery.DiscoverAsync([], CancellationToken.None).ToListAsync();
 
         // Assert
         var bridge = Assert.IsType<NukiDiscoveredBridge>(Assert.Single(discovered).Result);
@@ -204,26 +203,5 @@ public class NukiBridgeDiscoveryTests
     private sealed class StubHttpClientFactory(string json) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => CreateAnsweringClient(json);
-    }
-
-    private sealed class EmptySsdpSearch : ISsdpSearch
-    {
-        public Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<SsdpResponse>>([]);
-    }
-
-    private sealed class EmptyMulticastDnsBrowser : IMulticastDnsBrowser
-    {
-        public Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<MulticastDnsServiceInstance>>([]);
-    }
-
-    private sealed class UnusedUdpDiscovery : IUdpDiscovery
-    {
-        public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
-        public IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
     }
 }

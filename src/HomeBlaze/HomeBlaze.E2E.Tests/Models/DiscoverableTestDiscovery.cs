@@ -44,7 +44,7 @@ public sealed class DiscoverableTestDiscovery : SubjectDiscovery<DiscoverableTes
     public static IReadOnlyCollection<string> MatchedHostAddresses => MatchedHostAddressQueue;
 
     protected override async IAsyncEnumerable<DiscoverableTestResult> DiscoverAsync(
-        DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _scanCount);
         await Task.Yield();
