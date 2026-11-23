@@ -217,8 +217,8 @@ public class SubjectDiscoveryServiceTests
 
         // Assert
         Assert.Empty(results);
-        Assert.False(service.HasDiscoveries([typeof(DiscoveryTestSubject)]));
-        Assert.True(service.HasDiscoveries([typeof(OtherDiscoveryTestSubject)]));
+        Assert.False(service.HasSubjectDiscoveries([typeof(DiscoveryTestSubject)]));
+        Assert.True(service.HasSubjectDiscoveries([typeof(OtherDiscoveryTestSubject)]));
     }
 
     private sealed class RecordingLogger : ILogger<SubjectDiscoveryService>

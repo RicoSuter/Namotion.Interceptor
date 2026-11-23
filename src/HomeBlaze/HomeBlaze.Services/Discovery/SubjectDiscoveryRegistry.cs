@@ -14,7 +14,7 @@ public sealed class SubjectDiscoveryRegistry
     private readonly SubjectComponentRegistry _componentRegistry;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<SubjectDiscoveryRegistry> _logger;
-    private readonly Lazy<ISubjectDiscovery[]> _discoveries;
+    private readonly Lazy<ISubjectDiscovery[]> _subjectDiscoveries;
 
     public SubjectDiscoveryRegistry(
         TypeProvider typeProvider,
@@ -25,7 +25,7 @@ public sealed class SubjectDiscoveryRegistry
         _componentRegistry = componentRegistry;
         _serviceProvider = serviceProvider;
         _logger = logger;
-        _discoveries = new Lazy<ISubjectDiscovery[]>(() => CreateDiscoveries(typeProvider.Types));
+        _subjectDiscoveries = new Lazy<ISubjectDiscovery[]>(() => CreateSubjectDiscoveries(typeProvider.Types));
     }
 
     /// <summary>
@@ -37,9 +37,9 @@ public sealed class SubjectDiscoveryRegistry
     /// The subject discoveries are created once, on the first call, from the types loaded then; types added later are
     /// not scanned, so every subject discovery type must be loaded before.
     /// </remarks>
-    public IReadOnlyList<ISubjectDiscovery> GetDiscoveries() => _discoveries.Value;
+    public IReadOnlyList<ISubjectDiscovery> GetSubjectDiscoveries() => _subjectDiscoveries.Value;
 
-    private ISubjectDiscovery[] CreateDiscoveries(IReadOnlyCollection<Type> types)
+    private ISubjectDiscovery[] CreateSubjectDiscoveries(IReadOnlyCollection<Type> types)
     {
         var discoveries = new List<ISubjectDiscovery>();
         foreach (var type in types)

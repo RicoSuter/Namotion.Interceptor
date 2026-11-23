@@ -14,7 +14,7 @@ public sealed class SubjectDiscoveryService
     /// </summary>
     internal static readonly TimeSpan ScanTimeout = TimeSpan.FromSeconds(30);
 
-    private readonly Func<IReadOnlyList<ISubjectDiscovery>> _getDiscoveries;
+    private readonly Func<IReadOnlyList<ISubjectDiscovery>> _getSubjectDiscoveries;
     private readonly ISsdpSearch _ssdpSearch;
     private readonly IMulticastDnsBrowser _multicastDnsBrowser;
     private readonly TimeProvider _timeProvider;
@@ -26,18 +26,18 @@ public sealed class SubjectDiscoveryService
         IMulticastDnsBrowser multicastDnsBrowser,
         TimeProvider timeProvider,
         ILogger<SubjectDiscoveryService> logger)
-        : this(registry.GetDiscoveries, ssdpSearch, multicastDnsBrowser, timeProvider, logger)
+        : this(registry.GetSubjectDiscoveries, ssdpSearch, multicastDnsBrowser, timeProvider, logger)
     {
     }
 
     internal SubjectDiscoveryService(
-        Func<IReadOnlyList<ISubjectDiscovery>> getDiscoveries,
+        Func<IReadOnlyList<ISubjectDiscovery>> getSubjectDiscoveries,
         ISsdpSearch ssdpSearch,
         IMulticastDnsBrowser multicastDnsBrowser,
         TimeProvider timeProvider,
         ILogger<SubjectDiscoveryService> logger)
     {
-        _getDiscoveries = getDiscoveries;
+        _getSubjectDiscoveries = getSubjectDiscoveries;
         _ssdpSearch = ssdpSearch;
         _multicastDnsBrowser = multicastDnsBrowser;
         _timeProvider = timeProvider;
@@ -47,8 +47,8 @@ public sealed class SubjectDiscoveryService
     /// <summary>
     /// Whether a subject discovery finds devices of one of <paramref name="subjectTypes"/>.
     /// </summary>
-    public bool HasDiscoveries(IReadOnlyCollection<Type> subjectTypes) =>
-        _getDiscoveries().Any(discovery => subjectTypes.Contains(discovery.SubjectType));
+    public bool HasSubjectDiscoveries(IReadOnlyCollection<Type> subjectTypes) =>
+        _getSubjectDiscoveries().Any(discovery => subjectTypes.Contains(discovery.SubjectType));
 
     /// <summary>
     /// Runs the subject discoveries of <paramref name="subjectTypes"/> in parallel and reports what they find, until
@@ -75,7 +75,7 @@ public sealed class SubjectDiscoveryService
         var scanToken = scanCancellation.Token;
         var scan = new DiscoveryScan(_ssdpSearch, _multicastDnsBrowser, scanToken);
         var reporter = new ScanReporter(onResult, onFailure);
-        var discoveries = _getDiscoveries().Where(discovery => subjectTypes.Contains(discovery.SubjectType));
+        var discoveries = _getSubjectDiscoveries().Where(discovery => subjectTypes.Contains(discovery.SubjectType));
         try
         {
             // Bounded by the token as well, so a subject discovery that ignores it cannot hold the scan past its time limit.

@@ -52,7 +52,7 @@ public sealed class FritzBoxDiscovery : SubjectDiscovery<FritzBox, FritzBoxDisco
     protected override async IAsyncEnumerable<FritzBoxDiscoveryResult> DiscoverAsync(
         DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        foreach (var result in await DiscoverAsync(scan.Ssdp, DescriptionTimeout, cancellationToken))
+        foreach (var result in await SearchAsync(scan.Ssdp, DescriptionTimeout, cancellationToken))
         {
             yield return result;
         }
@@ -73,27 +73,42 @@ public sealed class FritzBoxDiscovery : SubjectDiscovery<FritzBox, FritzBoxDisco
     /// answer or does not describe a FRITZ!Box: it is left out of the result. Cancellation still propagates.
     /// </summary>
     /// <param name="ssdpSearch">The SSDP search to use.</param>
-    /// <param name="timeout">How long to wait for each description request.</param>
+    /// <param name="timeout">
+    /// How long to wait for the name resolution of <c>fritz.box</c> and for each description request.
+    /// </param>
     /// <param name="cancellationToken">Cancels the search and every description request.</param>
     /// <returns>
     /// The routers found, de-duplicated by unique device name, or by host address when that is absent, with
     /// repeaters last. A router found by both SSDP and the <c>fritz.box</c> fallback is kept once, under its SSDP
     /// host address.
     /// </returns>
-    public static Task<IReadOnlyList<FritzBoxDiscoveryResult>> DiscoverAsync(
-        ISsdpSearch ssdpSearch, TimeSpan timeout, CancellationToken cancellationToken) =>
-        DiscoverAsync(ssdpSearch, timeout, Dns.GetHostAddressesAsync, cancellationToken);
+    public static async Task<IReadOnlyList<FritzBoxDiscoveryResult>> SearchAsync(
+        ISsdpSearch ssdpSearch, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        using var httpClient = FritzBoxHttpClient.CreatePlain(timeout, Tr64Description.MaximumBytes);
+        return await SearchAsync(
+            ssdpSearch,
+            timeout,
+            Dns.GetHostAddressesAsync,
+            (host, token) => DescribeAsync(httpClient, host, Tr64Description.DescriptionPort, token),
+            TimeProvider.System,
+            cancellationToken);
+    }
 
-    internal static async Task<IReadOnlyList<FritzBoxDiscoveryResult>> DiscoverAsync(
+    internal static async Task<IReadOnlyList<FritzBoxDiscoveryResult>> SearchAsync(
         ISsdpSearch ssdpSearch,
         TimeSpan timeout,
         Func<string, CancellationToken, Task<IPAddress[]>> resolveAsync,
+        Func<string, CancellationToken, Task<FritzBoxDiscoveryResult?>> describeAsync,
+        TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
-        // Without a FRITZ!Box on the network the name resolves to AVM's public server or not at all, and a LAN
-        // discovery must not send requests to the internet.
-        var isWellKnownHostLocal = IsOnLocalNetworkAsync(WellKnownHost, resolveAsync, timeout, cancellationToken);
+        // Without a FRITZ!Box on the network the name resolves to AVM's public server or not at all, and the fallback
+        // must not send a request to the internet.
+        var isWellKnownHostLocal = IsOnLocalNetworkAsync(WellKnownHost, resolveAsync, timeout, timeProvider, cancellationToken);
         var responses = await ssdpSearch.SearchAsync(SearchTarget, cancellationToken);
+
+        // A slot is reserved for the fritz.box fallback so a flood of SSDP answers cannot push it out of the cap.
         var hosts = responses
             .Select(response => response.Location.Host)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -103,12 +118,8 @@ public sealed class FritzBoxDiscovery : SubjectDiscovery<FritzBox, FritzBoxDisco
             hosts = hosts.Append(WellKnownHost);
         }
 
-        using var httpClient = FritzBoxHttpClient.CreatePlain(timeout, Tr64Description.MaximumBytes);
-
-        // A slot is reserved for the fritz.box fallback so a flood of SSDP answers cannot push it out of the cap.
         var distinctHosts = hosts.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var descriptions = await Task.WhenAll(
-            distinctHosts.Select(host => DescribeAsync(httpClient, host, Tr64Description.DescriptionPort, cancellationToken)));
+        var descriptions = await Task.WhenAll(distinctHosts.Select(host => describeAsync(host, cancellationToken)));
 
         var results = new Dictionary<string, FritzBoxDiscoveryResult>(StringComparer.OrdinalIgnoreCase);
         foreach (var result in descriptions)
@@ -127,14 +138,24 @@ public sealed class FritzBoxDiscovery : SubjectDiscovery<FritzBox, FritzBoxDisco
     /// local network. A name that does not resolve is not on it. Cancellation still propagates.
     /// </summary>
     internal static async Task<bool> IsOnLocalNetworkAsync(
-        string host, Func<string, CancellationToken, Task<IPAddress[]>> resolveAsync, TimeSpan timeout, CancellationToken cancellationToken)
+        string host,
+        Func<string, CancellationToken, Task<IPAddress[]>> resolveAsync,
+        TimeSpan timeout,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken)
     {
+        using var timeoutSource = new CancellationTokenSource(timeout, timeProvider);
+        using var linkedSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
         try
         {
-            var addresses = await resolveAsync(host, cancellationToken).WaitAsync(timeout, cancellationToken);
+            var addresses = await resolveAsync(host, linkedSource.Token);
             return addresses.Any(IsLocalNetworkAddress);
         }
-        catch (Exception exception) when ((exception is SocketException or TimeoutException) && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (SocketException) when (!cancellationToken.IsCancellationRequested)
         {
             return false;
         }

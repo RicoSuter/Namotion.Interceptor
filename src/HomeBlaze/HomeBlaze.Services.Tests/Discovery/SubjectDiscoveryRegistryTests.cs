@@ -31,7 +31,7 @@ public class SubjectDiscoveryRegistryTests
         var (registry, _) = CreateRegistry(typeof(AcceptedTestDiscovery));
 
         // Act
-        var discoveries = registry.GetDiscoveries();
+        var discoveries = registry.GetSubjectDiscoveries();
 
         // Assert
         Assert.IsType<AcceptedTestDiscovery>(Assert.Single(discoveries));
@@ -44,7 +44,7 @@ public class SubjectDiscoveryRegistryTests
         var (registry, _) = CreateRegistry(typeof(RejectedTestDiscovery));
 
         // Act
-        var discoveries = registry.GetDiscoveries();
+        var discoveries = registry.GetSubjectDiscoveries();
 
         // Assert
         Assert.Empty(discoveries);
@@ -57,7 +57,7 @@ public class SubjectDiscoveryRegistryTests
         var (registry, _) = CreateRegistry(typeof(ThrowingTestDiscovery), typeof(AcceptedTestDiscovery));
 
         // Act
-        var discoveries = registry.GetDiscoveries();
+        var discoveries = registry.GetSubjectDiscoveries();
 
         // Assert
         Assert.IsType<AcceptedTestDiscovery>(Assert.Single(discoveries));
@@ -70,7 +70,7 @@ public class SubjectDiscoveryRegistryTests
         var (registry, _) = CreateRegistry(typeof(InjectedTestDiscovery));
 
         // Act
-        var discovery = Assert.IsType<InjectedTestDiscovery>(Assert.Single(registry.GetDiscoveries()));
+        var discovery = Assert.IsType<InjectedTestDiscovery>(Assert.Single(registry.GetSubjectDiscoveries()));
 
         // Assert
         Assert.NotNull(discovery.Dependency);
@@ -83,7 +83,7 @@ public class SubjectDiscoveryRegistryTests
         var (registry, _) = CreateRegistry(typeof(SplitTestDiscovery));
 
         // Act
-        var discoveries = registry.GetDiscoveries();
+        var discoveries = registry.GetSubjectDiscoveries();
 
         // Assert
         Assert.Empty(discoveries);
@@ -96,7 +96,7 @@ public class SubjectDiscoveryRegistryTests
         var (registry, _) = CreateRegistry(typeof(EditOnlyTestDiscovery));
 
         // Act
-        var discoveries = registry.GetDiscoveries();
+        var discoveries = registry.GetSubjectDiscoveries();
 
         // Assert
         Assert.IsType<EditOnlyTestDiscovery>(Assert.Single(discoveries));
@@ -107,11 +107,11 @@ public class SubjectDiscoveryRegistryTests
     {
         // Arrange
         var (registry, typeProvider) = CreateRegistry(typeof(AcceptedTestDiscovery));
-        var first = registry.GetDiscoveries();
+        var first = registry.GetSubjectDiscoveries();
         typeProvider.AddTypes([typeof(EditOnlyTestDiscovery)]);
 
         // Act
-        var second = registry.GetDiscoveries();
+        var second = registry.GetSubjectDiscoveries();
 
         // Assert
         Assert.Same(first, second);

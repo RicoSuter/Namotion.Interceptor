@@ -195,7 +195,7 @@
         _nameOptions = Options.NameField;
 
         LoadTypes();
-        _isDiscoverAvailable = Options.Type is null && DiscoveryService.HasDiscoveries(_types.Select(descriptor => descriptor.Type).ToArray());
+        _isDiscoverAvailable = Options.Type is null && DiscoveryService.HasSubjectDiscoveries(_types.Select(descriptor => descriptor.Type).ToArray());
 
         // A normal handler would re-render the dialog, and with it the form, each time the pointer enters the button.
         _refreshEditPanelIsValid = new NonRenderingEventReceiver(RefreshEditPanelIsValidAsync).HandleAsync;

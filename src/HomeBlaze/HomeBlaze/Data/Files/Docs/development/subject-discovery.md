@@ -7,7 +7,7 @@ navTitle: Subject Discovery
 
 A subject discovery finds devices of one subject type on the network, so that the user can pick them on the Discover page of the create dialog instead of typing their address. It is one class in the device library and an opt-in on the type's Setup or Edit component. There is nothing to register: subject discoveries are found among the loaded types, as components are.
 
-Write one when the device announces itself (mDNS, SSDP) or a vendor service lists it. The design, the internals and the reasons behind them are in [Subject Discovery](../architecture/design/discovery.md).
+Write one when the device announces itself (mDNS, SSDP) or a vendor service lists it. The design, the internals and the reasons behind them are in [the Subject Discovery design](../architecture/design/discovery.md).
 
 ## The result
 
@@ -110,7 +110,7 @@ public sealed record MulticastDnsService(
 
 - `Ssdp.SearchAsync` sends an M-SEARCH for the search target, such as `urn:dslforum-org:device:InternetGatewayDevice:1`, listens for about 3 seconds and returns the answers for exactly that target. Searches are shared by exact search target.
 - `MulticastDns.BrowseAsync` browses a service type, such as `_hue._tcp`, and returns each instance with its host name, port, addresses and TXT records in `Properties`. Browses are shared by service type ignoring case.
-- What one query returns is capped, see [Subject Discovery](../architecture/design/discovery.md#scan-session-and-shared-services).
+- What one query returns is capped, see [the Subject Discovery design](../architecture/design/discovery.md#scan-session-and-shared-services).
 
 ## Your own I/O
 
@@ -144,7 +144,7 @@ public sealed class AcmeCloudDiscovery : SubjectDiscovery<AcmeHub, AcmeDiscovere
 
 - Keep parsing and matching in `internal static` methods, which the test project of the library reaches through `InternalsVisibleTo`, as `ShellyDeviceDiscovery.ToDevices` and `IsSameDevice` are tested.
 - To run a whole subject discovery, create a `DiscoveryScan` with fake `ISsdpSearch` and `IMulticastDnsBrowser` implementations and call it through `ISubjectDiscovery.DiscoverAsync(scan, existingSubjects, cancellationToken)`, which also applies the deduplication and `Matches`.
-- The E2E host replaces the shared services with empty ones, so a subject discovery that only uses them finds nothing there and needs no setup. One that calls an address of its own, such as a vendor's cloud service, needs a stub in `WebTestingHostFactory`, as the Nuki discovery service has; that stub only reaches an `HttpClient` from `IHttpClientFactory`. The FRITZ!Box subject discovery asks `fritz.box` only when the name resolves to an address on the local network, so in the E2E host it makes a name lookup and no request.
+- The E2E host replaces the shared services with empty ones, so a subject discovery that only uses them finds nothing there and needs no setup. One that calls an address of its own, such as a vendor's cloud service, needs a stub in `WebTestingHostFactory`, as the Nuki discovery service has; that stub only reaches an `HttpClient` from `IHttpClientFactory`. The FRITZ!Box subject discovery asks `fritz.box` only when the name resolves to an address on the local network: on a CI runner it makes only a name lookup, and behind a FRITZ!Box the router answers.
 
 ## Example
 
