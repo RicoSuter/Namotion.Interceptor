@@ -845,9 +845,16 @@ internal sealed class StorageReconciler
                 _subjectFactory.LogSkippedProperties(entry.Path, skipped);
 
                 // Not with a skipped value, which the save would replace with its default.
-                if (skipped.Count == 0 && _serializer.HasUnstoredSecrets(entry.Subject))
+                if (skipped.Count == 0)
                 {
-                    ScheduleSecretRewrite(entry.Path, entry.Subject, hash);
+                    if (_serializer.HasUnstoredSecrets(entry.Subject))
+                    {
+                        ScheduleSecretRewrite(entry.Path, entry.Subject, hash);
+                    }
+                }
+                else if (_serializer.HasUnstoredSecrets(entry.Subject))
+                {
+                    _subjectFactory.LogSecretsKeptInFile(entry.Path);
                 }
             }
 

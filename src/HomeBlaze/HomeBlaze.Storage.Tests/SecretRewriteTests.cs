@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using HomeBlaze.Storage.Internal;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Storage.Tests;
@@ -39,6 +41,25 @@ public class SecretRewriteTests : StorageTestBase
         await AsyncTestHelpers.WaitUntilAsync(
             () => device.Password == "s3cr3t" && HoldsSecretReferenceOnly("Gateway.json"), WatcherTimeout);
         Assert.Contains("s3cr3t", File.ReadAllText(SecretsPath));
+    }
+
+    [Fact]
+    public async Task WhenAReloadedPlaintextSecretHasAValueThatCannotBeRead_ThenAWarningTellsThatTheSecretStaysInTheFile()
+    {
+        // Arrange
+        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""");
+        var messages = new ConcurrentQueue<string>();
+        var storage = CreateStorage(logger: new RecordingLogger(messages));
+        await storage.ConnectAsync(CancellationToken.None);
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": [1], "password": "s3cr3t" }""");
+
+        // Act
+        await storage.ReconcileAsync(Named("Gateway.json"));
+
+        // Assert
+        Assert.Contains(messages, message => message.Contains("Gateway.json") && message.Contains("plaintext"));
+        Assert.DoesNotContain(messages, message => message.Contains("s3cr3t"));
     }
 
     [Fact]
@@ -90,5 +111,16 @@ public class SecretRewriteTests : StorageTestBase
         {
             return false;
         }
+    }
+
+    private sealed class RecordingLogger(ConcurrentQueue<string> messages) : ILogger<FluentStorageContainer>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => messages.Enqueue(formatter(state, exception));
     }
 }

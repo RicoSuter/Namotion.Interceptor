@@ -80,7 +80,15 @@ internal sealed class FileSubjectFactory
             if (_serializer.Deserialize(json, created: null, skipped.Add) is IInterceptorSubject subject)
             {
                 LogSkippedProperties(path, skipped);
-                hasUnstoredSecrets = skipped.Count == 0 && _serializer.HasUnstoredSecrets(subject);
+                if (skipped.Count == 0)
+                {
+                    hasUnstoredSecrets = _serializer.HasUnstoredSecrets(subject);
+                }
+                else if (_serializer.HasUnstoredSecrets(subject))
+                {
+                    LogSecretsKeptInFile(path);
+                }
+
                 return subject;
             }
         }
@@ -109,6 +117,15 @@ internal sealed class FileSubjectFactory
                 path, ConfigurableSubjectSerializer.DescribeSkippedProperties(skipped));
         }
     }
+
+    /// <summary>
+    /// Logs as a warning that the file at the path keeps a secret in plaintext, because it has a value that cannot be
+    /// read and a save would replace that value with its default.
+    /// </summary>
+    public void LogSecretsKeptInFile(string path)
+        => _logger?.LogWarning(
+            "The configuration of {Path} holds a secret in plaintext, which stays in the file until the issues of the file are corrected",
+            path);
 
     /// <summary>
     /// Takes a subject that entered the context when it was created and that no property holds out of that

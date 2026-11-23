@@ -106,7 +106,31 @@ public class FileSubjectFactoryTests
         }
     }
 
-    private static FileSubjectFactory CreateFactoryWithSecretStore(string secretsPath)
+    [Fact]
+    public void WhenAJsonFileWithAPlaintextSecretHasAValueThatCannotBeRead_ThenAWarningTellsThatTheSecretStaysInTheFile()
+    {
+        // Arrange
+        var directory = Directory.CreateTempSubdirectory("homeblaze-secrets-");
+        try
+        {
+            var logger = new LevelRecordingLogger();
+            var factory = CreateFactoryWithSecretStore(Path.Combine(directory.FullName, "Secrets.json"), logger);
+            var json = $$"""{ "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "host": [1], "password": "s3cr3t" }""";
+
+            // Act
+            factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out _);
+
+            // Assert
+            Assert.Contains(logger.Messages, message => message.Contains("/Gateway.json") && message.Contains("plaintext"));
+            Assert.DoesNotContain(logger.Messages, message => message.Contains("s3cr3t"));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    private static FileSubjectFactory CreateFactoryWithSecretStore(string secretsPath, ILogger? logger = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(new SecretStore(secretsPath));
@@ -116,12 +140,15 @@ public class FileSubjectFactoryTests
         return new FileSubjectFactory(
             new SubjectTypeRegistry(typeProvider),
             new ConfigurableSubjectSerializer(typeProvider, serviceProvider),
-            serviceProvider);
+            serviceProvider,
+            logger);
     }
 
     private sealed class LevelRecordingLogger : ILogger
     {
         public List<LogLevel> Levels { get; } = [];
+
+        public List<string> Messages { get; } = [];
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -129,6 +156,9 @@ public class FileSubjectFactoryTests
 
         public void Log<TState>(
             LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-            => Levels.Add(logLevel);
+        {
+            Levels.Add(logLevel);
+            Messages.Add(formatter(state, exception));
+        }
     }
 }
