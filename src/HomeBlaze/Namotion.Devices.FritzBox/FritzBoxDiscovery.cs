@@ -148,7 +148,8 @@ public sealed class FritzBoxDiscovery : SubjectDiscovery<FritzBox, FritzBoxDisco
         using var linkedSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
         try
         {
-            var addresses = await resolveAsync(host, linkedSource.Token);
+            // On Linux a running lookup ignores its token, so the wait itself must end at the timeout.
+            var addresses = await resolveAsync(host, linkedSource.Token).WaitAsync(linkedSource.Token);
             return addresses.Any(IsLocalNetworkAddress);
         }
         catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
