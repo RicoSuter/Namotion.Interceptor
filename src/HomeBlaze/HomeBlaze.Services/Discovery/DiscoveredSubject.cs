@@ -1,6 +1,7 @@
+using HomeBlaze.Abstractions.Discovery;
 using Namotion.Interceptor;
 
-namespace HomeBlaze.Abstractions.Discovery;
+namespace HomeBlaze.Services.Discovery;
 
 /// <summary>
 /// A found device, with the subject type that represents it.

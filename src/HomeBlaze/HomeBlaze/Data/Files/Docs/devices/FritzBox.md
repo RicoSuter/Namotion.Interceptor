@@ -25,7 +25,7 @@ The router's certificate key is pinned on first connection; see [Certificate Tru
 
 ## Discovery
 
-The Discover page of the create dialog finds FRITZ!Box routers and repeaters over SSDP and at `fritz.box`, when that name points into your local network. A router that is already added is recognized by its unique device name, so also after it moved to another address, or by its host address. A router added before discovery existed has no unique device name stored, so it is recognized only by its host address: one configured as `fritz.box` shows as new when SSDP finds it under its IP address.
+The Discover page of the create dialog finds FRITZ!Box routers and repeaters over SSDP and at `fritz.box`, when that name points into your local network. A router that is already added is recognized by its host address, or, while the subject is connected, by the unique device name it read from the router, so a connected router configured as `fritz.box` is also recognized under its IP address. A router that moved to another address while the subject is not connected shows as new on the Discover page.
 
 In a FRITZ!Box mesh, the clients of the repeaters already appear under the router. Discovery cannot see which mesh a repeater belongs to, so when it finds exactly one router, it lists the repeaters under that router, with their name and address, instead of as devices of their own. With several routers or none, each repeater is listed as a device of its own, and picking one explains when to add it.
 
@@ -35,7 +35,6 @@ In a FRITZ!Box mesh, the clients of the repeaters already appear under the route
 |---|---|---|---|
 | `Name` | string | `FRITZ!Box` | Title |
 | `HostAddress` | string | | IP address or host name of the router. Empty stops the subject. |
-| `Udn` | string | | Unique device name from the router's TR-064 description. Set from discovery and used to recognize the router as already added. |
 | `Username` | string | | FRITZ!Box user with the FRITZ!Box settings permission |
 | `Password` | string | | Password of that user, stored as a secret |
 | `PublicKeyPin` | string | | Base64 SHA-256 of the trusted certificate's public key. Empty trusts the key the router presents next and stores it. |
@@ -49,7 +48,6 @@ Both intervals accept 5 seconds to 1 hour; a value outside that range is clamped
   "$type": "Namotion.Devices.FritzBox.FritzBox",
   "name": "FRITZ!Box",
   "hostAddress": "192.168.178.1",
-  "udn": null,
   "username": "homeblaze",
   "password": null,
   "publicKeyPin": null,

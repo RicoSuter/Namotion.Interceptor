@@ -178,7 +178,7 @@ public class NukiBridgeDiscoveryTests
     {
         // Arrange
         const string json = """{"bridges": [{"bridgeId": 2117604523, "ip": "192.168.1.50", "port": 8080}], "errorCode": 0}""";
-        ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(json));
+        ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(() => CreateAnsweringClient(json)));
 
         // Act
         var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
@@ -188,6 +188,74 @@ public class NukiBridgeDiscoveryTests
         Assert.Equal("2117604523", bridge.Key);
         Assert.Equal("Nuki Bridge 2117604523", bridge.DisplayName);
         Assert.Equal("192.168.1.50:8080", bridge.Detail);
+    }
+
+    [Fact]
+    public async Task WhenTheDiscoveryServiceCannotBeReached_ThenTheSubjectDiscoveryFindsNothing()
+    {
+        // Arrange
+        ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(() => new HttpClient(new StubHandler(_ =>
+            Task.FromException<HttpResponseMessage>(new HttpRequestException("No route to host"))))));
+
+        // Act
+        var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
+
+        // Assert
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task WhenTheDiscoveryServiceAnswersWithAnError_ThenTheSubjectDiscoveryFindsNothing()
+    {
+        // Arrange
+        ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(() => new HttpClient(new StubHandler(_ =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable))))));
+
+        // Act
+        var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
+
+        // Assert
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task WhenTheDiscoveryServiceDoesNotAnswerInTime_ThenTheSubjectDiscoveryFindsNothing()
+    {
+        // Arrange
+        ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(CreateNeverAnsweringClient))
+        {
+            Timeout = TimeSpan.FromMilliseconds(1)
+        };
+
+        // Act
+        var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
+
+        // Assert
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task WhenTheCallerCancelsTheSubjectDiscovery_ThenTheCancellationIsThrown()
+    {
+        // Arrange
+        ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(CreateNeverAnsweringClient));
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await discovery.DiscoverAsync(cancellation.Token).ToListAsync());
+    }
+
+    [Fact]
+    public async Task WhenTheDiscoveryServiceAnswersWithInvalidJson_ThenTheSubjectDiscoveryFails()
+    {
+        // Arrange
+        ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(() => CreateAnsweringClient("{\"bridges\": 42}")));
+
+        // Act & Assert
+        await Assert.ThrowsAsync<System.Text.Json.JsonException>(
+            async () => await discovery.DiscoverAsync(CancellationToken.None).ToListAsync());
     }
 
     private static HttpClient CreateAnsweringClient(string json) => new(new StubHandler(_ =>
@@ -202,8 +270,8 @@ public class NukiBridgeDiscoveryTests
             answer(cancellationToken);
     }
 
-    private sealed class StubHttpClientFactory(string json) : IHttpClientFactory
+    private sealed class StubHttpClientFactory(Func<HttpClient> createClient) : IHttpClientFactory
     {
-        public HttpClient CreateClient(string name) => CreateAnsweringClient(json);
+        public HttpClient CreateClient(string name) => createClient();
     }
 }

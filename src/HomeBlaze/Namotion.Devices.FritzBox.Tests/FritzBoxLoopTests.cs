@@ -46,6 +46,25 @@ public class FritzBoxLoopTests
     }
 
     [Fact]
+    public async Task WhenTheRouterIsConnected_ThenAResultWithItsUdnMatchesItAtAnotherAddress()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        var router = CreateRouter(fake);
+        var sameRouter = new FritzBoxDiscoveryResult("fritz.box", null, null, "UUID:75802409-BCCB-40E7-8E6C-0123456789AB", IsRepeater: false);
+        var otherRouter = sameRouter with { Udn = "uuid:other" };
+        Assert.False(sameRouter.Matches(router));
+
+        // Act
+        await using var running = await RunAsync(router);
+        await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should connect.");
+
+        // Assert
+        Assert.True(sameRouter.Matches(router));
+        Assert.False(otherRouter.Matches(router));
+    }
+
+    [Fact]
     public async Task WhenThePasswordIsWrong_ThenOneLoginFailsAndNothingElseIsAsked()
     {
         // Arrange

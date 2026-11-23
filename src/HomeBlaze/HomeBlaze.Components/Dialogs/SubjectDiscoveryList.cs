@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Discovery;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 

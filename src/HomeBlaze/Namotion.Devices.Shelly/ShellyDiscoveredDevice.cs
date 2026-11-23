@@ -20,16 +20,10 @@ public sealed record ShellyDiscoveredDevice(string DeviceId, string HostAddress,
     /// <inheritdoc />
     public bool Matches(ShellyDevice subject)
     {
-        // The ID the running subject read from the device wins over the stored one, which can be stale after the
-        // device at the host address was replaced, and covers a subject created before discovery stored an ID.
-        var readDeviceId = subject.DeviceInfo?.Id;
-        var storedDeviceId = subject.DeviceId;
-        var deviceId =
-            !string.IsNullOrWhiteSpace(readDeviceId) ? readDeviceId :
-            !string.IsNullOrWhiteSpace(storedDeviceId) ? storedDeviceId.Trim() :
-            null;
-
-        return deviceId is not null
+        // The ID the running subject read from the device decides, so a device that replaced it at the host address
+        // is listed as new; the host address only decides while no ID is known, such as before the subject connected.
+        var deviceId = subject.DeviceInfo?.Id;
+        return !string.IsNullOrWhiteSpace(deviceId)
             ? string.Equals(deviceId, DeviceId, StringComparison.OrdinalIgnoreCase)
             : string.Equals(subject.HostAddress?.Trim(), HostAddress, StringComparison.OrdinalIgnoreCase);
     }

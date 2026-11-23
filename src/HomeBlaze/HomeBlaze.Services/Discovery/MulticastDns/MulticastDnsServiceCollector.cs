@@ -105,7 +105,6 @@ internal sealed class MulticastDnsServiceCollector
             instances.Add(new MulticastDnsServiceInstance(
                 instanceName[..^suffix.Length],
                 service?.Target,
-                service?.Port ?? 0,
                 addresses.Length > 0 ? addresses : [sender],
                 properties));
         }

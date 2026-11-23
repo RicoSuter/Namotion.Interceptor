@@ -600,13 +600,6 @@ namespace HomeBlaze.Abstractions.Discovery
         public string? Detail { get; init; }
         public string DisplayName { get; init; }
     }
-    public sealed class DiscoveredSubject : System.IEquatable<HomeBlaze.Abstractions.Discovery.DiscoveredSubject>
-    {
-        public DiscoveredSubject(System.Type SubjectType, HomeBlaze.Abstractions.Discovery.IDiscoveryResult Result, Namotion.Interceptor.IInterceptorSubject? ExistingSubject) { }
-        public Namotion.Interceptor.IInterceptorSubject? ExistingSubject { get; init; }
-        public HomeBlaze.Abstractions.Discovery.IDiscoveryResult Result { get; init; }
-        public System.Type SubjectType { get; init; }
-    }
     public interface IDiscoveryResult
     {
         string? Detail { get; }
@@ -640,11 +633,10 @@ namespace HomeBlaze.Abstractions.Discovery
     }
     public sealed class MulticastDnsServiceInstance : System.IEquatable<HomeBlaze.Abstractions.Discovery.MulticastDnsServiceInstance>
     {
-        public MulticastDnsServiceInstance(string InstanceName, string? HostName, int Port, System.Collections.Generic.IReadOnlyList<System.Net.IPAddress> Addresses, System.Collections.Generic.IReadOnlyDictionary<string, string> Properties) { }
+        public MulticastDnsServiceInstance(string InstanceName, string? HostName, System.Collections.Generic.IReadOnlyList<System.Net.IPAddress> Addresses, System.Collections.Generic.IReadOnlyDictionary<string, string> Properties) { }
         public System.Collections.Generic.IReadOnlyList<System.Net.IPAddress> Addresses { get; init; }
         public string? HostName { get; init; }
         public string InstanceName { get; init; }
-        public int Port { get; init; }
         public System.Collections.Generic.IReadOnlyDictionary<string, string> Properties { get; init; }
     }
     public sealed class SsdpResponse : System.IEquatable<HomeBlaze.Abstractions.Discovery.SsdpResponse>

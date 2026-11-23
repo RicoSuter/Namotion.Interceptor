@@ -45,7 +45,6 @@ public class MulticastDnsServiceCollectorTests
         var instance = Assert.Single(instances);
         Assert.Equal("Philips Hue - 1A2B3C", instance.InstanceName);
         Assert.Equal("hue.local", instance.HostName);
-        Assert.Equal(443, instance.Port);
         Assert.Equal([IPAddress.Parse("192.168.1.20")], instance.Addresses);
         Assert.Equal("001788fffe1a2b3c", instance.Properties["BRIDGEID"]);
         Assert.Equal("", instance.Properties["flag"]);
@@ -98,7 +97,6 @@ public class MulticastDnsServiceCollectorTests
         var instance = Assert.Single(collector.GetInstances("_hue._tcp"));
 
         // Assert
-        Assert.Equal(443, instance.Port);
         Assert.Equal("abc", instance.Properties["bridgeid"]);
         Assert.Equal([IPAddress.Parse("192.168.1.20")], instance.Addresses);
     }

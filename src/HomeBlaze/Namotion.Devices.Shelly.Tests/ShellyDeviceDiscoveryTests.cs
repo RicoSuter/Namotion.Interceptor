@@ -25,7 +25,7 @@ public class ShellyDeviceDiscoveryTests
             properties["app"] = application;
         }
 
-        return new MulticastDnsServiceInstance(instanceName, hostName, 80, [IPAddress.Parse(address)], properties);
+        return new MulticastDnsServiceInstance(instanceName, hostName, [IPAddress.Parse(address)], properties);
     }
 
     [Fact]
@@ -124,19 +124,6 @@ public class ShellyDeviceDiscoveryTests
     }
 
     [Fact]
-    public void WhenTheSubjectHasADeviceId_ThenTheDeviceIdDecides()
-    {
-        // Arrange
-        var device = CreateDevice();
-        device.HostAddress = "192.168.1.99";
-        device.DeviceId = "ShellyPlus1PM-A8032AB12345";
-
-        // Act & Assert
-        Assert.True(Found().Matches(device));
-        Assert.False(Found(deviceId: "shellyplus1pm-other").Matches(device));
-    }
-
-    [Fact]
     public void WhenTheRunningSubjectReadItsDeviceId_ThenThatDecides()
     {
         // Arrange
@@ -146,24 +133,23 @@ public class ShellyDeviceDiscoveryTests
 
         // Act & Assert
         Assert.True(Found().Matches(device));
+        Assert.False(Found(deviceId: "shellyplus1pm-other").Matches(device));
     }
 
     [Fact]
-    public void WhenTheRunningSubjectReadAnotherDeviceIdThanTheStoredOne_ThenTheReadOneDecides()
+    public void WhenTheRunningSubjectReadAnotherDeviceId_ThenTheSameHostAddressDoesNotMatch()
     {
         // Arrange
         var device = CreateDevice();
         device.HostAddress = "192.168.1.41";
-        device.DeviceId = "shellyplus1pm-replaced";
-        device.DeviceInfo = new ShellyDeviceInfo { Id = "shellyplus1pm-a8032ab12345" };
+        device.DeviceInfo = new ShellyDeviceInfo { Id = "shellyplus1pm-replaced" };
 
         // Act & Assert
-        Assert.True(Found().Matches(device));
-        Assert.False(Found(deviceId: "shellyplus1pm-replaced").Matches(device));
+        Assert.False(Found().Matches(device));
     }
 
     [Fact]
-    public void WhenTheSubjectHasNoDeviceId_ThenTheHostAddressDecides()
+    public void WhenTheRunningSubjectReadNoDeviceId_ThenTheHostAddressDecides()
     {
         // Arrange
         var device = CreateDevice();
@@ -172,20 +158,6 @@ public class ShellyDeviceDiscoveryTests
         // Act & Assert
         Assert.True(Found().Matches(device));
         Assert.False(Found(hostAddress: "192.168.1.42").Matches(device));
-    }
-
-    [Fact]
-    public void WhenTheStoredDeviceIdIsBlank_ThenTheDeviceIdTheRunningSubjectReadDecides()
-    {
-        // Arrange
-        var device = CreateDevice();
-        device.HostAddress = "192.168.1.99";
-        device.DeviceId = " ";
-        device.DeviceInfo = new ShellyDeviceInfo { Id = "shellyplus1pm-a8032ab12345" };
-
-        // Act & Assert
-        Assert.True(Found().Matches(device));
-        Assert.False(Found(deviceId: "shellyplus1pm-other").Matches(device));
     }
 
     private sealed class AnsweringBrowser(params MulticastDnsServiceInstance[] instances) : IMulticastDnsBrowser

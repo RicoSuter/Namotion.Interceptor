@@ -21,7 +21,7 @@ public class BlazorSubjectSetupService : ISubjectSetupService
         return SubjectSetupDialog.ShowAsync(_dialogService, new SubjectSetupOptions
         {
             NameField = new SubjectNameOptions("File name", FileExtensions.Json, target.ChildNames),
-            OnCreatedAsync = (result, _) => addSubjectAsync(result, cancellationToken)
+            OnCreatedAsync = result => addSubjectAsync(result, cancellationToken)
         });
     }
 }

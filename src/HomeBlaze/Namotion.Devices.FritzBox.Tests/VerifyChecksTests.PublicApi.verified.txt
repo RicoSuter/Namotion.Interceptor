@@ -95,8 +95,6 @@ namespace Namotion.Devices.FritzBox
         public string? StatusMessage { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string? Title { get; }
-        [HomeBlaze.Abstractions.Attributes.Configuration]
-        public string? Udn { get; set; }
         [HomeBlaze.Abstractions.Attributes.State(Position=122, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.KilobytePerSecond)]
         [System.ComponentModel.Category("Internet")]
         public decimal? UploadRate { get; }

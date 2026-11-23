@@ -183,13 +183,43 @@ public class SubjectNameOptionsTests
     }
 
     [Fact]
-    public void WhenThePreferredNameIsTaken_ThenTheTypeNameIsSuggested()
+    public void WhenThePreferredNameIsTaken_ThenTheNextFreeNumberIsAppended()
     {
         // Arrange
-        var options = new SubjectNameOptions("File name", ".json", ["Living room.json"]);
+        var options = new SubjectNameOptions("File name", ".json", ["FRITZ!Repeater 1200 AX.json", "fritz!repeater 1200 ax 2"]);
 
         // Act
-        var name = options.SuggestName("Living room", typeof(SubjectNameOptionsTests));
+        var name = options.SuggestName("FRITZ!Repeater 1200 AX", typeof(SubjectNameOptionsTests));
+
+        // Assert
+        Assert.Equal("FRITZ!Repeater 1200 AX 3", name);
+        Assert.Null(options.Validate(name));
+    }
+
+    [Fact]
+    public void WhenThePreferredNameIsInvalid_ThenTheTypeNameIsSuggested()
+    {
+        // Arrange
+        var options = new SubjectNameOptions("File name", ".json", []);
+
+        // Act
+        var name = options.SuggestName("Living/room", typeof(SubjectNameOptionsTests));
+
+        // Assert
+        Assert.Equal(nameof(SubjectNameOptionsTests), name);
+    }
+
+    [Fact]
+    public void WhenTheNumberedPreferredNameDoesNotFitTheRule_ThenTheTypeNameIsSuggested()
+    {
+        // Arrange
+        var options = new SubjectNameOptions("File name", ".json", ["Kitchen.json"])
+        {
+            Rule = trimmedName => trimmedName.All(char.IsLetter) ? null : "Only letters"
+        };
+
+        // Act
+        var name = options.SuggestName("Kitchen", typeof(SubjectNameOptionsTests));
 
         // Assert
         Assert.Equal(nameof(SubjectNameOptionsTests), name);

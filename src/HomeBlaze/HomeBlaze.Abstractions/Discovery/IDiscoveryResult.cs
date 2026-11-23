@@ -4,7 +4,8 @@ namespace HomeBlaze.Abstractions.Discovery;
 
 /// <summary>
 /// A device that a <see cref="SubjectDiscovery{TSubject, TResult}"/> found, with what the user is shown for it.
-/// Implement <see cref="IDiscoveryResult{TSubject}"/> instead of this interface.
+/// Implementing <see cref="IDiscoveryResult{TSubject}"/> is recommended, as it implements <see cref="Matches"/> for
+/// subjects of other types.
 /// </summary>
 public interface IDiscoveryResult
 {

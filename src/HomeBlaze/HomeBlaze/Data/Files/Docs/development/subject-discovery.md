@@ -42,10 +42,10 @@ public sealed record DiscoveredItem(string DisplayName, string? Detail);
 ```
 
 - `Key` is a stable identity of the device, such as a MAC address, a serial number or a bridge ID. The scan drops a result with a key your subject discovery already returned in it, compared ordinally, so yielding a device twice is fine, and normalize the case where the device's identity ignores it, such as a MAC address.
-- `DisplayName` is the title of the row and the suggested name of the subject, when it is a valid, unused and plain name.
+- `DisplayName` is the title of the row and the suggested name of the subject, when it is a valid and plain name, with a number appended while it is taken ("FRITZ!Repeater 1200 AX 2").
 - `Detail` is shown under it, after the type's display name.
 - `IncludedItems` lists what comes with the device when the user creates it, such as the speakers of a Sonos household or the repeaters of a FRITZ!Box mesh. The page shows them collapsed under the row, and they cannot be picked on their own. Leave it out when there is nothing to list.
-- `Matches` decides whether a subject already represents the device, by the type's own rule, such as the same MAC address or the same host. Implement only `Matches(TSubject)`: `IDiscoveryResult<TSubject>` implements the untyped one, which is false for a subject of another type. The caller matches: the scan asks each result about the existing subjects of the type and shows the first match as "already added" with a link to it, and the create dialog asks the rows of the type not added yet about each subject it creates. Match on a stable identity, so a device that moved is still recognized. Whether the host address counts as well is the type's rule: `ShellyDiscoveredDevice` uses it only when no identity is known, so a device that replaced another at the same address is listed as new, while `FritzBoxDiscoveryResult` accepts either, because its subject connects to whatever answers at that address. A `Matches` that throws ends its subject discovery during a scan and counts as no match in the dialog, see [Error handling](../architecture/design/discovery.md#error-handling). Keep it a quick comparison of values, without I/O or blocking: it runs on the scan's threads and on the dialog's renderer.
+- `Matches` decides whether a subject already represents the device, by the type's own rule, such as the same MAC address or the same host. Implement only `Matches(TSubject)`: `IDiscoveryResult<TSubject>` implements the untyped one, which is false for a subject of another type. The caller matches: the scan asks each result about the existing subjects of the type and shows the first match as "already added" with a link to it, and the create dialog asks the rows of the type not added yet about each subject it creates. Match on a stable identity that the running subject reads from the device, so a device that moved is still recognized while its subject is connected; HomeBlaze stores no identity of its own for discovery. Whether the host address counts as well is the type's rule: `ShellyDiscoveredDevice` uses it only while the subject has not read the device ID, so a device that replaced another at the same address is listed as new, while `FritzBoxDiscoveryResult` accepts either the unique device name of the connected router or the host address, because its subject connects to whatever answers at that address. A `Matches` that throws ends its subject discovery during a scan and counts as no match in the dialog, see [Error handling](../architecture/design/discovery.md#error-handling). Keep it a quick comparison of values, without I/O or blocking: it runs on the scan's threads and on the dialog's renderer.
 
 ## The subject discovery
 
@@ -122,7 +122,7 @@ public interface IMulticastDnsBrowser
 }
 
 public sealed record MulticastDnsServiceInstance(
-    string InstanceName, string? HostName, int Port, IReadOnlyList<IPAddress> Addresses, IReadOnlyDictionary<string, string> Properties);
+    string InstanceName, string? HostName, IReadOnlyList<IPAddress> Addresses, IReadOnlyDictionary<string, string> Properties);
 
 public interface IUdpDiscovery
 {
@@ -135,7 +135,7 @@ public readonly record struct UdpDatagram(ReadOnlyMemory<byte> Payload, IPAddres
 ```
 
 - `ISsdpSearch.SearchAsync` sends an M-SEARCH for the search target, such as `urn:dslforum-org:device:InternetGatewayDevice:1`, listens for about 3 seconds and returns the answers for exactly that target. `Headers` are looked up by name ignoring case, such as a vendor header like `X-RINCON-HOUSEHOLD`; the values of a repeated header are joined by `, `, and headers are capped in number and length.
-- `IMulticastDnsBrowser.BrowseAsync` browses a service type, such as `_hue._tcp`, and returns each instance with its host name, port, addresses and TXT records in `Properties`.
+- `IMulticastDnsBrowser.BrowseAsync` browses a service type, such as `_hue._tcp`, and returns each instance with its host name, addresses and TXT records in `Properties`.
 - `IUdpDiscovery.BroadcastAsync` sends your request to the given port as a broadcast on every IPv4 adapter, repeats it once after about a second, and yields each answer as it arrives within the window, with the address it came from. A device that receives both requests answers twice, which the deduplication by `Key` absorbs.
 - `IUdpDiscovery.ListenAsync` listens on a port with address reuse for devices that announce themselves, and yields each datagram that arrives within the window.
 - Each UDP payload is a copy that stays valid. A socket error, such as a port another program holds without address reuse, ends the call quietly with nothing more yielded. The call itself throws `ArgumentOutOfRangeException` for a port outside 1 to 65535, a request outside 1 to 1024 bytes, or a window of zero or less or of more than 30 seconds, and the enumeration throws only for the caller's cancellation.
@@ -203,10 +203,11 @@ public sealed record AcmeDiscoveredPlug(string DeviceId, string HostAddress, str
 
     public string? Detail => HostAddress;
 
+    // ReportedDeviceId is state the running subject read from the plug, null until it connected.
     public bool Matches(AcmePlug subject) =>
-        string.IsNullOrWhiteSpace(subject.DeviceId)
+        string.IsNullOrWhiteSpace(subject.ReportedDeviceId)
             ? string.Equals(subject.HostAddress?.Trim(), HostAddress, StringComparison.OrdinalIgnoreCase)
-            : string.Equals(subject.DeviceId.Trim(), DeviceId, StringComparison.OrdinalIgnoreCase);
+            : string.Equals(subject.ReportedDeviceId, DeviceId, StringComparison.OrdinalIgnoreCase);
 }
 ```
 
