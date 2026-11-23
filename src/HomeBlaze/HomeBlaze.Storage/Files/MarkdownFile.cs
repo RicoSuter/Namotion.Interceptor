@@ -303,16 +303,21 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                     return;
                 }
 
-                var result = await WriteBlockAsync(subjects[index], CancellationToken.None);
-                if (result == BlockWriteResult.Written)
+                switch (await WriteBlockAsync(subjects[index], CancellationToken.None))
                 {
-                    _parser.LogMovedSecrets(FullPath);
-                }
-                else if (result == BlockWriteResult.NotWritten)
-                {
-                    // The mark only keeps the reload of a refused write from trying again. No reload followed here, so
-                    // the next parse that applies the configuration checks the subject again.
-                    ForgetSecretRewrite(subjects[index], forgetAppliedConfiguration: true);
+                    case BlockWriteResult.Written:
+                        _parser.LogMovedSecrets(FullPath);
+                        break;
+                    case BlockWriteResult.RefusedByPublish:
+                        // A reload published meanwhile and kept the block as it was, so, as for a changed file, the
+                        // page is read again with the configurations of the remaining subjects.
+                        ForgetSecretRewritesFrom(subjects, index, forgetAppliedConfigurations: true);
+                        await ReloadAfterRefusalAsync(CancellationToken.None);
+                        return;
+                    case BlockWriteResult.NotABlock:
+                        // The subject left the page.
+                        ForgetSecretRewrite(subjects[index], forgetAppliedConfiguration: false);
+                        break;
                 }
             }
         }
@@ -1218,7 +1223,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         var blockIndex = FindBlock(snapshot.BlockSubjects, subject);
         if (snapshot.Page is not { } page || blockIndex < 0)
         {
-            return BlockWriteResult.NotWritten;
+            return BlockWriteResult.NotABlock;
         }
 
         // The block spans index into the text the page was parsed from, which is the source of the
@@ -1240,13 +1245,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
         return await PublishAndWriteAsync(snapshot, write, page.AllBlocks[blockIndex], ConfigurationChangedRefusal) is null
             ? BlockWriteResult.Written
-            : BlockWriteResult.NotWritten;
+            : BlockWriteResult.RefusedByPublish;
     }
 
     private enum BlockWriteResult
     {
         Written,
-        NotWritten,
+        NotABlock,
+        RefusedByPublish,
         RefusedAndReloaded
     }
 

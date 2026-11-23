@@ -357,6 +357,30 @@ public class SecretRewriteTests : StorageTestBase
         await WaitForSecretReferenceOnlyAsync("Gateway.md");
     }
 
+    [Fact]
+    public async Task WhenAReloadPublishesWhileABlockIsRewritten_ThenThePageIsReadAgainWithTheBlockConfigurationAppliedAgain()
+    {
+        // Arrange: without a secret store, nothing is rewritten on its own.
+        var deviceType = typeof(ReloadingDevice).FullName;
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {deviceType}#gateway Host=10.0.0.1\n::\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var device = Assert.IsType<ReloadingDevice>(page.Children["gateway"]);
+        device.Host = "10.0.0.2";
+
+        // The write reads the configuration of the block after it computed its text from the snapshot, and the reload
+        // it starts then publishes another snapshot before the write does.
+        device.ReloadOnRead = () => Task.Run(() => page.OnFileChangedAsync(CancellationToken.None)).GetAwaiter().GetResult();
+
+        // Act
+        await page.RewriteBlocksIfFileUnchangedAsync([device]);
+
+        // Assert
+        Assert.Null(device.ReloadOnRead);
+        Assert.Equal(1, device.ApplyCount);
+        Assert.Equal($"# Gateway\n\n:: {deviceType}#gateway Host=10.0.0.1\n::\n", File.ReadAllText(GetFullPath("Gateway.md")));
+    }
+
     // Only for a check that something does not happen, which a passing test always waits for in full.
     private static async Task AssertStaysTrueAsync(Func<bool> condition)
     {
@@ -480,5 +504,45 @@ public partial class CancelingDevice : IConfigurable
         }
 
         return Task.CompletedTask;
+    }
+}
+
+/// <summary>A device that runs <see cref="ReloadOnRead"/> once when its configuration is read.</summary>
+[InterceptorSubject]
+public partial class ReloadingDevice : IConfigurable
+{
+    private int _applyCount;
+
+    [Configuration]
+    public partial string? Host { get; set; }
+
+    [Configuration]
+    public ReloadingValue Value => new(this);
+
+    public Action? ReloadOnRead { get; set; }
+
+    /// <summary>How often the configuration was applied in place.</summary>
+    public int ApplyCount => Volatile.Read(ref _applyCount);
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _applyCount);
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>The value of a <see cref="ReloadingDevice"/>, which runs its reload when it is written.</summary>
+public sealed class ReloadingValue(ReloadingDevice device)
+{
+    [Configuration]
+    public string? Text
+    {
+        get
+        {
+            var reload = device.ReloadOnRead;
+            device.ReloadOnRead = null;
+            reload?.Invoke();
+            return null;
+        }
     }
 }
