@@ -27,7 +27,7 @@ public sealed class DiscoverableTestDiscovery : SubjectDiscovery<DiscoverableTes
     public static int ScanCount => Volatile.Read(ref _scanCount);
 
     /// <summary>
-    /// The host addresses of the found devices that matched an existing subject, in the order of the matches, in any
+    /// The host addresses of the found devices whose result matched a subject, in the order of the matches, in any
     /// test of the process.
     /// </summary>
     public static IReadOnlyCollection<string> MatchedHostAddresses => MatchedHostAddressQueue;
@@ -41,21 +41,26 @@ public sealed class DiscoverableTestDiscovery : SubjectDiscovery<DiscoverableTes
         yield return new DiscoverableTestResult(SecondDeviceName, SecondHostAddress);
     }
 
-    protected override bool Matches(DiscoverableTestSubject existing, DiscoverableTestResult result)
+    internal static void RecordMatch(string hostAddress)
     {
-        var isMatch = existing.HostAddress == result.HostAddress;
-        if (isMatch)
-        {
-            MatchedHostAddressQueue.Enqueue(result.HostAddress);
-        }
-
-        return isMatch;
+        MatchedHostAddressQueue.Enqueue(hostAddress);
     }
 }
 
-public sealed record DiscoverableTestResult(string DisplayName, string HostAddress) : IDiscoveryResult
+public sealed record DiscoverableTestResult(string DisplayName, string HostAddress) : IDiscoveryResult<DiscoverableTestSubject>
 {
     public string Key => HostAddress;
 
     public string? Detail => HostAddress;
+
+    public bool Matches(DiscoverableTestSubject subject)
+    {
+        var isMatch = subject.HostAddress == HostAddress;
+        if (isMatch)
+        {
+            DiscoverableTestDiscovery.RecordMatch(HostAddress);
+        }
+
+        return isMatch;
+    }
 }

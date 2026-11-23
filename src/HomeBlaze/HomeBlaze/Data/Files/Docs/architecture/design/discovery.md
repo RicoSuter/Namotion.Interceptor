@@ -49,11 +49,11 @@ Out of scope, with the contract kept compatible:
 
 ## Contract
 
-The API and the rules for implementers are in [Writing a Subject Discovery](../../development/subject-discovery.md): `SubjectDiscovery<TSubject, TResult>` with `DiscoverAsync` and `Matches`, the result records implementing `IDiscoveryResult`, and `ISubjectDiscoveryComponent` on the Setup or Edit component. The base class reports each result as `DiscoveredSubject(SubjectType, Result, ExistingSubject)`.
+The API and the rules for implementers are in [Writing a Subject Discovery](../../development/subject-discovery.md): `SubjectDiscovery<TSubject, TResult>` with `DiscoverAsync`, the result records implementing `IDiscoveryResult<TSubject>` with `Matches`, and `ISubjectDiscoveryComponent` on the Setup or Edit component. The base class implements `ISubjectDiscovery`, with `SubjectType` and an untyped `DiscoverAsync`. `IDiscoveryResult<TSubject>` implements the untyped `IDiscoveryResult.Matches`, which is false for a subject of another type. `SubjectDiscoveryService` reports each result as `DiscoveredSubject(SubjectType, Result, ExistingSubject)`.
 
-- A subject discovery yields each result as soon as it is known.
-- Duplicate detection belongs to each type. The base class keeps the existing subjects of type `TSubject`, calls `Matches` for each result and yields a `DiscoveredSubject` whose `ExistingSubject` is the first match, or null. The framework prescribes no identity property.
-- Result records are type specific and implement `IDiscoveryResult` themselves. The existing `FritzBoxDiscoveryResult` and `NukiDiscoveredBridge` become results directly.
+- A subject discovery yields each result as soon as it is known, and may yield a device more than once. The scan drops a result whose `Key` the same subject discovery already returned in it, compared ordinally.
+- Duplicate detection belongs to each type, through the `Matches` rule of its result. The caller runs the loop: the scan keeps the existing subjects of the subject type once per subject discovery, asks each result whether one of them matches and reports a `DiscoveredSubject` whose `ExistingSubject` is the first match, or null. The framework prescribes no identity property.
+- Result records are type specific and implement `IDiscoveryResult<TSubject>` themselves. The existing `FritzBoxDiscoveryResult` and `NukiDiscoveredBridge` become results directly.
 - A subject discovery creates no subject. `SubjectFactory.CreateSubject` attaches the subject to the root context, where a hosted subject starts at once, so a subject is only created once the user picks a result.
 - A Setup or Edit component takes the picked result through `ISubjectDiscoveryComponent` and casts it to its own record type. What it fills in, preselects or skips is its own decision.
 
@@ -115,7 +115,7 @@ During the first setup a user adds many found devices, so the folder Create oper
 
 - `SubjectSetupOptions.OnCreatedAsync` stores each created subject while the dialog is open. Create applies the edits and the configuration, as without `BeforeSave`, and then awaits the callback. `ShowAsync` returns null when it is set. `ShowAsync` throws an `ArgumentException` when it is set without `NameField` or together with `BeforeSave`.
 - `ISubjectSetupService.CreateSubjectsAsync` passes its callback on as `OnCreatedAsync`, with its own cancellation token, and `CreateSubjectsAndAddToStorageAsync` stores each subject as `{name}.json`. The canvas, grid and markdown callers do not opt in and still close the dialog on Create.
-- A subject created from a Discover row returns the dialog to the Discover page and shows "Created" with its name. The row of the device is shown as already added, with a link to the new subject, and moves after the rows that are not added. A running scan carries on. Scan again recognizes the new subject, a single instance type is no longer offered in the type list, the used name is rejected, and the next device gets its own suggested name.
+- A subject created from a Discover row returns the dialog to the Discover page and shows "Created" with its name. The row of the device is shown as already added, with a link to the new subject, also when the subject was configured to differ from the device. Every other row not added yet is asked whether its result matches the new subject, and is shown as added as well, with a link to the new subject, when it does. The added rows move after the rows that are not added. A running scan carries on, and its later results are matched against the subjects that existed when it started. Scan again recognizes the new subject, a single instance type is no longer offered in the type list, the used name is rejected, and the next device gets its own suggested name.
 - A subject created from the type list closes the dialog, as before.
 - Once a subject was created, Cancel reads Done on the picker page. On the configure page it still reads Cancel, as it discards the form.
 - When the callback throws, the dialog reports the error and stays on the configure page. As with `BeforeSave`, the subject counts as handed over only when it has a parent afterwards; otherwise it is discarded later.
@@ -126,13 +126,13 @@ During the first setup a user adds many found devices, so the folder Create oper
 - An `OperationCanceledException` from a canceled session is neither logged nor shown.
 - An exception thrown once the scan has been canceled or has reached its deadline, such as from a library that disposes its socket, counts as the end of the scan: it is logged at debug level and not shown.
 - The SSDP and mDNS services fail soft: no usable adapter or a socket error returns an empty answer and one debug log entry, not an exception.
-- A `Matches` call that throws ends its subject discovery like any other exception.
+- A `Matches` call that throws during a scan ends its subject discovery like any other exception. When the dialog matches the rows against a subject it created, a `Matches` call that throws is logged at debug level and counts as no match.
 - A subject discovery that never completes is canceled at the session deadline. The scan ends then even when the subject discovery ignores its cancellation; the later results and failures of the abandoned subject discovery are dropped, a later exception is still logged, at debug level, and no callback of `ScanAsync` runs once it has returned.
 - Every string from the network is untrusted. Blazor renders it as text, never as markup.
 
 ## v1 subject discoveries
 
-| Type | Discovery | Result | Matches |
+| Type | Discovery | Result | `Matches` of the result |
 |---|---|---|---|
 | `FritzBox` | `FritzBoxDiscovery` through the injected `ISsdpSearch`, plus the `fritz.box` fallback | `FritzBoxDiscoveryResult`, key `Udn` or else host address | A new persisted `Udn`, or the host address: either one matching is enough, so a router that moved is recognized by its UDN and a router replaced at the same address counts as added |
 | `HueBridge` | mDNS `_hue._tcp`, local only | A new record with bridge ID and address, key bridge ID | The persisted `BridgeId`, ignoring case; `HueBridge` itself compares bridge IDs ignoring case as well |
@@ -149,13 +149,14 @@ During the first setup a user adds many found devices, so the folder Create oper
 
 Unit tests, without sockets:
 
-- The base class keeps only subjects of its type and sets `ExistingSubject` from `Matches`
+- The base class yields the typed results, and the untyped `IDiscoveryResult.Matches` is false for a subject of another type
+- `SubjectDiscoveryService` drops repeated keys per subject discovery, sets `ExistingSubject` from the result's `Matches` against the subjects of the type, and treats a throwing `Matches` as a failure of the subject discovery
 - The registry finds subject discoveries through `TypeProvider` and applies its exclusion rules
 - `SubjectDiscoveryService` isolates failing subject discoveries, honors cancellation and ends at its deadline, driven by a `TimeProvider` the test advances
 - mDNS packet parsing from captured bytes, including name compression, malformed packets and the caps
-- Each subject discovery constructed with fake `ISsdpSearch`, `IMulticastDnsBrowser` or HTTP handlers, including its `Matches` rules
+- Each subject discovery constructed with fake `ISsdpSearch`, `IMulticastDnsBrowser` or HTTP handlers, and the `Matches` rule of its result called directly
 
-This repository has no component test framework, so the Discover page keeps its logic in `SubjectDiscoveryList` (ordering, marking a row added, failures), `SubjectNameOptions.SuggestName` (the name) and `SubjectEditPanel.CreateHostedComponentParameters` (passing the result), which unit tests cover. The E2E test covers the page itself.
+This repository has no component test framework, so the Discover page keeps its logic in `SubjectDiscoveryList` (ordering, marking the picked row and every row whose result matches the new subject added, a throwing `Matches`, failures), `SubjectNameOptions.SuggestName` (the name) and `SubjectEditPanel.CreateHostedComponentParameters` (passing the result), which unit tests cover. The E2E test covers the page itself.
 
 One E2E test with a fake subject discovery that finds two devices: open Discover from the folder Create, pick the first result, create, see the dialog return to the Discover page with the device listed as added after the other one and Done in the footer, create the second device without a new scan, and find both stored subjects. Creating from the type list still closes the dialog, which the other create tests cover.
 

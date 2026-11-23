@@ -181,9 +181,8 @@ namespace Namotion.Devices.Shelly
         public ShellyDeviceDiscovery(HomeBlaze.Abstractions.Discovery.IMulticastDnsBrowser multicastDnsBrowser) { }
         [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Shelly.ShellyDeviceDiscovery.<DiscoverAsync>d__4))]
         protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Shelly.ShellyDiscoveredDevice> DiscoverAsync([System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
-        protected override bool Matches(Namotion.Devices.Shelly.ShellyDevice existing, Namotion.Devices.Shelly.ShellyDiscoveredDevice result) { }
     }
-    public sealed class ShellyDiscoveredDevice : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, System.IEquatable<Namotion.Devices.Shelly.ShellyDiscoveredDevice>
+    public sealed class ShellyDiscoveredDevice : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, HomeBlaze.Abstractions.Discovery.IDiscoveryResult<Namotion.Devices.Shelly.ShellyDevice>, System.IEquatable<Namotion.Devices.Shelly.ShellyDiscoveredDevice>
     {
         public ShellyDiscoveredDevice(string DeviceId, string HostAddress, string? Application, string DisplayName) { }
         public string? Application { get; init; }
@@ -192,6 +191,7 @@ namespace Namotion.Devices.Shelly
         public string DisplayName { get; init; }
         public string HostAddress { get; init; }
         public string Key { get; }
+        public bool Matches(Namotion.Devices.Shelly.ShellyDevice subject) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class ShellyEnergyMeter : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IPowerMeter, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged

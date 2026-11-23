@@ -37,6 +37,84 @@ public class SubjectDiscoveryServiceTests
     }
 
     [Fact]
+    public async Task WhenAResultMatchesExistingSubjects_ThenItIsReportedWithTheFirstOfTheSubjectType()
+    {
+        // Arrange
+        var otherType = new OtherDiscoveryTestSubject();
+        var first = new DiscoveryTestSubject();
+        var second = new DiscoveryTestSubject();
+        var askedSubjects = new ConcurrentQueue<object>();
+        var service = CreateService(
+            TimeProvider.System,
+            new LambdaDiscovery<DiscoveryTestSubject>(_ => TestScans.Yield(
+                new TestDiscoveryResult("a") { IsMatch = subject => { askedSubjects.Enqueue(subject); return true; } },
+                new TestDiscoveryResult("b"))));
+        var results = new ConcurrentQueue<DiscoveredSubject>();
+
+        // Act
+        await service.ScanAsync([typeof(DiscoveryTestSubject)], [otherType, first, second], results.Enqueue, _ => { }, CancellationToken.None);
+
+        // Assert - the result matches a subject of any type, so only the subject type keeps the other subject out.
+        var discovered = results.OrderBy(result => result.Result.Key).ToArray();
+        Assert.Equal(["a", "b"], discovered.Select(result => result.Result.Key));
+        Assert.Same(first, discovered[0].ExistingSubject);
+        Assert.Null(discovered[1].ExistingSubject);
+        Assert.Equal([first], askedSubjects);
+        Assert.All(discovered, result => Assert.Equal(typeof(DiscoveryTestSubject), result.SubjectType));
+    }
+
+    [Fact]
+    public async Task WhenADiscoveryYieldsADeviceTwice_ThenItIsReportedOnce()
+    {
+        // Arrange
+        var service = CreateService(
+            TimeProvider.System,
+            new LambdaDiscovery<DiscoveryTestSubject>(
+                _ => TestScans.Yield(new TestDiscoveryResult("a"), new TestDiscoveryResult("a", "Same device again"), new TestDiscoveryResult("A"))),
+            new LambdaDiscovery<OtherDiscoveryTestSubject>(_ => TestScans.Yield(new TestDiscoveryResult("a"))));
+        var results = new ConcurrentQueue<DiscoveredSubject>();
+
+        // Act
+        await service.ScanAsync(
+            [typeof(DiscoveryTestSubject), typeof(OtherDiscoveryTestSubject)], [], results.Enqueue, _ => { }, CancellationToken.None);
+
+        // Assert - keys are compared ordinally and per subject discovery.
+        var ofType = results.Where(result => result.SubjectType == typeof(DiscoveryTestSubject)).ToArray();
+        Assert.Equal(["A", "a"], ofType.Select(result => result.Result.Key).Order(StringComparer.Ordinal));
+        Assert.Equal("Device", ofType.Single(result => result.Result.Key == "a").Result.DisplayName);
+        Assert.Single(results, result => result.SubjectType == typeof(OtherDiscoveryTestSubject));
+    }
+
+    [Fact]
+    public async Task WhenMatchesThrows_ThenItsDiscoveryFailsAndTheOthersCarryOn()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var service = CreateService(
+            TimeProvider.System,
+            logger,
+            new LambdaDiscovery<DiscoveryTestSubject>(_ => TestScans.Yield(
+                new TestDiscoveryResult("a") { IsMatch = _ => throw new InvalidOperationException("The match failed.") },
+                new TestDiscoveryResult("b"))),
+            new LambdaDiscovery<OtherDiscoveryTestSubject>(_ => TestScans.Yield(new TestDiscoveryResult("c"))));
+        var results = new ConcurrentQueue<DiscoveredSubject>();
+        var failures = new ConcurrentQueue<Type>();
+
+        // Act
+        await service.ScanAsync(
+            [typeof(DiscoveryTestSubject), typeof(OtherDiscoveryTestSubject)],
+            [new DiscoveryTestSubject()],
+            results.Enqueue,
+            failures.Enqueue,
+            CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["c"], results.Select(result => result.Result.Key));
+        Assert.Equal([typeof(DiscoveryTestSubject)], failures);
+        Assert.Equal([LogLevel.Warning], logger.Levels);
+    }
+
+    [Fact]
     public async Task WhenADiscoveryThrows_ThenItsFailureIsReportedAndTheOthersCarryOn()
     {
         // Arrange

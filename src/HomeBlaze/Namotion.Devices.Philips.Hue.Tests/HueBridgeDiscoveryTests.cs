@@ -25,20 +25,20 @@ public class HueBridgeDiscoveryTests
         ISubjectDiscovery discovery = new HueBridgeDiscovery(browser);
 
         // Act
-        var discovered = await discovery.DiscoverAsync([existing], CancellationToken.None).ToListAsync();
+        var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
 
         // Assert
-        var single = Assert.Single(discovered);
-        var bridge = Assert.IsType<HueDiscoveredBridge>(single.Result);
+        var single = Assert.Single(results);
+        var bridge = Assert.IsType<HueDiscoveredBridge>(single);
         Assert.Equal("001788fffe1a2b3c", bridge.BridgeId);
         Assert.Equal("192.168.1.20", bridge.HostAddress);
         Assert.Equal("Philips Hue - 1A2B3C", bridge.DisplayName);
-        Assert.Same(existing, single.ExistingSubject);
+        Assert.True(single.Matches(existing));
         Assert.Equal([HueBridgeDiscovery.ServiceType], browser.ServiceTypes);
     }
 
     [Fact]
-    public async Task WhenNoSubjectHasTheBridgeId_ThenTheBridgeIsFoundWithoutASubject()
+    public async Task WhenTheSubjectHasAnotherBridgeId_ThenTheBridgeDoesNotMatchIt()
     {
         // Arrange
         var browser = new AnsweringBrowser(Announcement("001788FFFE1A2B3C"));
@@ -46,12 +46,12 @@ public class HueBridgeDiscoveryTests
         ISubjectDiscovery discovery = new HueBridgeDiscovery(browser);
 
         // Act
-        var discovered = await discovery.DiscoverAsync([existing], CancellationToken.None).ToListAsync();
+        var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
 
         // Assert
-        var single = Assert.Single(discovered);
-        Assert.Equal("001788fffe1a2b3c", Assert.IsType<HueDiscoveredBridge>(single.Result).BridgeId);
-        Assert.Null(single.ExistingSubject);
+        var single = Assert.Single(results);
+        Assert.Equal("001788fffe1a2b3c", Assert.IsType<HueDiscoveredBridge>(single).BridgeId);
+        Assert.False(single.Matches(existing));
     }
 
     [Fact]
@@ -62,11 +62,11 @@ public class HueBridgeDiscoveryTests
         ISubjectDiscovery discovery = new HueBridgeDiscovery(browser);
 
         // Act
-        var discovered = await discovery.DiscoverAsync([], CancellationToken.None).ToListAsync();
+        var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
 
         // Assert
-        var single = Assert.Single(discovered);
-        Assert.Equal("001788fffe1a2b3c", single.Result.DisplayName);
+        var single = Assert.Single(results);
+        Assert.Equal("001788fffe1a2b3c", single.DisplayName);
     }
 
     private sealed class AnsweringBrowser(params MulticastDnsServiceInstance[] instances) : IMulticastDnsBrowser

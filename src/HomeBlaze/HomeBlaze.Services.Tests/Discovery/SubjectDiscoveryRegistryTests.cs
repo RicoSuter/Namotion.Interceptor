@@ -162,8 +162,6 @@ public abstract class TestDiscovery<TSubject> : SubjectDiscovery<TSubject, TestD
     where TSubject : class, IInterceptorSubject
 {
     protected override IAsyncEnumerable<TestDiscoveryResult> DiscoverAsync(CancellationToken cancellationToken) => TestScans.Yield();
-
-    protected override bool Matches(TSubject existing, TestDiscoveryResult result) => false;
 }
 
 public sealed class SplitTestDiscovery : TestDiscovery<SplitDiscoveryTestSubject>;

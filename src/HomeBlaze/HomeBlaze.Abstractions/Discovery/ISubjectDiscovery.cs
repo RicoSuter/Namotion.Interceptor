@@ -1,5 +1,3 @@
-using Namotion.Interceptor;
-
 namespace HomeBlaze.Abstractions.Discovery;
 
 /// <summary>
@@ -14,9 +12,9 @@ public interface ISubjectDiscovery
     Type SubjectType { get; }
 
     /// <summary>
-    /// Scans and yields each device once, as soon as it is known, with the subject of
-    /// <paramref name="existingSubjects"/> that already represents it.
+    /// Scans and yields each device as soon as it is known. A device may be yielded more than once, with the same
+    /// <see cref="IDiscoveryResult.Key"/>.
     /// </summary>
-    IAsyncEnumerable<DiscoveredSubject> DiscoverAsync(
-        IReadOnlyCollection<IInterceptorSubject> existingSubjects, CancellationToken cancellationToken);
+    /// <param name="cancellationToken">Canceled when the scan is canceled or reaches its time limit.</param>
+    IAsyncEnumerable<IDiscoveryResult> DiscoverAsync(CancellationToken cancellationToken);
 }

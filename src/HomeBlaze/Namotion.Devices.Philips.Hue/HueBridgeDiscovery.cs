@@ -24,8 +24,4 @@ public sealed class HueBridgeDiscovery(IMulticastDnsBrowser multicastDnsBrowser)
             }
         }
     }
-
-    /// <inheritdoc />
-    protected override bool Matches(HueBridge existing, HueDiscoveredBridge result) =>
-        string.Equals(existing.BridgeId, result.BridgeId, StringComparison.OrdinalIgnoreCase);
 }

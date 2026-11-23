@@ -233,12 +233,13 @@
     }
 
     /// <summary>
-    /// Shows the found device as added, with <paramref name="subject"/> as the subject that represents it, without a
-    /// new scan, the next time the page is shown. A running scan carries on.
+    /// Shows the picked device, and every other found device whose result matches <paramref name="subject"/>, as
+    /// added, with <paramref name="subject"/> as their subject, without a new scan, the next time the page is shown. A
+    /// running scan carries on.
     /// </summary>
-    internal void MarkAdded(DiscoveredSubject discovered, IInterceptorSubject subject)
+    internal void MarkAdded(DiscoveredSubject picked, IInterceptorSubject subject)
     {
-        _list.MarkAdded(discovered, subject);
+        _list.MarkAdded(picked, subject, Logger);
     }
 
     private string GetFoundText()

@@ -11,7 +11,7 @@ Write one when the device announces itself (mDNS, SSDP) or a vendor service list
 
 ## The result
 
-A result describes one found device. It is a record of your own that implements `IDiscoveryResult` and carries whatever the setup needs, such as the host address, an ID or the model.
+A result describes one found device. It is a record of your own that implements `IDiscoveryResult<TSubject>` and carries whatever the setup needs, such as the host address, an ID or the model.
 
 ```csharp
 public interface IDiscoveryResult
@@ -24,30 +24,48 @@ public interface IDiscoveryResult
 
     /// <summary>A second line for the user, such as the host address, or null.</summary>
     string? Detail { get; }
+
+    /// <summary>Whether <paramref name="subject"/> already represents this device; false for a subject of another type.</summary>
+    bool Matches(IInterceptorSubject subject);
+}
+
+public interface IDiscoveryResult<in TSubject> : IDiscoveryResult
+    where TSubject : IInterceptorSubject
+{
+    bool Matches(TSubject subject);
 }
 ```
 
-- `Key` is a stable identity of the device, such as a MAC address, a serial number or a bridge ID. Results with a key that was already returned in the scan are dropped, compared ordinally, so normalize the case where the device's identity ignores it, such as a MAC address.
+- `Key` is a stable identity of the device, such as a MAC address, a serial number or a bridge ID. The scan drops a result with a key your subject discovery already returned in it, compared ordinally, so yielding a device twice is fine, and normalize the case where the device's identity ignores it, such as a MAC address.
 - `DisplayName` is the title of the row and the suggested name of the subject, when it is a valid, unused and plain name.
 - `Detail` is shown under it, after the type's display name.
+- `Matches` decides whether a subject already represents the device, by the type's own rule, such as the same MAC address or the same host. Implement only `Matches(TSubject)`: `IDiscoveryResult<TSubject>` implements the untyped one, which is false for a subject of another type. The caller matches: the scan asks each result about the existing subjects of the type and shows the first match as "already added" with a link to it, and the create dialog asks the rows not added yet about each subject it creates. Match on a stable identity, so a device that moved is still recognized. Whether the host address counts as well is the type's rule: `ShellyDiscoveredDevice` uses it only when no identity is known, so a device that replaced another at the same address is listed as new, while `FritzBoxDiscoveryResult` accepts either, because its subject connects to whatever answers at that address. A `Matches` that throws ends its subject discovery during a scan and counts as no match in the dialog, see [Error handling](../architecture/design/discovery.md#error-handling).
 
 ## The subject discovery
 
-Derive from `SubjectDiscovery<TSubject, TResult>` in `HomeBlaze.Abstractions.Discovery` and implement two methods:
+Derive from `SubjectDiscovery<TSubject, TResult>` in `HomeBlaze.Abstractions.Discovery` and implement `DiscoverAsync`:
 
 ```csharp
 public abstract class SubjectDiscovery<TSubject, TResult> : ISubjectDiscovery
     where TSubject : class, IInterceptorSubject
-    where TResult : class, IDiscoveryResult
+    where TResult : class, IDiscoveryResult<TSubject>
 {
     protected abstract IAsyncEnumerable<TResult> DiscoverAsync(CancellationToken cancellationToken);
-
-    protected abstract bool Matches(TSubject existing, TResult result);
 }
 ```
 
-- `DiscoverAsync` yields each device as soon as it is known, so the page fills while the scan runs.
-- `Matches` decides whether an existing subject already represents the device, by the type's own rule, such as the same MAC address or the same host. It is only called with existing subjects of type `TSubject`, and the first match is shown as "already added" with a link to it. Match on a stable identity, so a device that moved is still recognized. Whether the host address counts as well is the type's rule: `ShellyDeviceDiscovery` uses it only when no identity is known, so a device that replaced another at the same address is listed as new, while `FritzBoxDiscovery` accepts either, because its subject connects to whatever answers at that address.
+The base class implements `ISubjectDiscovery`, the contract the scan calls:
+
+```csharp
+public interface ISubjectDiscovery
+{
+    Type SubjectType { get; }
+
+    IAsyncEnumerable<IDiscoveryResult> DiscoverAsync(CancellationToken cancellationToken);
+}
+```
+
+`DiscoverAsync` yields each device as soon as it is known, so the page fills while the scan runs.
 
 A subject discovery creates no subject. The subject is created when the user picks the result, and the result is handed to the component.
 
@@ -135,8 +153,9 @@ public sealed class AcmeCloudDiscovery : SubjectDiscovery<AcmeHub, AcmeDiscovere
 
 ## Testing
 
-- Keep parsing and matching in `internal static` methods, which the test project of the library reaches through `InternalsVisibleTo`, as `ShellyDeviceDiscovery.ToDevices` and `IsSameDevice` are tested.
-- To run a whole subject discovery, construct it with fakes of the services it takes, such as `ISsdpSearch` or `IMulticastDnsBrowser`, and call it through `ISubjectDiscovery.DiscoverAsync(existingSubjects, cancellationToken)`, which also applies the deduplication and `Matches`.
+- Keep parsing in `internal static` methods, which the test project of the library reaches through `InternalsVisibleTo`, as `ShellyDeviceDiscovery.ToDevices` is tested.
+- Check the matching rule by calling `result.Matches(subject)` directly on a result you construct, as the tests of `ShellyDiscoveredDevice` do.
+- To run a whole subject discovery, construct it with fakes of the services it takes, such as `ISsdpSearch` or `IMulticastDnsBrowser`, and call it through `ISubjectDiscovery.DiscoverAsync(cancellationToken)`, which is what the scan calls. The scan adds the deduplication by key and the matching against the existing subjects.
 - The E2E host replaces `ISsdpSearch` and `IMulticastDnsBrowser` with empty ones, so a subject discovery that only uses them finds nothing there and needs no setup. One that calls an address of its own, such as a vendor's cloud service, needs a stub in `WebTestingHostFactory`, as the Nuki discovery service has; that stub only reaches an `HttpClient` from `IHttpClientFactory`. The FRITZ!Box subject discovery asks `fritz.box` only when the name resolves to an address on the local network: on a CI runner it makes only a name lookup, and behind a FRITZ!Box the router answers.
 
 ## Example
@@ -157,18 +176,18 @@ public sealed class AcmePlugDiscovery(IMulticastDnsBrowser multicastDnsBrowser) 
             }
         }
     }
-
-    protected override bool Matches(AcmePlug existing, AcmeDiscoveredPlug result) =>
-        string.IsNullOrWhiteSpace(existing.DeviceId)
-            ? string.Equals(existing.HostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase)
-            : string.Equals(existing.DeviceId.Trim(), result.DeviceId, StringComparison.OrdinalIgnoreCase);
 }
 
-public sealed record AcmeDiscoveredPlug(string DeviceId, string HostAddress, string DisplayName) : IDiscoveryResult
+public sealed record AcmeDiscoveredPlug(string DeviceId, string HostAddress, string DisplayName) : IDiscoveryResult<AcmePlug>
 {
     public string Key => DeviceId.ToLowerInvariant();
 
     public string? Detail => HostAddress;
+
+    public bool Matches(AcmePlug subject) =>
+        string.IsNullOrWhiteSpace(subject.DeviceId)
+            ? string.Equals(subject.HostAddress?.Trim(), HostAddress, StringComparison.OrdinalIgnoreCase)
+            : string.Equals(subject.DeviceId.Trim(), DeviceId, StringComparison.OrdinalIgnoreCase);
 }
 ```
 

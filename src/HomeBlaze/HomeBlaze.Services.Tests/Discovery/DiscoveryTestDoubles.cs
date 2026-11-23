@@ -17,29 +17,40 @@ public partial class OtherDiscoveryTestSubject
     public partial string? Address { get; set; }
 }
 
-public sealed record TestDiscoveryResult(string Key, string DisplayName = "Device", string? Detail = null) : IDiscoveryResult;
+/// <summary>
+/// A result that matches the subjects for which <see cref="IsMatch"/> is true, of any type, and none without it.
+/// </summary>
+public sealed record TestDiscoveryResult(string Key, string DisplayName = "Device", string? Detail = null)
+    : IDiscoveryResult<IInterceptorSubject>
+{
+    public Func<IInterceptorSubject, bool>? IsMatch { get; init; }
+
+    public bool Matches(IInterceptorSubject subject) => IsMatch?.Invoke(subject) ?? false;
+}
 
 /// <summary>
-/// A subject discovery whose scan and matching the test passes in.
+/// A result that matches a <see cref="DiscoveryTestSubject"/> with its address.
 /// </summary>
-internal sealed class LambdaDiscovery<TSubject> : SubjectDiscovery<TSubject, TestDiscoveryResult>
+public sealed record AddressDiscoveryResult(string Address) : IDiscoveryResult<DiscoveryTestSubject>
+{
+    public string Key => Address;
+
+    public string DisplayName => Address;
+
+    public string? Detail => null;
+
+    public bool Matches(DiscoveryTestSubject subject) => subject.Address == Address;
+}
+
+/// <summary>
+/// A subject discovery whose scan the test passes in.
+/// </summary>
+internal sealed class LambdaDiscovery<TSubject>(Func<CancellationToken, IAsyncEnumerable<TestDiscoveryResult>> scan)
+    : SubjectDiscovery<TSubject, TestDiscoveryResult>
     where TSubject : class, IInterceptorSubject
 {
-    private readonly Func<CancellationToken, IAsyncEnumerable<TestDiscoveryResult>> _scan;
-    private readonly Func<TSubject, TestDiscoveryResult, bool> _matches;
-
-    public LambdaDiscovery(
-        Func<CancellationToken, IAsyncEnumerable<TestDiscoveryResult>> scan,
-        Func<TSubject, TestDiscoveryResult, bool>? matches = null)
-    {
-        _scan = scan;
-        _matches = matches ?? ((_, _) => false);
-    }
-
     protected override IAsyncEnumerable<TestDiscoveryResult> DiscoverAsync(CancellationToken cancellationToken) =>
-        _scan(cancellationToken);
-
-    protected override bool Matches(TSubject existing, TestDiscoveryResult result) => _matches(existing, result);
+        scan(cancellationToken);
 }
 
 internal static class TestScans

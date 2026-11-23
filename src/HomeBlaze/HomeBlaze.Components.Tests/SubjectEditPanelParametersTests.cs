@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Components.Editors;
+using Namotion.Interceptor;
 using Xunit;
 
 namespace HomeBlaze.Components.Tests;
@@ -92,5 +93,7 @@ public class SubjectEditPanelParametersTests
         public string DisplayName => "Device";
 
         public string? Detail => null;
+
+        public bool Matches(IInterceptorSubject subject) => false;
     }
 }

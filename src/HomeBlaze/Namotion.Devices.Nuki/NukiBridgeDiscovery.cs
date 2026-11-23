@@ -36,16 +36,6 @@ public sealed class NukiBridgeDiscovery : SubjectDiscovery<NukiBridge, NukiDisco
         }
     }
 
-    /// <inheritdoc />
-    protected override bool Matches(NukiBridge existing, NukiDiscoveredBridge result) =>
-        IsSameBridge(existing.HostAddress, result);
-
-    internal static bool IsSameBridge(string? hostAddress, NukiDiscoveredBridge result) =>
-        NukiBridgeClient.TryParseHostAddress(hostAddress, out var host, out var port, out _) &&
-        NukiBridgeClient.TryParseHostAddress(result.HostAddress, out var resultHost, out var resultPort, out _) &&
-        port == resultPort &&
-        string.Equals(host, resultHost, StringComparison.OrdinalIgnoreCase);
-
     /// <summary>
     /// Lists the bridges that the Nuki discovery service knows for this network. Bridges with discovery disabled are
     /// left out. The service has 10 seconds to answer.

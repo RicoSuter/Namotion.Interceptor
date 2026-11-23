@@ -606,6 +606,12 @@ namespace HomeBlaze.Abstractions.Discovery
         string? Detail { get; }
         string DisplayName { get; }
         string Key { get; }
+        bool Matches(Namotion.Interceptor.IInterceptorSubject subject);
+    }
+    public interface IDiscoveryResult<in TSubject> : HomeBlaze.Abstractions.Discovery.IDiscoveryResult
+        where in TSubject : Namotion.Interceptor.IInterceptorSubject
+    {
+        bool Matches(TSubject subject);
     }
     public interface IMulticastDnsBrowser
     {
@@ -618,7 +624,7 @@ namespace HomeBlaze.Abstractions.Discovery
     public interface ISubjectDiscovery
     {
         System.Type SubjectType { get; }
-        System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.DiscoveredSubject> DiscoverAsync(System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.IInterceptorSubject> existingSubjects, System.Threading.CancellationToken cancellationToken);
+        System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.IDiscoveryResult> DiscoverAsync(System.Threading.CancellationToken cancellationToken);
     }
     public sealed class MulticastDnsServiceInstance : System.IEquatable<HomeBlaze.Abstractions.Discovery.MulticastDnsServiceInstance>
     {
@@ -637,11 +643,10 @@ namespace HomeBlaze.Abstractions.Discovery
     }
     public abstract class SubjectDiscovery<TSubject, TResult> : HomeBlaze.Abstractions.Discovery.ISubjectDiscovery
         where TSubject :  class, Namotion.Interceptor.IInterceptorSubject
-        where TResult :  class, HomeBlaze.Abstractions.Discovery.IDiscoveryResult
+        where TResult :  class, HomeBlaze.Abstractions.Discovery.IDiscoveryResult<TSubject>
     {
         protected SubjectDiscovery() { }
         protected abstract System.Collections.Generic.IAsyncEnumerable<TResult> DiscoverAsync(System.Threading.CancellationToken cancellationToken);
-        protected abstract bool Matches(TSubject existing, TResult result);
     }
 }
 namespace HomeBlaze.Abstractions

@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Services;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Components.Dialogs;
@@ -26,23 +27,33 @@ internal sealed class SubjectDiscoveryList
     }
 
     /// <summary>
-    /// Marks the row of the device, found by its subject type and key, as added, with <paramref name="existingSubject"/>
-    /// as the subject that represents it, and moves it to its place among the added devices. Does nothing when the
-    /// list has no such row.
+    /// Marks the rows that <paramref name="createdSubject"/> represents as added, with it as their subject, and moves
+    /// them to their place among the added devices. These are the row of <paramref name="picked"/>, found by its
+    /// subject type and key, and every row not added yet whose result matches <paramref name="createdSubject"/>. A
+    /// result whose <see cref="IDiscoveryResult.Matches"/> throws is logged and does not match.
     /// </summary>
-    public void MarkAdded(DiscoveredSubject discovered, IInterceptorSubject existingSubject)
+    public void MarkAdded(DiscoveredSubject picked, IInterceptorSubject createdSubject, ILogger logger)
     {
-        var index = _rows.FindIndex(row =>
-            row.Discovered.SubjectType == discovered.SubjectType &&
-            string.Equals(row.Discovered.Result.Key, discovered.Result.Key, StringComparison.Ordinal));
-        if (index < 0)
+        var isChanged = false;
+        for (var index = 0; index < _rows.Count; index++)
         {
-            return;
+            var row = _rows[index];
+
+            // The picked row is marked also when the subject was configured to differ from the found device.
+            var isPicked =
+                row.Discovered.SubjectType == picked.SubjectType &&
+                string.Equals(row.Discovered.Result.Key, picked.Result.Key, StringComparison.Ordinal);
+            if (isPicked || (row.Discovered.ExistingSubject is null && Matches(row.Discovered.Result, createdSubject, logger)))
+            {
+                _rows[index] = row with { Discovered = row.Discovered with { ExistingSubject = createdSubject } };
+                isChanged = true;
+            }
         }
 
-        var row = _rows[index];
-        _rows.RemoveAt(index);
-        Insert(row with { Discovered = row.Discovered with { ExistingSubject = existingSubject } });
+        if (isChanged)
+        {
+            _rows.Sort(RowComparer);
+        }
     }
 
     public void AddFailure(SubjectTypeDescriptor descriptor)
@@ -54,6 +65,19 @@ internal sealed class SubjectDiscoveryList
     {
         _rows.Clear();
         _failures.Clear();
+    }
+
+    private static bool Matches(IDiscoveryResult result, IInterceptorSubject subject, ILogger logger)
+    {
+        try
+        {
+            return result.Matches(subject);
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(exception, "The found device {Key} failed to match the created subject.", result.Key);
+            return false;
+        }
     }
 
     private void Insert(SubjectDiscoveryRow row)

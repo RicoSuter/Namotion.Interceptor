@@ -276,30 +276,30 @@ public class FritzBoxDiscoveryTests
     public void WhenTheUdnsMatch_ThenARouterAtAnotherAddressIsTheSame()
     {
         // Act & Assert
-        Assert.True(FritzBoxDiscovery.IsSameRouter(CreateRouter("192.168.178.1", "uuid:a"), Found("192.168.178.2", "UUID:A")));
+        Assert.True(Found("192.168.178.2", "UUID:A").Matches(CreateRouter("192.168.178.1", "uuid:a")));
     }
 
     [Fact]
     public void WhenTheHostAddressesMatch_ThenARouterWithAnotherUdnIsTheSame()
     {
         // Act & Assert
-        Assert.True(FritzBoxDiscovery.IsSameRouter(CreateRouter("192.168.178.1", "uuid:a"), Found("192.168.178.1", "uuid:b")));
+        Assert.True(Found("192.168.178.1", "uuid:b").Matches(CreateRouter("192.168.178.1", "uuid:a")));
     }
 
     [Fact]
     public void WhenNeitherTheUdnNorTheHostAddressMatches_ThenTheRouterIsAnother()
     {
         // Act & Assert
-        Assert.False(FritzBoxDiscovery.IsSameRouter(CreateRouter("192.168.178.1", "uuid:a"), Found("192.168.178.2", "uuid:b")));
-        Assert.False(FritzBoxDiscovery.IsSameRouter(CreateRouter("192.168.178.1", "uuid:a"), Found("192.168.178.2", null)));
+        Assert.False(Found("192.168.178.2", "uuid:b").Matches(CreateRouter("192.168.178.1", "uuid:a")));
+        Assert.False(Found("192.168.178.2", null).Matches(CreateRouter("192.168.178.1", "uuid:a")));
     }
 
     [Fact]
     public void WhenTheRouterHasNoUdn_ThenTheHostAddressDecides()
     {
         // Act & Assert
-        Assert.True(FritzBoxDiscovery.IsSameRouter(CreateRouter(" Fritz.Box ", null), Found("fritz.box", "uuid:a")));
-        Assert.False(FritzBoxDiscovery.IsSameRouter(CreateRouter("192.168.178.1", null), Found("192.168.178.2", "uuid:a")));
+        Assert.True(Found("fritz.box", "uuid:a").Matches(CreateRouter(" Fritz.Box ", null)));
+        Assert.False(Found("192.168.178.2", "uuid:a").Matches(CreateRouter("192.168.178.1", null)));
     }
 
     [Fact]
