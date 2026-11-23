@@ -79,7 +79,8 @@ public class FritzBoxLoopTests
         Assert.True(sameRouter.Matches(router));
 
         // Act
-        router.HostAddress = "192.0.2.1";
+        // A loopback address nothing listens on, so the reconnect that follows stays on this machine.
+        router.HostAddress = "127.0.0.2";
 
         // Assert
         Assert.False(sameRouter.Matches(router));
