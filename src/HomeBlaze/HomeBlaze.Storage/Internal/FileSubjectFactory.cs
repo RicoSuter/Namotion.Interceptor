@@ -56,9 +56,9 @@ internal sealed class FileSubjectFactory
     /// <see cref="LogSkippedProperties"/>, and tells whether the file holds a secret in plaintext that a save would move
     /// to the secret store, see <see cref="ShouldMoveSecrets"/>.
     /// </summary>
-    public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json, out bool hasUnstoredSecrets)
+    public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json, out bool shouldMoveSecrets)
     {
-        hasUnstoredSecrets = false;
+        shouldMoveSecrets = false;
 
         // A configurable subject enters the context when it is created, which runs lifecycle handlers as an
         // assignment to the tree does. With the flow of the caller, work that a handler starts would count as
@@ -73,7 +73,7 @@ internal sealed class FileSubjectFactory
             if (_serializer.Deserialize(json, created: null, skipped.Add) is IInterceptorSubject subject)
             {
                 LogSkippedProperties(path, skipped);
-                hasUnstoredSecrets = ShouldMoveSecrets(path, subject, hasSkippedValues: skipped.Count > 0);
+                shouldMoveSecrets = ShouldMoveSecrets(path, subject, hasSkippedValues: skipped.Count > 0);
                 return subject;
             }
         }

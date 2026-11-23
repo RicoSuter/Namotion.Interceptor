@@ -715,18 +715,14 @@ internal sealed class StorageReconciler
         });
     }
 
-    /// <param name="path">The path of the file.</param>
-    /// <param name="json">The text of the file.</param>
-    /// <param name="version">The version of the file as the storage reports it.</param>
-    /// <param name="hash">The hash of the content of the file.</param>
     private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version, string hash)
     {
-        var subject = _subjectFactory.CreateFromJson(_storage, StoragePath.ToFullPath(path), json, out var hasUnstoredSecrets);
+        var subject = _subjectFactory.CreateFromJson(_storage, StoragePath.ToFullPath(path), json, out var shouldMoveSecrets);
         if (subject is JsonFile file)
         {
             SetMetadata(file, version);
         }
-        else if (hasUnstoredSecrets)
+        else if (shouldMoveSecrets)
         {
             ScheduleSecretRewrite(path, subject, hash);
         }
