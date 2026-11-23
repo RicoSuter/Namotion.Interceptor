@@ -80,7 +80,7 @@ The Discover page further leaves out results whose type is not creatable in the 
 
 SSDP uses Rssdp, which `HomeBlaze.Services` references, and searches every IPv4 adapter with a listening window of about 3 seconds.
 
-mDNS is a minimal implementation of our own, with no package and no reflection. It sends a PTR query for the service type to `224.0.0.251:5353` on each IPv4 adapter, repeats it after 1 and 3 seconds as RFC 6762 recommends, and combines the PTR, SRV, TXT and A records of the answers into `MulticastDnsService`. Queries are sent from an ephemeral port as legacy unicast queries, so devices answer straight back and HomeBlaze does not bind port 5353, which Avahi holds on most Linux hosts. During development, real Shelly Gen2 devices and a Hue bridge answered legacy unicast queries on a Linux host with Avahi running. Binding port 5353 with address reuse remains the documented fallback, and has not been needed so far.
+mDNS is a minimal implementation of our own, with no package and no reflection. It sends a PTR query for the service type to `224.0.0.251:5353` on each IPv4 adapter, repeats it after 1 and 3 seconds as RFC 6762 recommends, and combines the PTR, SRV, TXT and A records of the answers into `MulticastDnsServiceInstance`. Queries are sent from an ephemeral port as legacy unicast queries, so devices answer straight back and HomeBlaze does not bind port 5353, which Avahi holds on most Linux hosts. During development, real Shelly Gen2 devices and a Hue bridge answered legacy unicast queries on a Linux host with Avahi running. Binding port 5353 with address reuse remains the documented fallback, and has not been needed so far.
 
 Any host on the network can answer, so what one query can make HomeBlaze hold or do is capped:
 

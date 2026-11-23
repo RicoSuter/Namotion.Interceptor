@@ -6,7 +6,7 @@ namespace HomeBlaze.Services.Tests.Discovery;
 
 public class DiscoveryScanTests
 {
-    private static readonly MulticastDnsService Bridge = new(
+    private static readonly MulticastDnsServiceInstance Bridge = new(
         "Philips Hue - 1A2B3C", "hue.local", 443, [IPAddress.Parse("192.168.1.20")], new Dictionary<string, string>());
 
     [Fact]

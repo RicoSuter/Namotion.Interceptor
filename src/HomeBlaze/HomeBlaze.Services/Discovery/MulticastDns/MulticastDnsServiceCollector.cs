@@ -53,7 +53,7 @@ internal sealed class MulticastDnsServiceCollector
     /// <summary>
     /// Combines the collected records into the instances of <paramref name="serviceType"/>.
     /// </summary>
-    public IReadOnlyList<MulticastDnsService> GetServices(string serviceType)
+    public IReadOnlyList<MulticastDnsServiceInstance> GetServices(string serviceType)
     {
         (DnsRecord Record, IPAddress Sender)[] records;
         lock (_lock)
@@ -72,7 +72,7 @@ internal sealed class MulticastDnsServiceCollector
             .Take(MaximumServices);
         var dnsRecords = records.Select(entry => entry.Record);
 
-        var services = new List<MulticastDnsService>();
+        var services = new List<MulticastDnsServiceInstance>();
         foreach (var (record, sender) in instances)
         {
             var instanceName = ((PointerRecord)record).Target;
@@ -102,7 +102,7 @@ internal sealed class MulticastDnsServiceCollector
                     .Distinct()
                     .ToArray();
 
-            services.Add(new MulticastDnsService(
+            services.Add(new MulticastDnsServiceInstance(
                 instanceName[..^suffix.Length],
                 service?.Target,
                 service?.Port ?? 0,

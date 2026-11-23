@@ -7,7 +7,7 @@ namespace Namotion.Devices.Philips.Hue.Tests;
 
 public class HueBridgeDiscoveryTests
 {
-    private static MulticastDnsService Announcement(string? bridgeId, string instanceName = "Philips Hue - 1A2B3C") => new(
+    private static MulticastDnsServiceInstance Announcement(string? bridgeId, string instanceName = "Philips Hue - 1A2B3C") => new(
         instanceName,
         "001788fffe1a2b3c.local",
         443,
@@ -72,14 +72,14 @@ public class HueBridgeDiscoveryTests
         Assert.Equal("001788fffe1a2b3c", single.Result.DisplayName);
     }
 
-    private sealed class AnsweringBrowser(params MulticastDnsService[] services) : IMulticastDnsBrowser
+    private sealed class AnsweringBrowser(params MulticastDnsServiceInstance[] services) : IMulticastDnsBrowser
     {
         public List<string> ServiceTypes { get; } = [];
 
-        public Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken)
+        public Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken)
         {
             ServiceTypes.Add(serviceType);
-            return Task.FromResult<IReadOnlyList<MulticastDnsService>>(services);
+            return Task.FromResult<IReadOnlyList<MulticastDnsServiceInstance>>(services);
         }
     }
 

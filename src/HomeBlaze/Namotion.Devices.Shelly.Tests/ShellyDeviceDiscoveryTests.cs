@@ -13,7 +13,7 @@ public class ShellyDeviceDiscoveryTests
     private static ShellyDiscoveredDevice Found(string deviceId = "shellyplus1pm-a8032ab12345", string hostAddress = "192.168.1.41") =>
         new(deviceId, hostAddress, "Plus1PM", deviceId);
 
-    private static MulticastDnsService Service(
+    private static MulticastDnsServiceInstance Service(
         string instanceName,
         string? hostName = "ShellyPlus1PM-A8032AB12345.local",
         string address = "192.168.1.41",
@@ -25,7 +25,7 @@ public class ShellyDeviceDiscoveryTests
             properties["app"] = application;
         }
 
-        return new MulticastDnsService(instanceName, hostName, 80, [IPAddress.Parse(address)], properties);
+        return new MulticastDnsServiceInstance(instanceName, hostName, 80, [IPAddress.Parse(address)], properties);
     }
 
     [Fact]
@@ -190,14 +190,14 @@ public class ShellyDeviceDiscoveryTests
         Assert.False(ShellyDeviceDiscovery.IsSameDevice(device, Found(deviceId: "shellyplus1pm-other")));
     }
 
-    private sealed class AnsweringBrowser(params MulticastDnsService[] services) : IMulticastDnsBrowser
+    private sealed class AnsweringBrowser(params MulticastDnsServiceInstance[] services) : IMulticastDnsBrowser
     {
         public List<string> ServiceTypes { get; } = [];
 
-        public Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken)
+        public Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken)
         {
             ServiceTypes.Add(serviceType);
-            return Task.FromResult<IReadOnlyList<MulticastDnsService>>(services);
+            return Task.FromResult<IReadOnlyList<MulticastDnsServiceInstance>>(services);
         }
     }
 

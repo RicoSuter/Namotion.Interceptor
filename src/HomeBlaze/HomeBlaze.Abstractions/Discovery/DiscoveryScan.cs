@@ -13,7 +13,7 @@ public sealed class DiscoveryScan
     {
         Ssdp = new SharedSsdpSearch(new SharedQueries<IReadOnlyList<SsdpResponse>>(ssdpSearch.SearchAsync, cancellationToken, StringComparer.Ordinal));
         MulticastDns = new SharedMulticastDnsBrowser(
-            new SharedQueries<IReadOnlyList<MulticastDnsService>>(multicastDnsBrowser.BrowseAsync, cancellationToken, StringComparer.OrdinalIgnoreCase));
+            new SharedQueries<IReadOnlyList<MulticastDnsServiceInstance>>(multicastDnsBrowser.BrowseAsync, cancellationToken, StringComparer.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -32,9 +32,9 @@ public sealed class DiscoveryScan
             queries.GetAsync(searchTarget, cancellationToken);
     }
 
-    private sealed class SharedMulticastDnsBrowser(SharedQueries<IReadOnlyList<MulticastDnsService>> queries) : IMulticastDnsBrowser
+    private sealed class SharedMulticastDnsBrowser(SharedQueries<IReadOnlyList<MulticastDnsServiceInstance>> queries) : IMulticastDnsBrowser
     {
-        public Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
+        public Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
             queries.GetAsync(serviceType, cancellationToken);
     }
 }

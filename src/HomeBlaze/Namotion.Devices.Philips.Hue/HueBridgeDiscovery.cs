@@ -14,13 +14,13 @@ public sealed class HueBridgeDiscovery : SubjectDiscovery<HueBridge, HueDiscover
     protected override async IAsyncEnumerable<HueDiscoveredBridge> DiscoverAsync(
         DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        foreach (var service in await scan.MulticastDns.BrowseAsync(ServiceType, cancellationToken))
+        foreach (var instance in await scan.MulticastDns.BrowseAsync(ServiceType, cancellationToken))
         {
-            if (service.Properties.TryGetValue("bridgeid", out var bridgeId) && !string.IsNullOrWhiteSpace(bridgeId))
+            if (instance.Properties.TryGetValue("bridgeid", out var bridgeId) && !string.IsNullOrWhiteSpace(bridgeId))
             {
                 var normalizedBridgeId = bridgeId.Trim().ToLowerInvariant();
-                var name = string.IsNullOrWhiteSpace(service.InstanceName) ? normalizedBridgeId : service.InstanceName.Trim();
-                yield return new HueDiscoveredBridge(normalizedBridgeId, service.Addresses[0].ToString(), name);
+                var name = string.IsNullOrWhiteSpace(instance.InstanceName) ? normalizedBridgeId : instance.InstanceName.Trim();
+                yield return new HueDiscoveredBridge(normalizedBridgeId, instance.Addresses[0].ToString(), name);
             }
         }
     }
