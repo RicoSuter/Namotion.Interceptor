@@ -13,7 +13,7 @@ public class ShellyDeviceDiscoveryTests
     private static ShellyDiscoveredDevice Found(string deviceId = "shellyplus1pm-a8032ab12345", string hostAddress = "192.168.1.41") =>
         new(deviceId, hostAddress, "Plus1PM", deviceId);
 
-    private static MulticastDnsServiceInstance Service(
+    private static MulticastDnsServiceInstance Instance(
         string instanceName,
         string? hostName = "ShellyPlus1PM-A8032AB12345.local",
         string address = "192.168.1.41",
@@ -32,10 +32,10 @@ public class ShellyDeviceDiscoveryTests
     public void WhenAShellyIsAnnounced_ThenItsDeviceIdAddressAndApplicationAreRead()
     {
         // Arrange
-        var service = Service("ShellyPlus1PM-A8032AB12345");
+        var instance = Instance("ShellyPlus1PM-A8032AB12345");
 
         // Act
-        var devices = ShellyDeviceDiscovery.ToDevices([service]);
+        var devices = ShellyDeviceDiscovery.ToDevices([instance]);
 
         // Assert
         var device = Assert.Single(devices);
@@ -48,14 +48,14 @@ public class ShellyDeviceDiscoveryTests
     public void WhenADeviceAnnouncesItsIdAndItsUserGivenName_ThenOneDeviceWithTheUserGivenNameIsFound()
     {
         // Arrange
-        var services = new[]
+        var instances = new[]
         {
-            Service("shellyplus2pm-4022d8dbe028", "ShellyPlus2PM-4022D8DBE028.local.", "192.168.1.50", application: null),
-            Service("Wohnzimmer Fenster Gross", "ShellyPlus2PM-4022D8DBE028.local.", "192.168.1.50", "Plus2PM")
+            Instance("shellyplus2pm-4022d8dbe028", "ShellyPlus2PM-4022D8DBE028.local.", "192.168.1.50", application: null),
+            Instance("Wohnzimmer Fenster Gross", "ShellyPlus2PM-4022D8DBE028.local.", "192.168.1.50", "Plus2PM")
         };
 
         // Act
-        var devices = ShellyDeviceDiscovery.ToDevices(services);
+        var devices = ShellyDeviceDiscovery.ToDevices(instances);
 
         // Assert
         var device = Assert.Single(devices);
@@ -70,14 +70,14 @@ public class ShellyDeviceDiscoveryTests
     public void WhenTwoDevicesAreAnnounced_ThenTwoDevicesAreFound()
     {
         // Arrange
-        var services = new[]
+        var instances = new[]
         {
-            Service("Kitchen", "ShellyPlus1PM-A8032AB12345.local", "192.168.1.41"),
-            Service("Garage", "ShellyPlus1PM-A8032AB67890.local", "192.168.1.42")
+            Instance("Kitchen", "ShellyPlus1PM-A8032AB12345.local", "192.168.1.41"),
+            Instance("Garage", "ShellyPlus1PM-A8032AB67890.local", "192.168.1.42")
         };
 
         // Act
-        var devices = ShellyDeviceDiscovery.ToDevices(services);
+        var devices = ShellyDeviceDiscovery.ToDevices(instances);
 
         // Assert
         Assert.Equal(2, devices.Count);
@@ -93,14 +93,14 @@ public class ShellyDeviceDiscoveryTests
     public void WhenAServiceHasNoHostName_ThenItIsSkipped()
     {
         // Arrange
-        var services = new[]
+        var instances = new[]
         {
-            Service("Kitchen", hostName: null),
-            Service("Garage", hostName: " . ", address: "192.168.1.42")
+            Instance("Kitchen", hostName: null),
+            Instance("Garage", hostName: " . ", address: "192.168.1.42")
         };
 
         // Act
-        var devices = ShellyDeviceDiscovery.ToDevices(services);
+        var devices = ShellyDeviceDiscovery.ToDevices(instances);
 
         // Assert
         Assert.Empty(devices);
@@ -110,7 +110,7 @@ public class ShellyDeviceDiscoveryTests
     public async Task WhenAScanRuns_ThenTheShellyServiceTypeIsBrowsed()
     {
         // Arrange
-        var browser = new AnsweringBrowser(Service("Kitchen"));
+        var browser = new AnsweringBrowser(Instance("Kitchen"));
         ISubjectDiscovery discovery = new ShellyDeviceDiscovery(browser);
 
         // Act
@@ -189,14 +189,14 @@ public class ShellyDeviceDiscoveryTests
         Assert.False(ShellyDeviceDiscovery.IsSameDevice(device, Found(deviceId: "shellyplus1pm-other")));
     }
 
-    private sealed class AnsweringBrowser(params MulticastDnsServiceInstance[] services) : IMulticastDnsBrowser
+    private sealed class AnsweringBrowser(params MulticastDnsServiceInstance[] instances) : IMulticastDnsBrowser
     {
         public List<string> ServiceTypes { get; } = [];
 
         public Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken)
         {
             ServiceTypes.Add(serviceType);
-            return Task.FromResult<IReadOnlyList<MulticastDnsServiceInstance>>(services);
+            return Task.FromResult<IReadOnlyList<MulticastDnsServiceInstance>>(instances);
         }
     }
 

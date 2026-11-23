@@ -78,14 +78,31 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         // address.
         builder.ConfigureTestServices(services =>
         {
-            services.RemoveAll<ISsdpSearch>();
-            services.AddSingleton<ISsdpSearch, EmptySsdpSearch>();
-            services.RemoveAll<IMulticastDnsBrowser>();
-            services.AddSingleton<IMulticastDnsBrowser, EmptyMulticastDnsBrowser>();
-            services.RemoveAll<IUdpDiscovery>();
-            services.AddSingleton<IUdpDiscovery, EmptyUdpDiscovery>();
+            Replace<ISsdpSearch, EmptySsdpSearch>(services);
+            Replace<IMulticastDnsBrowser, EmptyMulticastDnsBrowser>(services);
+            Replace<IUdpDiscovery, EmptyUdpDiscovery>(services);
             services.ConfigureHttpClientDefaults(httpClient => httpClient.AddHttpMessageHandler(() => new NukiDiscoveryStub()));
         });
+    }
+
+    /// <summary>
+    /// Replaces the registration of <typeparamref name="TService"/> with a singleton of
+    /// <typeparamref name="TImplementation"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The host does not register <typeparamref name="TService"/>.</exception>
+    private static void Replace<TService, TImplementation>(IServiceCollection services)
+        where TService : class
+        where TImplementation : class, TService
+    {
+        // A host that stopped registering the service would leave the subject discoveries that need it uncreated in
+        // production, while adding it here kept the tests green.
+        if (!services.Any(descriptor => descriptor.ServiceType == typeof(TService)))
+        {
+            throw new InvalidOperationException($"{typeof(TService)} is not registered by the host");
+        }
+
+        services.RemoveAll<TService>();
+        services.AddSingleton<TService, TImplementation>();
     }
 
     protected override IHost CreateHost(IHostBuilder builder)

@@ -54,7 +54,7 @@ public class PlaywrightFixtureTests
 
         // Act
         var ssdpResponses = await services.GetRequiredService<ISsdpSearch>().SearchAsync("ssdp:all", CancellationToken.None);
-        var multicastDnsServices = await services.GetRequiredService<IMulticastDnsBrowser>().BrowseAsync("_hue._tcp", CancellationToken.None);
+        var multicastDnsInstances = await services.GetRequiredService<IMulticastDnsBrowser>().BrowseAsync("_hue._tcp", CancellationToken.None);
         var broadcastAnswers = await udpDiscovery.BroadcastAsync(46000, new byte[] { 0x01 }, TimeSpan.FromSeconds(1), CancellationToken.None).ToListAsync();
         var listenedDatagrams = await udpDiscovery.ListenAsync(7979, TimeSpan.FromSeconds(1), CancellationToken.None).ToListAsync();
         var nukiAnswer = await httpClient.GetStringAsync(NukiBridgeDiscovery.DiscoveryAddress);
@@ -62,7 +62,7 @@ public class PlaywrightFixtureTests
 
         // Assert
         Assert.Empty(ssdpResponses);
-        Assert.Empty(multicastDnsServices);
+        Assert.Empty(multicastDnsInstances);
         Assert.Empty(broadcastAnswers);
         Assert.Empty(listenedDatagrams);
         // The stub of the host answers with exactly this; the real service adds an error code.

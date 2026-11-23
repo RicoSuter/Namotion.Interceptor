@@ -62,7 +62,7 @@ The API and the rules for implementers are in [Writing a Subject Discovery](../.
 
 ### Registry
 
-`SubjectDiscoveryRegistry` in `HomeBlaze.Services` scans `TypeProvider.Types` for non-abstract `ISubjectDiscovery` types, as `SubjectComponentRegistry` does for components, so plugins provide subject discoveries without extra registration. It creates them through DI with `ActivatorUtilities`, so a constructor can ask for `ISsdpSearch`, `IMulticastDnsBrowser`, `IHttpClientFactory` or `ILogger<T>`. Like the components, the subject discoveries are created once, on first use, so all subject discovery types must be loaded before; types added later are not scanned.
+`SubjectDiscoveryRegistry` in `HomeBlaze.Services` scans `TypeProvider.Types` for non-abstract `ISubjectDiscovery` types, as `SubjectComponentRegistry` does for components, so plugins provide subject discoveries without extra registration. It creates them through DI with `ActivatorUtilities`, so a constructor can take the services in [Writing a Subject Discovery](../../development/subject-discovery.md#services) or any other singleton, such as `IHttpClientFactory` or `ILogger<T>`. Like the components, the subject discoveries are created once, on first use, so all subject discovery types must be loaded before; types added later are not scanned.
 
 It leaves out, with one logged error each, written the first time the create dialog asks for subject discoveries rather than at startup, and without blocking the app:
 

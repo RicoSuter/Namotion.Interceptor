@@ -69,14 +69,14 @@ public class HueBridgeDiscoveryTests
         Assert.Equal("001788fffe1a2b3c", single.Result.DisplayName);
     }
 
-    private sealed class AnsweringBrowser(params MulticastDnsServiceInstance[] services) : IMulticastDnsBrowser
+    private sealed class AnsweringBrowser(params MulticastDnsServiceInstance[] instances) : IMulticastDnsBrowser
     {
         public List<string> ServiceTypes { get; } = [];
 
         public Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken)
         {
             ServiceTypes.Add(serviceType);
-            return Task.FromResult<IReadOnlyList<MulticastDnsServiceInstance>>(services);
+            return Task.FromResult<IReadOnlyList<MulticastDnsServiceInstance>>(instances);
         }
     }
 }
