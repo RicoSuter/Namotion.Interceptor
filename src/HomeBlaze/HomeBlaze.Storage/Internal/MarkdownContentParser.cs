@@ -285,6 +285,10 @@ public sealed partial class MarkdownContentParser
     internal void LogSecretRewriteOnChangedFile(string path) =>
         _logger?.LogDebug("The page {Path} changed since it was read, so its plaintext secrets are moved to the secret store once it has been read again", path);
 
+    /// <summary>Logs that the plaintext secrets of a block were moved to the secret store.</summary>
+    internal void LogMovedSecrets(string path) =>
+        _logger?.LogInformation("Moved the plaintext secrets of a block of the page {Path} to the secret store.", path);
+
     /// <summary>Logs that the plaintext secrets of a block could not be moved to the secret store.</summary>
     internal void LogFailedSecretRewrite(string path, Exception exception) =>
         _logger?.LogWarning(exception, "The plaintext secrets of a block of the page {Path} could not be moved to the secret store and stay in the page until it is saved", path);

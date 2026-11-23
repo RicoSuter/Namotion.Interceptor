@@ -298,23 +298,21 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 {
                     // The read of the page applies the configurations again, so it checks the remaining subjects.
                     _parser.LogSecretRewriteOnChangedFile(FullPath);
-                    for (var remaining = index; remaining < subjects.Count; remaining++)
-                    {
-                        _secretRewrites.Remove(subjects[remaining]);
-                        _parser.ForgetAppliedConfiguration(subjects[remaining]);
-                    }
-
+                    ForgetSecretRewritesFrom(subjects, index, forgetAppliedConfigurations: true);
                     await ReloadAfterRefusalAsync(CancellationToken.None);
                     return;
                 }
 
-                await WriteBlockAsync(subjects[index], CancellationToken.None);
+                if (await WriteBlockAsync(subjects[index], CancellationToken.None))
+                {
+                    _parser.LogMovedSecrets(FullPath);
+                }
             }
         }
         catch
         {
             // Unmarked after the write's own reload, so only a later parse that applies the configuration tries again.
-            ForgetSecretRewritesFrom(subjects, index);
+            ForgetSecretRewritesFrom(subjects, index, forgetAppliedConfigurations: false);
             throw;
         }
         finally
@@ -323,11 +321,16 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
-    private void ForgetSecretRewritesFrom(IReadOnlyList<IInterceptorSubject> subjects, int index)
+    // Forgetting the applied configuration makes the next parse apply it again, which checks it again.
+    private void ForgetSecretRewritesFrom(IReadOnlyList<IInterceptorSubject> subjects, int index, bool forgetAppliedConfigurations)
     {
         for (; index < subjects.Count; index++)
         {
             _secretRewrites.Remove(subjects[index]);
+            if (forgetAppliedConfigurations)
+            {
+                _parser.ForgetAppliedConfiguration(subjects[index]);
+            }
         }
     }
 
