@@ -53,6 +53,55 @@ public class SecretStoreTests : IDisposable
     }
 
     [Fact]
+    public void WhenAValueIsSetUnderAnExistingKey_ThenItReplacesTheValueAndKeepsTheOthers()
+    {
+        // Arrange
+        var store = new SecretStore(StorePath);
+        var key = store.Add("hunter2");
+        var otherKey = store.Add("other");
+
+        // Act
+        store.Set(key, "correct horse");
+
+        // Assert
+        Assert.True(store.TryGet(key, out var value));
+        Assert.Equal("correct horse", value);
+        Assert.True(store.TryGet(otherKey, out var otherValue));
+        Assert.Equal("other", otherValue);
+    }
+
+    [Fact]
+    public void WhenAValueIsSetUnderAMissingKey_ThenItIsAddedUnderThatKey()
+    {
+        // Arrange
+        var store = new SecretStore(StorePath);
+        const string key = "0123456789abcdef0123456789abcdef";
+
+        // Act
+        store.Set(key, "hunter2");
+
+        // Assert
+        Assert.True(store.TryGet(key, out var value));
+        Assert.Equal("hunter2", value);
+    }
+
+    [Fact]
+    public void WhenTheStoreIsCreatedAgain_ThenItReadsTheSetValues()
+    {
+        // Arrange
+        var first = new SecretStore(StorePath);
+        var key = first.Add("hunter2");
+        first.Set(key, "correct horse");
+
+        // Act
+        var store = new SecretStore(StorePath);
+
+        // Assert
+        Assert.True(store.TryGet(key, out var value));
+        Assert.Equal("correct horse", value);
+    }
+
+    [Fact]
     public void WhenTheFileIsMissing_ThenTheStoreIsEmptyAndNoFileIsCreated()
     {
         // Act
@@ -89,6 +138,20 @@ public class SecretStoreTests : IDisposable
 
         // Act
         store.Add("hunter2");
+
+        // Assert
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(StorePath));
+    }
+
+    [UnixFact]
+    [UnsupportedOSPlatform("windows")]
+    public void WhenAValueIsSet_ThenOnlyTheOwnerCanReadTheFile()
+    {
+        // Arrange
+        var store = new SecretStore(StorePath);
+
+        // Act
+        store.Set("0123456789abcdef0123456789abcdef", "hunter2");
 
         // Assert
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(StorePath));

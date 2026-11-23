@@ -6,7 +6,7 @@ namespace HomeBlaze.Services.Secrets;
 
 /// <summary>
 /// Keeps the values of secret configuration properties in a JSON file outside the storage, each under a random key that
-/// configuration files reference instead of the value. Entries are only added, never changed or removed.
+/// configuration files reference instead of the value. Entries are added or replaced, never removed.
 /// </summary>
 /// <remarks>
 /// The file is read once, when the store is created, so a file that is replaced while the store lives takes effect
@@ -36,9 +36,21 @@ public sealed class SecretStore
     /// <exception cref="UnauthorizedAccessException">The file cannot be written. The value is not stored.</exception>
     public string Add(string value)
     {
+        var key = Guid.NewGuid().ToString("N");
+        Set(key, value);
+        return key;
+    }
+
+    /// <summary>
+    /// Stores <paramref name="value"/> under <paramref name="key"/>, replacing its value or adding the key when it is
+    /// missing, and returns once the file is written.
+    /// </summary>
+    /// <exception cref="IOException">The file cannot be written. The value is not stored.</exception>
+    /// <exception cref="UnauthorizedAccessException">The file cannot be written. The value is not stored.</exception>
+    public void Set(string key, string value)
+    {
         lock (_writeLock)
         {
-            var key = Guid.NewGuid().ToString("N");
             var values = new Dictionary<string, string>(_values) { [key] = value };
             var content = JsonSerializer.SerializeToUtf8Bytes(values, SecretStoreJsonContext.Default.DictionaryStringString);
 
@@ -47,7 +59,6 @@ public sealed class SecretStore
 
             // After the write: a value that is not in the file must not be referenced.
             _values[key] = value;
-            return key;
         }
     }
 

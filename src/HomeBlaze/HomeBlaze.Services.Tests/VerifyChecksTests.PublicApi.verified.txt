@@ -685,6 +685,7 @@ namespace HomeBlaze.Services.Secrets
         public SecretStore(string path) { }
         public string Path { get; }
         public string Add(string value) { }
+        public void Set(string key, string value) { }
         public bool TryGet(string key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? value) { }
     }
 }
