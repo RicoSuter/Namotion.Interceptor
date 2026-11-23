@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Testing;
@@ -97,6 +98,105 @@ public class SecretRewriteTests : StorageTestBase
         // Assert
         Assert.False(isWritten);
         Assert.Equal(content, File.ReadAllText(GetFullPath("Gateway.json")));
+    }
+
+    [Fact]
+    public async Task WhenABlockArgumentOfAPageHoldsAPlaintextSecret_ThenOnlyItIsReplacedByAReference()
+    {
+        // Arrange
+        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        WriteFile("Gateway.md", $"# Gateway\n\nIntro text.\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n\nOutro text.\n");
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        var content = await WaitForSecretReferenceOnlyAsync("Gateway.md");
+        Assert.StartsWith($"# Gateway\n\nIntro text.\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=", content);
+        Assert.EndsWith("::\n\nOutro text.\n", content);
+        Assert.Contains("s3cr3t", File.ReadAllText(SecretsPath));
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => page.Children.TryGetValue("gateway", out var block) && ((EmbeddedSecretDevice)block).Password == "s3cr3t");
+    }
+
+    [Fact]
+    public async Task WhenAJsonBlockOfAPageHoldsAPlaintextSecret_ThenItIsReplacedByAReference()
+    {
+        // Arrange
+        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway\n```json\n{{\n  \"Host\": \"10.0.0.1\",\n  \"Password\": \"s3cr3t\"\n}}\n```\n::\n");
+
+        // Act
+        await ConnectAsync();
+
+        // Assert
+        var content = await WaitForSecretReferenceOnlyAsync("Gateway.md");
+        Assert.StartsWith($"# Gateway\n\n:: {DeviceType}#gateway", content);
+        Assert.Contains("10.0.0.1", content);
+        Assert.Contains("s3cr3t", File.ReadAllText(SecretsPath));
+    }
+
+    [Fact]
+    public async Task WhenThePageFileChangedSinceItWasRead_ThenTheBlockRewriteWritesNothingAndReadsThePageAgain()
+    {
+        // Arrange
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var device = Assert.IsType<EmbeddedSecretDevice>(page.Children["gateway"]);
+        device.Host = "10.0.0.2";
+        var handEdit = $"# Gateway\n\nA hand edit.\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n";
+        WriteFile("Gateway.md", handEdit);
+
+        // Act
+        await page.RewriteBlocksIfFileUnchangedAsync([device]);
+
+        // Assert
+        Assert.Equal(handEdit, File.ReadAllText(GetFullPath("Gateway.md")));
+        Assert.Equal(handEdit, page.Content);
+    }
+
+    [Fact]
+    public async Task WhenThePageFileIsAsItWasRead_ThenTheBlockRewriteWritesTheBlock()
+    {
+        // Arrange
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var device = Assert.IsType<EmbeddedSecretDevice>(page.Children["gateway"]);
+        device.Host = "10.0.0.2";
+
+        // Act
+        await page.RewriteBlocksIfFileUnchangedAsync([device]);
+
+        // Assert
+        Assert.Equal($"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.2\n::\n", File.ReadAllText(GetFullPath("Gateway.md")));
+    }
+
+    private async Task<string> WaitForSecretReferenceOnlyAsync(string relativePath)
+    {
+        string? content = null;
+        await AsyncTestHelpers.WaitUntilAsync(() =>
+        {
+            content = TryReadText(relativePath);
+            return content is not null && content.Contains("$secret:") && !content.Contains("s3cr3t");
+        });
+
+        return content!;
+    }
+
+    // A file that is being rewritten can be read empty, or not at all on Windows.
+    private string? TryReadText(string relativePath)
+    {
+        try
+        {
+            return File.ReadAllText(GetFullPath(relativePath));
+        }
+        catch (IOException)
+        {
+            return null;
+        }
     }
 
     // One read for both checks: a file that is being rewritten can be read empty, or not at all on Windows.

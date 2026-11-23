@@ -281,6 +281,10 @@ public sealed partial class MarkdownContentParser
     internal void LogFailedReload(string path, Exception exception) =>
         _logger?.LogWarning(exception, "Failed to reload the page {Path} after a write that was refused or failed", path);
 
+    /// <summary>Logs that the plaintext secrets of a block could not be moved to the secret store.</summary>
+    internal void LogFailedSecretRewrite(string path, Exception exception) =>
+        _logger?.LogWarning(exception, "The plaintext secrets of a block of the page {Path} could not be moved to the secret store and stay in the page until it is saved", path);
+
     /// <summary>
     /// Renders markdown content by replacing each {{ path }} expression that
     /// <see cref="MarkdownSegmentBuilder.FindExpressions"/> finds with its resolved value as the page shows it: also

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -75,6 +76,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private const string PageChangedRefusal = "The page changed since you opened it.";
     private const string MovedTextRefusal = "The text moved or changed. Select it again.";
     private const string NotInContentRefusal = "The block to insert before is not in this content.";
+
+    // Each block subject is tried once: a write that the page refuses reads the page again, which would try again and
+    // be refused again. A subject that a later parse creates anew, or one whose rewrite found the file changed, is tried
+    // again.
+    private readonly ConditionalWeakTable<IInterceptorSubject, object> _secretRewrites = new();
 
     // The write of this page that the flow runs in, so that a write from inside it is refused instead of waiting
     // for _writeLock. Off the worker, the reload after a write, a refused write-back or a refused structure edit applies
@@ -204,10 +210,83 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             {
                 Children = result.Children;
             }
+
+            ScheduleSecretRewrites(result);
         }
         finally
         {
             _reloadLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Saves each block whose subject holds a secret in plaintext, which moves the secret to the secret store. Queued
+    /// behind the parse, because a page cannot write itself from the worker of the storage or from within its reload.
+    /// A block with a value that cannot be read has no subject, so it is not saved.
+    /// </summary>
+    private void ScheduleSecretRewrites(MarkdownParseResult result)
+    {
+        List<IInterceptorSubject>? subjects = null;
+        foreach (var subject in result.BlockSubjects.Values)
+        {
+            if (_serializer.HasUnstoredSecrets(subject) && _secretRewrites.TryAdd(subject, this))
+            {
+                (subjects ??= []).Add(subject);
+            }
+        }
+
+        if (subjects is null)
+        {
+            return;
+        }
+
+        using var suppressedFlow = ExecutionContext.IsFlowSuppressed() ? (AsyncFlowControl?)null : ExecutionContext.SuppressFlow();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RewriteBlocksIfFileUnchangedAsync(subjects);
+            }
+            catch (Exception exception)
+            {
+                _parser.LogFailedSecretRewrite(FullPath, exception);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Writes the block of each subject, one after the other, while the file is the text the page last read. When the
+    /// file differs, nothing more is written and the page is read again, which schedules the remaining subjects again.
+    /// A refused block write is logged by the write itself.
+    /// </summary>
+    internal async Task RewriteBlocksIfFileUnchangedAsync(IReadOnlyList<IInterceptorSubject> subjects)
+    {
+        EnsureNotWithinWrite();
+        await _writeLock.WaitAsync(CancellationToken.None);
+        var write = BeginWrite();
+        try
+        {
+            for (var index = 0; index < subjects.Count; index++)
+            {
+                // The block text is computed from the snapshot, which lags behind a change of the file until its event
+                // arrives, and an unrequested write must never undo a hand edit.
+                if (_parseResult.Page is not { } page || await ReadSourceUnlockedAsync(CancellationToken.None) != page.Source)
+                {
+                    for (var remaining = index; remaining < subjects.Count; remaining++)
+                    {
+                        _secretRewrites.Remove(subjects[remaining]);
+                    }
+
+                    await ReloadAfterRefusalAsync(CancellationToken.None);
+                    return;
+                }
+
+                await WriteBlockAsync(subjects[index], CancellationToken.None);
+            }
+        }
+        finally
+        {
+            EndWrite(write);
         }
     }
 
