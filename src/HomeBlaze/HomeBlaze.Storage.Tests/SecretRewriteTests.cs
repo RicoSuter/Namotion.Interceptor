@@ -1,7 +1,11 @@
 using System.Collections.Concurrent;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Storage.Tests;
@@ -174,6 +178,79 @@ public class SecretRewriteTests : StorageTestBase
         Assert.Equal($"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.2\n::\n", File.ReadAllText(GetFullPath("Gateway.md")));
     }
 
+    [Fact]
+    public async Task WhenABlockWithAPlaintextSecretHasAValueThatCannotBeRead_ThenItIsNotRewritten()
+    {
+        // Arrange: the blocks are rewritten in the order of the page, so the error block would be written first.
+        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        var errorBlock = $":: {DeviceType}#broken\n```json\n{{\n  \"Host\": [1],\n  \"Password\": \"error-secret\"\n}}\n```\n::\n";
+        WriteFile("Gateway.md", $"# Gateway\n\n{errorBlock}\n:: {DeviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n");
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        var content = await WaitForSecretReferenceOnlyAsync("Gateway.md");
+        Assert.StartsWith($"# Gateway\n\n{errorBlock}\n", content);
+        Assert.DoesNotContain("error-secret", File.ReadAllText(SecretsPath));
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        Assert.False(page.Children.ContainsKey("broken"));
+    }
+
+    [Fact]
+    public async Task WhenTheRewriteOfABlockIsRefused_ThenItIsTriedAgainOnlyOnceItsConfigurationChanges()
+    {
+        // Arrange
+        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        var deviceType = typeof(UnwritableSecretDevice).FullName;
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {deviceType}#gateway Password=s3cr3t\n::\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var device = Assert.IsType<UnwritableSecretDevice>(page.Children["gateway"]);
+
+        // The refused write reads the page again, which applies the configuration of the block again.
+        await AsyncTestHelpers.WaitUntilAsync(() => device.ApplyCount == 1);
+        await AssertStaysTrueAsync(() => device.ApplyCount == 1);
+
+        // Act
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {deviceType}#gateway Password=an0ther-s3cr3t\n::\n");
+        await storage.ReconcileAsync(Named("Gateway.md"));
+
+        // Assert: the reload applies the new configuration, and the refused rewrite of it reads the page once more.
+        await AsyncTestHelpers.WaitUntilAsync(() => device.ApplyCount == 3);
+        await AssertStaysTrueAsync(() => device.ApplyCount == 3);
+        Assert.Contains("an0ther-s3cr3t", File.ReadAllText(GetFullPath("Gateway.md")));
+    }
+
+    [Fact]
+    public async Task WhenThePageFileChangedBeforeTheRewrite_ThenTheBlockIsRewrittenOnTheNewText()
+    {
+        // Arrange: the secret is set in memory, so the block of the page has no plaintext that would be rewritten on load.
+        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var device = Assert.IsType<EmbeddedSecretDevice>(page.Children["gateway"]);
+        device.Password = "s3cr3t";
+        WriteFile("Gateway.md", $"# Gateway\n\nA hand edit.\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n");
+
+        // Act
+        await page.RewriteBlocksIfFileUnchangedAsync([device]);
+
+        // Assert
+        string? content = null;
+        await AsyncTestHelpers.WaitUntilAsync(() => (content = TryReadText("Gateway.md")) is not null && content.Contains("$secret:"));
+        Assert.StartsWith($"# Gateway\n\nA hand edit.\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=$secret:", content);
+        Assert.Contains("s3cr3t", File.ReadAllText(SecretsPath));
+    }
+
+    // Only for a check that something does not happen, which a passing test always waits for in full.
+    private static async Task AssertStaysTrueAsync(Func<bool> condition)
+    {
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => AsyncTestHelpers.WaitUntilAsync(() => !condition(), timeout: TimeSpan.FromMilliseconds(500)));
+    }
+
     private async Task<string> WaitForSecretReferenceOnlyAsync(string relativePath)
     {
         string? content = null;
@@ -186,7 +263,7 @@ public class SecretRewriteTests : StorageTestBase
         return content!;
     }
 
-    // A file that is being rewritten can be read empty, or not at all on Windows.
+    // Each check reads the file once: a file that is being rewritten can be read empty, or not at all on Windows.
     private string? TryReadText(string relativePath)
     {
         try
@@ -199,19 +276,8 @@ public class SecretRewriteTests : StorageTestBase
         }
     }
 
-    // One read for both checks: a file that is being rewritten can be read empty, or not at all on Windows.
-    private bool HoldsSecretReferenceOnly(string relativePath)
-    {
-        try
-        {
-            var text = File.ReadAllText(GetFullPath(relativePath));
-            return text.Contains("\"password\": \"$secret:") && !text.Contains("s3cr3t");
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-    }
+    private bool HoldsSecretReferenceOnly(string relativePath) =>
+        TryReadText(relativePath) is { } text && text.Contains("\"password\": \"$secret:") && !text.Contains("s3cr3t");
 
     private sealed class RecordingLogger(ConcurrentQueue<string> messages) : ILogger<FluentStorageContainer>
     {
@@ -222,5 +288,30 @@ public class SecretRewriteTests : StorageTestBase
         public void Log<TState>(
             LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
             => messages.Enqueue(formatter(state, exception));
+    }
+}
+
+/// <summary>A device whose block can never be written: its slot that takes page content always holds a subject of its own.</summary>
+[InterceptorSubject]
+public partial class UnwritableSecretDevice : IConfigurable
+{
+    private readonly EmbeddedSecretDevice _ownChild = new();
+    private int _applyCount;
+
+    [Configuration(IsSecret = true)]
+    public partial string? Password { get; set; }
+
+    [Slot(IsDefault = true)]
+    public partial IInterceptorSubject? Child { get; set; }
+
+    /// <summary>How often the configuration was applied in place.</summary>
+    public int ApplyCount => Volatile.Read(ref _applyCount);
+
+    partial void OnChildChanging(ref IInterceptorSubject? newValue, ref bool cancel) => newValue = _ownChild;
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _applyCount);
+        return Task.CompletedTask;
     }
 }

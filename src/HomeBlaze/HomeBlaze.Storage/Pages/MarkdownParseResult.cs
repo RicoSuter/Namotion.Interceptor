@@ -27,4 +27,10 @@ public sealed record MarkdownParseResult(
 
     /// <summary>The text block that each HTML segment of the parse starts, by the segment.</summary>
     internal IReadOnlyDictionary<HtmlSegment, MarkdownTextBlock> TextBlocks { get; init; } = NoTextBlocks;
+
+    /// <summary>
+    /// The block subjects whose configuration the parse applied, by creating them or updating them in place, with the
+    /// configuration JSON it applied. Empty for a snapshot that a write published.
+    /// </summary>
+    internal IReadOnlyList<(IInterceptorSubject Subject, string Json)> AppliedConfigurations { get; init; } = [];
 }

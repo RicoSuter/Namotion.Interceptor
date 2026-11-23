@@ -77,10 +77,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private const string MovedTextRefusal = "The text moved or changed. Select it again.";
     private const string NotInContentRefusal = "The block to insert before is not in this content.";
 
-    // Each block subject is tried once: a write that the page refuses reads the page again, which would try again and
-    // be refused again. A subject that a later parse creates anew, or one whose rewrite found the file changed, is tried
-    // again.
-    private readonly ConditionalWeakTable<IInterceptorSubject, object> _secretRewrites = new();
+    // The configuration JSON whose plaintext secrets were last tried to move, per block subject. A write that the page
+    // refuses reads the page again, which applies the same JSON again and must not try again. A parse that applies other
+    // JSON tries again.
+    private readonly ConditionalWeakTable<IInterceptorSubject, string> _secretRewrites = new();
+
+    // The subjects whose rewrite found the file changed. The read of the page that follows applies no configuration of a
+    // block whose text did not change, so it checks these besides the ones it applied.
+    private List<IInterceptorSubject>? _secretRewritesToRecheck;
 
     // The write of this page that the flow runs in, so that a write from inside it is refused instead of waiting
     // for _writeLock. Off the worker, the reload after a write, a refused write-back or a refused structure edit applies
@@ -220,18 +224,27 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>
-    /// Saves each block whose subject holds a secret in plaintext, which moves the secret to the secret store. Queued
-    /// behind the parse, because a page cannot write itself from the worker of the storage or from within its reload.
-    /// A block with a value that cannot be read has no subject, so it is not saved.
+    /// Saves each block whose subject holds a secret in plaintext in the configuration that the parse applied, which moves
+    /// the secret to the secret store. Queued behind the parse, because a page cannot write itself from the worker of the
+    /// storage or from within its reload. A block with a value that cannot be read has no subject, so it is not saved.
     /// </summary>
     private void ScheduleSecretRewrites(MarkdownParseResult result)
     {
         List<IInterceptorSubject>? subjects = null;
-        foreach (var subject in result.BlockSubjects.Values)
+        foreach (var (subject, json) in result.AppliedConfigurations)
         {
-            if (_serializer.HasUnstoredSecrets(subject) && _secretRewrites.TryAdd(subject, this))
+            AddSecretRewrite(subject, json, ref subjects);
+        }
+
+        if (Interlocked.Exchange(ref _secretRewritesToRecheck, null) is { } recheck)
+        {
+            foreach (var subject in recheck)
             {
-                (subjects ??= []).Add(subject);
+                if (result.BlockSubjects.Values.Contains(subject, ReferenceEqualityComparer.Instance) &&
+                    _parser.TryGetAppliedConfiguration(subject, out var json))
+                {
+                    AddSecretRewrite(subject, json, ref subjects);
+                }
             }
         }
 
@@ -254,6 +267,31 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         });
     }
 
+    // Runs after the parse was published, so a subject whose check throws is only skipped.
+    private void AddSecretRewrite(IInterceptorSubject subject, string json, ref List<IInterceptorSubject>? subjects)
+    {
+        if (_secretRewrites.TryGetValue(subject, out var triedJson) && triedJson == json)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!_serializer.HasUnstoredSecrets(subject))
+            {
+                return;
+            }
+        }
+        catch (Exception exception)
+        {
+            _parser.LogFailedSecretRewrite(FullPath, exception);
+            return;
+        }
+
+        _secretRewrites.AddOrUpdate(subject, json);
+        (subjects ??= []).Add(subject);
+    }
+
     /// <summary>
     /// Writes the block of each subject, one after the other, while the file is the text the page last read. When the
     /// file differs, nothing more is written and the page is read again, which schedules the remaining subjects again.
@@ -264,19 +302,24 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         EnsureNotWithinWrite();
         await _writeLock.WaitAsync(CancellationToken.None);
         var write = BeginWrite();
+        var index = 0;
         try
         {
-            for (var index = 0; index < subjects.Count; index++)
+            for (; index < subjects.Count; index++)
             {
                 // The block text is computed from the snapshot, which lags behind a change of the file until its event
                 // arrives, and an unrequested write must never undo a hand edit.
                 if (_parseResult.Page is not { } page || await ReadSourceUnlockedAsync(CancellationToken.None) != page.Source)
                 {
-                    for (var remaining = index; remaining < subjects.Count; remaining++)
+                    _parser.LogSecretRewriteOnChangedFile(FullPath);
+                    ForgetSecretRewritesFrom(subjects, index);
+                    var recheck = subjects.Skip(index).ToList();
+                    if (Interlocked.Exchange(ref _secretRewritesToRecheck, null) is { } earlier)
                     {
-                        _secretRewrites.Remove(subjects[remaining]);
+                        recheck.AddRange(earlier);
                     }
 
+                    Volatile.Write(ref _secretRewritesToRecheck, recheck);
                     await ReloadAfterRefusalAsync(CancellationToken.None);
                     return;
                 }
@@ -284,9 +327,24 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 await WriteBlockAsync(subjects[index], CancellationToken.None);
             }
         }
+        catch
+        {
+            // After the read that a failed write does itself, so that read does not try again, which could repeat a write
+            // that keeps failing; a later parse that applies the configuration does.
+            ForgetSecretRewritesFrom(subjects, index);
+            throw;
+        }
         finally
         {
             EndWrite(write);
+        }
+    }
+
+    private void ForgetSecretRewritesFrom(IReadOnlyList<IInterceptorSubject> subjects, int index)
+    {
+        for (; index < subjects.Count; index++)
+        {
+            _secretRewrites.Remove(subjects[index]);
         }
     }
 
@@ -1220,7 +1278,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         {
             Page = write.Page,
             BlockSubjects = write.BlockSubjects,
-            TextBlocks = MarkdownParseResult.NoTextBlocks
+            TextBlocks = MarkdownParseResult.NoTextBlocks,
+            AppliedConfigurations = []
         };
         if (!ReferenceEquals(Interlocked.CompareExchange(ref _parseResult, published, snapshot), snapshot))
         {
