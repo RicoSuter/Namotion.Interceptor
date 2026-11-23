@@ -20,15 +20,15 @@ public partial class OtherDiscoveryTestSubject
 public sealed record TestDiscoveryResult(string Key, string DisplayName = "Device", string? Detail = null) : IDiscoveryResult;
 
 /// <summary>
-/// A discoverer whose scan and matching the test passes in.
+/// A subject discovery whose scan and matching the test passes in.
 /// </summary>
-internal sealed class LambdaDiscoverer<TSubject> : SubjectDiscoverer<TSubject, TestDiscoveryResult>
+internal sealed class LambdaDiscovery<TSubject> : SubjectDiscovery<TSubject, TestDiscoveryResult>
     where TSubject : class, IInterceptorSubject
 {
     private readonly Func<DiscoveryScan, CancellationToken, IAsyncEnumerable<TestDiscoveryResult>> _scan;
     private readonly Func<TSubject, TestDiscoveryResult, bool> _matches;
 
-    public LambdaDiscoverer(
+    public LambdaDiscovery(
         Func<DiscoveryScan, CancellationToken, IAsyncEnumerable<TestDiscoveryResult>> scan,
         Func<TSubject, TestDiscoveryResult, bool>? matches = null)
     {

@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Namotion.Devices.Philips.Hue.Tests;
 
-public class HueBridgeDiscovererTests
+public class HueBridgeDiscoveryTests
 {
     private static MulticastDnsService Announcement(string? bridgeId, string instanceName = "Philips Hue - 1A2B3C") => new(
         instanceName,
@@ -22,11 +22,11 @@ public class HueBridgeDiscovererTests
         // Arrange
         var browser = new AnsweringBrowser(Announcement("001788FFFE1A2B3C"), Announcement(null));
         var existing = new HueBridge(NullLogger<HueBridge>.Instance) { BridgeId = "001788fffe1a2b3c" };
-        ISubjectDiscoverer discoverer = new HueBridgeDiscoverer();
+        ISubjectDiscovery discovery = new HueBridgeDiscovery();
         var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, CancellationToken.None);
 
         // Act
-        var discovered = await discoverer.DiscoverAsync(scan, [existing], CancellationToken.None).ToListAsync();
+        var discovered = await discovery.DiscoverAsync(scan, [existing], CancellationToken.None).ToListAsync();
 
         // Assert
         var single = Assert.Single(discovered);
@@ -35,7 +35,7 @@ public class HueBridgeDiscovererTests
         Assert.Equal("192.168.1.20", bridge.HostAddress);
         Assert.Equal("Philips Hue - 1A2B3C", bridge.DisplayName);
         Assert.Same(existing, single.ExistingSubject);
-        Assert.Equal([HueBridgeDiscoverer.ServiceType], browser.ServiceTypes);
+        Assert.Equal([HueBridgeDiscovery.ServiceType], browser.ServiceTypes);
     }
 
     [Fact]
@@ -44,11 +44,11 @@ public class HueBridgeDiscovererTests
         // Arrange
         var browser = new AnsweringBrowser(Announcement("001788FFFE1A2B3C"));
         var existing = new HueBridge(NullLogger<HueBridge>.Instance) { BridgeId = "001788fffe999999" };
-        ISubjectDiscoverer discoverer = new HueBridgeDiscoverer();
+        ISubjectDiscovery discovery = new HueBridgeDiscovery();
         var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, CancellationToken.None);
 
         // Act
-        var discovered = await discoverer.DiscoverAsync(scan, [existing], CancellationToken.None).ToListAsync();
+        var discovered = await discovery.DiscoverAsync(scan, [existing], CancellationToken.None).ToListAsync();
 
         // Assert
         var single = Assert.Single(discovered);
@@ -61,11 +61,11 @@ public class HueBridgeDiscovererTests
     {
         // Arrange
         var browser = new AnsweringBrowser(Announcement("001788FFFE1A2B3C", instanceName: " "));
-        ISubjectDiscoverer discoverer = new HueBridgeDiscoverer();
+        ISubjectDiscovery discovery = new HueBridgeDiscovery();
         var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, CancellationToken.None);
 
         // Act
-        var discovered = await discoverer.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
+        var discovered = await discovery.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
 
         // Assert
         var single = Assert.Single(discovered);

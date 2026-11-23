@@ -8,20 +8,20 @@ namespace HomeBlaze.Abstractions.Discovery;
 /// among the loaded types and creates it through dependency injection.
 /// </summary>
 /// <remarks>
-/// A discoverer only reads the network and creates no subject. The create dialog passes the result the user picks to
-/// the Setup component of <typeparamref name="TSubject"/>, or its Edit component when it has none, which must
-/// implement <c>ISubjectDiscoveryComponent</c>; otherwise HomeBlaze does not use the discoverer. One instance serves
-/// overlapping scans, so it keeps no state between calls.
+/// A subject discovery only reads the network and creates no subject. The create dialog passes the result the user
+/// picks to the Setup component of <typeparamref name="TSubject"/>, or its Edit component when it has none, which must
+/// implement <c>ISubjectDiscoveryComponent</c>; otherwise HomeBlaze does not use the subject discovery. One instance
+/// serves overlapping scans, so it keeps no state between calls.
 /// </remarks>
 /// <typeparam name="TSubject">The type of subject that represents a found device.</typeparam>
 /// <typeparam name="TResult">The type of result that describes a found device.</typeparam>
-public abstract class SubjectDiscoverer<TSubject, TResult> : ISubjectDiscoverer
+public abstract class SubjectDiscovery<TSubject, TResult> : ISubjectDiscovery
     where TSubject : class, IInterceptorSubject
     where TResult : class, IDiscoveryResult
 {
-    Type ISubjectDiscoverer.SubjectType => typeof(TSubject);
+    Type ISubjectDiscovery.SubjectType => typeof(TSubject);
 
-    async IAsyncEnumerable<DiscoveredSubject> ISubjectDiscoverer.DiscoverAsync(
+    async IAsyncEnumerable<DiscoveredSubject> ISubjectDiscovery.DiscoverAsync(
         DiscoveryScan scan,
         IReadOnlyCollection<IInterceptorSubject> existingSubjects,
         [EnumeratorCancellation] CancellationToken cancellationToken)

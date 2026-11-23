@@ -254,15 +254,12 @@ namespace Namotion.Devices.FritzBox
         public string? Model { get; init; }
         public string? PublicKeyPin { get; init; }
     }
-    public sealed class FritzBoxDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscoverer<Namotion.Devices.FritzBox.FritzBox, Namotion.Devices.FritzBox.FritzBoxDiscoveryResult>
+    public sealed class FritzBoxDiscovery : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.FritzBox.FritzBox, Namotion.Devices.FritzBox.FritzBoxDiscoveryResult>
     {
-        public FritzBoxDiscoverer() { }
-        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.FritzBox.FritzBoxDiscoverer.<DiscoverAsync>d__1))]
+        public FritzBoxDiscovery() { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.FritzBox.FritzBoxDiscovery.<DiscoverAsync>d__4))]
         protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.FritzBox.FritzBoxDiscoveryResult> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
         protected override bool Matches(Namotion.Devices.FritzBox.FritzBox existing, Namotion.Devices.FritzBox.FritzBoxDiscoveryResult result) { }
-    }
-    public static class FritzBoxDiscovery
-    {
         public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Namotion.Devices.FritzBox.FritzBoxDiscoveryResult>> DiscoverAsync(HomeBlaze.Abstractions.Discovery.ISsdpSearch ssdpSearch, System.TimeSpan timeout, System.Threading.CancellationToken cancellationToken) { }
     }
     public sealed class FritzBoxDiscoveryResult : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, System.IEquatable<Namotion.Devices.FritzBox.FritzBoxDiscoveryResult>

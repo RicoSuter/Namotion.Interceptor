@@ -10,7 +10,7 @@ public class DiscoveryScanTests
         "Philips Hue - 1A2B3C", "hue.local", 443, [IPAddress.Parse("192.168.1.20")], new Dictionary<string, string>());
 
     [Fact]
-    public async Task WhenTwoDiscoverersBrowseTheSameServiceType_ThenOneQueryIsSent()
+    public async Task WhenTwoDiscoveriesBrowseTheSameServiceType_ThenOneQueryIsSent()
     {
         // Arrange
         var browser = new FakeMulticastDnsBrowser();
@@ -27,7 +27,7 @@ public class DiscoveryScanTests
     }
 
     [Fact]
-    public async Task WhenTwoDiscoverersSearchTheSameSsdpTarget_ThenOneSearchIsSent()
+    public async Task WhenTwoDiscoveriesSearchTheSameSsdpTarget_ThenOneSearchIsSent()
     {
         // Arrange
         var search = new FakeSsdpSearch();

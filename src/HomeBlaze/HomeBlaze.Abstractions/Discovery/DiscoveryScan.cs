@@ -1,7 +1,7 @@
 namespace HomeBlaze.Abstractions.Discovery;
 
 /// <summary>
-/// One scan for devices. Its services send each distinct query once and give every discoverer that asks the same
+/// One scan for devices. Its services send each distinct query once and give every subject discovery that asks the same
 /// question the same answer.
 /// </summary>
 public sealed class DiscoveryScan

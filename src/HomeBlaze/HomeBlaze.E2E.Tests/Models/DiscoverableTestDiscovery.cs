@@ -7,7 +7,7 @@ namespace HomeBlaze.E2E.Tests.Models;
 /// <summary>
 /// Finds two fixed devices, so that the Discover page has results without a network.
 /// </summary>
-public sealed class DiscoverableTestDiscoverer : SubjectDiscoverer<DiscoverableTestSubject, DiscoverableTestResult>
+public sealed class DiscoverableTestDiscovery : SubjectDiscovery<DiscoverableTestSubject, DiscoverableTestResult>
 {
     public const string DeviceName = "Discoverable test device 1";
 
@@ -22,7 +22,7 @@ public sealed class DiscoverableTestDiscoverer : SubjectDiscoverer<DiscoverableT
     private static int _scanCount;
 
     /// <summary>
-    /// How many scans have asked this discoverer so far, in any test of the process.
+    /// How many scans have asked this subject discovery so far, in any test of the process.
     /// </summary>
     public static int ScanCount => Volatile.Read(ref _scanCount);
 

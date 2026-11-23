@@ -6,7 +6,7 @@ namespace Namotion.Devices.Philips.Hue;
 /// <summary>
 /// Finds Hue bridges over mDNS, without asking the Hue cloud.
 /// </summary>
-public sealed class HueBridgeDiscoverer : SubjectDiscoverer<HueBridge, HueDiscoveredBridge>
+public sealed class HueBridgeDiscovery : SubjectDiscovery<HueBridge, HueDiscoveredBridge>
 {
     internal const string ServiceType = "_hue._tcp";
 

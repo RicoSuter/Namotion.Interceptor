@@ -68,10 +68,10 @@ namespace Namotion.Devices.Philips.Hue
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public static System.TimeSpan GetEffectiveInterval(System.TimeSpan configured, int defaultSeconds) { }
     }
-    public sealed class HueBridgeDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscoverer<Namotion.Devices.Philips.Hue.HueBridge, Namotion.Devices.Philips.Hue.HueDiscoveredBridge>
+    public sealed class HueBridgeDiscovery : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.Philips.Hue.HueBridge, Namotion.Devices.Philips.Hue.HueDiscoveredBridge>
     {
-        public HueBridgeDiscoverer() { }
-        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Philips.Hue.HueBridgeDiscoverer.<DiscoverAsync>d__1))]
+        public HueBridgeDiscovery() { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Philips.Hue.HueBridgeDiscovery.<DiscoverAsync>d__1))]
         protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Philips.Hue.HueDiscoveredBridge> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
         protected override bool Matches(Namotion.Devices.Philips.Hue.HueBridge existing, Namotion.Devices.Philips.Hue.HueDiscoveredBridge result) { }
     }

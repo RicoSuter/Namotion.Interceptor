@@ -176,10 +176,10 @@ namespace Namotion.Devices.Shelly
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
-    public sealed class ShellyDeviceDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscoverer<Namotion.Devices.Shelly.ShellyDevice, Namotion.Devices.Shelly.ShellyDiscoveredDevice>
+    public sealed class ShellyDeviceDiscovery : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.Shelly.ShellyDevice, Namotion.Devices.Shelly.ShellyDiscoveredDevice>
     {
-        public ShellyDeviceDiscoverer() { }
-        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Shelly.ShellyDeviceDiscoverer.<DiscoverAsync>d__2))]
+        public ShellyDeviceDiscovery() { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Shelly.ShellyDeviceDiscovery.<DiscoverAsync>d__2))]
         protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Shelly.ShellyDiscoveredDevice> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
         protected override bool Matches(Namotion.Devices.Shelly.ShellyDevice existing, Namotion.Devices.Shelly.ShellyDiscoveredDevice result) { }
     }

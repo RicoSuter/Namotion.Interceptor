@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Xml;
 using HomeBlaze.Abstractions.Discovery;
 using Namotion.Devices.FritzBox.Client;
@@ -31,18 +32,40 @@ public sealed record FritzBoxDiscoveryResult(string HostAddress, string? Friendl
 }
 
 /// <summary>
-/// Finds FRITZ!Box routers on the local network over SSDP and by their usual host name.
+/// Finds FRITZ!Box routers and repeaters on the local network over SSDP and by their usual host name,
+/// <c>fritz.box</c>.
 /// </summary>
-public static class FritzBoxDiscovery
+public sealed class FritzBoxDiscovery : SubjectDiscovery<FritzBox, FritzBoxDiscoveryResult>
 {
     private const string SearchTarget = "urn:dslforum-org:device:InternetGatewayDevice:1";
     private const string WellKnownHost = "fritz.box";
+
+    private static readonly TimeSpan DescriptionTimeout = TimeSpan.FromSeconds(3);
 
     /// <summary>
     /// The most locations described in one search, so that a hostile or malfunctioning answerer on the network
     /// cannot make a search describe an unbounded number of hosts.
     /// </summary>
     private const int MaximumLocations = 32;
+
+    /// <inheritdoc />
+    protected override async IAsyncEnumerable<FritzBoxDiscoveryResult> DiscoverAsync(
+        DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (var result in await DiscoverAsync(scan.Ssdp, DescriptionTimeout, cancellationToken))
+        {
+            yield return result;
+        }
+    }
+
+    /// <inheritdoc />
+    protected override bool Matches(FritzBox existing, FritzBoxDiscoveryResult result) => IsSameRouter(existing, result);
+
+    // The UDN recognizes a router that moved to another address; the host address one that was added without
+    // discovery, and a router that replaced it at the same address, which a stale stored UDN must not hide.
+    internal static bool IsSameRouter(FritzBox existing, FritzBoxDiscoveryResult result) =>
+        (result.Udn is not null && string.Equals(existing.Udn?.Trim(), result.Udn, StringComparison.OrdinalIgnoreCase)) ||
+        string.Equals(existing.HostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Searches with <paramref name="ssdpSearch"/> and asks <c>fritz.box</c> when that name resolves to an address on

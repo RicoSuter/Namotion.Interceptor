@@ -3,7 +3,7 @@ using Xunit;
 
 namespace HomeBlaze.Services.Tests.Discovery;
 
-public class SubjectDiscovererTests
+public class SubjectDiscoveryTests
 {
     [Fact]
     public async Task WhenAResultMatchesAnExistingSubject_ThenItCarriesThatSubject()
@@ -11,12 +11,12 @@ public class SubjectDiscovererTests
         // Arrange
         var existing = new DiscoveryTestSubject { Address = "a" };
         var otherType = new OtherDiscoveryTestSubject { Address = "b" };
-        ISubjectDiscoverer discoverer = new LambdaDiscoverer<DiscoveryTestSubject>(
+        ISubjectDiscovery discovery = new LambdaDiscovery<DiscoveryTestSubject>(
             (_, _) => TestScans.Yield(new TestDiscoveryResult("a"), new TestDiscoveryResult("b")),
             (subject, result) => subject.Address == result.Key);
 
         // Act
-        var discovered = await discoverer
+        var discovered = await discovery
             .DiscoverAsync(TestScans.CreateScan(), [otherType, existing], CancellationToken.None)
             .ToListAsync();
 
@@ -31,11 +31,11 @@ public class SubjectDiscovererTests
     public async Task WhenADeviceIsYieldedTwice_ThenItIsReportedOnce()
     {
         // Arrange
-        ISubjectDiscoverer discoverer = new LambdaDiscoverer<DiscoveryTestSubject>(
+        ISubjectDiscovery discovery = new LambdaDiscovery<DiscoveryTestSubject>(
             (_, _) => TestScans.Yield(new TestDiscoveryResult("a"), new TestDiscoveryResult("a", "Same device again")));
 
         // Act
-        var discovered = await discoverer
+        var discovered = await discovery
             .DiscoverAsync(TestScans.CreateScan(), [], CancellationToken.None)
             .ToListAsync();
 

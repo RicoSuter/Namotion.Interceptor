@@ -3,13 +3,13 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Abstractions.Discovery;
 
 /// <summary>
-/// Finds devices of one subject type. Derive from <see cref="SubjectDiscoverer{TSubject, TResult}"/> instead of
+/// Finds devices of one subject type. Derive from <see cref="SubjectDiscovery{TSubject, TResult}"/> instead of
 /// implementing this interface.
 /// </summary>
-public interface ISubjectDiscoverer
+public interface ISubjectDiscovery
 {
     /// <summary>
-    /// The type of subject that represents the devices this discoverer finds.
+    /// The type of subject that represents the devices this subject discovery finds.
     /// </summary>
     Type SubjectType { get; }
 

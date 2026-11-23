@@ -1,19 +1,50 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
+using HomeBlaze.Abstractions.Discovery;
 using Namotion.Devices.Nuki.Client;
 using Namotion.Devices.Nuki.Model;
 
 namespace Namotion.Devices.Nuki;
 
 /// <summary>
-/// Finds Nuki bridges and pairs with them.
+/// Finds Nuki bridges through the Nuki discovery service, which lists the bridges seen from the public IP address of
+/// the caller, and pairs with them.
 /// </summary>
-public static class NukiBridgeDiscovery
+public sealed class NukiBridgeDiscovery : SubjectDiscovery<NukiBridge, NukiDiscoveredBridge>
 {
     /// <summary>The Nuki discovery service, which lists the bridges seen from the public IP address of the caller.</summary>
     public const string DiscoveryAddress = "https://api.nuki.io/discover/bridges";
 
     private static readonly TimeSpan DiscoveryTimeout = TimeSpan.FromSeconds(10);
+
+    private readonly IHttpClientFactory _httpClientFactory;
+
+    public NukiBridgeDiscovery(IHttpClientFactory httpClientFactory)
+    {
+        _httpClientFactory = httpClientFactory;
+    }
+
+    /// <inheritdoc />
+    protected override async IAsyncEnumerable<NukiDiscoveredBridge> DiscoverAsync(
+        DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using var httpClient = _httpClientFactory.CreateClient();
+        foreach (var bridge in await DiscoverAsync(httpClient, cancellationToken))
+        {
+            yield return bridge;
+        }
+    }
+
+    /// <inheritdoc />
+    protected override bool Matches(NukiBridge existing, NukiDiscoveredBridge result) =>
+        IsSameBridge(existing.HostAddress, result);
+
+    internal static bool IsSameBridge(string? hostAddress, NukiDiscoveredBridge result) =>
+        NukiBridgeClient.TryParseHostAddress(hostAddress, out var host, out var port, out _) &&
+        NukiBridgeClient.TryParseHostAddress(result.HostAddress, out var resultHost, out var resultPort, out _) &&
+        port == resultPort &&
+        string.Equals(host, resultHost, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Lists the bridges that the Nuki discovery service knows for this network. Bridges with discovery disabled are

@@ -1,12 +1,12 @@
 namespace HomeBlaze.Abstractions.Discovery;
 
 /// <summary>
-/// A device that a <see cref="SubjectDiscoverer{TSubject, TResult}"/> found, with what the user is shown for it.
+/// A device that a <see cref="SubjectDiscovery{TSubject, TResult}"/> found, with what the user is shown for it.
 /// </summary>
 public interface IDiscoveryResult
 {
     /// <summary>
-    /// Identifies the device within the discoverer that found it, the same in every scan. Keys are compared ordinally, so a discoverer normalizes the case where the identity of the device ignores it.
+    /// Identifies the device within the subject discovery that found it, the same in every scan. Keys are compared ordinally, so a subject discovery normalizes the case where the identity of the device ignores it.
     /// </summary>
     string Key { get; }
 

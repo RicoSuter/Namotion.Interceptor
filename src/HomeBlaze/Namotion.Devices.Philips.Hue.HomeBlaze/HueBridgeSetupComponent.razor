@@ -104,7 +104,7 @@ else
 
         try
         {
-            _bridges = await HueBridgeDiscovery.FastDiscoveryWithNetworkScanFallbackAsync(
+            _bridges = await global::HueApi.BridgeLocator.HueBridgeDiscovery.FastDiscoveryWithNetworkScanFallbackAsync(
                 TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
         }
         catch

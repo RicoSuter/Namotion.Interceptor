@@ -11,21 +11,21 @@ namespace HomeBlaze.Services.Tests.Discovery;
 
 public class SubjectDiscoveryServiceTests
 {
-    private static SubjectDiscoveryService CreateService(TimeProvider timeProvider, params ISubjectDiscoverer[] discoverers) =>
-        CreateService(timeProvider, NullLogger<SubjectDiscoveryService>.Instance, discoverers);
+    private static SubjectDiscoveryService CreateService(TimeProvider timeProvider, params ISubjectDiscovery[] discoveries) =>
+        CreateService(timeProvider, NullLogger<SubjectDiscoveryService>.Instance, discoveries);
 
     private static SubjectDiscoveryService CreateService(
-        TimeProvider timeProvider, ILogger<SubjectDiscoveryService> logger, params ISubjectDiscoverer[] discoverers) =>
-        new(() => discoverers, new FakeSsdpSearch(), new FakeMulticastDnsBrowser(), timeProvider, logger);
+        TimeProvider timeProvider, ILogger<SubjectDiscoveryService> logger, params ISubjectDiscovery[] discoveries) =>
+        new(() => discoveries, new FakeSsdpSearch(), new FakeMulticastDnsBrowser(), timeProvider, logger);
 
     [Fact]
-    public async Task WhenDiscoverersYieldResults_ThenEveryResultIsReported()
+    public async Task WhenDiscoveriesYieldResults_ThenEveryResultIsReported()
     {
         // Arrange
         var service = CreateService(
             TimeProvider.System,
-            new LambdaDiscoverer<DiscoveryTestSubject>((_, _) => TestScans.Yield(new TestDiscoveryResult("a"), new TestDiscoveryResult("b"))),
-            new LambdaDiscoverer<OtherDiscoveryTestSubject>((_, _) => TestScans.Yield(new TestDiscoveryResult("c"))));
+            new LambdaDiscovery<DiscoveryTestSubject>((_, _) => TestScans.Yield(new TestDiscoveryResult("a"), new TestDiscoveryResult("b"))),
+            new LambdaDiscovery<OtherDiscoveryTestSubject>((_, _) => TestScans.Yield(new TestDiscoveryResult("c"))));
         var results = new ConcurrentQueue<DiscoveredSubject>();
 
         // Act
@@ -37,13 +37,13 @@ public class SubjectDiscoveryServiceTests
     }
 
     [Fact]
-    public async Task WhenADiscovererThrows_ThenItsFailureIsReportedAndTheOthersCarryOn()
+    public async Task WhenADiscoveryThrows_ThenItsFailureIsReportedAndTheOthersCarryOn()
     {
         // Arrange
         var service = CreateService(
             TimeProvider.System,
-            new LambdaDiscoverer<DiscoveryTestSubject>((_, _) => TestScans.YieldThenThrow(new TestDiscoveryResult("a"))),
-            new LambdaDiscoverer<OtherDiscoveryTestSubject>((_, _) => TestScans.Yield(new TestDiscoveryResult("c"))));
+            new LambdaDiscovery<DiscoveryTestSubject>((_, _) => TestScans.YieldThenThrow(new TestDiscoveryResult("a"))),
+            new LambdaDiscovery<OtherDiscoveryTestSubject>((_, _) => TestScans.Yield(new TestDiscoveryResult("c"))));
         var results = new ConcurrentQueue<DiscoveredSubject>();
         var failures = new ConcurrentQueue<Type>();
 
@@ -57,13 +57,13 @@ public class SubjectDiscoveryServiceTests
     }
 
     [Fact]
-    public async Task WhenAllDiscoverersComplete_ThenTheScanTokenIsCanceled()
+    public async Task WhenAllDiscoveriesComplete_ThenTheScanTokenIsCanceled()
     {
         // Arrange
         var receivedToken = CancellationToken.None;
         var service = CreateService(
             TimeProvider.System,
-            new LambdaDiscoverer<DiscoveryTestSubject>((_, cancellationToken) =>
+            new LambdaDiscovery<DiscoveryTestSubject>((_, cancellationToken) =>
             {
                 receivedToken = cancellationToken;
                 return TestScans.Yield(new TestDiscoveryResult("a"));
@@ -78,11 +78,11 @@ public class SubjectDiscoveryServiceTests
     }
 
     [Fact]
-    public async Task WhenTheTimeLimitPasses_ThenAHangingDiscovererEndsWithoutAFailure()
+    public async Task WhenTheTimeLimitPasses_ThenAHangingDiscoveryEndsWithoutAFailure()
     {
         // Arrange
         var timeProvider = new FakeTimeProvider();
-        var service = CreateService(timeProvider, new LambdaDiscoverer<DiscoveryTestSubject>((_, cancellationToken) => TestScans.Hang(cancellationToken)));
+        var service = CreateService(timeProvider, new LambdaDiscovery<DiscoveryTestSubject>((_, cancellationToken) => TestScans.Hang(cancellationToken)));
         var failures = new ConcurrentQueue<Type>();
         var scan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], _ => { }, failures.Enqueue, CancellationToken.None);
 
@@ -95,7 +95,7 @@ public class SubjectDiscoveryServiceTests
     }
 
     [Fact]
-    public async Task WhenADiscovererIgnoresCancellation_ThenTheScanEndsAtTheTimeLimitAndDropsItsLateReports()
+    public async Task WhenADiscoveryIgnoresCancellation_ThenTheScanEndsAtTheTimeLimitAndDropsItsLateReports()
     {
         // Arrange
         var timeProvider = new FakeTimeProvider();
@@ -103,7 +103,7 @@ public class SubjectDiscoveryServiceTests
         var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var service = CreateService(
             timeProvider,
-            new LambdaDiscoverer<DiscoveryTestSubject>((_, _) => TestScans.IgnoreCancellation(release.Task, ended, new TestDiscoveryResult("late"))));
+            new LambdaDiscovery<DiscoveryTestSubject>((_, _) => TestScans.IgnoreCancellation(release.Task, ended, new TestDiscoveryResult("late"))));
         var results = new ConcurrentQueue<DiscoveredSubject>();
         var failures = new ConcurrentQueue<Type>();
         var scan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], results.Enqueue, failures.Enqueue, CancellationToken.None);
@@ -120,7 +120,7 @@ public class SubjectDiscoveryServiceTests
     }
 
     [Fact]
-    public async Task WhenADiscovererThrowsBecauseTheScanEnded_ThenNoFailureIsReported()
+    public async Task WhenADiscoveryThrowsBecauseTheScanEnded_ThenNoFailureIsReported()
     {
         // Arrange
         var timeProvider = new FakeTimeProvider();
@@ -128,7 +128,7 @@ public class SubjectDiscoveryServiceTests
         var service = CreateService(
             timeProvider,
             logger,
-            new LambdaDiscoverer<DiscoveryTestSubject>((_, cancellationToken) => TestScans.ThrowDisposedWhenCanceled(cancellationToken)));
+            new LambdaDiscovery<DiscoveryTestSubject>((_, cancellationToken) => TestScans.ThrowDisposedWhenCanceled(cancellationToken)));
         var failures = new ConcurrentQueue<Type>();
         var scan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], _ => { }, failures.Enqueue, CancellationToken.None);
 
@@ -143,7 +143,7 @@ public class SubjectDiscoveryServiceTests
     }
 
     [Fact]
-    public async Task WhenAnAbandonedDiscovererThrowsLate_ThenItIsLoggedAtDebugOnly()
+    public async Task WhenAnAbandonedDiscoveryThrowsLate_ThenItIsLoggedAtDebugOnly()
     {
         // Arrange
         var timeProvider = new FakeTimeProvider();
@@ -152,7 +152,7 @@ public class SubjectDiscoveryServiceTests
         var service = CreateService(
             timeProvider,
             logger,
-            new LambdaDiscoverer<DiscoveryTestSubject>((_, _) => TestScans.ThrowIgnoringCancellation(release.Task)));
+            new LambdaDiscovery<DiscoveryTestSubject>((_, _) => TestScans.ThrowIgnoringCancellation(release.Task)));
         var failures = new ConcurrentQueue<Type>();
         var scan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], _ => { }, failures.Enqueue, CancellationToken.None);
 
@@ -168,14 +168,14 @@ public class SubjectDiscoveryServiceTests
     }
 
     [Fact]
-    public async Task WhenTheCallerCancelsWhileADiscovererIgnoresIt_ThenTheScanIsCanceled()
+    public async Task WhenTheCallerCancelsWhileADiscoveryIgnoresIt_ThenTheScanIsCanceled()
     {
         // Arrange
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var service = CreateService(
             TimeProvider.System,
-            new LambdaDiscoverer<DiscoveryTestSubject>((_, _) => TestScans.IgnoreCancellation(release.Task, ended, new TestDiscoveryResult("late"))));
+            new LambdaDiscovery<DiscoveryTestSubject>((_, _) => TestScans.IgnoreCancellation(release.Task, ended, new TestDiscoveryResult("late"))));
         using var cancellation = new CancellationTokenSource();
         var scan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], _ => { }, _ => { }, cancellation.Token);
 
@@ -192,7 +192,7 @@ public class SubjectDiscoveryServiceTests
     public async Task WhenTheCallerCancels_ThenTheScanIsCanceled()
     {
         // Arrange
-        var service = CreateService(TimeProvider.System, new LambdaDiscoverer<DiscoveryTestSubject>((_, cancellationToken) => TestScans.Hang(cancellationToken)));
+        var service = CreateService(TimeProvider.System, new LambdaDiscovery<DiscoveryTestSubject>((_, cancellationToken) => TestScans.Hang(cancellationToken)));
         using var cancellation = new CancellationTokenSource();
         var scan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], _ => { }, _ => { }, cancellation.Token);
 
@@ -204,12 +204,12 @@ public class SubjectDiscoveryServiceTests
     }
 
     [Fact]
-    public async Task WhenATypeIsNotAsked_ThenItsDiscovererDoesNotRun()
+    public async Task WhenATypeIsNotAsked_ThenItsDiscoveryDoesNotRun()
     {
         // Arrange
         var service = CreateService(
             TimeProvider.System,
-            new LambdaDiscoverer<OtherDiscoveryTestSubject>((_, _) => TestScans.Yield(new TestDiscoveryResult("c"))));
+            new LambdaDiscovery<OtherDiscoveryTestSubject>((_, _) => TestScans.Yield(new TestDiscoveryResult("c"))));
         var results = new ConcurrentQueue<DiscoveredSubject>();
 
         // Act
@@ -217,8 +217,8 @@ public class SubjectDiscoveryServiceTests
 
         // Assert
         Assert.Empty(results);
-        Assert.False(service.HasDiscoverers([typeof(DiscoveryTestSubject)]));
-        Assert.True(service.HasDiscoverers([typeof(OtherDiscoveryTestSubject)]));
+        Assert.False(service.HasDiscoveries([typeof(DiscoveryTestSubject)]));
+        Assert.True(service.HasDiscoveries([typeof(OtherDiscoveryTestSubject)]));
     }
 
     private sealed class RecordingLogger : ILogger<SubjectDiscoveryService>
