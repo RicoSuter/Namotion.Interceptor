@@ -6,7 +6,7 @@ namespace Namotion.Devices.MyStrom;
 /// <summary>
 /// Finds myStrom switches by the announcements they broadcast to UDP port 7979 of the local network.
 /// </summary>
-public sealed class MyStromSwitchDiscovery : SubjectDiscovery<MyStromSwitch, MyStromDiscoveredSwitch>
+public sealed class MyStromSwitchDiscovery(IUdpDiscovery udpDiscovery) : SubjectDiscovery<MyStromSwitch, MyStromDiscoveredSwitch>
 {
     private const int AnnouncementPort = 7979;
 
@@ -15,9 +15,9 @@ public sealed class MyStromSwitchDiscovery : SubjectDiscovery<MyStromSwitch, MyS
 
     /// <inheritdoc />
     protected override async IAsyncEnumerable<MyStromDiscoveredSwitch> DiscoverAsync(
-        DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await foreach (var datagram in scan.Udp.ListenAsync(AnnouncementPort, ListeningWindow, cancellationToken))
+        await foreach (var datagram in udpDiscovery.ListenAsync(AnnouncementPort, ListeningWindow, cancellationToken))
         {
             var announcement = MyStromAnnouncement.TryParse(datagram.Payload.Span, datagram.SenderAddress);
             if (announcement is not null)

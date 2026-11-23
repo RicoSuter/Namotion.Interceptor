@@ -13,27 +13,30 @@ public sealed class SonosHouseholdDiscovery : SubjectDiscovery<SonosSystem, Sono
 {
     internal const string HouseholdHeader = "X-RINCON-HOUSEHOLD";
 
+    private readonly ISsdpSearch _ssdpSearch;
     private readonly HttpMessageHandler? _handler;
     private readonly TimeProvider _timeProvider;
 
-    public SonosHouseholdDiscovery()
-        : this(handler: null, TimeProvider.System)
+    public SonosHouseholdDiscovery(ISsdpSearch ssdpSearch)
+        : this(ssdpSearch, handler: null, TimeProvider.System)
     {
     }
 
+    /// <param name="ssdpSearch">The SSDP search to find the speakers with.</param>
     /// <param name="handler">The handler to send the description requests through, not disposed; null for a new one per scan.</param>
     /// <param name="timeProvider">Runs the deadline of the description requests.</param>
-    internal SonosHouseholdDiscovery(HttpMessageHandler? handler, TimeProvider timeProvider)
+    internal SonosHouseholdDiscovery(ISsdpSearch ssdpSearch, HttpMessageHandler? handler, TimeProvider timeProvider)
     {
+        _ssdpSearch = ssdpSearch;
         _handler = handler;
         _timeProvider = timeProvider;
     }
 
     /// <inheritdoc />
     protected override async IAsyncEnumerable<SonosDiscoveredHousehold> DiscoverAsync(
-        DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var responses = await scan.Ssdp.SearchAsync(SonosDiscovery.ZonePlayerSearchTarget, cancellationToken);
+        var responses = await _ssdpSearch.SearchAsync(SonosDiscovery.ZonePlayerSearchTarget, cancellationToken);
         var households = ToHouseholds(responses);
         if (households.Count == 0)
         {

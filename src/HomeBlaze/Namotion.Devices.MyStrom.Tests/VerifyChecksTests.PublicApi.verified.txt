@@ -105,9 +105,9 @@ namespace Namotion.Devices.MyStrom
     }
     public sealed class MyStromSwitchDiscovery : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.MyStrom.MyStromSwitch, Namotion.Devices.MyStrom.MyStromDiscoveredSwitch>
     {
-        public MyStromSwitchDiscovery() { }
-        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.MyStrom.MyStromSwitchDiscovery.<DiscoverAsync>d__2))]
-        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.MyStrom.MyStromDiscoveredSwitch> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
+        public MyStromSwitchDiscovery(HomeBlaze.Abstractions.Discovery.IUdpDiscovery udpDiscovery) { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.MyStrom.MyStromSwitchDiscovery.<DiscoverAsync>d__4))]
+        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.MyStrom.MyStromDiscoveredSwitch> DiscoverAsync([System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
         protected override bool Matches(Namotion.Devices.MyStrom.MyStromSwitch existing, Namotion.Devices.MyStrom.MyStromDiscoveredSwitch result) { }
     }
 }

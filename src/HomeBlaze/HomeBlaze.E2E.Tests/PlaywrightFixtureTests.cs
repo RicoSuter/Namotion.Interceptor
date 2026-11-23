@@ -70,7 +70,10 @@ public class PlaywrightFixtureTests
         // The subject discoveries get these services injected from the same container. One that cannot be created is
         // left out without an error a test sees, so every subject discovery of the application must be there.
         Assert.Equal(
-            ["DiscoverableTestDiscovery", "FritzBoxDiscovery", "HueBridgeDiscovery", "NukiBridgeDiscovery", "ShellyDeviceDiscovery"],
+            [
+                "DiscoverableTestDiscovery", "EcowittGatewayDiscovery", "FritzBoxDiscovery", "HueBridgeDiscovery", "MyStromSwitchDiscovery",
+                "NukiBridgeDiscovery", "ShellyDeviceDiscovery", "SonosHouseholdDiscovery"
+            ],
             discoveries.Select(discovery => discovery.GetType().Name).Order());
     }
 

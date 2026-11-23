@@ -255,9 +255,9 @@ namespace Namotion.Devices.Sonos
     }
     public sealed class SonosHouseholdDiscovery : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.Sonos.SonosSystem, Namotion.Devices.Sonos.SonosDiscoveredHousehold>
     {
-        public SonosHouseholdDiscovery() { }
-        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Sonos.SonosHouseholdDiscovery.<DiscoverAsync>d__5))]
-        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Sonos.SonosDiscoveredHousehold> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
+        public SonosHouseholdDiscovery(HomeBlaze.Abstractions.Discovery.ISsdpSearch ssdpSearch) { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Sonos.SonosHouseholdDiscovery.<DiscoverAsync>d__6))]
+        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Sonos.SonosDiscoveredHousehold> DiscoverAsync([System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
         protected override bool Matches(Namotion.Devices.Sonos.SonosSystem existing, Namotion.Devices.Sonos.SonosDiscoveredHousehold result) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]

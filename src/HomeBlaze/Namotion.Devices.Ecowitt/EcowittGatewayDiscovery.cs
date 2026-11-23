@@ -7,7 +7,7 @@ namespace Namotion.Devices.Ecowitt;
 /// <summary>
 /// Finds Ecowitt gateways with the broadcast request of their local API, sent to UDP port 46000 of the local network.
 /// </summary>
-public sealed class EcowittGatewayDiscovery : SubjectDiscovery<EcowittGateway, EcowittDiscoveredGateway>
+public sealed class EcowittGatewayDiscovery(IUdpDiscovery udpDiscovery) : SubjectDiscovery<EcowittGateway, EcowittDiscoveredGateway>
 {
     internal static readonly byte[] BroadcastRequest = [0xFF, 0xFF, EcowittBroadcastReply.BroadcastCommand, 0x00, 0x04, 0x16];
 
@@ -16,9 +16,9 @@ public sealed class EcowittGatewayDiscovery : SubjectDiscovery<EcowittGateway, E
 
     /// <inheritdoc />
     protected override async IAsyncEnumerable<EcowittDiscoveredGateway> DiscoverAsync(
-        DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await foreach (var datagram in scan.Udp.BroadcastAsync(BroadcastPort, BroadcastRequest, ListeningWindow, cancellationToken))
+        await foreach (var datagram in udpDiscovery.BroadcastAsync(BroadcastPort, BroadcastRequest, ListeningWindow, cancellationToken))
         {
             var reply = EcowittBroadcastReply.TryParse(datagram.Payload.Span);
             if (reply is not null)

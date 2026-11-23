@@ -49,11 +49,10 @@ public class EcowittGatewayDiscoveryTests
     private static async Task<List<DiscoveredSubject>> DiscoverAsync(
         FakeUdpDiscovery udpDiscovery, params IInterceptorSubject[] existingSubjects)
     {
-        ISubjectDiscovery discovery = new EcowittGatewayDiscovery();
-        var scan = new DiscoveryScan(new UnusedSsdpSearch(), new UnusedMulticastDnsBrowser(), udpDiscovery, CancellationToken.None);
+        ISubjectDiscovery discovery = new EcowittGatewayDiscovery(udpDiscovery);
 
         var discovered = new List<DiscoveredSubject>();
-        await foreach (var subject in discovery.DiscoverAsync(scan, existingSubjects, CancellationToken.None))
+        await foreach (var subject in discovery.DiscoverAsync(existingSubjects, CancellationToken.None))
         {
             discovered.Add(subject);
         }
@@ -238,17 +237,5 @@ public class EcowittGatewayDiscoveryTests
                 yield return datagram;
             }
         }
-    }
-
-    private sealed class UnusedSsdpSearch : ISsdpSearch
-    {
-        public Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-    }
-
-    private sealed class UnusedMulticastDnsBrowser : IMulticastDnsBrowser
-    {
-        public Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
     }
 }

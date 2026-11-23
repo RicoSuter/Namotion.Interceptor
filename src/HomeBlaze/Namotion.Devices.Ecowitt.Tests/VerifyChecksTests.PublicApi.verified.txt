@@ -132,9 +132,9 @@ namespace Namotion.Devices.Ecowitt
     }
     public sealed class EcowittGatewayDiscovery : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.Ecowitt.EcowittGateway, Namotion.Devices.Ecowitt.EcowittDiscoveredGateway>
     {
-        public EcowittGatewayDiscovery() { }
-        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Ecowitt.EcowittGatewayDiscovery.<DiscoverAsync>d__3))]
-        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Ecowitt.EcowittDiscoveredGateway> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
+        public EcowittGatewayDiscovery(HomeBlaze.Abstractions.Discovery.IUdpDiscovery udpDiscovery) { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Ecowitt.EcowittGatewayDiscovery.<DiscoverAsync>d__5))]
+        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Ecowitt.EcowittDiscoveredGateway> DiscoverAsync([System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
         protected override bool Matches(Namotion.Devices.Ecowitt.EcowittGateway existing, Namotion.Devices.Ecowitt.EcowittDiscoveredGateway result) { }
     }
     public static class EcowittServiceCollectionExtensions

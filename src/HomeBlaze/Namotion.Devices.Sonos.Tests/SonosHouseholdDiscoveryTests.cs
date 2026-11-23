@@ -139,12 +139,11 @@ public class SonosHouseholdDiscoveryTests
             Answer("RINCON_A00000000000001400", "192.168.1.101"),
             Answer("RINCON_B00000000000001400", "192.168.1.102"));
         using var handler = new DescriptionHandler(_ => Description("Wohnzimmer", "Sonos One"));
-        ISubjectDiscovery discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
-        var scan = new DiscoveryScan(search, new EmptyMulticastDnsBrowser(), new UnusedUdpDiscovery(), CancellationToken.None);
+        ISubjectDiscovery discovery = new SonosHouseholdDiscovery(search, handler, new FakeTimeProvider());
         var existing = CreateSystem(seedHost: "192.168.1.102");
 
         // Act
-        var discovered = await discovery.DiscoverAsync(scan, [existing], CancellationToken.None).ToListAsync();
+        var discovered = await discovery.DiscoverAsync([existing], CancellationToken.None).ToListAsync();
 
         // Assert
         var single = Assert.Single(discovered);
@@ -184,11 +183,10 @@ public class SonosHouseholdDiscoveryTests
             new SsdpResponse(new Uri("urn:x"), $"uuid:RINCON_B00000000000001400::{ZonePlayer}", HouseholdHeaders()),
             Answer("RINCON_C00000000000001400", "192.168.1.103"));
         using var handler = new DescriptionHandler(_ => Description("Wohnzimmer", "Sonos One"));
-        ISubjectDiscovery discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
-        var scan = new DiscoveryScan(search, new EmptyMulticastDnsBrowser(), new UnusedUdpDiscovery(), CancellationToken.None);
+        ISubjectDiscovery discovery = new SonosHouseholdDiscovery(search, handler, new FakeTimeProvider());
 
         // Act
-        var discovered = await discovery.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
+        var discovered = await discovery.DiscoverAsync([], CancellationToken.None).ToListAsync();
 
         // Assert
         var household = Assert.IsType<SonosDiscoveredHousehold>(Assert.Single(discovered).Result);
@@ -211,7 +209,7 @@ public class SonosHouseholdDiscoveryTests
 
             return Description("Wohnzimmer", "Sonos One");
         });
-        var discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
+        var discovery = new SonosHouseholdDiscovery(new UnusedSsdpSearch(), handler, new FakeTimeProvider());
         var households = SonosHouseholdDiscovery.ToHouseholds(
         [
             new(new Uri("http://192.168.1.101:1400/elsewhere?target=192.0.2.1"), $"uuid:RINCON_A00000000000001400::{ZonePlayer}", HouseholdHeaders()),
@@ -237,7 +235,7 @@ public class SonosHouseholdDiscoveryTests
             "192.168.1.102" => Description("Wohnzimmer", "Sonos Sub"),
             _ => Description(" Bad ", "Sonos One")
         });
-        var discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
+        var discovery = new SonosHouseholdDiscovery(new UnusedSsdpSearch(), handler, new FakeTimeProvider());
         var households = SonosHouseholdDiscovery.ToHouseholds(
         [
             Answer("RINCON_A00000000000001400", "192.168.1.101"),
@@ -291,7 +289,7 @@ public class SonosHouseholdDiscoveryTests
                 otherRequestsAnswered.Release();
             }
         });
-        var discovery = new SonosHouseholdDiscovery(handler, timeProvider);
+        var discovery = new SonosHouseholdDiscovery(new UnusedSsdpSearch(), handler, timeProvider);
         var households = SonosHouseholdDiscovery.ToHouseholds(
         [
             Answer("RINCON_A00000000000001400", "192.168.1.101"),
@@ -342,7 +340,7 @@ public class SonosHouseholdDiscoveryTests
             "malformed" => Xml("<root><device><roomName>Open"),
             _ => WithCharset(Description("Charset", "Sonos One"), "no-such-charset")
         });
-        var discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
+        var discovery = new SonosHouseholdDiscovery(new UnusedSsdpSearch(), handler, new FakeTimeProvider());
         var households = SonosHouseholdDiscovery.ToHouseholds([Answer("RINCON_A00000000000001400", "192.168.1.101")]);
 
         // Act
@@ -359,7 +357,7 @@ public class SonosHouseholdDiscoveryTests
         // Arrange
         var longName = new string('r', SonosSpeakerDescriptions.MaximumNameLength - 1) + "\U0001F50A" + "tail";
         using var handler = new DescriptionHandler(_ => Description(longName, new string('m', 200)));
-        var discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
+        var discovery = new SonosHouseholdDiscovery(new UnusedSsdpSearch(), handler, new FakeTimeProvider());
         var households = SonosHouseholdDiscovery.ToHouseholds([Answer("RINCON_A00000000000001400", "192.168.1.101")]);
 
         // Act
@@ -395,7 +393,7 @@ public class SonosHouseholdDiscoveryTests
             context.Response.ContentType = "text/xml; charset=utf-8";
             await context.Response.OutputStream.WriteAsync(body);
         });
-        var discovery = new SonosHouseholdDiscovery(handler: null, new FakeTimeProvider());
+        var discovery = new SonosHouseholdDiscovery(new UnusedSsdpSearch(), handler: null, new FakeTimeProvider());
         var households = SonosHouseholdDiscovery.ToHouseholds([Answer("RINCON_A00000000000001400", "127.0.0.1", port: speaker.Port)]);
 
         // Act
@@ -417,7 +415,7 @@ public class SonosHouseholdDiscoveryTests
             context.Response.ContentType = "text/xml";
             await context.Response.OutputStream.WriteAsync(body);
         });
-        var discovery = new SonosHouseholdDiscovery(handler: null, new FakeTimeProvider());
+        var discovery = new SonosHouseholdDiscovery(new UnusedSsdpSearch(), handler: null, new FakeTimeProvider());
         var households = SonosHouseholdDiscovery.ToHouseholds([Answer("RINCON_A00000000000001400", "127.0.0.1", port: speaker.Port)]);
 
         // Act
@@ -432,7 +430,7 @@ public class SonosHouseholdDiscoveryTests
     {
         // Arrange
         using var handler = new DescriptionHandler(_ => Description("Room", "Sonos One"));
-        var discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
+        var discovery = new SonosHouseholdDiscovery(new UnusedSsdpSearch(), handler, new FakeTimeProvider());
         var count = SonosSpeakerDescriptions.MaximumDescriptions + 1;
         var households = SonosHouseholdDiscovery.ToHouseholds(
         [
@@ -460,7 +458,7 @@ public class SonosHouseholdDiscoveryTests
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             throw new InvalidOperationException("Not reached.");
         });
-        var discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
+        var discovery = new SonosHouseholdDiscovery(new UnusedSsdpSearch(), handler, new FakeTimeProvider());
         var households = SonosHouseholdDiscovery.ToHouseholds([Answer("RINCON_A00000000000001400", "192.168.1.101")]);
         using var cancellation = new CancellationTokenSource();
 
@@ -596,18 +594,9 @@ public class SonosHouseholdDiscoveryTests
         }
     }
 
-    private sealed class EmptyMulticastDnsBrowser : IMulticastDnsBrowser
+    private sealed class UnusedSsdpSearch : ISsdpSearch
     {
-        public Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<MulticastDnsServiceInstance>>([]);
-    }
-
-    private sealed class UnusedUdpDiscovery : IUdpDiscovery
-    {
-        public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
-        public IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken) =>
+        public Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
     }
 }
