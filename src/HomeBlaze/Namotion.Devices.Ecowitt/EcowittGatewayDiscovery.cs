@@ -28,9 +28,6 @@ public sealed class EcowittGatewayDiscovery(IUdpDiscovery udpDiscovery) : Subjec
         }
     }
 
-    /// <inheritdoc />
-    protected override bool Matches(EcowittGateway existing, EcowittDiscoveredGateway result) => IsSameGateway(existing, result);
-
     /// <param name="reply">The reply of the gateway.</param>
     /// <param name="senderAddress">
     /// The address the reply came from, which is the host address, as for the other UDP subject discoveries, rather
@@ -49,49 +46,4 @@ public sealed class EcowittGatewayDiscovery(IUdpDiscovery udpDiscovery) : Subjec
             deviceName.Length == 0 ? null : deviceName,
             firmwareVersion.Length == 0 ? null : firmwareVersion);
     }
-
-    internal static bool IsSameGateway(EcowittGateway existing, EcowittDiscoveredGateway result) =>
-        IsSameMacAddress(existing.MacAddress, result.MacAddress) ||
-        string.Equals(existing.HostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Compares two MAC addresses, ignoring case and the separators <c>:</c> and <c>-</c>.
-    /// </summary>
-    internal static bool IsSameMacAddress(string? macAddress, string otherMacAddress)
-    {
-        if (string.IsNullOrWhiteSpace(macAddress))
-        {
-            return false;
-        }
-
-        var index = 0;
-        var otherIndex = 0;
-        while (true)
-        {
-            while (index < macAddress.Length && IsSeparator(macAddress[index]))
-            {
-                index++;
-            }
-
-            while (otherIndex < otherMacAddress.Length && IsSeparator(otherMacAddress[otherIndex]))
-            {
-                otherIndex++;
-            }
-
-            if (index == macAddress.Length || otherIndex == otherMacAddress.Length)
-            {
-                return index == macAddress.Length && otherIndex == otherMacAddress.Length;
-            }
-
-            if (char.ToUpperInvariant(macAddress[index]) != char.ToUpperInvariant(otherMacAddress[otherIndex]))
-            {
-                return false;
-            }
-
-            index++;
-            otherIndex++;
-        }
-    }
-
-    private static bool IsSeparator(char character) => character is ':' or '-';
 }

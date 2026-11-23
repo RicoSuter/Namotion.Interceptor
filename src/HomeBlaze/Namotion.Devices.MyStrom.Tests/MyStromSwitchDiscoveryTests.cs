@@ -26,18 +26,10 @@ public class MyStromSwitchDiscoveryTests
             Information = macAddress is null ? null : new MyStromSwitchInformation { Mac = macAddress }
         };
 
-    private static async Task<List<DiscoveredSubject>> DiscoverAsync(
-        FakeUdpDiscovery udpDiscovery, params IInterceptorSubject[] existingSubjects)
+    private static async Task<List<IDiscoveryResult>> DiscoverAsync(FakeUdpDiscovery udpDiscovery)
     {
         ISubjectDiscovery discovery = new MyStromSwitchDiscovery(udpDiscovery);
-
-        var discovered = new List<DiscoveredSubject>();
-        await foreach (var subject in discovery.DiscoverAsync(existingSubjects, CancellationToken.None))
-        {
-            discovered.Add(subject);
-        }
-
-        return discovered;
+        return await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
     }
 
     [Fact]
@@ -66,12 +58,12 @@ public class MyStromSwitchDiscoveryTests
         var discovered = await DiscoverAsync(udpDiscovery);
 
         // Assert
-        var result = Assert.IsType<MyStromDiscoveredSwitch>(Assert.Single(discovered).Result);
+        var result = Assert.IsType<MyStromDiscoveredSwitch>(Assert.Single(discovered));
         Assert.Equal(MacAddress, result.MacAddress);
     }
 
     [Fact]
-    public async Task WhenASwitchAnnouncesItselfTwice_ThenItIsFoundOnce()
+    public async Task WhenASwitchAnnouncesItselfTwice_ThenBothAnnouncementsHaveItsKey()
     {
         // Arrange
         var udpDiscovery = new FakeUdpDiscovery(
@@ -82,34 +74,32 @@ public class MyStromSwitchDiscoveryTests
         // Act
         var discovered = await DiscoverAsync(udpDiscovery);
 
-        // Assert
-        Assert.Equal(2, discovered.Count);
-        var subject = discovered[0];
-        Assert.Equal(typeof(MyStromSwitch), subject.SubjectType);
-        Assert.Null(subject.ExistingSubject);
-        var result = Assert.IsType<MyStromDiscoveredSwitch>(subject.Result);
+        // Assert - the scan lists a key once.
+        Assert.Equal([MacAddress, "FCF5C4000001", MacAddress], discovered.Select(result => result.Key));
+        var result = Assert.IsType<MyStromDiscoveredSwitch>(discovered[0]);
         Assert.Equal(new MyStromDiscoveredSwitch(MacAddress, HostAddress, "WS2"), result);
         Assert.Equal(MacAddress, result.Key);
         Assert.Equal("myStrom Switch 18ADAC", result.DisplayName);
         Assert.Equal("WS2, 192.168.1.59", result.Detail);
 
-        var other = Assert.IsType<MyStromDiscoveredSwitch>(discovered[1].Result);
+        var other = Assert.IsType<MyStromDiscoveredSwitch>(discovered[1]);
         Assert.Equal("myStrom Switch 000001", other.DisplayName);
         Assert.Equal("WSE, 192.168.1.60", other.Detail);
     }
 
     [Fact]
-    public async Task WhenASwitchIsAlreadyAdded_ThenItIsFoundWithItsSubject()
+    public async Task WhenASwitchIsAlreadyAdded_ThenItsResultMatchesOnlyItsSubject()
     {
         // Arrange
         var other = CreateSwitch(hostAddress: "192.168.1.10", macAddress: "FCF5C4000002");
         var existing = CreateSwitch(hostAddress: "kitchen.local", macAddress: MacAddress);
 
         // Act
-        var discovered = await DiscoverAsync(new FakeUdpDiscovery(Announcement()), other, existing);
+        var result = Assert.Single(await DiscoverAsync(new FakeUdpDiscovery(Announcement())));
 
         // Assert
-        Assert.Same(existing, Assert.Single(discovered).ExistingSubject);
+        Assert.False(result.Matches(other));
+        Assert.True(result.Matches(existing));
     }
 
     [Theory]
@@ -123,7 +113,7 @@ public class MyStromSwitchDiscoveryTests
         var existing = CreateSwitch(hostAddress: "192.168.1.10", macAddress: macAddress);
 
         // Act
-        var matches = MyStromSwitchDiscovery.IsSameSwitch(existing, Found());
+        var matches = Found().Matches(existing);
 
         // Assert
         Assert.True(matches);
@@ -138,7 +128,7 @@ public class MyStromSwitchDiscoveryTests
         var existing = CreateSwitch(hostAddress: hostAddress);
 
         // Act
-        var matches = MyStromSwitchDiscovery.IsSameSwitch(existing, Found());
+        var matches = Found().Matches(existing);
 
         // Assert
         Assert.True(matches);
@@ -157,7 +147,7 @@ public class MyStromSwitchDiscoveryTests
         var existing = CreateSwitch(hostAddress: hostAddress, macAddress: macAddress);
 
         // Act
-        var matches = MyStromSwitchDiscovery.IsSameSwitch(existing, Found());
+        var matches = Found().Matches(existing);
 
         // Assert
         Assert.False(matches);

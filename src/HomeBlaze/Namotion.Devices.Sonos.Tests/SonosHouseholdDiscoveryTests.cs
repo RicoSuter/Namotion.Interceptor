@@ -143,13 +143,13 @@ public class SonosHouseholdDiscoveryTests
         var existing = CreateSystem(seedHost: "192.168.1.102");
 
         // Act
-        var discovered = await discovery.DiscoverAsync([existing], CancellationToken.None).ToListAsync();
+        var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
 
         // Assert
-        var single = Assert.Single(discovered);
-        var household = Assert.IsType<SonosDiscoveredHousehold>(single.Result);
+        var single = Assert.Single(results);
+        var household = Assert.IsType<SonosDiscoveredHousehold>(single);
         Assert.Equal(Household, household.HouseholdId);
-        Assert.Same(existing, single.ExistingSubject);
+        Assert.True(single.Matches(existing));
         Assert.Equal([ZonePlayer], search.SearchTargets);
     }
 
@@ -186,10 +186,10 @@ public class SonosHouseholdDiscoveryTests
         ISubjectDiscovery discovery = new SonosHouseholdDiscovery(search, handler, new FakeTimeProvider());
 
         // Act
-        var discovered = await discovery.DiscoverAsync([], CancellationToken.None).ToListAsync();
+        var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
 
         // Assert
-        var household = Assert.IsType<SonosDiscoveredHousehold>(Assert.Single(discovered).Result);
+        var household = Assert.IsType<SonosDiscoveredHousehold>(Assert.Single(results));
         Assert.Equal(
             [new DiscoveredItem("Wohnzimmer", "Sonos One, 192.168.1.101"), new DiscoveredItem("Wohnzimmer", "Sonos One, 192.168.1.103")],
             household.IncludedItems);
@@ -482,8 +482,8 @@ public class SonosHouseholdDiscoveryTests
         };
 
         // Act & Assert
-        Assert.True(SonosHouseholdDiscovery.IsSameHousehold(system, Found(("RINCON_A00000000000001400", "192.168.1.101"), ("RINCON_B00000000000001400", "192.168.1.102"))));
-        Assert.False(SonosHouseholdDiscovery.IsSameHousehold(system, Found(("RINCON_C00000000000001400", "192.168.1.103"))));
+        Assert.True(Found(("RINCON_A00000000000001400", "192.168.1.101"), ("RINCON_B00000000000001400", "192.168.1.102")).Matches(system));
+        Assert.False(Found(("RINCON_C00000000000001400", "192.168.1.103")).Matches(system));
     }
 
     [Fact]
@@ -499,7 +499,7 @@ public class SonosHouseholdDiscoveryTests
         system.Players = new Dictionary<string, SonosPlayer>(StringComparer.Ordinal) { [player.Uuid] = player };
 
         // Act & Assert
-        Assert.True(SonosHouseholdDiscovery.IsSameHousehold(system, Found(("RINCON_S00000000000001400", "192.168.1.110"))));
+        Assert.True(Found(("RINCON_S00000000000001400", "192.168.1.110")).Matches(system));
     }
 
     [Theory]
@@ -512,7 +512,7 @@ public class SonosHouseholdDiscoveryTests
         var system = CreateSystem(seedHost);
 
         // Act & Assert
-        Assert.True(SonosHouseholdDiscovery.IsSameHousehold(system, Found(("RINCON_A00000000000001400", "192.168.1.101"), ("RINCON_B00000000000001400", "192.168.1.102"))));
+        Assert.True(Found(("RINCON_A00000000000001400", "192.168.1.101"), ("RINCON_B00000000000001400", "192.168.1.102")).Matches(system));
     }
 
     [Fact]
@@ -522,7 +522,7 @@ public class SonosHouseholdDiscoveryTests
         var system = CreateSystem("Sonos-Kitchen.local");
 
         // Act & Assert
-        Assert.True(SonosHouseholdDiscovery.IsSameHousehold(system, Found(("RINCON_A00000000000001400", "sonos-kitchen.local"))));
+        Assert.True(Found(("RINCON_A00000000000001400", "sonos-kitchen.local")).Matches(system));
     }
 
     [Theory]
@@ -540,7 +540,7 @@ public class SonosHouseholdDiscoveryTests
         };
 
         // Act & Assert
-        Assert.False(SonosHouseholdDiscovery.IsSameHousehold(system, Found(("RINCON_A00000000000001400", "192.168.1.101"))));
+        Assert.False(Found(("RINCON_A00000000000001400", "192.168.1.101")).Matches(system));
     }
 
     private static Dictionary<string, string> HouseholdHeaders() =>

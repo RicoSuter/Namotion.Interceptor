@@ -12,7 +12,7 @@ namespace Namotion.Devices.Ecowitt
         public System.Threading.Tasks.Task<Namotion.Devices.Ecowitt.Models.EcowittSensorInfo[]> GetSensorsInfoAsync(System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<Namotion.Devices.Ecowitt.Models.EcowittVersionInfo> GetVersionAsync(System.Threading.CancellationToken cancellationToken) { }
     }
-    public sealed class EcowittDiscoveredGateway : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, System.IEquatable<Namotion.Devices.Ecowitt.EcowittDiscoveredGateway>
+    public sealed class EcowittDiscoveredGateway : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, HomeBlaze.Abstractions.Discovery.IDiscoveryResult<Namotion.Devices.Ecowitt.EcowittGateway>, System.IEquatable<Namotion.Devices.Ecowitt.EcowittDiscoveredGateway>
     {
         public EcowittDiscoveredGateway(string MacAddress, string HostAddress, string? DeviceName, string? FirmwareVersion) { }
         public string? Detail { get; }
@@ -22,6 +22,7 @@ namespace Namotion.Devices.Ecowitt
         public string HostAddress { get; init; }
         public string Key { get; }
         public string MacAddress { get; init; }
+        public bool Matches(Namotion.Devices.Ecowitt.EcowittGateway subject) { }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("Cloud")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -135,7 +136,6 @@ namespace Namotion.Devices.Ecowitt
         public EcowittGatewayDiscovery(HomeBlaze.Abstractions.Discovery.IUdpDiscovery udpDiscovery) { }
         [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Ecowitt.EcowittGatewayDiscovery.<DiscoverAsync>d__5))]
         protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Ecowitt.EcowittDiscoveredGateway> DiscoverAsync([System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
-        protected override bool Matches(Namotion.Devices.Ecowitt.EcowittGateway existing, Namotion.Devices.Ecowitt.EcowittDiscoveredGateway result) { }
     }
     public static class EcowittServiceCollectionExtensions
     {

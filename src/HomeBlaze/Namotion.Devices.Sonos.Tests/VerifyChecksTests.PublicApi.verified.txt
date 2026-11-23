@@ -47,7 +47,7 @@ namespace Namotion.Devices.Sonos
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
-    public sealed class SonosDiscoveredHousehold : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, System.IEquatable<Namotion.Devices.Sonos.SonosDiscoveredHousehold>
+    public sealed class SonosDiscoveredHousehold : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, HomeBlaze.Abstractions.Discovery.IDiscoveryResult<Namotion.Devices.Sonos.SonosSystem>, System.IEquatable<Namotion.Devices.Sonos.SonosDiscoveredHousehold>
     {
         public string? Detail { get; }
         public string DisplayName { get; }
@@ -55,6 +55,7 @@ namespace Namotion.Devices.Sonos
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.DiscoveredItem> IncludedItems { get; }
         public string Key { get; }
         public string SeedHost { get; }
+        public bool Matches(Namotion.Devices.Sonos.SonosSystem subject) { }
     }
     public sealed class SonosFaultException : System.Exception
     {
@@ -258,7 +259,6 @@ namespace Namotion.Devices.Sonos
         public SonosHouseholdDiscovery(HomeBlaze.Abstractions.Discovery.ISsdpSearch ssdpSearch) { }
         [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Sonos.SonosHouseholdDiscovery.<DiscoverAsync>d__6))]
         protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Sonos.SonosDiscoveredHousehold> DiscoverAsync([System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
-        protected override bool Matches(Namotion.Devices.Sonos.SonosSystem existing, Namotion.Devices.Sonos.SonosDiscoveredHousehold result) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class SonosPlayer : Namotion.Devices.Sonos.SonosDevice, HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Media.IAudioPlayer, HomeBlaze.Abstractions.Media.IMediaPlaybackController, HomeBlaze.Abstractions.Media.IMediaPlaybackState, HomeBlaze.Abstractions.Media.IMediaTrackState, HomeBlaze.Abstractions.Media.IVolumeController, HomeBlaze.Abstractions.Media.IVolumeState, Namotion.Interceptor.IInterceptorSubject

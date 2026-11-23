@@ -277,12 +277,32 @@ public class SubjectDiscoveryListTests
         list.ToggleExpanded(list.Rows[0]);
 
         // Act
-        list.MarkAdded(found, Mock.Of<IInterceptorSubject>());
+        list.MarkAdded(found, Mock.Of<IInterceptorSubject>(), NullLogger.Instance);
 
         // Assert
         Assert.Equal(["Beta", "Alpha"], Names(list));
         Assert.True(list.IsExpanded(list.Rows[1]));
         Assert.False(list.IsExpanded(list.Rows[0]));
+    }
+
+    [Fact]
+    public void WhenAnExpandedRowMatchesTheCreatedSubject_ThenItStaysExpanded()
+    {
+        // Arrange
+        var list = new SubjectDiscoveryList();
+        var found = Found(Hue, "Alpha");
+        list.Add(found, Hue);
+        list.Add(Found(Hue, "Beta"), Hue);
+        list.Add(Found(Hue, "Gamma", isMatch: _ => true), Hue);
+        list.ToggleExpanded(list.Rows[2]);
+
+        // Act
+        list.MarkAdded(found, Mock.Of<IInterceptorSubject>(), NullLogger.Instance);
+
+        // Assert
+        Assert.Equal(["Beta", "Alpha", "Gamma"], Names(list));
+        Assert.True(list.IsExpanded(list.Rows[2]));
+        Assert.False(list.IsExpanded(list.Rows[1]));
     }
 
     [Fact]

@@ -3,7 +3,7 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Namotion.Devices.MyStrom
 {
-    public sealed class MyStromDiscoveredSwitch : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, System.IEquatable<Namotion.Devices.MyStrom.MyStromDiscoveredSwitch>
+    public sealed class MyStromDiscoveredSwitch : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, HomeBlaze.Abstractions.Discovery.IDiscoveryResult<Namotion.Devices.MyStrom.MyStromSwitch>, System.IEquatable<Namotion.Devices.MyStrom.MyStromDiscoveredSwitch>
     {
         public MyStromDiscoveredSwitch(string MacAddress, string HostAddress, string DeviceType) { }
         public string? Detail { get; }
@@ -12,6 +12,7 @@ namespace Namotion.Devices.MyStrom
         public string HostAddress { get; init; }
         public string Key { get; }
         public string MacAddress { get; init; }
+        public bool Matches(Namotion.Devices.MyStrom.MyStromSwitch subject) { }
     }
     public static class MyStromServiceCollectionExtensions
     {
@@ -108,6 +109,5 @@ namespace Namotion.Devices.MyStrom
         public MyStromSwitchDiscovery(HomeBlaze.Abstractions.Discovery.IUdpDiscovery udpDiscovery) { }
         [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.MyStrom.MyStromSwitchDiscovery.<DiscoverAsync>d__4))]
         protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.MyStrom.MyStromDiscoveredSwitch> DiscoverAsync([System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
-        protected override bool Matches(Namotion.Devices.MyStrom.MyStromSwitch existing, Namotion.Devices.MyStrom.MyStromDiscoveredSwitch result) { }
     }
 }

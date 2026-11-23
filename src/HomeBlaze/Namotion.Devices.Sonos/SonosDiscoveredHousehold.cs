@@ -1,11 +1,12 @@
 using HomeBlaze.Abstractions.Discovery;
+using Namotion.Devices.Sonos.Client;
 
 namespace Namotion.Devices.Sonos;
 
 /// <summary>
 /// A Sonos household whose speakers answered an SSDP search.
 /// </summary>
-public sealed record SonosDiscoveredHousehold : IDiscoveryResult
+public sealed record SonosDiscoveredHousehold : IDiscoveryResult<SonosSystem>
 {
     /// <param name="householdId">The household ID the speakers announce.</param>
     /// <param name="speakers">The speakers that answered, satellites included, ordered by ID; never empty.</param>
@@ -48,6 +49,47 @@ public sealed record SonosDiscoveredHousehold : IDiscoveryResult
     /// </summary>
     public IReadOnlyList<DiscoveredItem> IncludedItems { get; }
 
+    /// <inheritdoc />
+    public bool Matches(SonosSystem subject)
+    {
+        // The dictionaries are replaced, never mutated, so each one is read once and enumerated safely.
+        var players = subject.Players;
+        foreach (var speaker in Speakers)
+        {
+            if (players.ContainsKey(speaker.Id))
+            {
+                return true;
+            }
+        }
+
+        foreach (var player in players.Values)
+        {
+            var satellites = player.Satellites;
+            foreach (var speaker in Speakers)
+            {
+                if (satellites.ContainsKey(speaker.Id))
+                {
+                    return true;
+                }
+            }
+        }
+
+        // A system that has not connected yet knows no speakers, only its seed.
+        var seedHostAddress = GetHostAddress(subject.SeedHost);
+        if (seedHostAddress is not null)
+        {
+            foreach (var speaker in Speakers)
+            {
+                if (string.Equals(speaker.HostAddress, seedHostAddress, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private static DiscoveredItem[] ToItems(IReadOnlyList<SonosDiscoveredSpeaker> speakers)
     {
         var items = new DiscoveredItem[speakers.Count];
@@ -67,5 +109,22 @@ public sealed record SonosDiscoveredHousehold : IDiscoveryResult
         });
 
         return items;
+    }
+
+    private static string? GetHostAddress(string? seedHost)
+    {
+        if (string.IsNullOrWhiteSpace(seedHost))
+        {
+            return null;
+        }
+
+        try
+        {
+            return SonosDiscovery.CreateDeviceUri(seedHost).Host;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 }

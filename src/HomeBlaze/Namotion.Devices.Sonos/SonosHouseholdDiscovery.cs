@@ -49,9 +49,6 @@ public sealed class SonosHouseholdDiscovery : SubjectDiscovery<SonosSystem, Sono
         }
     }
 
-    /// <inheritdoc />
-    protected override bool Matches(SonosSystem existing, SonosDiscoveredHousehold result) => IsSameHousehold(existing, result);
-
     /// <summary>
     /// Returns the households with the room and model of each speaker whose device description was read.
     /// </summary>
@@ -95,46 +92,6 @@ public sealed class SonosHouseholdDiscovery : SubjectDiscovery<SonosSystem, Sono
         return households;
     }
 
-    internal static bool IsSameHousehold(SonosSystem existing, SonosDiscoveredHousehold result)
-    {
-        // The dictionaries are replaced, never mutated, so each one is read once and enumerated safely.
-        var players = existing.Players;
-        foreach (var speaker in result.Speakers)
-        {
-            if (players.ContainsKey(speaker.Id))
-            {
-                return true;
-            }
-        }
-
-        foreach (var player in players.Values)
-        {
-            var satellites = player.Satellites;
-            foreach (var speaker in result.Speakers)
-            {
-                if (satellites.ContainsKey(speaker.Id))
-                {
-                    return true;
-                }
-            }
-        }
-
-        // A system that has not connected yet knows no speakers, only its seed.
-        var seedHostAddress = GetHostAddress(existing.SeedHost);
-        if (seedHostAddress is not null)
-        {
-            foreach (var speaker in result.Speakers)
-            {
-                if (string.Equals(speaker.HostAddress, seedHostAddress, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
     // The host and port of the location are where the speaker is asked, as seed and for its description; an absolute
     // location such as urn:x has neither.
     private static bool IsSpeakerLocation(Uri location) =>
@@ -147,21 +104,4 @@ public sealed class SonosHouseholdDiscovery : SubjectDiscovery<SonosSystem, Sono
         speaker.Port == SonosValues.DevicePort
             ? speaker.HostAddress
             : string.Create(CultureInfo.InvariantCulture, $"{speaker.HostAddress}:{speaker.Port}");
-
-    private static string? GetHostAddress(string? seedHost)
-    {
-        if (string.IsNullOrWhiteSpace(seedHost))
-        {
-            return null;
-        }
-
-        try
-        {
-            return SonosDiscovery.CreateDeviceUri(seedHost).Host;
-        }
-        catch (ArgumentException)
-        {
-            return null;
-        }
-    }
 }
