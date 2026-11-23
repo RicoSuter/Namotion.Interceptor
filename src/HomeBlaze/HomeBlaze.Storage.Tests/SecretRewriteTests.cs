@@ -81,6 +81,9 @@ public class SecretRewriteTests : StorageTestBase
         var applyCount = device.ApplyCount;
         WriteFile("Gateway.json", $$"""{ "$type": "{{deviceType}}", "value": {}, "password": "s3cr3t" }""");
 
+        // The load logs the same warning, because the check of this type always fails.
+        messages.Clear();
+
         // Act
         await storage.ReconcileAsync(Named("Gateway.json"));
 
