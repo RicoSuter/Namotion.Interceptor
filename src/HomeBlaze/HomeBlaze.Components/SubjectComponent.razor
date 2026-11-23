@@ -3,6 +3,7 @@
 @using Microsoft.JSInterop
 
 @inject SubjectComponentRegistry ComponentRegistry
+@inject SubjectPathResolver PathResolver
 @inject IDialogService DialogService
 @inject IJSRuntime JSRuntime
 
@@ -17,6 +18,12 @@
     if (registration?.ComponentType != null)
     {
         var isSelectable = IsSelectable;
+        if (isSelectable)
+        {
+            // Only a selectable widget is named by these properties, so a viewed page never reads the version.
+            ResolveNamePropertiesWhileUnregistered();
+        }
+
         var isSelected = isSelectable && ReferenceEquals(Selection?.Selected, this);
         var isRevealable = !isSelectable && Revealer is not null && Type == SubjectComponentType.Widget;
         @* Text that is not selectable yet, such as in a card that is not selected, becomes selectable once it is selected.
@@ -321,9 +328,11 @@
     // Keyed weakly, because the type of a widget can come from a plugin that is unloaded again.
     private static readonly ConditionalWeakTable<Type, string> TypeDisplayNames = new();
 
-    // The properties that name a selectable widget without a title, looked up once per subject.
+    // The properties that name a selectable widget without a title, looked up once per subject, and again while the
+    // subject is not registered, see ResolveNamePropertiesWhileUnregistered.
     private RegisteredSubjectProperty? _labelProperty;
     private RegisteredSubjectProperty? _pathProperty;
+    private bool _isSubjectRegistered;
 
     // Whether the widget of the subject is a block of text of its page, which can be selected without a configuration.
     private bool _isTextBlock;
@@ -520,9 +529,7 @@
         {
             if (Subject != _previousSubject)
             {
-                var registeredSubject = Subject?.TryGetRegisteredSubject();
-                _labelProperty = TryGetTextProperty(registeredSubject, SubjectNames.LabelPropertyName);
-                _pathProperty = SubjectNames.TryGetPathProperty(registeredSubject);
+                ResolveNameProperties();
                 _isTextBlock = Subject is not null &&
                                ComponentRegistry.GetComponent(Subject.GetType(), Type)?.ComponentType is { } componentType &&
                                typeof(ITextBlockWidget).IsAssignableFrom(componentType);
@@ -534,6 +541,26 @@
             _previousSubject = Subject;
             _previousAdditionalParameters = AdditionalParameters;
             _cachedParameters = BuildComponentParameters();
+        }
+    }
+
+    private void ResolveNameProperties()
+    {
+        var registeredSubject = Subject?.TryGetRegisteredSubject();
+        _isSubjectRegistered = registeredSubject is not null;
+        _labelProperty = TryGetTextProperty(registeredSubject, SubjectNames.LabelPropertyName);
+        _pathProperty = SubjectNames.TryGetPathProperty(registeredSubject);
+    }
+
+    // The widget can render before its subject is registered: a write of a new subject changes the paths when it detaches
+    // the old one, before the new one is attached. The version is read before the lookup, so that the attach, which changes
+    // it once the registry has the subject, renders the widget again.
+    private void ResolveNamePropertiesWhileUnregistered()
+    {
+        if (!_isSubjectRegistered)
+        {
+            _ = PathResolver.PathsVersion;
+            ResolveNameProperties();
         }
     }
 

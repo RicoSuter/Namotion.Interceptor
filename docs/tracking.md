@@ -447,6 +447,14 @@ Events are useful for:
 - Dynamic subscribers that register/unregister at runtime (unlike `ILifecycleHandler` which is registered at startup)
 - Integration packages (MQTT, OPC UA) that need to clean up internal state
 
+**Replacement order:** when a property that holds subjects gets a new value, for example `person.Father = newFather`, the setter does three things before it returns:
+
+1. It stores the new value, so `person.Father` returns `newFather`.
+2. It detaches the subjects that are no longer referenced (`oldFather`).
+3. It attaches the new subjects (`newFather`).
+
+Once the setter returns, the code that assigned the property sees the final state, unless another thread overwrote the property or detached `person` in the meantime. A lifecycle handler of the detach in step 2, or another thread reading in that moment, can see `person.Father` already return `newFather` while `newFather` is not attached yet. A subject that another property in the graph still holds after step 2 is not attached again; it only gains a property reference (`IsPropertyReferenceAdded` without `IsContextAttach`). Likewise, a subject that another property still holds is not detached; it only loses one (`IsPropertyReferenceRemoved` without `IsContextDetach`). React to each lifecycle and child index change rather than assuming the first one shows the final state.
+
 ### Child Index Changes
 
 A structural write that keeps a subject in the property raises neither a detach nor an attach for it, also when the subject now sits at another position or under another key. A handler that stores that index implements `IChildIndexHandler` and is registered as a context service:

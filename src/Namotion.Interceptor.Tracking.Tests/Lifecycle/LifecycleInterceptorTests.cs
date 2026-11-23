@@ -696,6 +696,58 @@ public class LifecycleInterceptorTests
         Assert.Contains(events, e => e.Contains("ImmutableCars[0] -> Car1") && e.Contains("detached"));
     }
 
+    [Fact]
+    public void WhenSubjectIsReplaced_ThenItsDetachIsHandledBeforeTheNewSubjectIsAttached()
+    {
+        // Arrange
+        var handler = new DetachObservingHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler);
+
+        var interceptor = context.GetServices<LifecycleInterceptor>().Single();
+        var person = new Person(context);
+        var oldFather = new Person();
+        var newFather = new Person();
+        person.Father = oldFather;
+
+        handler.OnDetach = change =>
+        {
+            if (ReferenceEquals(change.Subject, oldFather))
+            {
+                handler.FatherAtDetach = person.Father;
+                handler.WasNewFatherAttachedAtDetach = interceptor.TryRunWhileAttached(newFather, () => { });
+            }
+        };
+
+        // Act
+        person.Father = newFather;
+
+        // Assert
+        Assert.Same(newFather, handler.FatherAtDetach);
+        Assert.False(handler.WasNewFatherAttachedAtDetach);
+        Assert.True(interceptor.TryRunWhileAttached(newFather, () => { }));
+        Assert.False(interceptor.TryRunWhileAttached(oldFather, () => { }));
+    }
+
+    private sealed class DetachObservingHandler : ILifecycleHandler
+    {
+        public Action<SubjectLifecycleChange>? OnDetach { get; set; }
+
+        public Person? FatherAtDetach { get; set; }
+
+        public bool? WasNewFatherAttachedAtDetach { get; set; }
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (change.IsContextDetach)
+            {
+                OnDetach?.Invoke(change);
+            }
+        }
+    }
+
     public class AddPropertyToSubjectHandler : ILifecycleHandler
     {
         public void HandleLifecycleChange(SubjectLifecycleChange change)
