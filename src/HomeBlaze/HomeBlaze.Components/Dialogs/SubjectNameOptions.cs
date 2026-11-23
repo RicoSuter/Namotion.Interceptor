@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Globalization;
 
 namespace HomeBlaze.Components.Dialogs;
 
@@ -64,6 +65,51 @@ public sealed record SubjectNameOptions(string Label, string Suffix, IReadOnlyCo
         }
 
         return name;
+    }
+
+    /// <summary>
+    /// Suggests a name for a new subject that represents a found device: <paramref name="preferredName"/> without
+    /// surrounding whitespace, with a space and a number from 2 appended while it is taken, when it has no control or
+    /// Unicode format characters, does not start with a dot and <see cref="Validate"/> accepts it; otherwise
+    /// <see cref="SuggestName(Type)"/>.
+    /// </summary>
+    public string SuggestName(string preferredName, Type type)
+    {
+        var trimmedName = preferredName.Trim();
+        if (!IsPlainName(trimmedName))
+        {
+            return SuggestName(type);
+        }
+
+        var name = trimmedName;
+        for (var number = 2; IsTaken(name); number++)
+        {
+            name = trimmedName + " " + number.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return Validate(name) is null ? name : SuggestName(type);
+    }
+
+    /// <summary>
+    /// Whether a name that a device announced shows as what it reads: format characters such as U+202E reorder
+    /// the text around them, and a leading dot hides the file.
+    /// </summary>
+    private static bool IsPlainName(string name)
+    {
+        if (name.StartsWith('.'))
+        {
+            return false;
+        }
+
+        foreach (var character in name)
+        {
+            if (char.IsControl(character) || CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.Format)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private bool IsTaken(string name)

@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.E2E.Tests.Models;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
@@ -285,11 +286,12 @@ public class SubjectSetupDialogTests
         Assert.Equal(["solid", "2px"], outline);
     }
 
+    // A phone shows fewer rows, because the toggle between the type list and the Discover page sits above the list.
     [Theory]
-    [InlineData(1300, 880)]
-    [InlineData(375, 812)]
-    [InlineData(812, 375)]
-    public async Task WhenTheViewportIsDesktopOrPhoneSized_ThenTheTypeListAndTheActionsStayInView(int width, int height)
+    [InlineData(1300, 880, 3)]
+    [InlineData(375, 812, 2)]
+    [InlineData(812, 375, 2)]
+    public async Task WhenTheViewportIsDesktopOrPhoneSized_ThenTheTypeListAndTheActionsStayInView(int width, int height, int minimumVisibleRows)
     {
         // Arrange - the navigation to the browser is in a drawer that a narrow viewport closes, so the
         // viewport is only resized once the pane is there.
@@ -318,13 +320,16 @@ public class SubjectSetupDialogTests
                     .filter(row => row.height > 0 && row.top >= list.top - 0.5 && row.bottom <= list.bottom + 0.5 && isInViewport(row));
                 const content = document.querySelector('.mud-dialog-content');
                 const cancel = document.querySelector("[data-testid='cancel-button']").getBoundingClientRect();
-                return [visibleRows.length, content.scrollHeight - content.clientHeight, isInViewport(cancel) ? 1 : 0];
+                const toggle = document.querySelector("[data-testid='picker-mode-toggle']");
+                const isToggleWhole = toggle !== null && toggle.clientHeight >= toggle.scrollHeight && isInViewport(toggle.getBoundingClientRect());
+                return [visibleRows.length, content.scrollHeight - content.clientHeight, isInViewport(cancel) ? 1 : 0, isToggleWhole ? 1 : 0];
             }
             """);
 
-        Assert.True(pickerLayout[0] >= 3, $"Only {pickerLayout[0]} type rows are completely visible in the list.");
+        Assert.True(pickerLayout[0] >= minimumVisibleRows, $"Only {pickerLayout[0]} type rows are completely visible in the list.");
         Assert.True(pickerLayout[1] <= 0, $"The dialog content scrolls by {pickerLayout[1]} pixels, although only the list should.");
         Assert.True(pickerLayout[2] == 1, "The cancel button is outside the viewport.");
+        Assert.True(pickerLayout[3] == 1, "The toggle between the type list and the Discover page is missing, clipped or outside the viewport.");
 
         // Act
         await PickTypeAsync(page, "shellydevice");
@@ -1156,6 +1161,194 @@ public class SubjectSetupDialogTests
                 _output.WriteLine($"Deleting {filePath} failed: {exception}");
             }
         }
+    }
+
+    [Fact]
+    public async Task WhenFoundDevicesAreCreatedFromAFolder_ThenEachStartsFromItsDeviceAndTheDialogReturnsToTheDiscoverPage()
+    {
+        // The files are written to the test output directory, which later runs reuse, so they are removed again.
+        var firstName = $"Discovered{Guid.NewGuid():N}";
+        var secondName = $"Discovered{Guid.NewGuid():N}";
+        var firstFilePath = Path.Combine(AppContext.BaseDirectory, "TestData", $"{firstName}.json");
+        var secondFilePath = Path.Combine(AppContext.BaseDirectory, "TestData", $"{secondName}.json");
+        var root = Assert.IsType<FluentStorageContainer>(_fixture.ServerServices.GetRequiredService<RootManager>().Root);
+        bool IsStored(string name, string hostAddress) =>
+            root.Children.TryGetValue(name, out var subject) && subject is DiscoverableTestSubject { HostAddress: var stored } && stored == hostAddress;
+
+        var isCompleted = false;
+        try
+        {
+            // Arrange
+            var page = await _fixture.CreatePageAsync();
+            await OpenDialogAsync(page);
+            await Dialog(page).GetByTestId("picker-mode-discover").ClickAsync();
+            var discoverPage = Dialog(page).GetByTestId("subject-discovery-page");
+            var firstRow = discoverPage.GetByTestId("discovery-row").Filter(new() { HasText = DiscoverableTestDiscovery.HostAddress });
+            var secondRow = discoverPage.GetByTestId("discovery-row").Filter(new() { HasText = DiscoverableTestDiscovery.SecondHostAddress });
+            await Assertions.Expect(firstRow).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(secondRow).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            var scanCount = DiscoverableTestDiscovery.ScanCount;
+
+            // Act
+            await firstRow.ClickAsync();
+            await ExpectConfigurePageAsync(page);
+
+            // Assert - the component and the name start from the device.
+            await Assertions.Expect(Dialog(page).GetByTestId("discoverable-host"))
+                .ToHaveTextAsync($"Host: {DiscoverableTestDiscovery.HostAddress}", new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(NameInput(page)).ToHaveValueAsync(DiscoverableTestDiscovery.DeviceName);
+
+            // Act
+            await NameInput(page).FillAsync(firstName);
+            await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+            await CreateButton(page).ClickAsync();
+
+            // Assert - the dialog stays open on the Discover page, where the device is now listed as added, after
+            // the devices that are not.
+            await Assertions.Expect(discoverPage).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(CreateButton(page)).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(page.GetByText($"Created \"{firstName}\"")).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(page.Locator("[data-testid='cancel-button']")).ToHaveTextAsync("Done");
+
+            var testDeviceRows = discoverPage.Locator("[data-testid^='discovery-row']").Filter(new()
+            {
+                HasTextRegex = new Regex($"{Regex.Escape(DiscoverableTestDiscovery.HostAddress)}|{Regex.Escape(DiscoverableTestDiscovery.SecondHostAddress)}")
+            });
+            await Assertions.Expect(testDeviceRows).ToHaveTextAsync(
+                [new Regex(Regex.Escape(DiscoverableTestDiscovery.SecondHostAddress)), new Regex($"{Regex.Escape(DiscoverableTestDiscovery.HostAddress)}, already added")],
+                new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(testDeviceRows.Nth(1)).ToHaveAttributeAsync("data-testid", "discovery-row-existing");
+
+            await _fixture.WaitForFileTextAsync(
+                firstFilePath,
+                text => text.Contains(DiscoverableTestDiscovery.HostAddress, StringComparison.Ordinal),
+                "The created file does not contain the host address of the found device.");
+
+            // Act - the second device is created from the same results, without a new scan.
+            await secondRow.ClickAsync();
+            await ExpectConfigurePageAsync(page);
+
+            // Assert - the name that was typed for the first device is not kept, and leaving the form is a cancel.
+            await Assertions.Expect(Dialog(page).GetByTestId("discoverable-host"))
+                .ToHaveTextAsync($"Host: {DiscoverableTestDiscovery.SecondHostAddress}", new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(NameInput(page)).ToHaveValueAsync(DiscoverableTestDiscovery.SecondDeviceName);
+            await Assertions.Expect(page.Locator("[data-testid='cancel-button']")).ToHaveTextAsync("Cancel");
+
+            // Act
+            await NameInput(page).FillAsync(secondName);
+            await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+            await CreateButton(page).ClickAsync();
+
+            // Assert
+            await Assertions.Expect(discoverPage.GetByTestId("discovery-row-existing").Filter(new() { HasText = DiscoverableTestDiscovery.SecondHostAddress }))
+                .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await _fixture.WaitForFileTextAsync(
+                secondFilePath,
+                text => text.Contains(DiscoverableTestDiscovery.SecondHostAddress, StringComparison.Ordinal),
+                "The second created file does not contain the host address of the second found device.");
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => IsStored(firstName, DiscoverableTestDiscovery.HostAddress) && IsStored(secondName, DiscoverableTestDiscovery.SecondHostAddress),
+                message: "The folder does not hold both created subjects.");
+            Assert.Equal(scanCount, DiscoverableTestDiscovery.ScanCount);
+
+            // Act - a new scan matches the found devices against the subjects that exist now, not when the dialog opened.
+            var matchCount = DiscoverableTestDiscovery.MatchedHostAddresses.Count;
+            var scanAgainButton = discoverPage.GetByTestId("discovery-scan-again-button");
+            await Assertions.Expect(scanAgainButton).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+            await scanAgainButton.ClickAsync();
+
+            // Assert - the rows before the new scan already show both devices as added, so the matches of the
+            // subject discovery tell that the new scan received the created subjects.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => DiscoverableTestDiscovery.MatchedHostAddresses.Skip(matchCount).Distinct().Count() == 2,
+                message: "The new scan did not match both found devices to the created subjects.");
+            await Assertions.Expect(testDeviceRows).ToHaveCountAsync(2, new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(testDeviceRows.Nth(0)).ToHaveAttributeAsync("data-testid", "discovery-row-existing");
+            await Assertions.Expect(testDeviceRows.Nth(1)).ToHaveAttributeAsync("data-testid", "discovery-row-existing");
+
+            // Act
+            await page.Locator("[data-testid='cancel-button']").ClickAsync();
+
+            // Assert
+            await Assertions.Expect(Dialog(page)).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            isCompleted = true;
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(firstFilePath);
+                File.Delete(secondFilePath);
+                await _fixture.ReconcileStorageAsync();
+            }
+            catch (Exception exception) when (!isCompleted)
+            {
+                // The failure of the test itself is the one to report.
+                _output.WriteLine($"Deleting {firstFilePath} or {secondFilePath} failed: {exception}");
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(1300, 880)]
+    [InlineData(375, 812)]
+    public async Task WhenTheExpanderOfAFoundDeviceIsClicked_ThenItsIncludedItemsAreShownAndAreNotSelectable(int width, int height)
+    {
+        // Arrange - the navigation to the browser is in a drawer that a narrow viewport closes, so the viewport is
+        // only resized once the pane is there.
+        var page = await _fixture.CreatePageAsync();
+        await OpenSubjectBrowserAsync(page);
+        await page.SetViewportSizeAsync(width, height);
+        await PaneCreateButton(page).ClickAsync();
+        await Assertions.Expect(TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Dialog(page).GetByTestId("picker-mode-discover").ClickAsync();
+
+        var hubRow = Dialog(page).Locator(".subject-discovery-row").Filter(new() { HasText = DiscoverableTestDiscovery.HubName });
+        var expander = hubRow.GetByTestId("discovery-row-expander");
+        var items = hubRow.GetByTestId("discovery-included-item");
+        await Assertions.Expect(expander).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(expander).ToHaveAttributeAsync("aria-expanded", "false");
+        await Assertions.Expect(expander).ToHaveAccessibleNameAsync("Show 2 included items");
+        await Assertions.Expect(items).ToHaveCountAsync(0);
+
+        // Act
+        await expander.ClickAsync();
+
+        // Assert
+        await Assertions.Expect(items).ToHaveTextAsync(
+            ["Kitchen speaker, Test model, 192.0.2.20", "Office speaker"], new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(expander).ToHaveAttributeAsync("aria-expanded", "true");
+        await Assertions.Expect(expander).ToHaveAccessibleNameAsync("Hide 2 included items");
+        await Assertions.Expect(hubRow.GetByTestId("discovery-included-items").Locator("button, a, [tabindex]")).ToHaveCountAsync(0);
+
+        // The select button and the expander are siblings on one line, both completely in view.
+        var layout = await hubRow.EvaluateAsync<double[]>(
+            """
+            row => {
+                const select = row.querySelector("[data-testid='discovery-row']").getBoundingClientRect();
+                const expander = row.querySelector("[data-testid='discovery-row-expander']").getBoundingClientRect();
+                const list = row.closest('.subject-type-list');
+                const isInViewport = box => box.left >= 0 && box.right <= innerWidth;
+                return [
+                    row.querySelector("[data-testid='discovery-row'] [data-testid='discovery-row-expander']") ? 1 : 0,
+                    select.right <= expander.left + 0.5 ? 1 : 0,
+                    isInViewport(select) && isInViewport(expander) ? 1 : 0,
+                    list.scrollWidth - list.clientWidth
+                ];
+            }
+            """);
+        Assert.Equal([0, 1, 1], layout[..3]);
+        Assert.True(layout[3] <= 0, $"The list scrolls sideways by {layout[3]} pixels.");
+
+        // Act - events of a circuit are handled in order, so once the second click of the expander has collapsed the
+        // items, the click on an item has been handled before it.
+        await items.First.ClickAsync();
+        await expander.ClickAsync();
+
+        // Assert - the item did not pick the device, which would have left the Discover page.
+        await Assertions.Expect(items).ToHaveCountAsync(0, new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(Dialog(page).GetByTestId("subject-discovery-page")).ToBeVisibleAsync();
+        await Assertions.Expect(CreateButton(page)).Not.ToBeVisibleAsync();
     }
 
     [Fact]

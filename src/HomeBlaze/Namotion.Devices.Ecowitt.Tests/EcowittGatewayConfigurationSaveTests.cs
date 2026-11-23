@@ -22,7 +22,7 @@ public class EcowittGatewayConfigurationSaveTests
         // Assert
         Assert.Equal(1, writer.WriteCount);
         var warning = Assert.Single(logger.Warnings);
-        Assert.Contains("192.168.1.50", warning);
+        Assert.Contains("192.0.2.50", warning);
         Assert.Contains("not saved", warning);
     }
 
@@ -76,7 +76,7 @@ public class EcowittGatewayConfigurationSaveTests
         CreateGatewayWithWriter(bool isWriting)
     {
         var logger = new RecordingLogger<EcowittGateway>();
-        var gateway = new EcowittGateway(new TestHttpClientFactory(), logger) { HostAddress = "192.168.1.50" };
+        var gateway = new EcowittGateway(new TestHttpClientFactory(), logger) { HostAddress = "192.0.2.50" };
 
         var context = InterceptorSubjectContext.Create().WithParents();
         var writer = new TestConfigurationWriter(context) { IsWriting = isWriting, Gateway = gateway };

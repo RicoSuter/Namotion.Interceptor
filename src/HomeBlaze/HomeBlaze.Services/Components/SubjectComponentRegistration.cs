@@ -1,3 +1,4 @@
+using HomeBlaze.Components.Abstractions;
 using HomeBlaze.Components.Abstractions.Attributes;
 
 namespace HomeBlaze.Services.Components;
@@ -14,4 +15,8 @@ public record SubjectComponentRegistration(
     Type SubjectType,
     SubjectComponentType Type,
     string? Name
-);
+)
+{
+    /// <summary>Gets whether the component implements <see cref="ISubjectDiscoveryComponent"/> and so takes a discovered device.</summary>
+    public bool TakesDiscoveryResults => typeof(ISubjectDiscoveryComponent).IsAssignableFrom(ComponentType);
+}

@@ -1711,6 +1711,26 @@ namespace HomeBlaze.Components.Dialogs
         public static string GetMemberKey(string parameterName, string memberName) { }
         public static bool IsEnteredPerMember(HomeBlaze.Abstractions.Metadata.MethodParameter parameter) { }
     }
+    public class SubjectDiscoveryPage : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public SubjectDiscoveryPage() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.IInterceptorSubject> ExistingSubjects { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsActive { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnNavigating { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<HomeBlaze.Services.Discovery.DiscoveredSubject> OnSelected { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.SubjectTypeDescriptor> Types { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnParametersSet() { }
+        protected override bool ShouldRender() { }
+    }
     public class SubjectEditDialog : Microsoft.AspNetCore.Components.ComponentBase
     {
         public SubjectEditDialog() { }
@@ -1730,6 +1750,7 @@ namespace HomeBlaze.Components.Dialogs
         public System.Func<string, string?>? Rule { get; init; }
         public string Suffix { get; init; }
         public string SuggestName(System.Type type) { }
+        public string SuggestName(string preferredName, System.Type type) { }
         public string? Validate(string? name) { }
     }
     public class SubjectSetupDialog : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
@@ -1748,6 +1769,7 @@ namespace HomeBlaze.Components.Dialogs
         public SubjectSetupOptions() { }
         public System.Action<Namotion.Interceptor.IInterceptorSubject>? BeforeSave { get; init; }
         public HomeBlaze.Components.Dialogs.SubjectNameOptions? NameField { get; init; }
+        public System.Func<HomeBlaze.Storage.Abstractions.CreateSubjectResult, System.Threading.Tasks.Task>? OnCreatedAsync { get; init; }
         public System.Type? Type { get; init; }
     }
     public class SubjectTypePicker : Microsoft.AspNetCore.Components.ComponentBase
@@ -1800,6 +1822,8 @@ namespace HomeBlaze.Components.Editors
     public class SubjectEditPanel : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
     {
         public SubjectEditPanel() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Abstractions.Discovery.IDiscoveryResult? DiscoveryResult { get; set; }
         public HomeBlaze.Components.Abstractions.ISubjectComponent? EditComponent { get; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyDictionary<string, object?>? EditorParameters { get; set; }

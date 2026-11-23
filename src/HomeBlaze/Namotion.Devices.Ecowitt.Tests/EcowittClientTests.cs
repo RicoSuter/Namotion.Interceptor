@@ -284,12 +284,12 @@ public class EcowittClientTests
         // Arrange
         var json = JsonSerializer.Deserialize<JsonElement>("""
         {
-            "mac":"3C:8A:1F:32:E1:57",
+            "mac":"02:AB:CD:00:00:01",
             "ethIpType":"1",
-            "ethIP":"192.168.1.216",
+            "ethIP":"192.0.2.216",
             "ethMask":"255.255.255.0",
-            "ethGateway":"192.168.1.1",
-            "ethDNS":"192.168.1.1",
+            "ethGateway":"192.0.2.1",
+            "ethDNS":"192.0.2.1",
             "wLanFunc":false
         }
         """);
@@ -298,11 +298,11 @@ public class EcowittClientTests
         var result = EcowittClient.ParseNetworkInfo(json);
 
         // Assert
-        Assert.Equal("3C:8A:1F:32:E1:57", result.MacAddress);
-        Assert.Equal("192.168.1.216", result.IpAddress);
+        Assert.Equal("02:AB:CD:00:00:01", result.MacAddress);
+        Assert.Equal("192.0.2.216", result.IpAddress);
         Assert.Equal("255.255.255.0", result.SubnetMask);
-        Assert.Equal("192.168.1.1", result.Gateway);
-        Assert.Equal("192.168.1.1", result.Dns);
+        Assert.Equal("192.0.2.1", result.Gateway);
+        Assert.Equal("192.0.2.1", result.Dns);
         Assert.False(result.IsWireless);
     }
 
@@ -357,7 +357,7 @@ public class EcowittClientTests
     {
         // Arrange
         var json = JsonSerializer.Deserialize<JsonElement>("""
-        {"sensorType":"1","rf_freq":"1","apName":"GW2000A-WIFIE157"}
+        {"sensorType":"1","rf_freq":"1","apName":"GW2000A-WIFI0001"}
         """);
 
         // Act

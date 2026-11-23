@@ -862,11 +862,11 @@ public partial class FluentStorageContainer :
         => StorageMetadataMethods.RunAsync(() => MetadataStoreExtensions.SetOrderAsync(this, names, cancellationToken));
 
     /// <summary>
-    /// Opens the create subject dialog to add a new subject to this storage.
+    /// Opens the create subject dialog to add new subjects to this storage.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
-        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
+        => subjectSetupService.CreateSubjectsAndAddToStorageAsync(this, cancellationToken);
 
     /// <summary>
     /// Creates a Markdown file in the root folder of this storage and adds it as a page.
@@ -1148,5 +1148,16 @@ public partial class FluentStorageContainer :
         // Ended outside the lock, because cancelling it runs code of the work it cancels.
         connection?.Dispose();
         base.Dispose();
+    }
+
+    /// <summary>
+    /// Disposes the container and completes once the worker of its connection has stopped: the item that it was
+    /// running has finished. A call into the storage that the item gave up can still be running, see
+    /// <see cref="IsStorageUnresponsive"/>.
+    /// </summary>
+    internal Task DisposeAndWaitForWorkerAsync()
+    {
+        Dispose();
+        return _connection?.Worker.StopAsync() ?? Task.CompletedTask;
     }
 }

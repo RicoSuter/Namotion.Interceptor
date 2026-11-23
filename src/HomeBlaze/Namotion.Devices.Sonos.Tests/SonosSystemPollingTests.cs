@@ -422,7 +422,7 @@ public class SonosSystemPollingTests
     }
 
     // The speaker the change was made through, which prefixes FavoritesUpdateID.
-    private const string ChangingSpeaker = "RINCON_C43875930F2801400";
+    private const string ChangingSpeaker = "RINCON_000E58A0F00D01400";
 
     // As a speaker sends them: FavoritesUpdateID is the speaker that made the change and a count per household, and
     // ContainerUpdateIDs lists the radio and favorites containers with their update ids.
@@ -473,7 +473,7 @@ public class SonosSystemPollingTests
         household.ClearCalls();
 
         // Act
-        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2", speaker: "RINCON_949F3E93613001400"));
+        await household.Kitchen.NotifyAsync(ContentDirectoryEventPath, ContentDirectoryEvent("12", "2", speaker: "RINCON_000E58A0BEEF01400"));
         await household.WaitForFavoritesAsync();
 
         // Assert

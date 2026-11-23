@@ -22,6 +22,10 @@ Any Shelly Gen2+ device is supported. Components are discovered dynamically from
 
 Unknown component types (for example `light:0`, `dimmer:0`, and the `em1:N` / `pm1:N` meters of the Pro 3EM monophase profile, Pro EM and Plus PM Mini) are ignored. Such devices still work, only the unsupported components are skipped.
 
+## Discovery
+
+The Discover page of the create dialog finds Shelly devices of the second generation and later over mDNS (`_shelly._tcp`) and shows each one with the name you gave it, or its device ID when it has none. A device that is already added is recognized by the device ID the subject read from it once connected, or, while it has not, by its host address. A device that moved to another address before its subject connected since HomeBlaze started shows as new on the Discover page.
+
 ## Configuration
 
 | Property | Type | Default | Description |

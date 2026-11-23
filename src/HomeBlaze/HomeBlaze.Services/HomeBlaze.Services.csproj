@@ -22,6 +22,7 @@
         <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
         <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
         <PackageReference Include="Microsoft.Extensions.Http" />
+        <PackageReference Include="Rssdp" />
     </ItemGroup>
 
 </Project>
