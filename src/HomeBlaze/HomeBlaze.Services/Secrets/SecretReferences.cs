@@ -22,10 +22,6 @@ internal sealed class SecretReferences
     [ThreadStatic] private static bool t_isDryRun;
     [ThreadStatic] private static bool t_hasUnstored;
 
-    // Grows for each secret value that a read left without a stored key. A read is synchronous and runs on the calling
-    // thread, so the count around a read covers that read. Compared by equality only, so an overflow does no harm.
-    [ThreadStatic] private static int t_unstoredReadCount;
-
     private readonly SecretStore _store;
     private readonly ILogger? _logger;
 
@@ -76,15 +72,8 @@ internal sealed class SecretReferences
     }
 
     /// <summary>
-    /// The number of secret values that reads on the calling thread left without a key in the store, see
-    /// <see cref="Read"/> and <see cref="CountIfUnstored"/>.
-    /// </summary>
-    public static int UnstoredReadCount => t_unstoredReadCount;
-
-    /// <summary>
     /// Gives the value to set for the JSON value of a secret property: the stored value of a reference, null for a
-    /// reference to a missing key, and any other value as it is, which counts towards <see cref="UnstoredReadCount"/>
-    /// unless it is null or empty.
+    /// reference to a missing key, and any other value as it is.
     /// </summary>
     public object? Read(object owner, string propertyName, object? value)
     {
@@ -93,11 +82,6 @@ internal sealed class SecretReferences
             if (_keys.TryGetValue(owner, out var keys))
             {
                 keys.TryRemove(propertyName, out _);
-            }
-
-            if (value is string { Length: > 0 })
-            {
-                t_unstoredReadCount++;
             }
 
             return value;
@@ -126,16 +110,16 @@ internal sealed class SecretReferences
     public object? Write(object owner, string propertyName, object? value)
     {
         var text = (string?)value;
-        var remembered = GetRememberedKey(owner, propertyName);
+        var remembered = _keys.TryGetValue(owner, out var keys) && keys.TryGetValue(propertyName, out var key) ? key : (RememberedKey?)null;
 
         if (string.IsNullOrEmpty(text))
         {
             return text is null && remembered is { IsUnresolved: true } unresolved ? unresolved.Reference : text;
         }
 
-        if (IsStoredUnder(remembered, text))
+        if (remembered is { IsUnresolved: false } resolved && _store.TryGet(resolved.Key, out var stored) && stored == text)
         {
-            return remembered!.Value.Reference;
+            return resolved.Reference;
         }
 
         if (t_isDryRun)
@@ -149,24 +133,6 @@ internal sealed class SecretReferences
         _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(newKey, reference, IsUnresolved: false);
         return reference;
     }
-
-    /// <summary>
-    /// Counts the value of a secret property towards <see cref="UnstoredReadCount"/> when it is neither null, empty nor
-    /// stored under the remembered key, for a value that a read kept instead of setting it.
-    /// </summary>
-    public void CountIfUnstored(object owner, string propertyName, object? value)
-    {
-        if (value is string { Length: > 0 } text && !IsStoredUnder(GetRememberedKey(owner, propertyName), text))
-        {
-            t_unstoredReadCount++;
-        }
-    }
-
-    private RememberedKey? GetRememberedKey(object owner, string propertyName) =>
-        _keys.TryGetValue(owner, out var keys) && keys.TryGetValue(propertyName, out var key) ? key : null;
-
-    private bool IsStoredUnder(RememberedKey? remembered, string text) =>
-        remembered is { IsUnresolved: false } resolved && _store.TryGet(resolved.Key, out var stored) && stored == text;
 
     /// <summary>
     /// Runs <paramref name="serialize"/> without storing anything and returns whether it found a secret value that has

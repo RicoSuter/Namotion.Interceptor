@@ -402,7 +402,7 @@ public sealed partial class MarkdownContentParser
             return new MarkdownParseResult(children, page, state.BlockSubjects, state.NamedSubjects)
             {
                 TextBlocks = state.TextBlocks,
-                ConfigurationsWithUnstoredSecrets = state.GetConfigurationsWithUnstoredSecretsOfBlocks()
+                AppliedConfigurations = state.GetAppliedConfigurationsOfBlocks()
             };
         }
         catch
@@ -816,7 +816,7 @@ public sealed partial class MarkdownContentParser
     {
         private readonly List<(int BlockIndex, string? Id, IInterceptorSubject Subject)> _registrations = [];
         private readonly List<IInterceptorSubject> _created = [];
-        private List<(IInterceptorSubject Subject, string Json)>? _configurationsWithUnstoredSecrets;
+        private List<(IInterceptorSubject Subject, string Json)>? _appliedConfigurations;
         private readonly Dictionary<string, int> _nameOwners = new();
         private readonly string _source;
         private bool? _hasLoneCarriageReturn;
@@ -883,26 +883,23 @@ public sealed partial class MarkdownContentParser
 
         public void AddErrorBox() => ErrorBoxCount++;
 
-        /// <summary>
-        /// Records that this parse applied the configuration JSON to the subject, and that the read left a secret value
-        /// without a key in the secret store.
-        /// </summary>
-        public void AddConfigurationWithUnstoredSecrets(IInterceptorSubject subject, string json) =>
-            (_configurationsWithUnstoredSecrets ??= []).Add((subject, json));
+        /// <summary>Records that this parse applied the configuration JSON to the subject.</summary>
+        public void AddAppliedConfiguration(IInterceptorSubject subject, string json) =>
+            (_appliedConfigurations ??= []).Add((subject, json));
 
         /// <summary>
-        /// Gets the recorded configurations of the subjects that are block subjects of the parse, without those of blocks
+        /// Gets the applied configurations of the subjects that are block subjects of the parse, without those of blocks
         /// that ended as an error box.
         /// </summary>
-        public IReadOnlyList<(IInterceptorSubject Subject, string Json)> GetConfigurationsWithUnstoredSecretsOfBlocks()
+        public IReadOnlyList<(IInterceptorSubject Subject, string Json)> GetAppliedConfigurationsOfBlocks()
         {
-            if (_configurationsWithUnstoredSecrets is null)
+            if (_appliedConfigurations is null)
             {
                 return [];
             }
 
             var blockSubjects = new HashSet<IInterceptorSubject>(BlockSubjects.Values, ReferenceEqualityComparer.Instance);
-            return _configurationsWithUnstoredSecrets.FindAll(applied => blockSubjects.Contains(applied.Subject));
+            return _appliedConfigurations.FindAll(applied => blockSubjects.Contains(applied.Subject));
         }
 
         /// <summary>The text of the page that this parse reads.</summary>

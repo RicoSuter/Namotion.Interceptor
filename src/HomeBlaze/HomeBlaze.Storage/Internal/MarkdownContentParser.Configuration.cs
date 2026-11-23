@@ -55,10 +55,6 @@ public sealed partial class MarkdownContentParser
         SkippedConfigurationProperty? skipped = null;
         void RememberFirstSkipped(SkippedConfigurationProperty property) => skipped ??= property;
 
-        // Taken on the thread of the read, before the first await. See ConfigurableSubjectSerializer.GetUnstoredSecretReadCount.
-        var unstoredSecretReadCount = ConfigurableSubjectSerializer.GetUnstoredSecretReadCount();
-        bool hasUnstoredSecrets;
-
         IInterceptorSubject? subject;
         if (CanUpdateInPlace(existing, type, configuration.Keys))
         {
@@ -75,8 +71,6 @@ public sealed partial class MarkdownContentParser
                 _serializer.UpdateConfiguration(
                     existing, configuration.Json, RememberFirstSkipped, ConfigurationNaming.CSharpProperty);
             }
-
-            hasUnstoredSecrets = ConfigurableSubjectSerializer.GetUnstoredSecretReadCount() != unstoredSecretReadCount;
 
             if (skipped is null && existing is IConfigurable configurable)
             {
@@ -97,8 +91,6 @@ public sealed partial class MarkdownContentParser
                 subject = _serializer.Deserialize(
                     configuration.Json, state.AddCreated, RememberFirstSkipped, ConfigurationNaming.CSharpProperty) as IInterceptorSubject;
             }
-
-            hasUnstoredSecrets = ConfigurableSubjectSerializer.GetUnstoredSecretReadCount() != unstoredSecretReadCount;
         }
 
         if (skipped is not null)
@@ -110,10 +102,7 @@ public sealed partial class MarkdownContentParser
         {
             _appliedConfigurationKeys.AddOrUpdate(subject, configuration.Keys);
             _appliedConfigurationJson.AddOrUpdate(subject, configuration.Json);
-            if (hasUnstoredSecrets)
-            {
-                state.AddConfigurationWithUnstoredSecrets(subject, configuration.Json);
-            }
+            state.AddAppliedConfiguration(subject, configuration.Json);
         }
 
         return (subject, null);

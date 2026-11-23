@@ -227,7 +227,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private void ScheduleSecretRewrites(MarkdownParseResult result)
     {
         List<IInterceptorSubject>? subjects = null;
-        foreach (var (subject, json) in result.ConfigurationsWithUnstoredSecrets)
+        foreach (var (subject, json) in result.AppliedConfigurations)
         {
             AddSecretRewrite(subject, json, ref subjects);
         }
@@ -1265,7 +1265,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             Page = write.Page,
             BlockSubjects = write.BlockSubjects,
             TextBlocks = MarkdownParseResult.NoTextBlocks,
-            ConfigurationsWithUnstoredSecrets = []
+            AppliedConfigurations = []
         };
         if (!ReferenceEquals(Interlocked.CompareExchange(ref _parseResult, published, snapshot), snapshot))
         {

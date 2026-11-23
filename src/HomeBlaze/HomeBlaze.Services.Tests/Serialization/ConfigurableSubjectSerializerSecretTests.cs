@@ -372,130 +372,6 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         Assert.False(hasUnstoredSecrets);
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void WhenAPlaintextSecretIsDeserialized_ThenTheUnstoredSecretReadCountGrows(bool hasRegistry)
-    {
-        // Arrange
-        var (serializer, _) = CreateSerializer(hasRegistry: hasRegistry);
-        var count = ConfigurableSubjectSerializer.GetUnstoredSecretReadCount();
-
-        // Act
-        Deserialize(serializer, DeviceJson("s3cr3t"));
-
-        // Assert
-        Assert.NotEqual(count, ConfigurableSubjectSerializer.GetUnstoredSecretReadCount());
-    }
-
-    [Fact]
-    public void WhenAPlaintextSecretOfANestedSubjectIsDeserialized_ThenTheUnstoredSecretReadCountGrows()
-    {
-        // Arrange
-        var (serializer, _) = CreateSerializer();
-        var count = ConfigurableSubjectSerializer.GetUnstoredSecretReadCount();
-
-        // Act
-        Deserialize(serializer, DeviceJson(password: null, childPassword: "s3cr3t"));
-
-        // Assert
-        Assert.NotEqual(count, ConfigurableSubjectSerializer.GetUnstoredSecretReadCount());
-    }
-
-    [Fact]
-    public void WhenAPlaintextSecretIsUpdatedInPlace_ThenTheUnstoredSecretReadCountGrows()
-    {
-        // Arrange
-        var (serializer, _) = CreateSerializer();
-        var device = Deserialize(serializer, DeviceJson(password: null));
-        var count = ConfigurableSubjectSerializer.GetUnstoredSecretReadCount();
-
-        // Act
-        serializer.UpdateConfiguration(device, """{ "password": "s3cr3t" }""");
-
-        // Assert
-        Assert.NotEqual(count, ConfigurableSubjectSerializer.GetUnstoredSecretReadCount());
-    }
-
-    [Fact]
-    public void WhenOnlyStoredSecretsAreDeserialized_ThenTheUnstoredSecretReadCountStays()
-    {
-        // Arrange
-        var (serializer, _) = CreateSerializer();
-        var json = serializer.Serialize(Deserialize(serializer, DeviceJson("s3cr3t", childPassword: "inner")));
-        var count = ConfigurableSubjectSerializer.GetUnstoredSecretReadCount();
-
-        // Act
-        Deserialize(serializer, json);
-
-        // Assert
-        Assert.Equal(count, ConfigurableSubjectSerializer.GetUnstoredSecretReadCount());
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void WhenASecretKeepsAPresetValueThatTheJsonLacks_ThenTheUnstoredSecretReadCountGrows(bool hasRegistry)
-    {
-        // Arrange
-        var (serializer, _) = CreateSerializer(hasRegistry: hasRegistry);
-        var count = ConfigurableSubjectSerializer.GetUnstoredSecretReadCount();
-
-        // Act
-        serializer.Deserialize($$"""{ "$type": "{{typeof(PresetSecretDevice).FullName}}" }""");
-
-        // Assert
-        Assert.NotEqual(count, ConfigurableSubjectSerializer.GetUnstoredSecretReadCount());
-    }
-
-    [Fact]
-    public void WhenANestedSubjectKeepsAPresetSecretThatTheJsonLacks_ThenTheUnstoredSecretReadCountGrows()
-    {
-        // Arrange
-        var (serializer, _) = CreateSerializer();
-        var json = $$"""{ "$type": "{{typeof(PresetSecretDevice).FullName}}", "password": null, "child": { "password": null, "child": {} } }""";
-        var count = ConfigurableSubjectSerializer.GetUnstoredSecretReadCount();
-
-        // Act
-        serializer.Deserialize(json);
-
-        // Assert
-        Assert.NotEqual(count, ConfigurableSubjectSerializer.GetUnstoredSecretReadCount());
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void WhenTheUnstoredSecretReadCountStaysOverARead_ThenNoSecretIsReportedAsUnstored(bool hasRegistry)
-    {
-        // Arrange
-        var (serializer, _) = CreateSerializer(hasRegistry: hasRegistry);
-        var stored = serializer.Serialize(Deserialize(serializer, DeviceJson("s3cr3t", childPassword: "inner")));
-        var presetType = typeof(PresetSecretDevice).FullName;
-        string[] inputs =
-        [
-            DeviceJson("s3cr3t"),
-            DeviceJson(password: null, childPassword: "s3cr3t"),
-            DeviceJson(""),
-            DeviceJson(Prefix + "0123456789abcdef0123456789abcdef"),
-            stored,
-            $$"""{ "$type": "{{presetType}}" }""",
-            $$"""{ "$type": "{{presetType}}", "password": null }""",
-            $$"""{ "$type": "{{presetType}}", "password": null, "child": { "password": null, "child": {} } }"""
-        ];
-
-        foreach (var input in inputs)
-        {
-            // Act
-            var count = ConfigurableSubjectSerializer.GetUnstoredSecretReadCount();
-            var subject = (IInterceptorSubject)serializer.Deserialize(input)!;
-            var isCountUnchanged = count == ConfigurableSubjectSerializer.GetUnstoredSecretReadCount();
-
-            // Assert
-            Assert.False(isCountUnchanged && serializer.HasUnstoredSecrets(subject), input);
-        }
-    }
-
     [Fact]
     public void WhenASecretPropertyIsNotAString_ThenDeserializingThrows()
     {
@@ -513,7 +389,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     internal (ConfigurableSubjectSerializer Serializer, SecretStore Store) CreateSerializer(bool withStore = true, bool hasRegistry = true)
     {
         var typeProvider = new TypeProvider();
-        typeProvider.AddTypes([typeof(SecretTestDevice), typeof(SecretDefaultDevice), typeof(PresetSecretDevice), typeof(InvalidSecretTypeDevice)]);
+        typeProvider.AddTypes([typeof(SecretTestDevice), typeof(SecretDefaultDevice), typeof(InvalidSecretTypeDevice)]);
 
         var store = new SecretStore(StorePath);
         var services = new ServiceCollection();
@@ -616,24 +492,6 @@ public partial class SecretDefaultDevice : IConfigurable
 
     [Configuration(IsSecret = true)]
     public partial string Password { get; set; }
-
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-}
-
-/// <summary>A device whose secret has a value before any configuration is read, which no real device has.</summary>
-[InterceptorSubject]
-public partial class PresetSecretDevice : IConfigurable
-{
-    public PresetSecretDevice()
-    {
-        Password = "preset";
-    }
-
-    [Configuration(IsSecret = true)]
-    public partial string? Password { get; set; }
-
-    [Configuration]
-    public partial PresetSecretDevice? Child { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

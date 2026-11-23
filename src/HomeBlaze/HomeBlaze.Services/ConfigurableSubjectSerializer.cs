@@ -161,16 +161,6 @@ public class ConfigurableSubjectSerializer
         subject is IConfigurable && _secrets is { } secrets && secrets.HasUnstoredSecrets(() => Serialize(subject));
 
     /// <summary>
-    /// Gets how many secret configuration values the reads of every serializer on the calling thread left without a key
-    /// in the <see cref="SecretStore"/>, such as values read as plaintext. Every method that reads configuration runs on
-    /// the calling thread. While the count stays the same over a read, <see cref="HasUnstoredSecrets"/> of the subject
-    /// that was read is false, unless code outside the read set a secret value of it or of a subject in its
-    /// configuration, such as the constructor of a subject that the read did not create.
-    /// </summary>
-    /// <remarks>Compare the counts for equality only. The count can grow for a value that turns out to be stored.</remarks>
-    public static int GetUnstoredSecretReadCount() => SecretReferences.UnstoredReadCount;
-
-    /// <summary>
     /// Gets the configuration of a new subject of <paramref name="type"/> as
     /// <see cref="Serialize(IInterceptorSubject, ConfigurationNaming)"/> writes it: the values that
     /// <see cref="Deserialize(string, ConfigurationNaming)"/> gives a property that the JSON does not have.
@@ -372,19 +362,18 @@ public class ConfigurableSubjectSerializer
             }
 
             var jsonName = GetJsonName(property.Name, naming);
-            if (root.TryGetProperty(jsonName, out var jsonValue) &&
-                TryConvert(jsonValue.GetRawText(), property.Name, property.PropertyType, options, skipped, out var value))
+            if (root.TryGetProperty(jsonName, out var jsonValue))
             {
-                if (isSecret && _secrets is not null)
+                var valueJson = jsonValue.GetRawText();
+                if (TryConvert(valueJson, property.Name, property.PropertyType, options, skipped, out var value))
                 {
-                    value = _secrets.Read(subject, property.Name, value);
-                }
+                    if (isSecret && _secrets is not null)
+                    {
+                        value = _secrets.Read(subject, property.Name, value);
+                    }
 
-                property.SetValue(subject, value);
-            }
-            else if (isSecret)
-            {
-                _secrets?.CountIfUnstored(subject, property.Name, property.GetValue(subject));
+                    property.SetValue(subject, value);
+                }
             }
         }
     }
@@ -411,7 +400,7 @@ public class ConfigurableSubjectSerializer
             }
 
             var jsonName = GetJsonName(property.Name, naming);
-            string? valueJson;
+            string valueJson;
             if (root.TryGetProperty(jsonName, out var jsonValue))
             {
                 valueJson = jsonValue.GetRawText();
@@ -423,10 +412,10 @@ public class ConfigurableSubjectSerializer
             }
             else
             {
-                valueJson = null;
+                continue;
             }
 
-            if (valueJson is not null && TryConvert(valueJson, property.Name, property.Type, options, skipped, out var value))
+            if (TryConvert(valueJson, property.Name, property.Type, options, skipped, out var value))
             {
                 if (isSecret && _secrets is not null)
                 {
@@ -434,10 +423,6 @@ public class ConfigurableSubjectSerializer
                 }
 
                 property.SetValue(value);
-            }
-            else if (isSecret)
-            {
-                _secrets?.CountIfUnstored(subject, property.Name, property.GetValue());
             }
         }
     }

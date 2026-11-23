@@ -28,7 +28,6 @@ namespace HomeBlaze.Services
         public void UpdateConfiguration(Namotion.Interceptor.IInterceptorSubject subject, string json, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public void UpdateConfiguration(Namotion.Interceptor.IInterceptorSubject subject, string json, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public static string DescribeSkippedProperties(System.Collections.Generic.IEnumerable<HomeBlaze.Services.SkippedConfigurationProperty> skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
-        public static int GetUnstoredSecretReadCount() { }
     }
     public enum ConfigurationNaming
     {
