@@ -62,6 +62,27 @@ public class FritzBoxLoopTests
         // Assert
         Assert.True(sameRouter.Matches(router));
         Assert.False(otherRouter.Matches(router));
+
+        await running.DisposeAsync();
+        Assert.False(sameRouter.Matches(router));
+    }
+
+    [Fact]
+    public async Task WhenTheHostAddressIsEditedWhileConnected_ThenItsUdnNoLongerMatches()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        var router = CreateRouter(fake);
+        var sameRouter = new FritzBoxDiscoveryResult("fritz.box", null, null, "uuid:75802409-bccb-40e7-8e6c-0123456789ab", IsRepeater: false);
+        await using var running = await RunAsync(router);
+        await AsyncTestHelpers.WaitUntilAsync(() => router.IsConnected, message: "The router should connect.");
+        Assert.True(sameRouter.Matches(router));
+
+        // Act
+        router.HostAddress = "192.0.2.1";
+
+        // Assert
+        Assert.False(sameRouter.Matches(router));
     }
 
     [Fact]
@@ -738,8 +759,16 @@ public class FritzBoxLoopTests
 
     private sealed class RunningRouter(FritzBox router) : IAsyncDisposable
     {
+        private bool _isDisposed;
+
         public async ValueTask DisposeAsync()
         {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            _isDisposed = true;
             await router.StopAsync(CancellationToken.None);
             router.Dispose();
         }

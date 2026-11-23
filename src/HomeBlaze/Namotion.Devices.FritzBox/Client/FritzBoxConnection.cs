@@ -32,6 +32,11 @@ internal sealed class FritzBoxConnection : IDisposable
 
     internal Tr64Description Description { get; }
 
+    /// <summary>
+    /// The host name or IP address the connection was opened for.
+    /// </summary>
+    internal string HostAddress => _options.HostAddress;
+
     internal Uri BaseUri { get; }
 
     /// <summary>

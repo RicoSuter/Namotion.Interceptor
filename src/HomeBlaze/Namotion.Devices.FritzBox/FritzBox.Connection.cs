@@ -23,18 +23,28 @@ public partial class FritzBox
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
     private readonly Lock _commandStateLock = new();
     private FritzBoxConnection? _connection;
-
-    /// <summary>
-    /// The unique device name from the TR-064 description of the connected router, or null while it is not connected
-    /// or the description names none.
-    /// </summary>
-    internal string? ConnectedUdn => Volatile.Read(ref _connection)?.Description.Udn;
     private long _commandGeneration;
 
     // Read and written by the polling loop only.
     private string? _stateHostAddress;
     private string? _unsavedPublicKeyPin;
     private TimeSpan _loginRetryDelay = InitialLoginRetryDelay;
+
+    /// <summary>
+    /// The unique device name from the TR-064 description of the connected router, or null while it is not connected,
+    /// the description names none or the host address no longer names the host the connection was opened for.
+    /// </summary>
+    internal string? ConnectedUdn
+    {
+        get
+        {
+            // Until the loop reconnects after a host address edit, the connection still belongs to the previous router.
+            var connection = Volatile.Read(ref _connection);
+            return connection is not null && string.Equals(connection.HostAddress, HostAddress?.Trim(), StringComparison.Ordinal)
+                ? connection.Description.Udn
+                : null;
+        }
+    }
 
     /// <summary>
     /// Raised by every successful command, so a poll that read the state a command changed before it does not write it
@@ -424,7 +434,7 @@ public partial class FritzBox
         await _connectionGate.WaitAsync(CancellationToken.None);
         try
         {
-            _connection = null;
+            Volatile.Write(ref _connection, null);
         }
         finally
         {
