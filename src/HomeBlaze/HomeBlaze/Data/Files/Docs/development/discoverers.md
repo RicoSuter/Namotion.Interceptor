@@ -52,7 +52,7 @@ public abstract class SubjectDiscoverer<TSubject, TResult> : ISubjectDiscoverer
 ```
 
 - `DiscoverAsync` yields each device as soon as it is known, so the page fills while the scan runs.
-- `Matches` decides whether an existing subject already represents the device, by the type's own rule, such as the same MAC address or the same host. It is only called with existing subjects of type `TSubject`, and the first match is shown as "already added" with a link to it. Match on a stable identity, so a device that moved is still recognized, and on the host address only for a subject that has no identity stored.
+- `Matches` decides whether an existing subject already represents the device, by the type's own rule, such as the same MAC address or the same host. It is only called with existing subjects of type `TSubject`, and the first match is shown as "already added" with a link to it. Match on a stable identity, so a device that moved is still recognized. Whether the host address counts as well is the type's rule: `ShellyDeviceDiscoverer` uses it only when no identity is known, so a device that replaced another at the same address is listed as new, while `FritzBoxDiscoverer` accepts either, because its subject connects to whatever answers at that address.
 
 A discoverer creates no subject. The subject is created when the user picks the result, and the result is handed to the component.
 
@@ -129,7 +129,7 @@ public readonly record struct UdpDatagram(ReadOnlyMemory<byte> Payload, IPAddres
 - `MulticastDns.BrowseAsync` browses a service type, such as `_hue._tcp`, and returns each instance with its host name, port, addresses and TXT records in `Properties`. Browses are shared by service type ignoring case.
 - `Udp.BroadcastAsync` sends your request to the given port as a broadcast on every IPv4 adapter, repeats it once after about a second, and yields each answer as it arrives within the window, with the address it came from. A device that receives both requests answers twice, which the deduplication by `Key` absorbs.
 - `Udp.ListenAsync` listens on a port with address reuse for devices that announce themselves, and yields each datagram that arrives within the window.
-- UDP calls are not shared, because each one is its own exchange. Each payload is a copy that stays valid. A socket error, such as a port another program holds without address reuse, ends the call quietly with nothing more yielded. The call itself throws `ArgumentOutOfRangeException` for a port outside 1 to 65535, a request outside 1 to 1024 bytes, or a window that is not more than zero and at most 30 seconds, and the enumeration throws only for the caller's cancellation.
+- UDP calls are not shared, because each one is its own exchange. Each payload is a copy that stays valid. A socket error, such as a port another program holds without address reuse, ends the call quietly with nothing more yielded. The call itself throws `ArgumentOutOfRangeException` for a port outside 1 to 65535, a request outside 1 to 1024 bytes, or a window of zero or less or of more than 30 seconds, and the enumeration throws only for the caller's cancellation.
 - What one query or UDP call returns is capped, see [Subject Discovery](../architecture/design/discovery.md#scan-session-and-shared-services).
 
 ## Your own I/O
@@ -165,7 +165,7 @@ public sealed class AcmeCloudDiscoverer : SubjectDiscoverer<AcmeHub, AcmeDiscove
 
 - Keep parsing and matching in `internal static` methods, which the test project of the library reaches through `InternalsVisibleTo`, as `ShellyDeviceDiscoverer.ToDevices` and `IsSameDevice` are tested.
 - To run a whole discoverer, create a `DiscoveryScan` with fake `ISsdpSearch`, `IMulticastDnsBrowser` and `IUdpDiscovery` implementations and call it through `ISubjectDiscoverer.DiscoverAsync(scan, existingSubjects, cancellationToken)`, which also applies the deduplication and `Matches`.
-- The E2E host replaces the shared services with empty ones, so a discoverer that only uses them finds nothing there and needs no setup. One that calls an address of its own, such as a vendor's cloud service, needs a stub in `WebTestingHostFactory`, as the Nuki discovery service has; that stub only reaches an `HttpClient` from `IHttpClientFactory`. The FRITZ!Box lookup of `fritz.box` is a local name lookup and runs unstubbed.
+- The E2E host replaces the shared services with empty ones, so a discoverer that only uses them finds nothing there and needs no setup. One that calls an address of its own, such as a vendor's cloud service, needs a stub in `WebTestingHostFactory`, as the Nuki discovery service has; that stub only reaches an `HttpClient` from `IHttpClientFactory`. The FRITZ!Box discoverer's request to `fritz.box` stays on the local network and runs unstubbed.
 
 ## Example
 
