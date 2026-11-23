@@ -581,7 +581,7 @@ public partial class FluentStorageContainer :
 
                 // A key that the type does not know, such as a typo or one of a newer version, is read without an
                 // issue, so only this comparison keeps an unrequested save from removing it.
-                if (current is not null && JsonKeyComparison.FindRemovedKeys(current, json) is { Count: > 0 } removedKeys)
+                if (current is not null && JsonKeyComparison.FindRemovedKeys(StorageReconciler.DecodeText(current), json) is { Count: > 0 } removedKeys)
                 {
                     _logger?.LogWarning(
                         "The plaintext secrets of {Path} stay in the file, because saving it would remove {Keys}",

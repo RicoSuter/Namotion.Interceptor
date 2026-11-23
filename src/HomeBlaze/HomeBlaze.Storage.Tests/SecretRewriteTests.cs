@@ -31,6 +31,24 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAUtf16JsonFileHoldsAPlaintextSecret_ThenItIsMovedToTheSecretStoreOnLoad()
+    {
+        // Arrange
+        var secretsPath = UseSecretStore();
+        File.WriteAllText(
+            GetFullPath("Gateway.json"),
+            $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""",
+            System.Text.Encoding.Unicode);
+
+        // Act
+        await ConnectAsync();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => HoldsSecretReferenceOnly("Gateway.json"));
+        Assert.Contains("s3cr3t", File.ReadAllText(secretsPath));
+    }
+
+    [Fact]
     public async Task WhenAPlaintextSecretIsWrittenIntoAWatchedJsonFile_ThenItIsMovedToTheSecretStoreOnReload()
     {
         // Arrange
