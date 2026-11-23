@@ -105,7 +105,7 @@ The picker page of `SubjectSetupDialog` gets a toggle at the top: All types or D
 Picking a row opens the configure page for the result's type, as picking the type does, and keeps the `DiscoveredSubject`.
 
 - `SubjectEditPanel` has a dedicated `DiscoveryResult` parameter, not an `EditorParameters` entry. It passes the result on as the `DiscoveryResult` parameter of the hosted component only when `SubjectComponentRegistration.TakesDiscoveryResults` is true for that component, and never otherwise, because `DynamicComponent` rejects a parameter the component does not declare. That property is the one place that decides whether a component takes results, and the registry uses it as well.
-- The name field suggests the result's `DisplayName` when that is a valid, unused name, and the type's usual suggestion otherwise. A name the user typed is kept.
+- The name field suggests the result's `DisplayName` when that is a valid name, with a number from 2 appended while it is taken, such as "FRITZ!Repeater 1200 AX 2". It suggests the type's usual name when the `DisplayName` is not valid or not plain. A name the user typed is kept.
 - Back returns to the page the type was picked on and discards the created subject, as today.
 - Validation, `BeforeSave` and persisting are unchanged.
 

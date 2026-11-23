@@ -69,13 +69,25 @@ public sealed record SubjectNameOptions(string Label, string Suffix, IReadOnlyCo
 
     /// <summary>
     /// Suggests a name for a new subject that represents a found device: <paramref name="preferredName"/> without
-    /// surrounding whitespace when <see cref="Validate"/> accepts it, it has no control or Unicode format characters
-    /// and does not start with a dot, otherwise <see cref="SuggestName(Type)"/>.
+    /// surrounding whitespace, with a space and a number from 2 appended while it is taken, when it has no control or
+    /// Unicode format characters, does not start with a dot and <see cref="Validate"/> accepts it; otherwise
+    /// <see cref="SuggestName(Type)"/>.
     /// </summary>
     public string SuggestName(string preferredName, Type type)
     {
         var trimmedName = preferredName.Trim();
-        return IsPlainName(trimmedName) && Validate(trimmedName) is null ? trimmedName : SuggestName(type);
+        if (!IsPlainName(trimmedName))
+        {
+            return SuggestName(type);
+        }
+
+        var name = trimmedName;
+        for (var number = 2; IsTaken(name); number++)
+        {
+            name = trimmedName + " " + number.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return Validate(name) is null ? name : SuggestName(type);
     }
 
     /// <summary>
