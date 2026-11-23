@@ -28,6 +28,22 @@ public class SsdpSearchTests
         Assert.Equal("uuid:router", response.UniqueServiceName);
     }
 
+    [Fact]
+    public void WhenMoreAnswersMatchThanTheLimit_ThenOnly64AreReturned()
+    {
+        // Arrange
+        var devices = Enumerable.Range(0, 65)
+            .Select(index => Create(SearchTarget, $"uuid:router-{index}", new Uri($"http://192.168.178.{index + 1}:49000/tr64desc.xml")))
+            .ToArray();
+
+        // Act
+        var responses = SsdpSearch.ToResponses(devices, SearchTarget);
+
+        // Assert
+        Assert.Equal(64, responses.Count);
+        Assert.Equal("uuid:router-63", responses[^1].UniqueServiceName);
+    }
+
     private static DiscoveredSsdpDevice Create(string notificationType, string usn, Uri location)
     {
         using var response = new HttpResponseMessage();

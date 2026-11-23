@@ -137,6 +137,23 @@ public class MulticastDnsServiceCollectorTests
     }
 
     [Fact]
+    public void WhenMoreInstancesAreAnnouncedThanTheLimit_ThenOnlyTheFirst64AreReturned()
+    {
+        // Arrange
+        var collector = new MulticastDnsServiceCollector();
+        var records = Enumerable.Range(0, 65)
+            .Select(index => (DnsRecord)new PointerRecord("_hue._tcp.local", $"Bridge {index}._hue._tcp.local"))
+            .ToList();
+        collector.Add(records, Sender);
+
+        // Act
+        var instances = collector.GetInstances("_hue._tcp");
+
+        // Assert
+        Assert.Equal(Enumerable.Range(0, 64).Select(index => $"Bridge {index}"), instances.Select(instance => instance.InstanceName));
+    }
+
+    [Fact]
     public void WhenMoreRecordsArriveThanTheLimit_ThenTheCollectorStopsAtTheLimit()
     {
         // Arrange: the names are short, so the records stay far below the limit of their size.

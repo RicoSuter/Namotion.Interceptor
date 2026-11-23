@@ -59,7 +59,7 @@ The API and the rules for implementers are in [Writing a Subject Discovery](../.
 
 ### Registry
 
-`SubjectDiscoveryRegistry` in `HomeBlaze.Services` scans `TypeProvider.Types` for non-abstract `ISubjectDiscovery` types, as `SubjectComponentRegistry` does for components, so plugins provide subject discoveries without extra registration. It creates them through DI with `ActivatorUtilities`, so a constructor can take the services in [Writing a Subject Discovery](../../development/subject-discovery.md#services) or any other singleton, such as `IHttpClientFactory` or `ILogger<T>`. Like the components, the subject discoveries are created once, on first use, so all subject discovery types must be loaded before; types added later are not scanned.
+`SubjectDiscoveryRegistry` in `HomeBlaze.Services` scans `TypeProvider.Types` for non-abstract `ISubjectDiscovery` types, as `SubjectComponentRegistry` does for components, so plugins provide subject discoveries without extra registration. It creates them through DI with `ActivatorUtilities`, so a constructor can take the services in [Writing a Subject Discovery](../../development/subject-discovery.md#services) or any other service that is not scoped, see [Your own I/O](../../development/subject-discovery.md#your-own-io). Like the components, the subject discoveries are created once, on first use, so all subject discovery types must be loaded before; types added later are not scanned.
 
 It leaves out, with one logged error each, written the first time the create dialog asks for subject discoveries rather than at startup, and without blocking the app:
 
@@ -144,22 +144,6 @@ During the first setup a user adds many found devices, so the folder Create oper
 - `FritzBoxDiscovery` is the subject discovery of `FritzBox` and keeps a static `SearchAsync`, which takes the SSDP search as a parameter, so the Setup component shares its parsing and description. `NukiBridgeDiscovery` likewise keeps the static members the Setup component calls.
 - The Setup components keep their own search for when the type is picked directly. The Hue Setup component keeps the HueApi locator with its network scan fallback.
 - `FritzBoxSetupComponent`, `HueBridgeSetupComponent`, `NukiBridgeSetupComponent` and `ShellyDeviceEditComponent` implement `ISubjectDiscoveryComponent`. The Setup components preselect the result in their lists; the Shelly component fills in the host address and device ID.
-
-## Breaking changes
-
-- `FritzBoxDiscovery.DiscoverAsync(TimeSpan, CancellationToken)` is now `SearchAsync(ISsdpSearch, TimeSpan timeout, CancellationToken)`. `timeout` now limits only the name resolution of `fritz.box` and each description request; the SSDP window is fixed at about 3 seconds. Migration: resolve `ISsdpSearch` from dependency injection (`AddHomeBlazeServices` registers it; the implementation is internal), or inject it into the constructor of a subject discovery.
-- `Namotion.Devices.FritzBox` no longer depends on Rssdp. Migration: add your own package reference if you used it transitively.
-- `FritzBoxSetupComponent` now injects `ISsdpSearch`. Migration: a host that shows it must call `AddHomeBlazeServices` or `AddHomeBlazeHostServices`.
-- `ISubjectSetupService.CreateSubjectAsync(IStorageContainer, CancellationToken)`, which returned one `CreateSubjectResult?`, is replaced by `CreateSubjectsAsync(IStorageContainer, Func<CreateSubjectResult, CancellationToken, Task> addSubjectAsync, CancellationToken)`, which passes each created subject to the callback, also while the dialog stays open for the next one. Migration: an implementation passes the callback on, such as to `SubjectSetupOptions.OnCreatedAsync`; a caller moves the code that handled the result into the callback.
-- `SubjectCreatorExtensions.CreateSubjectAndAddToStorageAsync` is renamed to `CreateSubjectsAndAddToStorageAsync`. Migration: rename the call.
-
-Not breaking:
-
-- `FritzBoxDiscovery` and `NukiBridgeDiscovery` are no longer static classes: each is now also the subject discovery of its type. Their static members are unchanged.
-- `HomeBlaze.Components.Abstractions` now references `HomeBlaze.Abstractions`.
-- `HueBridge` matches bridge IDs ignoring case.
-- `FritzBox.Udn` and `ShellyDevice.DeviceId` are new configuration properties; stored subjects without them load unchanged.
-- `SubjectSetupOptions.OnCreatedAsync` is a new, optional option.
 
 ## Testing
 
