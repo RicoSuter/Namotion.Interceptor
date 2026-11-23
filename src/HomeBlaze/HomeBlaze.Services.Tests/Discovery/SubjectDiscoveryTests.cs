@@ -12,12 +12,12 @@ public class SubjectDiscoveryTests
         var existing = new DiscoveryTestSubject { Address = "a" };
         var otherType = new OtherDiscoveryTestSubject { Address = "b" };
         ISubjectDiscovery discovery = new LambdaDiscovery<DiscoveryTestSubject>(
-            (_, _) => TestScans.Yield(new TestDiscoveryResult("a"), new TestDiscoveryResult("b")),
+            _ => TestScans.Yield(new TestDiscoveryResult("a"), new TestDiscoveryResult("b")),
             (subject, result) => subject.Address == result.Key);
 
         // Act
         var discovered = await discovery
-            .DiscoverAsync(TestScans.CreateScan(), [otherType, existing], CancellationToken.None)
+            .DiscoverAsync([otherType, existing], CancellationToken.None)
             .ToListAsync();
 
         // Assert
@@ -32,11 +32,11 @@ public class SubjectDiscoveryTests
     {
         // Arrange
         ISubjectDiscovery discovery = new LambdaDiscovery<DiscoveryTestSubject>(
-            (_, _) => TestScans.Yield(new TestDiscoveryResult("a"), new TestDiscoveryResult("a", "Same device again")));
+            _ => TestScans.Yield(new TestDiscoveryResult("a"), new TestDiscoveryResult("a", "Same device again")));
 
         // Act
         var discovered = await discovery
-            .DiscoverAsync(TestScans.CreateScan(), [], CancellationToken.None)
+            .DiscoverAsync([], CancellationToken.None)
             .ToListAsync();
 
         // Assert

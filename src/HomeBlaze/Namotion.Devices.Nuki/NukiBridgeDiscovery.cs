@@ -27,7 +27,7 @@ public sealed class NukiBridgeDiscovery : SubjectDiscovery<NukiBridge, NukiDisco
 
     /// <inheritdoc />
     protected override async IAsyncEnumerable<NukiDiscoveredBridge> DiscoverAsync(
-        DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var httpClient = _httpClientFactory.CreateClient();
         foreach (var bridge in await DiscoverAsync(httpClient, cancellationToken))

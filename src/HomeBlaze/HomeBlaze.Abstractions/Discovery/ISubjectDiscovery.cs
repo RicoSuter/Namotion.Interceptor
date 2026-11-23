@@ -18,5 +18,5 @@ public interface ISubjectDiscovery
     /// <paramref name="existingSubjects"/> that already represents it.
     /// </summary>
     IAsyncEnumerable<DiscoveredSubject> DiscoverAsync(
-        DiscoveryScan scan, IReadOnlyCollection<IInterceptorSubject> existingSubjects, CancellationToken cancellationToken);
+        IReadOnlyCollection<IInterceptorSubject> existingSubjects, CancellationToken cancellationToken);
 }

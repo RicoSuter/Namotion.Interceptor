@@ -22,11 +22,10 @@ public class HueBridgeDiscoveryTests
         // Arrange
         var browser = new AnsweringBrowser(Announcement("001788FFFE1A2B3C"), Announcement(null));
         var existing = new HueBridge(NullLogger<HueBridge>.Instance) { BridgeId = "001788fffe1a2b3c" };
-        ISubjectDiscovery discovery = new HueBridgeDiscovery();
-        var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, CancellationToken.None);
+        ISubjectDiscovery discovery = new HueBridgeDiscovery(browser);
 
         // Act
-        var discovered = await discovery.DiscoverAsync(scan, [existing], CancellationToken.None).ToListAsync();
+        var discovered = await discovery.DiscoverAsync([existing], CancellationToken.None).ToListAsync();
 
         // Assert
         var single = Assert.Single(discovered);
@@ -44,11 +43,10 @@ public class HueBridgeDiscoveryTests
         // Arrange
         var browser = new AnsweringBrowser(Announcement("001788FFFE1A2B3C"));
         var existing = new HueBridge(NullLogger<HueBridge>.Instance) { BridgeId = "001788fffe999999" };
-        ISubjectDiscovery discovery = new HueBridgeDiscovery();
-        var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, CancellationToken.None);
+        ISubjectDiscovery discovery = new HueBridgeDiscovery(browser);
 
         // Act
-        var discovered = await discovery.DiscoverAsync(scan, [existing], CancellationToken.None).ToListAsync();
+        var discovered = await discovery.DiscoverAsync([existing], CancellationToken.None).ToListAsync();
 
         // Assert
         var single = Assert.Single(discovered);
@@ -61,11 +59,10 @@ public class HueBridgeDiscoveryTests
     {
         // Arrange
         var browser = new AnsweringBrowser(Announcement("001788FFFE1A2B3C", instanceName: " "));
-        ISubjectDiscovery discovery = new HueBridgeDiscovery();
-        var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, CancellationToken.None);
+        ISubjectDiscovery discovery = new HueBridgeDiscovery(browser);
 
         // Act
-        var discovered = await discovery.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
+        var discovered = await discovery.DiscoverAsync([], CancellationToken.None).ToListAsync();
 
         // Assert
         var single = Assert.Single(discovered);
@@ -81,11 +78,5 @@ public class HueBridgeDiscoveryTests
             ServiceTypes.Add(serviceType);
             return Task.FromResult<IReadOnlyList<MulticastDnsServiceInstance>>(services);
         }
-    }
-
-    private sealed class EmptySsdpSearch : ISsdpSearch
-    {
-        public Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<SsdpResponse>>([]);
     }
 }

@@ -15,31 +15,23 @@ public sealed class SubjectDiscoveryService
     internal static readonly TimeSpan ScanTimeout = TimeSpan.FromSeconds(30);
 
     private readonly Func<IReadOnlyList<ISubjectDiscovery>> _getSubjectDiscoveries;
-    private readonly ISsdpSearch _ssdpSearch;
-    private readonly IMulticastDnsBrowser _multicastDnsBrowser;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SubjectDiscoveryService> _logger;
 
     public SubjectDiscoveryService(
         SubjectDiscoveryRegistry registry,
-        ISsdpSearch ssdpSearch,
-        IMulticastDnsBrowser multicastDnsBrowser,
         TimeProvider timeProvider,
         ILogger<SubjectDiscoveryService> logger)
-        : this(registry.GetSubjectDiscoveries, ssdpSearch, multicastDnsBrowser, timeProvider, logger)
+        : this(registry.GetSubjectDiscoveries, timeProvider, logger)
     {
     }
 
     internal SubjectDiscoveryService(
         Func<IReadOnlyList<ISubjectDiscovery>> getSubjectDiscoveries,
-        ISsdpSearch ssdpSearch,
-        IMulticastDnsBrowser multicastDnsBrowser,
         TimeProvider timeProvider,
         ILogger<SubjectDiscoveryService> logger)
     {
         _getSubjectDiscoveries = getSubjectDiscoveries;
-        _ssdpSearch = ssdpSearch;
-        _multicastDnsBrowser = multicastDnsBrowser;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -73,14 +65,13 @@ public sealed class SubjectDiscoveryService
 
         // Read once: a subject discovery task can start after the source has been disposed.
         var scanToken = scanCancellation.Token;
-        var scan = new DiscoveryScan(_ssdpSearch, _multicastDnsBrowser, scanToken);
         var reporter = new ScanReporter(onResult, onFailure);
         var discoveries = _getSubjectDiscoveries().Where(discovery => subjectTypes.Contains(discovery.SubjectType));
         try
         {
             // Bounded by the token as well, so a subject discovery that ignores it cannot hold the scan past its time limit.
             await Task.WhenAll(discoveries.Select(discovery => Task.Run(
-                    () => RunAsync(discovery, scan, existingSubjects, reporter, scanToken))))
+                    () => RunAsync(discovery, existingSubjects, reporter, scanToken))))
                 .WaitAsync(scanToken);
         }
         catch (OperationCanceledException) when (scanCancellation.IsCancellationRequested)
@@ -91,7 +82,7 @@ public sealed class SubjectDiscoveryService
         {
             reporter.End();
 
-            // Ends the queries the subject discoveries shared through the scan.
+            // Ends whatever a subject discovery started with the token and did not wait for.
             await scanCancellation.CancelAsync();
         }
 
@@ -100,14 +91,13 @@ public sealed class SubjectDiscoveryService
 
     private async Task RunAsync(
         ISubjectDiscovery discovery,
-        DiscoveryScan scan,
         IReadOnlyCollection<IInterceptorSubject> existingSubjects,
         ScanReporter reporter,
         CancellationToken cancellationToken)
     {
         try
         {
-            await foreach (var discovered in discovery.DiscoverAsync(scan, existingSubjects, cancellationToken))
+            await foreach (var discovered in discovery.DiscoverAsync(existingSubjects, cancellationToken))
             {
                 if (!reporter.TryReportResult(discovered))
                 {

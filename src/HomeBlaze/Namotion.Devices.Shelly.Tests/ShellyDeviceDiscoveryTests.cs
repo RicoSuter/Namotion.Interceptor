@@ -111,11 +111,10 @@ public class ShellyDeviceDiscoveryTests
     {
         // Arrange
         var browser = new AnsweringBrowser(Service("Kitchen"));
-        ISubjectDiscovery discovery = new ShellyDeviceDiscovery();
-        var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, CancellationToken.None);
+        ISubjectDiscovery discovery = new ShellyDeviceDiscovery(browser);
 
         // Act
-        var discovered = await discovery.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
+        var discovered = await discovery.DiscoverAsync([], CancellationToken.None).ToListAsync();
 
         // Assert
         var single = Assert.Single(discovered);
@@ -199,12 +198,6 @@ public class ShellyDeviceDiscoveryTests
             ServiceTypes.Add(serviceType);
             return Task.FromResult<IReadOnlyList<MulticastDnsServiceInstance>>(services);
         }
-    }
-
-    private sealed class EmptySsdpSearch : ISsdpSearch
-    {
-        public Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<SsdpResponse>>([]);
     }
 
     private sealed class TestHttpClientFactory : IHttpClientFactory

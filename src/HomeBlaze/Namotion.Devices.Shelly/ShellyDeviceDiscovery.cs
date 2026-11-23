@@ -6,7 +6,7 @@ namespace Namotion.Devices.Shelly;
 /// <summary>
 /// Finds Shelly devices of the second generation and later, which announce <c>_shelly._tcp</c> over mDNS.
 /// </summary>
-public sealed class ShellyDeviceDiscovery : SubjectDiscovery<ShellyDevice, ShellyDiscoveredDevice>
+public sealed class ShellyDeviceDiscovery(IMulticastDnsBrowser multicastDnsBrowser) : SubjectDiscovery<ShellyDevice, ShellyDiscoveredDevice>
 {
     internal const string ServiceType = "_shelly._tcp";
 
@@ -14,9 +14,9 @@ public sealed class ShellyDeviceDiscovery : SubjectDiscovery<ShellyDevice, Shell
 
     /// <inheritdoc />
     protected override async IAsyncEnumerable<ShellyDiscoveredDevice> DiscoverAsync(
-        DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var instances = await scan.MulticastDns.BrowseAsync(ServiceType, cancellationToken);
+        var instances = await multicastDnsBrowser.BrowseAsync(ServiceType, cancellationToken);
         foreach (var device in ToDevices(instances))
         {
             yield return device;

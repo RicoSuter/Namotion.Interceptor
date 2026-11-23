@@ -6,15 +6,15 @@ namespace Namotion.Devices.Philips.Hue;
 /// <summary>
 /// Finds Hue bridges over mDNS, without asking the Hue cloud.
 /// </summary>
-public sealed class HueBridgeDiscovery : SubjectDiscovery<HueBridge, HueDiscoveredBridge>
+public sealed class HueBridgeDiscovery(IMulticastDnsBrowser multicastDnsBrowser) : SubjectDiscovery<HueBridge, HueDiscoveredBridge>
 {
     internal const string ServiceType = "_hue._tcp";
 
     /// <inheritdoc />
     protected override async IAsyncEnumerable<HueDiscoveredBridge> DiscoverAsync(
-        DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        foreach (var instance in await scan.MulticastDns.BrowseAsync(ServiceType, cancellationToken))
+        foreach (var instance in await multicastDnsBrowser.BrowseAsync(ServiceType, cancellationToken))
         {
             if (instance.Properties.TryGetValue("bridgeid", out var bridgeId) && !string.IsNullOrWhiteSpace(bridgeId))
             {

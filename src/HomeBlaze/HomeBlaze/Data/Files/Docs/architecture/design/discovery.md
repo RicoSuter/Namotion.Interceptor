@@ -29,7 +29,7 @@ This design covers an on-demand Discover page in the create dialog, with a contr
 Implemented (one pull request):
 
 - The discovery contract, registry and scan session
-- Shared SSDP and mDNS services
+- SSDP and mDNS services
 - The Discover page in the create dialog and the handoff to the Setup or Edit component
 - Subject discoveries for FRITZ!Box (SSDP), Hue (mDNS), Nuki (cloud lookup) and Shelly (mDNS)
 
@@ -59,7 +59,7 @@ The API and the rules for implementers are in [Writing a Subject Discovery](../.
 
 ### Registry
 
-`SubjectDiscoveryRegistry` in `HomeBlaze.Services` scans `TypeProvider.Types` for non-abstract `ISubjectDiscovery` types, as `SubjectComponentRegistry` does for components, so plugins provide subject discoveries without extra registration. It creates them through DI with `ActivatorUtilities`, so a constructor can ask for `IHttpClientFactory` or `ILogger<T>`. Like the components, the subject discoveries are created once, on first use, so all subject discovery types must be loaded before; types added later are not scanned.
+`SubjectDiscoveryRegistry` in `HomeBlaze.Services` scans `TypeProvider.Types` for non-abstract `ISubjectDiscovery` types, as `SubjectComponentRegistry` does for components, so plugins provide subject discoveries without extra registration. It creates them through DI with `ActivatorUtilities`, so a constructor can ask for `ISsdpSearch`, `IMulticastDnsBrowser`, `IHttpClientFactory` or `ILogger<T>`. Like the components, the subject discoveries are created once, on first use, so all subject discovery types must be loaded before; types added later are not scanned.
 
 It leaves out, with one logged error each, written the first time the create dialog asks for subject discoveries rather than at startup, and without blocking the app:
 
@@ -68,15 +68,14 @@ It leaves out, with one logged error each, written the first time the create dia
 
 The Discover page further leaves out results whose type is not creatable in the dialog, as `SubjectTypeCatalog.GetCreatableTypes` decides (excluded from creation, or single instance and already present).
 
-## Scan session and shared services
+## Scan session and services
 
-`DiscoveryScan` represents one scan. `SubjectDiscoveryService.ScanAsync` creates and owns it; the Discover page owns the cancellation of the scans it starts.
+`SubjectDiscoveryService.ScanAsync` runs one scan and passes each subject discovery the token of the scan, which is canceled when the scan ends; the Discover page owns the cancellation of the scans it starts.
 
 - A scan is canceled only by Scan again and by closing the dialog, which disposes the page. Back, picking a row, creating a subject from a row and switching to All types leave it running while the page is hidden, so its results are complete when the user returns.
 - Its deadline is 30 seconds, taken from an injected `TimeProvider`. The deadline is a cap, not a wait: the scan ends as soon as every subject discovery has completed, normally after 3 to 5 seconds.
-- It exposes the shared services below. Within one session, a query that was already sent returns the same in-flight task, so two subject discoveries asking for the same question cause one query. SSDP queries are shared by exact search target, mDNS queries by service type ignoring case.
 
-`ISsdpSearch` and `IMulticastDnsBrowser`, in `HomeBlaze.Abstractions/Discovery`, are described for implementers in [Writing a Subject Discovery](../../development/subject-discovery.md#shared-services). They are implemented in `HomeBlaze.Services`.
+`ISsdpSearch` and `IMulticastDnsBrowser`, in `HomeBlaze.Abstractions/Discovery`, are described for implementers in [Writing a Subject Discovery](../../development/subject-discovery.md#services). They are implemented in `HomeBlaze.Services` and registered as singletons, and each subject discovery takes the ones it uses through its constructor. Every query is sent: no two subject discoveries ask the same question, so nothing is shared between them. As the services are singletons, merging identical in-flight queries, if ever needed, belongs inside their implementations without a contract change.
 
 SSDP uses Rssdp, which `HomeBlaze.Services` references, and searches every IPv4 adapter with a listening window of about 3 seconds.
 
@@ -126,7 +125,7 @@ During the first setup a user adds many found devices, so the folder Create oper
 - Each subject discovery runs in its own task. An exception other than cancellation ends that subject discovery only: it is logged with the type of the subject discovery and shown as one line on the page, such as "Nuki Bridge: search failed". Results it yielded before stay listed.
 - An `OperationCanceledException` from a canceled session is neither logged nor shown.
 - An exception thrown once the scan has been canceled or has reached its deadline, such as from a library that disposes its socket, counts as the end of the scan: it is logged at debug level and not shown.
-- The shared services fail soft: no usable adapter or a socket error returns an empty answer and one debug log entry, not an exception.
+- The SSDP and mDNS services fail soft: no usable adapter or a socket error returns an empty answer and one debug log entry, not an exception.
 - A `Matches` call that throws ends its subject discovery like any other exception.
 - A subject discovery that never completes is canceled at the session deadline. The scan ends then even when the subject discovery ignores its cancellation; the later results and failures of the abandoned subject discovery are dropped, a later exception is still logged, at debug level, and no callback of `ScanAsync` runs once it has returned.
 - Every string from the network is untrusted. Blazor renders it as text, never as markup.
@@ -135,7 +134,7 @@ During the first setup a user adds many found devices, so the folder Create oper
 
 | Type | Discovery | Result | Matches |
 |---|---|---|---|
-| `FritzBox` | `FritzBoxDiscovery` through the shared `ISsdpSearch`, plus the `fritz.box` fallback | `FritzBoxDiscoveryResult`, key `Udn` or else host address | A new persisted `Udn`, or the host address: either one matching is enough, so a router that moved is recognized by its UDN and a router replaced at the same address counts as added |
+| `FritzBox` | `FritzBoxDiscovery` through the injected `ISsdpSearch`, plus the `fritz.box` fallback | `FritzBoxDiscoveryResult`, key `Udn` or else host address | A new persisted `Udn`, or the host address: either one matching is enough, so a router that moved is recognized by its UDN and a router replaced at the same address counts as added |
 | `HueBridge` | mDNS `_hue._tcp`, local only | A new record with bridge ID and address, key bridge ID | The persisted `BridgeId`, ignoring case; `HueBridge` itself compares bridge IDs ignoring case as well |
 | `NukiBridge` | The Nuki cloud lookup, which runs when the user first opens the Discover page and on Scan again | `NukiDiscoveredBridge`, key bridge ID | The host address and port |
 | `ShellyDevice` | mDNS `_shelly._tcp` | `ShellyDiscoveredDevice(DeviceId, HostAddress, Application, DisplayName)`, key device ID | The device ID the running subject read from the device, otherwise a new persisted `DeviceId`, otherwise the host address |
@@ -148,7 +147,7 @@ During the first setup a user adds many found devices, so the folder Create oper
 
 ## Breaking changes
 
-- `FritzBoxDiscovery.DiscoverAsync(TimeSpan, CancellationToken)` is now `SearchAsync(ISsdpSearch, TimeSpan timeout, CancellationToken)`. `timeout` now limits only the name resolution of `fritz.box` and each description request; the SSDP window is fixed at about 3 seconds. Migration: resolve `ISsdpSearch` from dependency injection (`AddHomeBlazeServices` registers it; the implementation is internal), or pass `DiscoveryScan.Ssdp` inside a subject discovery.
+- `FritzBoxDiscovery.DiscoverAsync(TimeSpan, CancellationToken)` is now `SearchAsync(ISsdpSearch, TimeSpan timeout, CancellationToken)`. `timeout` now limits only the name resolution of `fritz.box` and each description request; the SSDP window is fixed at about 3 seconds. Migration: resolve `ISsdpSearch` from dependency injection (`AddHomeBlazeServices` registers it; the implementation is internal), or inject it into the constructor of a subject discovery.
 - `Namotion.Devices.FritzBox` no longer depends on Rssdp. Migration: add your own package reference if you used it transitively.
 - `FritzBoxSetupComponent` now injects `ISsdpSearch`. Migration: a host that shows it must call `AddHomeBlazeServices` or `AddHomeBlazeHostServices`.
 - `ISubjectSetupService.CreateSubjectAsync(IStorageContainer, CancellationToken)`, which returned one `CreateSubjectResult?`, is replaced by `CreateSubjectsAsync(IStorageContainer, Func<CreateSubjectResult, CancellationToken, Task> addSubjectAsync, CancellationToken)`, which passes each created subject to the callback, also while the dialog stays open for the next one. Migration: an implementation passes the callback on, such as to `SubjectSetupOptions.OnCreatedAsync`; a caller moves the code that handled the result into the callback.
@@ -168,10 +167,9 @@ Unit tests, without sockets:
 
 - The base class keeps only subjects of its type and sets `ExistingSubject` from `Matches`
 - The registry finds subject discoveries through `TypeProvider` and applies its exclusion rules
-- `DiscoveryScan` shares in-flight queries between subject discoveries
 - `SubjectDiscoveryService` isolates failing subject discoveries, honors cancellation and ends at its deadline, driven by a `TimeProvider` the test advances
 - mDNS packet parsing from captured bytes, including name compression, malformed packets and the caps
-- Each subject discovery against fake `ISsdpSearch`, `IMulticastDnsBrowser` and HTTP handlers, including its `Matches` rules
+- Each subject discovery constructed with fake `ISsdpSearch`, `IMulticastDnsBrowser` or HTTP handlers, including its `Matches` rules
 
 This repository has no component test framework, so the Discover page keeps its logic in `SubjectDiscoveryList` (ordering, marking a row added, failures), `SubjectNameOptions.SuggestName` (the name) and `SubjectEditPanel.CreateHostedComponentParameters` (passing the result), which unit tests cover. The E2E test covers the page itself.
 
