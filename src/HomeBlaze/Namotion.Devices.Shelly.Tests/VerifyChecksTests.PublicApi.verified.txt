@@ -93,8 +93,6 @@ namespace Namotion.Devices.Shelly
         public string? AvailableSoftwareUpdate { get; }
         [HomeBlaze.Abstractions.Attributes.State]
         public Namotion.Devices.Shelly.ShellyCover[] Covers { get; }
-        [HomeBlaze.Abstractions.Attributes.Configuration]
-        public string? DeviceId { get; set; }
         [HomeBlaze.Abstractions.Attributes.State(Position=400)]
         [Namotion.Interceptor.Attributes.Derived]
         public string? DeviceName { get; }

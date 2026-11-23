@@ -24,7 +24,7 @@ Unknown component types (for example `light:0`, `dimmer:0`, and the `em1:N` / `p
 
 ## Discovery
 
-The Discover page of the create dialog finds Shelly devices of the second generation and later over mDNS (`_shelly._tcp`) and shows each one with the name you gave it, or its device ID when it has none. A device that is already added is recognized by its device ID, which a device added without discovery reports once it is connected, or by its host address.
+The Discover page of the create dialog finds Shelly devices of the second generation and later over mDNS (`_shelly._tcp`) and shows each one with the name you gave it, or its device ID when it has none. A device that is already added is recognized by the device ID the subject read from it once connected, or, while it has not, by its host address. A device that moved to another address while the subject is not connected shows as new on the Discover page.
 
 ## Configuration
 
@@ -32,7 +32,6 @@ The Discover page of the create dialog finds Shelly devices of the second genera
 |----------|------|---------|-------------|
 | `Name` | string | "" | Display name (falls back to the device name from the API) |
 | `HostAddress` | string | null | Device IP address or hostname |
-| `DeviceId` | string | null | Device ID, such as `shellyplus1pm-a8032ab12345`. Set from discovery and used to recognize the device as already added |
 | `Password` | string | null | Reserved, device authentication is not supported yet |
 | `PollingInterval` | TimeSpan | 15 seconds | Normal polling rate |
 | `RetryInterval` | TimeSpan | 30 seconds | Delay before reconnecting after a connection or poll error |

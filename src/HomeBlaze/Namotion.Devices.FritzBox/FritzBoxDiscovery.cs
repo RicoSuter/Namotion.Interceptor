@@ -32,9 +32,9 @@ public sealed record FritzBoxDiscoveryResult(string HostAddress, string? Friendl
 
     /// <inheritdoc />
     public bool Matches(FritzBox subject) =>
-        // The UDN recognizes a router that moved to another address; the host address one that was added without
-        // discovery, and a router that replaced it at the same address, which a stale stored UDN must not hide.
-        (Udn is not null && string.Equals(subject.Udn?.Trim(), Udn, StringComparison.OrdinalIgnoreCase)) ||
+        // The UDN of the connected router recognizes it under another address, such as its host name for its IP
+        // address. The host address also recognizes a router that is not connected, and one that replaced it there.
+        (Udn is not null && string.Equals(subject.ConnectedUdn, Udn, StringComparison.OrdinalIgnoreCase)) ||
         string.Equals(subject.HostAddress?.Trim(), HostAddress, StringComparison.OrdinalIgnoreCase);
 }
 

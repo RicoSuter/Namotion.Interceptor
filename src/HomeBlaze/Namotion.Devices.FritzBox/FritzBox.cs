@@ -89,12 +89,6 @@ public partial class FritzBox : BackgroundService,
     public partial string? HostAddress { get; set; }
 
     /// <summary>
-    /// The unique device name from the TR-064 description of the router, which discovery recognizes it by, or null.
-    /// </summary>
-    [Configuration]
-    public partial string? Udn { get; set; }
-
-    /// <summary>
     /// A FRITZ!Box user with the "FRITZ!Box settings" permission.
     /// </summary>
     [Configuration]

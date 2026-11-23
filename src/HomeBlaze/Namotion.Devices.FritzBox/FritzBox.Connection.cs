@@ -23,6 +23,12 @@ public partial class FritzBox
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
     private readonly Lock _commandStateLock = new();
     private FritzBoxConnection? _connection;
+
+    /// <summary>
+    /// The unique device name from the TR-064 description of the connected router, or null while it is not connected
+    /// or the description names none.
+    /// </summary>
+    internal string? ConnectedUdn => Volatile.Read(ref _connection)?.Description.Udn;
     private long _commandGeneration;
 
     // Read and written by the polling loop only.

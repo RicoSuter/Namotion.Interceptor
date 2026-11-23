@@ -263,9 +263,6 @@
             RouterSubject.Password = string.IsNullOrEmpty(_password) ? null : _password;
             RouterSubject.PublicKeyPin = result.PublicKeyPin;
 
-            // Every edit of the address clears the selection, so a router picked from the list is the checked one.
-            RouterSubject.Udn = _selectedRouter?.Udn;
-
             // Without this, every router added here would be titled with the default name.
             var routerName = _selectedRouter?.FriendlyName ?? result.Model;
             if (RouterSubject.Name == FritzBox.DefaultName && !string.IsNullOrWhiteSpace(routerName))

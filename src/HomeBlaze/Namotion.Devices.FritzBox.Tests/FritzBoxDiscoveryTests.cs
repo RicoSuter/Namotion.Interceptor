@@ -273,33 +273,13 @@ public class FritzBoxDiscoveryTests
     }
 
     [Fact]
-    public void WhenTheUdnsMatch_ThenARouterAtAnotherAddressIsTheSame()
+    public void WhenTheRouterIsNotConnected_ThenTheHostAddressDecides()
     {
         // Act & Assert
-        Assert.True(Found("192.168.178.2", "UUID:A").Matches(CreateRouter("192.168.178.1", "uuid:a")));
-    }
-
-    [Fact]
-    public void WhenTheHostAddressesMatch_ThenARouterWithAnotherUdnIsTheSame()
-    {
-        // Act & Assert
-        Assert.True(Found("192.168.178.1", "uuid:b").Matches(CreateRouter("192.168.178.1", "uuid:a")));
-    }
-
-    [Fact]
-    public void WhenNeitherTheUdnNorTheHostAddressMatches_ThenTheRouterIsAnother()
-    {
-        // Act & Assert
-        Assert.False(Found("192.168.178.2", "uuid:b").Matches(CreateRouter("192.168.178.1", "uuid:a")));
-        Assert.False(Found("192.168.178.2", null).Matches(CreateRouter("192.168.178.1", "uuid:a")));
-    }
-
-    [Fact]
-    public void WhenTheRouterHasNoUdn_ThenTheHostAddressDecides()
-    {
-        // Act & Assert
-        Assert.True(Found("fritz.box", "uuid:a").Matches(CreateRouter(" Fritz.Box ", null)));
-        Assert.False(Found("192.168.178.2", "uuid:a").Matches(CreateRouter("192.168.178.1", null)));
+        Assert.True(Found("fritz.box", "uuid:a").Matches(CreateRouter(" Fritz.Box ")));
+        Assert.True(Found("192.168.178.1", "uuid:b").Matches(CreateRouter("192.168.178.1")));
+        Assert.False(Found("192.168.178.2", "uuid:a").Matches(CreateRouter("192.168.178.1")));
+        Assert.False(Found("192.168.178.2", null).Matches(CreateRouter("192.168.178.1")));
     }
 
     [Fact]
@@ -314,8 +294,8 @@ public class FritzBoxDiscoveryTests
         Assert.Equal("192.168.178.3 (repeater)", result.Detail);
     }
 
-    private static FritzBox CreateRouter(string? hostAddress, string? udn) =>
-        new(NullLogger<FritzBox>.Instance) { HostAddress = hostAddress, Udn = udn };
+    private static FritzBox CreateRouter(string? hostAddress) =>
+        new(NullLogger<FritzBox>.Instance) { HostAddress = hostAddress };
 
     private static FritzBoxDiscoveryResult Found(string hostAddress, string? udn) =>
         new(hostAddress, "FRITZ!Box 7590", "FRITZ!Box 7590", udn, IsRepeater: false);
