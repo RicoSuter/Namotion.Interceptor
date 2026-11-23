@@ -205,6 +205,23 @@ public class FritzBoxDiscoveryTests
     }
 
     [Fact]
+    public async Task WhenTheNameResolutionIgnoresItsToken_ThenTheCheckStillEndsAtTheTimeout()
+    {
+        // Arrange
+        var timeProvider = new FakeTimeProvider();
+        var timeout = TimeSpan.FromSeconds(3);
+
+        // Act
+        var checking = FritzBoxDiscovery.IsOnLocalNetworkAsync(
+            "fritz.box", (_, _) => new TaskCompletionSource<IPAddress[]>().Task, timeout, timeProvider, CancellationToken.None);
+        timeProvider.Advance(timeout);
+        var result = await checking.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
     public async Task WhenTheCallerCanceled_ThenTheCheckIsCanceled()
     {
         // Arrange
