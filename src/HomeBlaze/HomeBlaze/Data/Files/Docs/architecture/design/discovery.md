@@ -51,54 +51,14 @@ Out of scope, with the contract kept compatible:
 
 ## Contract
 
-In `HomeBlaze.Abstractions/Discovery`:
-
-```csharp
-public interface IDiscoveryResult
-{
-    /// <summary>Unique within the discoverer that returned it.</summary>
-    string Key { get; }
-
-    string DisplayName { get; }
-
-    /// <summary>A second line for the user, such as the host address, or null.</summary>
-    string? Detail { get; }
-
-    /// <summary>What the subject created for the result includes, shown under its row, not selectable.</summary>
-    IReadOnlyList<DiscoveredItem> IncludedItems => [];
-}
-
-public sealed record DiscoveredItem(string DisplayName, string? Detail);
-
-public abstract class SubjectDiscoverer<TSubject, TResult> : ISubjectDiscoverer
-    where TSubject : class, IInterceptorSubject
-    where TResult : class, IDiscoveryResult
-{
-    protected abstract IAsyncEnumerable<TResult> DiscoverAsync(DiscoveryScan scan, CancellationToken cancellationToken);
-
-    protected abstract bool Matches(TSubject existing, TResult result);
-}
-
-public sealed record DiscoveredSubject(Type SubjectType, IDiscoveryResult Result, IInterceptorSubject? ExistingSubject);
-```
+The API and the rules for implementers are in [Writing a Discoverer](../../development/discoverers.md): `SubjectDiscoverer<TSubject, TResult>` with `DiscoverAsync` and `Matches`, the result records implementing `IDiscoveryResult`, and `ISubjectDiscoveryComponent` on the Setup or Edit component. The base class reports each result as `DiscoveredSubject(SubjectType, Result, ExistingSubject)`.
 
 - A discoverer yields each result as soon as it is known.
 - Duplicate detection belongs to each type. The base class keeps the existing subjects of type `TSubject`, calls `Matches` for each result and yields a `DiscoveredSubject` whose `ExistingSubject` is the first match, or null. The framework prescribes no identity property.
 - Result records are type specific and implement `IDiscoveryResult` themselves. The existing `FritzBoxDiscoveryResult` and `NukiDiscoveredBridge` become results directly.
 - A row is something the user creates. What comes with it, such as the speakers of a Sonos household or the repeaters of a FRITZ!Box mesh, is listed in `IncludedItems`, which defaults to an empty list without allocating. Included items are shown, not created or selected on their own.
 - A discoverer creates no subject. `SubjectFactory.CreateSubject` attaches the subject to the root context, where a hosted subject starts at once, so a subject is only created once the user picks a result.
-
-In `HomeBlaze.Components.Abstractions`:
-
-```csharp
-public interface ISubjectDiscoveryComponent
-{
-    /// <summary>The result the user picked on the Discover page, or null when the type was picked directly.</summary>
-    IDiscoveryResult? DiscoveryResult { get; set; }
-}
-```
-
-A Setup or Edit component implements it with a `[Parameter]` property and casts the result to its own record type. What it fills in, preselects or skips is its own decision.
+- A Setup or Edit component takes the picked result through `ISubjectDiscoveryComponent` and casts it to its own record type. What it fills in, preselects or skips is its own decision.
 
 ### Registry
 
@@ -120,30 +80,7 @@ The Discover page further leaves out results whose type is not creatable in the 
 - Its deadline is 30 seconds, taken from an injected `TimeProvider`. The deadline is a cap, not a wait: the scan ends as soon as every discoverer has completed, normally after about 6 seconds, the listening window of the myStrom discoverer.
 - It exposes the shared services below. Within one session, a query that was already sent returns the same in-flight task, so two discoverers asking for the same question cause one query. SSDP queries are shared by exact search target, mDNS queries by service type ignoring case. UDP exchanges are not shared: each call is its own exchange, because a discoverer streams the datagrams of its own request or port.
 
-In `HomeBlaze.Abstractions/Discovery`, implemented in `HomeBlaze.Services`:
-
-```csharp
-public interface ISsdpSearch
-{
-    Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken);
-}
-
-public interface IMulticastDnsBrowser
-{
-    Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken);
-}
-
-public interface IUdpDiscovery
-{
-    IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken);
-
-    IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken);
-}
-```
-
-- `SsdpResponse` carries the location, unique service name and headers of an answer for exactly the searched target. Headers are looked up by name ignoring case, and the values of a repeated header are joined by `, `.
-- `MulticastDnsService` carries the instance name, host name, addresses, port and TXT records.
-- `UdpDatagram` carries the payload of a received datagram, copied for each one, and the address it came from.
+`ISsdpSearch`, `IMulticastDnsBrowser` and `IUdpDiscovery`, in `HomeBlaze.Abstractions/Discovery`, are described for implementers in [Writing a Discoverer](../../development/discoverers.md#shared-services). They are implemented in `HomeBlaze.Services`.
 
 SSDP uses Rssdp, which `HomeBlaze.Services` references, and searches every IPv4 adapter with a listening window of about 3 seconds.
 
