@@ -231,6 +231,26 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenABlockWithAPlaintextSecretHasANestedKeyTheTypeDoesNotKnow_ThenItIsNotRewritten()
+    {
+        // Arrange
+        UseSecretStore();
+        var deviceType = typeof(NestedSecretDevice).FullName;
+        var content = $"# Gateway\n\n:: {deviceType}#gateway Password=s3cr3t\n```json\n{{\n  \"Options\": {{ \"Endpoint\": \"a\", \"Typo\": 1 }}\n}}\n```\n::\n";
+        WriteFile("Gateway.md", content);
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var device = Assert.IsType<NestedSecretDevice>(page.Children["gateway"]);
+
+        // Act: the load scheduled the rewrite, and this one runs after it.
+        await page.RewriteBlocksIfFileUnchangedAsync([device]);
+
+        // Assert
+        Assert.Equal("s3cr3t", device.Password);
+        Assert.Equal(content, File.ReadAllText(GetFullPath("Gateway.md")));
+    }
+
+    [Fact]
     public async Task WhenThePageFileChangedSinceItWasRead_ThenTheBlockRewriteWritesNothingAndReadsThePageAgain()
     {
         // Arrange
@@ -545,4 +565,22 @@ public sealed class ReloadingValue(ReloadingDevice device)
             return null;
         }
     }
+}
+
+[InterceptorSubject]
+public partial class NestedSecretDevice : IConfigurable
+{
+    [Configuration(IsSecret = true)]
+    public partial string? Password { get; set; }
+
+    [Configuration]
+    public partial NestedSecretOptions? Options { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+public sealed class NestedSecretOptions
+{
+    [Configuration]
+    public string? Endpoint { get; set; }
 }
