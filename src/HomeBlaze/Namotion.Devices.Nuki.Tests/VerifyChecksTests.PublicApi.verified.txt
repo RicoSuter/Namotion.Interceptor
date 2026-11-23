@@ -86,9 +86,12 @@ namespace Namotion.Devices.Nuki
         public static System.TimeSpan GetEffectiveInterval(System.TimeSpan configured, System.TimeSpan fallback) { }
         public static string? ValidateHostAddress(string? hostAddress) { }
     }
-    public static class NukiBridgeDiscovery
+    public sealed class NukiBridgeDiscovery : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.Nuki.NukiBridge, Namotion.Devices.Nuki.NukiDiscoveredBridge>
     {
         public const string DiscoveryAddress = "https://api.nuki.io/discover/bridges";
+        public NukiBridgeDiscovery(System.Net.Http.IHttpClientFactory httpClientFactory) { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Nuki.NukiBridgeDiscovery.<DiscoverAsync>d__8))]
+        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Nuki.NukiDiscoveredBridge> DiscoverAsync([System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
         public static System.Threading.Tasks.Task<Namotion.Devices.Nuki.NukiTokenModeDetection> DetectTokenModeAsync(string hostAddress, string token, System.Threading.CancellationToken cancellationToken) { }
         public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Namotion.Devices.Nuki.NukiDiscoveredBridge>> DiscoverAsync(System.Net.Http.HttpClient httpClient, System.Threading.CancellationToken cancellationToken) { }
         public static System.Threading.Tasks.Task<string?> PairAsync(string hostAddress, System.Threading.CancellationToken cancellationToken) { }
@@ -142,11 +145,15 @@ namespace Namotion.Devices.Nuki
         SmartDoor = 3,
         SmartLock3 = 4,
     }
-    public sealed class NukiDiscoveredBridge : System.IEquatable<Namotion.Devices.Nuki.NukiDiscoveredBridge>
+    public sealed class NukiDiscoveredBridge : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, HomeBlaze.Abstractions.Discovery.IDiscoveryResult<Namotion.Devices.Nuki.NukiBridge>, System.IEquatable<Namotion.Devices.Nuki.NukiDiscoveredBridge>
     {
         public NukiDiscoveredBridge(long BridgeId, string HostAddress) { }
         public long BridgeId { get; init; }
+        public string? Detail { get; }
+        public string DisplayName { get; }
         public string HostAddress { get; init; }
+        public string Key { get; }
+        public bool Matches(Namotion.Devices.Nuki.NukiBridge subject) { }
     }
     [HomeBlaze.Abstractions.Attributes.ExcludeFromCreation]
     [Namotion.Interceptor.Attributes.InterceptorSubject]

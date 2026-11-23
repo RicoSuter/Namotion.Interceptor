@@ -6,7 +6,7 @@ namespace HomeBlaze.Storage.Blazor
     public class BlazorSubjectSetupService : HomeBlaze.Storage.Abstractions.ISubjectSetupService
     {
         public BlazorSubjectSetupService(MudBlazor.IDialogService dialogService) { }
-        public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.CreateSubjectResult?> CreateSubjectAsync(HomeBlaze.Storage.Abstractions.IStorageContainer target, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task CreateSubjectsAsync(HomeBlaze.Storage.Abstractions.IStorageContainer target, System.Func<HomeBlaze.Storage.Abstractions.CreateSubjectResult, System.Threading.CancellationToken, System.Threading.Tasks.Task> addSubjectAsync, System.Threading.CancellationToken cancellationToken) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Storage.Internal.RenderExpression?))]
     public class RenderExpressionComponent : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent

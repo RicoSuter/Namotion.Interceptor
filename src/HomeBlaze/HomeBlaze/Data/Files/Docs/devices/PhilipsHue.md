@@ -52,6 +52,10 @@ To register with a bridge:
 
 If you prefer manual setup, set `BridgeId` (the bridge identifier printed on the hardware or found via the Hue app) and `AppKey` (obtained from the Hue API registration endpoint) directly in the JSON configuration file.
 
+## Discovery
+
+The Discover page of the create dialog finds Hue bridges over mDNS (`_hue._tcp`), without asking the Hue cloud. A bridge that is already added is recognized by its bridge ID. Its setup page still asks you to press the Link button.
+
 ## Devices
 
 ### Lights (`HueLightbulb`)

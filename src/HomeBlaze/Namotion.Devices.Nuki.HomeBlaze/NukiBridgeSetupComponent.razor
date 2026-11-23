@@ -1,5 +1,7 @@
+@using global::HomeBlaze.Abstractions.Discovery
 @attribute [SubjectComponent(SubjectComponentType.Setup, typeof(NukiBridge))]
 @implements ISubjectEditComponent
+@implements ISubjectDiscoveryComponent
 @implements IDisposable
 @inject IHttpClientFactory HttpClientFactory
 
@@ -42,7 +44,7 @@
                       @bind-Value:after="ResetPairing"
                       Disabled="_pairing"
                       Label="Host address"
-                      Placeholder="192.168.1.50:8080"
+                      Placeholder="192.0.2.50:8080"
                       HelperText="IP address of the bridge with its port, 8080 by default"
                       Error="@(HostAddressError is not null)"
                       ErrorText="@HostAddressError"
@@ -98,6 +100,9 @@
     [Parameter]
     public bool IsCreating { get; set; }
 
+    [Parameter]
+    public IDiscoveryResult? DiscoveryResult { get; set; }
+
     private NukiBridge? BridgeSubject => Subject as NukiBridge;
 
     private string? HostAddressError => string.IsNullOrWhiteSpace(_hostAddress) ? null : NukiBridge.ValidateHostAddress(_hostAddress);
@@ -112,6 +117,15 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Picked on the Discover page, which has asked the discovery service already.
+        if (DiscoveryResult is NukiDiscoveredBridge discovered)
+        {
+            _bridges = [discovered];
+            _selectedBridge = discovered;
+            _hostAddress = discovered.HostAddress;
+            return;
+        }
+
         var cancellationToken = _lifetime.Token;
         try
         {

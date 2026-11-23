@@ -287,6 +287,7 @@ namespace HomeBlaze.Services.Components
         public System.Type ComponentType { get; init; }
         public string? Name { get; init; }
         public System.Type SubjectType { get; init; }
+        public bool TakesDiscoveryResults { get; }
         public HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType Type { get; init; }
     }
     public class SubjectComponentRegistry
@@ -295,6 +296,7 @@ namespace HomeBlaze.Services.Components
         public System.Collections.Generic.IReadOnlyCollection<HomeBlaze.Services.Components.SubjectComponentRegistration> GetAllComponents() { }
         public HomeBlaze.Services.Components.SubjectComponentRegistration? GetComponent(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type, string? name = null) { }
         public System.Collections.Generic.IEnumerable<HomeBlaze.Services.Components.SubjectComponentRegistration> GetComponents(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type) { }
+        public HomeBlaze.Services.Components.SubjectComponentRegistration? GetEditorComponent(System.Type subjectType, bool isCreating) { }
         public bool HasComponent(System.Type subjectType, HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType type, string? name = null) { }
     }
 }
@@ -496,6 +498,27 @@ namespace HomeBlaze.Services.Diagnostics
         public System.DateTimeOffset Timestamp { get; init; }
     }
     public sealed class RecentLogStore { }
+}
+namespace HomeBlaze.Services.Discovery
+{
+    public sealed class DiscoveredSubject : System.IEquatable<HomeBlaze.Services.Discovery.DiscoveredSubject>
+    {
+        public DiscoveredSubject(System.Type SubjectType, HomeBlaze.Abstractions.Discovery.IDiscoveryResult Result, Namotion.Interceptor.IInterceptorSubject? ExistingSubject) { }
+        public Namotion.Interceptor.IInterceptorSubject? ExistingSubject { get; init; }
+        public HomeBlaze.Abstractions.Discovery.IDiscoveryResult Result { get; init; }
+        public System.Type SubjectType { get; init; }
+    }
+    public sealed class SubjectDiscoveryRegistry
+    {
+        public SubjectDiscoveryRegistry(HomeBlaze.Services.TypeProvider typeProvider, HomeBlaze.Services.Components.SubjectComponentRegistry componentRegistry, System.IServiceProvider serviceProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Services.Discovery.SubjectDiscoveryRegistry> logger) { }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.ISubjectDiscovery> GetSubjectDiscoveries() { }
+    }
+    public sealed class SubjectDiscoveryService
+    {
+        public SubjectDiscoveryService(HomeBlaze.Services.Discovery.SubjectDiscoveryRegistry registry, System.TimeProvider timeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Services.Discovery.SubjectDiscoveryService> logger) { }
+        public bool HasSubjectDiscoveries(System.Collections.Generic.IReadOnlyCollection<System.Type> subjectTypes) { }
+        public System.Threading.Tasks.Task ScanAsync(System.Collections.Generic.IReadOnlyCollection<System.Type> subjectTypes, System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.IInterceptorSubject> existingSubjects, System.Action<HomeBlaze.Services.Discovery.DiscoveredSubject> onResult, System.Action<System.Type> onFailure, System.Threading.CancellationToken cancellationToken) { }
+    }
 }
 namespace HomeBlaze.Services.Display
 {

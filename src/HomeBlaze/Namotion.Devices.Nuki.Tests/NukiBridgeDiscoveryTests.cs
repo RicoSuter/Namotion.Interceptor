@@ -1,5 +1,7 @@
 using System.Net;
 using System.Text;
+using HomeBlaze.Abstractions.Discovery;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Nuki.Client;
 using Namotion.Devices.Nuki.Tests.Testing;
 using Xunit;
@@ -14,23 +16,23 @@ public class NukiBridgeDiscoveryTests
         // Arrange
         const string json = """
             {"bridges": [
-              {"bridgeId": 2117604523, "ip": "192.168.1.50", "port": 8080, "dateUpdated": "2017-06-14T06:53:44Z"},
+              {"bridgeId": 2117604523, "ip": "192.0.2.50", "port": 8080, "dateUpdated": "2017-06-14T06:53:44Z"},
               {"bridgeId": 7, "ip": "fe80::1", "port": 8081, "dateUpdated": "2017-06-14T06:53:44Z"},
               {"bridgeId": 42, "ip": "0.0.0.0", "port": 0, "dateUpdated": "2017-06-14T06:53:44Z"},
-              {"bridgeId": 43, "ip": "192.168.1.51/path", "port": 8080, "dateUpdated": "2017-06-14T06:53:44Z"},
+              {"bridgeId": 43, "ip": "192.0.2.51/path", "port": 8080, "dateUpdated": "2017-06-14T06:53:44Z"},
               {"bridgeId": 44, "ip": "nuki.local", "port": 8080, "dateUpdated": "2017-06-14T06:53:44Z"},
-              {"bridgeId": 45, "ip": "192.168.1.52", "port": 65536, "dateUpdated": "2017-06-14T06:53:44Z"},
-              {"bridgeId": 46, "ip": "192.168.1.53", "port": -1, "dateUpdated": "2017-06-14T06:53:44Z"},
+              {"bridgeId": 45, "ip": "192.0.2.52", "port": 65536, "dateUpdated": "2017-06-14T06:53:44Z"},
+              {"bridgeId": 46, "ip": "192.0.2.53", "port": -1, "dateUpdated": "2017-06-14T06:53:44Z"},
               {"bridgeId": 47, "port": 8080, "dateUpdated": "2017-06-14T06:53:44Z"}],
              "errorCode": 0}
             """;
-        using var httpClient = CreateClient(json);
+        using var httpClient = CreateAnsweringClient(json);
 
         // Act
         var bridges = await NukiBridgeDiscovery.DiscoverAsync(httpClient, CancellationToken.None);
 
         // Assert
-        Assert.Equal(["192.168.1.50:8080", "[fe80::1]:8081"], bridges.Select(bridge => bridge.HostAddress));
+        Assert.Equal(["192.0.2.50:8080", "[fe80::1]:8081"], bridges.Select(bridge => bridge.HostAddress));
         Assert.Equal(2117604523, bridges[0].BridgeId);
     }
 
@@ -38,7 +40,7 @@ public class NukiBridgeDiscoveryTests
     public async Task WhenTheDiscoveryResponseIsLargerThanTheLimit_ThenTheDiscoveryFails()
     {
         // Arrange
-        using var httpClient = CreateClient("{" + new string(' ', NukiBridgeClient.MaxResponseSize) + "}");
+        using var httpClient = CreateAnsweringClient("{" + new string(' ', NukiBridgeClient.MaxResponseSize) + "}");
 
         // Act & Assert
         await Assert.ThrowsAsync<HttpRequestException>(() => NukiBridgeDiscovery.DiscoverAsync(httpClient, CancellationToken.None));
@@ -75,11 +77,11 @@ public class NukiBridgeDiscoveryTests
         var fake = new FakeNukiBridge();
 
         // Act
-        var token = await NukiBridgeDiscovery.PairAsync(fake.CreateClient(), "192.168.1.50", CancellationToken.None);
+        var token = await NukiBridgeDiscovery.PairAsync(fake.CreateClient(), "192.0.2.50", CancellationToken.None);
 
         // Assert
         Assert.Equal("abc123", token);
-        Assert.Equal("http://192.168.1.50:8080/auth", Assert.Single(fake.Requests).ToString());
+        Assert.Equal("http://192.0.2.50:8080/auth", Assert.Single(fake.Requests).ToString());
     }
 
     [Fact]
@@ -89,7 +91,7 @@ public class NukiBridgeDiscoveryTests
         var fake = new FakeNukiBridge { AuthJson = """{"success": false}""" };
 
         // Act
-        var token = await NukiBridgeDiscovery.PairAsync(fake.CreateClient(), "192.168.1.50", CancellationToken.None);
+        var token = await NukiBridgeDiscovery.PairAsync(fake.CreateClient(), "192.0.2.50", CancellationToken.None);
 
         // Assert
         Assert.Null(token);
@@ -102,7 +104,7 @@ public class NukiBridgeDiscoveryTests
         var fake = new FakeNukiBridge();
 
         // Act
-        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(), "192.168.1.50", "abc123", CancellationToken.None);
+        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(), "192.0.2.50", "abc123", CancellationToken.None);
 
         // Assert
         Assert.Equal(new NukiTokenModeDetection(NukiTokenMode.Encrypted, Warning: null), detection);
@@ -120,7 +122,7 @@ public class NukiBridgeDiscoveryTests
         fake.StatusOverride = _ => fake.CountRequests("info") == 1 ? HttpStatusCode.Unauthorized : null;
 
         // Act
-        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(), "192.168.1.50", "abc123", CancellationToken.None);
+        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(), "192.0.2.50", "abc123", CancellationToken.None);
 
         // Assert
         Assert.Equal(expectedMode, detection.Mode);
@@ -143,7 +145,7 @@ public class NukiBridgeDiscoveryTests
         var fake = new FakeNukiBridge { StatusOverride = _ => HttpStatusCode.Unauthorized };
 
         // Act
-        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(), "192.168.1.50", "abc123", CancellationToken.None);
+        var detection = await NukiBridgeDiscovery.DetectTokenModeAsync(fake.CreateClient(), "192.0.2.50", "abc123", CancellationToken.None);
 
         // Assert
         Assert.Equal(NukiTokenMode.Encrypted, detection.Mode);
@@ -151,7 +153,112 @@ public class NukiBridgeDiscoveryTests
         Assert.Equal(2, fake.CountRequests("info"));
     }
 
-    private static HttpClient CreateClient(string json) => new(new StubHandler(_ =>
+    [Theory]
+    [InlineData("192.0.2.50", true)]
+    [InlineData("192.0.2.50:8080", true)]
+    [InlineData("http://192.0.2.50:8080", true)]
+    [InlineData("192.0.2.50:8081", false)]
+    [InlineData("192.0.2.51", false)]
+    [InlineData(null, false)]
+    public void WhenHostAddressesAreCompared_ThenHostAndPortDecide(string? hostAddress, bool expected)
+    {
+        // Arrange
+        var result = new NukiDiscoveredBridge(2117604523, "192.0.2.50:8080");
+        using var bridge = new NukiBridge(NullLogger<NukiBridge>.Instance) { HostAddress = hostAddress };
+
+        // Act
+        var isSame = result.Matches(bridge);
+
+        // Assert
+        Assert.Equal(expected, isSame);
+    }
+
+    [Fact]
+    public async Task WhenTheDiscoveryServiceListsABridge_ThenItIsFound()
+    {
+        // Arrange
+        const string json = """{"bridges": [{"bridgeId": 2117604523, "ip": "192.0.2.50", "port": 8080}], "errorCode": 0}""";
+        ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(() => CreateAnsweringClient(json)));
+
+        // Act
+        var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
+
+        // Assert
+        var bridge = Assert.IsType<NukiDiscoveredBridge>(Assert.Single(results));
+        Assert.Equal("2117604523", bridge.Key);
+        Assert.Equal("Nuki Bridge 2117604523", bridge.DisplayName);
+        Assert.Equal("192.0.2.50:8080", bridge.Detail);
+    }
+
+    [Fact]
+    public async Task WhenTheDiscoveryServiceCannotBeReached_ThenTheSubjectDiscoveryFindsNothing()
+    {
+        // Arrange
+        ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(() => new HttpClient(new StubHandler(_ =>
+            Task.FromException<HttpResponseMessage>(new HttpRequestException("No route to host"))))));
+
+        // Act
+        var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
+
+        // Assert
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task WhenTheDiscoveryServiceAnswersWithAnError_ThenTheSubjectDiscoveryFindsNothing()
+    {
+        // Arrange
+        ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(() => new HttpClient(new StubHandler(_ =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable))))));
+
+        // Act
+        var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
+
+        // Assert
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task WhenTheDiscoveryServiceDoesNotAnswerInTime_ThenTheSubjectDiscoveryFindsNothing()
+    {
+        // Arrange
+        ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(CreateNeverAnsweringClient))
+        {
+            Timeout = TimeSpan.FromMilliseconds(1)
+        };
+
+        // Act
+        var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
+
+        // Assert
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task WhenTheCallerCancelsTheSubjectDiscovery_ThenTheCancellationIsThrown()
+    {
+        // Arrange
+        ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(CreateNeverAnsweringClient));
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await discovery.DiscoverAsync(cancellation.Token).ToListAsync());
+    }
+
+    [Fact]
+    public async Task WhenTheDiscoveryServiceAnswersWithInvalidJson_ThenTheSubjectDiscoveryFails()
+    {
+        // Arrange
+        ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(() => CreateAnsweringClient("{\"bridges\": 42}")));
+
+        // Act & Assert
+        await Assert.ThrowsAsync<System.Text.Json.JsonException>(
+            async () => await discovery.DiscoverAsync(CancellationToken.None).ToListAsync());
+    }
+
+    private static HttpClient CreateAnsweringClient(string json) => new(new StubHandler(_ =>
         Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") })));
 
     private static HttpClient CreateNeverAnsweringClient() => new(new StubHandler(cancellationToken =>
@@ -161,5 +268,10 @@ public class NukiBridgeDiscoveryTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             answer(cancellationToken);
+    }
+
+    private sealed class StubHttpClientFactory(Func<HttpClient> createClient) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => createClient();
     }
 }

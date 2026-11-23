@@ -400,7 +400,7 @@ public class ShellyDeviceComponentParsingTests
         var device = CreateDevice();
         var json = JsonSerializer.Deserialize<JsonElement>("""
         {
-            "wifi": { "sta_ip": "192.168.1.100", "ssid": "MyNetwork", "rssi": -45 }
+            "wifi": { "sta_ip": "192.0.2.100", "ssid": "MyNetwork", "rssi": -45 }
         }
         """);
 
@@ -408,7 +408,7 @@ public class ShellyDeviceComponentParsingTests
         device.ParseStatusComponents(json);
 
         // Assert
-        Assert.Equal("192.168.1.100", device.IpAddress);
+        Assert.Equal("192.0.2.100", device.IpAddress);
         Assert.True(device.IsWireless);
         Assert.Equal(-45, device.SignalStrength);
     }
@@ -420,7 +420,7 @@ public class ShellyDeviceComponentParsingTests
         var device = CreateDevice();
         var json = JsonSerializer.Deserialize<JsonElement>("""
         {
-            "eth": { "ip": "192.168.1.50", "ip6": null },
+            "eth": { "ip": "192.0.2.50", "ip6": null },
             "wifi": { "sta_ip": null, "status": "disconnected", "ssid": null, "rssi": 0 }
         }
         """);
@@ -429,7 +429,7 @@ public class ShellyDeviceComponentParsingTests
         device.ParseStatusComponents(json);
 
         // Assert
-        Assert.Equal("192.168.1.50", device.IpAddress);
+        Assert.Equal("192.0.2.50", device.IpAddress);
         Assert.False(device.IsWireless);
         Assert.Null(device.SignalStrength);
     }
@@ -442,7 +442,7 @@ public class ShellyDeviceComponentParsingTests
         var json = JsonSerializer.Deserialize<JsonElement>("""
         {
             "eth": { "ip": null, "ip6": null },
-            "wifi": { "sta_ip": "192.168.1.133", "status": "got ip", "ssid": "MyNetwork", "rssi": -51 }
+            "wifi": { "sta_ip": "192.0.2.133", "status": "got ip", "ssid": "MyNetwork", "rssi": -51 }
         }
         """);
 
@@ -450,7 +450,7 @@ public class ShellyDeviceComponentParsingTests
         device.ParseStatusComponents(json);
 
         // Assert
-        Assert.Equal("192.168.1.133", device.IpAddress);
+        Assert.Equal("192.0.2.133", device.IpAddress);
         Assert.True(device.IsWireless);
         Assert.Equal(-51, device.SignalStrength);
     }
@@ -462,7 +462,7 @@ public class ShellyDeviceComponentParsingTests
         var device = CreateDevice();
         device.ParseStatusComponents(JsonSerializer.Deserialize<JsonElement>("""
         {
-            "wifi": { "sta_ip": "192.168.1.133", "status": "got ip", "ssid": "MyNetwork", "rssi": -51 }
+            "wifi": { "sta_ip": "192.0.2.133", "status": "got ip", "ssid": "MyNetwork", "rssi": -51 }
         }
         """));
 
@@ -474,7 +474,7 @@ public class ShellyDeviceComponentParsingTests
         """), isPartialUpdate: true);
 
         // Assert
-        Assert.Equal("192.168.1.133", device.IpAddress);
+        Assert.Equal("192.0.2.133", device.IpAddress);
         Assert.True(device.IsWireless);
         Assert.Equal(-60, device.SignalStrength);
     }
@@ -486,7 +486,7 @@ public class ShellyDeviceComponentParsingTests
         var device = CreateDevice();
         device.ParseStatusComponents(JsonSerializer.Deserialize<JsonElement>("""
         {
-            "eth": { "ip": "192.168.1.50" },
+            "eth": { "ip": "192.0.2.50" },
             "wifi": { "sta_ip": null, "rssi": 0 }
         }
         """));

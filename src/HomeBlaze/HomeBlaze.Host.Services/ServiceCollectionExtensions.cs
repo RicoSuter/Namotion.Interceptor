@@ -2,6 +2,7 @@ using HomeBlaze.Host.Services.Display;
 using HomeBlaze.Host.Services.Navigation;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Components;
+using HomeBlaze.Services.Discovery;
 using HomeBlaze.Services.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -26,6 +27,9 @@ public static class ServiceCollectionExtensions
         // UI-specific services
         services.AddSingleton<SubjectComponentRegistry>();
         services.TryAddSingleton(TimeProvider.System);
+        // The registry needs the component registry above, which only the host registers.
+        services.AddSingleton<SubjectDiscoveryRegistry>();
+        services.AddSingleton<SubjectDiscoveryService>();
         services.AddSingleton<NavigationItemResolver>();
         services.AddSingleton<MetadataLinkResolver>();
         services.AddScoped<PropertyRowLayoutService>();

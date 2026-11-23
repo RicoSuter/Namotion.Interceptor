@@ -1,11 +1,14 @@
 @using HomeBlaze.Components.Editors
 @using Microsoft.JSInterop
+@using HomeBlaze.Abstractions.Discovery
+@using HomeBlaze.Services.Discovery
 
 @inject SubjectTypeCatalog TypeCatalog
 @inject SubjectFactory SubjectFactory
 @inject RootManager RootManager
 @inject ISnackbar Snackbar
 @inject IJSRuntime JsRuntime
+@inject SubjectDiscoveryService DiscoveryService
 
 @implements IDisposable
 
@@ -16,14 +19,41 @@
         <MudText Typo="Typo.h6" data-testid="create-dialog-title">@GetTitle()</MudText>
     </TitleContent>
     <DialogContent>
-        @* The picker stays in the tree while the configure page is shown, so its search and group survive "Back". *@
+        @* The picker stays in the tree while the configure page is shown, so its search and group survive "Back".
+           The Discover page stays as well, so its results survive "Back". *@
         <div class="subject-setup-picker-page" hidden="@(_selectedType is not null)">
-            <SubjectTypePicker @ref="_typePicker" Types="_types" OnTypeSelected="SelectType" />
+            @if (_isDiscoverAvailable)
+            {
+                <MudToggleGroup T="PickerMode"
+                                Value="_pickerMode"
+                                ValueChanged="OnPickerModeChanged"
+                                SelectionMode="SelectionMode.SingleSelection"
+                                Size="Size.Small"
+                                Class="mb-2 subject-setup-picker-mode-toggle"
+                                data-testid="picker-mode-toggle">
+                    <MudToggleItem Value="PickerMode.Types" Text="All types" data-testid="picker-mode-types" />
+                    <MudToggleItem Value="PickerMode.Discover" Text="Discover" data-testid="picker-mode-discover" />
+                </MudToggleGroup>
+            }
+            <div class="subject-setup-picker-mode" hidden="@(_pickerMode != PickerMode.Types)">
+                <SubjectTypePicker @ref="_typePicker" Types="_types" OnTypeSelected="SelectType" />
+            </div>
+            @if (_isDiscoverAvailable)
+            {
+                <div class="subject-setup-picker-mode" hidden="@(_pickerMode != PickerMode.Discover)">
+                    <SubjectDiscoveryPage @ref="_discoveryPage"
+                                          Types="_types"
+                                          ExistingSubjects="_existingSubjects"
+                                          IsActive="@(_selectedType is null && _pickerMode == PickerMode.Discover)"
+                                          OnSelected="SelectDiscovered"
+                                          OnNavigating="Cancel" />
+                </div>
+            }
         </div>
         @if (_selectedType is not null && _createdSubject is not null)
         {
             <MudStack Spacing="3">
-                @if (Options.NameField is { } nameOptions)
+                @if (_nameOptions is { } nameOptions)
                 {
                     @* The field validates itself after every change and overwrites Error and ErrorText with its own
                        result, so the check must also be its Validation. Error and ErrorText still show the error of
@@ -47,6 +77,7 @@
                                   @ref="_editPanel"
                                   Subject="_createdSubject"
                                   IsCreating="true"
+                                  DiscoveryResult="_discoveredSubject?.Result"
                                   IsValidChanged="OnEditPanelIsValidChanged" />
             </MudStack>
         }
@@ -61,7 +92,7 @@
         }
         <MudButton OnClick="Cancel"
                    Disabled="_isCreating"
-                   data-testid="cancel-button">Cancel</MudButton>
+                   data-testid="cancel-button">@(_hasCreated && _selectedType is null ? "Done" : "Cancel")</MudButton>
         @if (_selectedType is not null)
         {
             @* A validity that changed without any event in the form, such as a delayed validation, is read
@@ -106,6 +137,19 @@
         flex: 1 1 auto;
         min-height: 0;
     }
+
+    /* The toggle group clips its overflow, so as a flex item it would shrink to nothing on a short screen. */
+    .subject-setup-picker-page > .subject-setup-picker-mode-toggle {
+        flex: none;
+    }
+
+    /* :not([hidden]) keeps display: flex from overriding the hidden attribute. */
+    .subject-setup-picker-page > .subject-setup-picker-mode:not([hidden]) {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+    }
 </style>
 
 @code {
@@ -118,6 +162,13 @@
     public SubjectSetupOptions Options { get; set; } = new();
 
     private IReadOnlyList<SubjectTypeDescriptor> _types = [];
+    private IReadOnlyCollection<IInterceptorSubject> _existingSubjects = [];
+    private bool _isDiscoverAvailable;
+    private PickerMode _pickerMode = PickerMode.Types;
+    private DiscoveredSubject? _discoveredSubject;
+    private SubjectDiscoveryPage? _discoveryPage;
+    private SubjectNameOptions? _nameOptions;
+    private bool _hasCreated;
     private SubjectTypePicker? _typePicker;
     private bool _isSearchFocusPending;
     private MudTextField<string>? _nameField;
@@ -139,11 +190,12 @@
 
     protected override void OnInitialized()
     {
-        IEnumerable<IInterceptorSubject> existingSubjects =
-            RootManager.Root?.Context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys
-            ?? Enumerable.Empty<IInterceptorSubject>();
+        // A field of its own, because the names grow with each subject created while the dialog is open, and a
+        // parameter written by the component itself is overwritten when its parent renders.
+        _nameOptions = Options.NameField;
 
-        _types = TypeCatalog.GetCreatableTypes(existingSubjects);
+        LoadTypes();
+        _isDiscoverAvailable = Options.Type is null && DiscoveryService.HasSubjectDiscoveries(_types.Select(descriptor => descriptor.Type).ToArray());
 
         // A normal handler would re-render the dialog, and with it the form, each time the pointer enters the button.
         _refreshEditPanelIsValid = new NonRenderingEventReceiver(RefreshEditPanelIsValidAsync).HandleAsync;
@@ -154,12 +206,34 @@
         }
     }
 
+    private void LoadTypes()
+    {
+        _existingSubjects =
+            RootManager.Root?.Context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys.ToArray()
+            ?? [];
+
+        _types = TypeCatalog.GetCreatableTypes(_existingSubjects);
+    }
+
     private string GetTitle()
     {
         return _selectedType is null ? "Create subject" : $"Create {_selectedType.DisplayName}";
     }
 
     private void SelectType(SubjectTypeDescriptor descriptor)
+    {
+        ShowConfigurePage(descriptor, null);
+    }
+
+    private void SelectDiscovered(DiscoveredSubject discoveredSubject)
+    {
+        if (_types.FirstOrDefault(descriptor => descriptor.Type == discoveredSubject.SubjectType) is { } descriptor)
+        {
+            ShowConfigurePage(descriptor, discoveredSubject);
+        }
+    }
+
+    private void ShowConfigurePage(SubjectTypeDescriptor descriptor, DiscoveredSubject? discoveredSubject)
     {
         DiscardCreatedSubject();
 
@@ -174,26 +248,37 @@
         }
 
         _selectedType = descriptor;
+        _discoveredSubject = discoveredSubject;
         _isEditPanelValid = false;
 
-        if (Options.NameField is { } nameOptions && !_isNameEdited)
+        if (_nameOptions is { } nameOptions && !_isNameEdited)
         {
-            _subjectName = nameOptions.SuggestName(descriptor.Type);
+            _subjectName = discoveredSubject is null
+                ? nameOptions.SuggestName(descriptor.Type)
+                : nameOptions.SuggestName(discoveredSubject.Result.DisplayName, descriptor.Type);
         }
 
         _nameError = ValidateName(_subjectName);
-        _isNameFocusPending = Options.NameField is not null;
+        _isNameFocusPending = _nameOptions is not null;
         RefreshDialog();
     }
 
     private void GoBack()
     {
         DiscardCreatedSubject();
+        ShowPicker();
+    }
+
+    private void ShowPicker()
+    {
         _selectedType = null;
+        _discoveredSubject = null;
         _editPanel = null;
         _isEditPanelValid = false;
         _isNameFocusPending = false;
-        _isSearchFocusPending = _hasFinePointer;
+
+        // Back returns to the page the type was picked on; only the type list has a search to focus.
+        _isSearchFocusPending = _hasFinePointer && _pickerMode == PickerMode.Types;
         RefreshDialog();
     }
 
@@ -203,7 +288,7 @@
         {
             // Focusing a field opens the on-screen keyboard of a touch device, over the list or the form.
             _hasFinePointer = await HasFinePointerAsync();
-            _isSearchFocusPending = _hasFinePointer && _selectedType is null;
+            _isSearchFocusPending = _hasFinePointer && _selectedType is null && _pickerMode == PickerMode.Types;
         }
 
         // The picker is hidden until the render that follows "Back", and a hidden field cannot take the focus.
@@ -256,7 +341,7 @@
 
     private string? ValidateName(string? name)
     {
-        return Options.NameField?.Validate(name);
+        return _nameOptions?.Validate(name);
     }
 
     private void RefreshDialog()
@@ -276,12 +361,13 @@
         // must not swap the subject that is attached and returned.
         var createdSubject = _createdSubject;
         var editPanel = _editPanel;
+        var discoveredSubject = _discoveredSubject;
         if (createdSubject is null || editPanel is null || !CanCreate)
         {
             return;
         }
 
-        var name = Options.NameField is null ? null : _subjectName.Trim();
+        var name = _nameOptions is null ? null : _subjectName.Trim();
 
         // A second click while the awaits below are pending would run BeforeSave again and attach the subject twice.
         _isCreating = true;
@@ -331,8 +417,29 @@
                     }
                 }
 
-                // The caller attaches and stores the subject, which it takes from the result.
+                if (Options.OnCreatedAsync is { } onCreatedAsync)
+                {
+                    try
+                    {
+                        await onCreatedAsync(new CreateSubjectResult(createdSubject, name));
+                    }
+                    catch
+                    {
+                        // As for BeforeSave: a callback that fails halfway may have attached the subject already.
+                        _isCreatedSubjectHandedOver = createdSubject.GetParents().Length > 0;
+                        throw;
+                    }
+                }
+
+                // The caller attaches and stores the subject, which it gets from the result or through OnCreatedAsync.
                 _isCreatedSubjectHandedOver = true;
+
+                // A closed dialog has nothing to return to. ShowAsync requires a name field with OnCreatedAsync.
+                if (Options.OnCreatedAsync is not null && discoveredSubject is not null && !_isDisposed)
+                {
+                    ReturnToDiscoverPage(createdSubject, discoveredSubject, name!);
+                    return;
+                }
             }
 
             MudDialog?.Close(DialogResult.Ok(new CreateSubjectResult(createdSubject, name)));
@@ -350,6 +457,32 @@
                 DiscardCreatedSubject();
             }
         }
+    }
+
+    /// <summary>
+    /// Returns to the Discover page after the subject of a found device was stored, so that the next device can be
+    /// created without a new scan.
+    /// </summary>
+    private void ReturnToDiscoverPage(IInterceptorSubject createdSubject, DiscoveredSubject discoveredSubject, string name)
+    {
+        _hasCreated = true;
+        Snackbar.Add($"Created \"{name}\"", Severity.Success);
+
+        // The existing names are a copy, which does not see the subject that was just stored.
+        if (_nameOptions is { } nameOptions)
+        {
+            _nameOptions = nameOptions with { ExistingNames = [.. nameOptions.ExistingNames, name] };
+        }
+
+        // So that Scan again recognizes the new subject and a single instance type is no longer offered.
+        LoadTypes();
+        _discoveryPage?.MarkAdded(discoveredSubject, createdSubject);
+
+        // The subject was handed over, so unlike Back this must not discard it.
+        _createdSubject = null;
+        _isCreatedSubjectHandedOver = false;
+        _isNameEdited = false;
+        ShowPicker();
     }
 
     private void DiscardCreatedSubject()
@@ -372,6 +505,18 @@
         _isCreatedSubjectHandedOver = false;
     }
 
+    private void OnPickerModeChanged(PickerMode pickerMode)
+    {
+        _pickerMode = pickerMode;
+        _isSearchFocusPending = _hasFinePointer && pickerMode == PickerMode.Types;
+    }
+
+    private enum PickerMode
+    {
+        Types,
+        Discover
+    }
+
     public void Dispose()
     {
         _isDisposed = true;
@@ -383,11 +528,36 @@
     /// </summary>
     /// <param name="dialogService">The dialog service.</param>
     /// <param name="options">The options, or null for a dialog that asks for no name.</param>
-    /// <returns>The created subject and its name, or null if cancelled.</returns>
+    /// <returns>
+    /// The created subject and its name, or null if canceled. Always null when <see cref="SubjectSetupOptions.OnCreatedAsync"/>
+    /// is set, which receives each created subject instead.
+    /// </returns>
+    /// <exception cref="ArgumentException">
+    /// <see cref="SubjectSetupOptions.OnCreatedAsync"/> is set together with <see cref="SubjectSetupOptions.BeforeSave"/>
+    /// or without <see cref="SubjectSetupOptions.NameField"/>.
+    /// </exception>
     public static async Task<CreateSubjectResult?> ShowAsync(
         IDialogService dialogService,
         SubjectSetupOptions? options = null)
     {
+        options ??= new SubjectSetupOptions();
+        if (options.OnCreatedAsync is not null)
+        {
+            if (options.BeforeSave is not null)
+            {
+                throw new ArgumentException(
+                    $"{nameof(SubjectSetupOptions.BeforeSave)} and {nameof(SubjectSetupOptions.OnCreatedAsync)} cannot be set together.",
+                    nameof(options));
+            }
+
+            if (options.NameField is null)
+            {
+                throw new ArgumentException(
+                    $"{nameof(SubjectSetupOptions.OnCreatedAsync)} requires {nameof(SubjectSetupOptions.NameField)}.",
+                    nameof(options));
+            }
+        }
+
         var dialogOptions = new DialogOptions
         {
             MaxWidth = MaxWidth.Medium,
@@ -397,13 +567,13 @@
 
         var parameters = new DialogParameters<SubjectSetupDialog>
         {
-            { setupDialog => setupDialog.Options, options ?? new SubjectSetupOptions() }
+            { setupDialog => setupDialog.Options, options }
         };
 
         var dialog = await dialogService.ShowAsync<SubjectSetupDialog>("Create subject", parameters, dialogOptions);
         var result = await dialog.Result;
 
-        if (result?.Canceled != false)
+        if (result?.Canceled != false || options.OnCreatedAsync is not null)
             return null;
 
         return result.Data as CreateSubjectResult;

@@ -592,6 +592,75 @@ namespace HomeBlaze.Abstractions.Devices.Vehicles
         decimal? OutsideTemperature { get; }
     }
 }
+namespace HomeBlaze.Abstractions.Discovery
+{
+    public sealed class DiscoveredItem : System.IEquatable<HomeBlaze.Abstractions.Discovery.DiscoveredItem>
+    {
+        public DiscoveredItem(string DisplayName, string? Detail) { }
+        public string? Detail { get; init; }
+        public string DisplayName { get; init; }
+        public static System.Collections.Generic.IComparer<HomeBlaze.Abstractions.Discovery.DiscoveredItem> DisplayOrder { get; }
+    }
+    public interface IDiscoveryResult
+    {
+        string? Detail { get; }
+        string DisplayName { get; }
+        System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.DiscoveredItem> IncludedItems { get; }
+        string Key { get; }
+        bool Matches(Namotion.Interceptor.IInterceptorSubject subject);
+    }
+    public interface IDiscoveryResult<in TSubject> : HomeBlaze.Abstractions.Discovery.IDiscoveryResult
+        where in TSubject : Namotion.Interceptor.IInterceptorSubject
+    {
+        bool Matches(TSubject subject);
+    }
+    public interface IMulticastDnsBrowser
+    {
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.MulticastDnsServiceInstance>> BrowseAsync(string serviceType, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface ISsdpSearch
+    {
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.SsdpResponse>> SearchAsync(string searchTarget, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface ISubjectDiscovery
+    {
+        System.Type SubjectType { get; }
+        System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.IDiscoveryResult> DiscoverAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IUdpDiscovery
+    {
+        System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.UdpDatagram> BroadcastAsync(int port, System.ReadOnlyMemory<byte> request, System.TimeSpan window, System.Threading.CancellationToken cancellationToken);
+        System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.UdpDatagram> ListenAsync(int port, System.TimeSpan window, System.Threading.CancellationToken cancellationToken);
+    }
+    public sealed class MulticastDnsServiceInstance : System.IEquatable<HomeBlaze.Abstractions.Discovery.MulticastDnsServiceInstance>
+    {
+        public MulticastDnsServiceInstance(string InstanceName, string? HostName, System.Collections.Generic.IReadOnlyList<System.Net.IPAddress> Addresses, System.Collections.Generic.IReadOnlyDictionary<string, string> Properties) { }
+        public System.Collections.Generic.IReadOnlyList<System.Net.IPAddress> Addresses { get; init; }
+        public string? HostName { get; init; }
+        public string InstanceName { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, string> Properties { get; init; }
+    }
+    public sealed class SsdpResponse : System.IEquatable<HomeBlaze.Abstractions.Discovery.SsdpResponse>
+    {
+        public SsdpResponse(System.Uri Location, string? UniqueServiceName, System.Collections.Generic.IReadOnlyDictionary<string, string> Headers) { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, string> Headers { get; init; }
+        public System.Uri Location { get; init; }
+        public string? UniqueServiceName { get; init; }
+    }
+    public abstract class SubjectDiscovery<TSubject, TResult> : HomeBlaze.Abstractions.Discovery.ISubjectDiscovery
+        where TSubject :  class, Namotion.Interceptor.IInterceptorSubject
+        where TResult :  class, HomeBlaze.Abstractions.Discovery.IDiscoveryResult<TSubject>
+    {
+        protected SubjectDiscovery() { }
+        protected abstract System.Collections.Generic.IAsyncEnumerable<TResult> DiscoverAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    public readonly struct UdpDatagram : System.IEquatable<HomeBlaze.Abstractions.Discovery.UdpDatagram>
+    {
+        public UdpDatagram(System.ReadOnlyMemory<byte> Payload, System.Net.IPAddress SenderAddress) { }
+        public System.ReadOnlyMemory<byte> Payload { get; init; }
+        public System.Net.IPAddress SenderAddress { get; init; }
+    }
+}
 namespace HomeBlaze.Abstractions
 {
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
@@ -987,6 +1056,10 @@ namespace HomeBlaze.Abstractions.Networking
     public interface INetworkHost
     {
         string? HostAddress { get; }
+    }
+    public static class MacAddressComparison
+    {
+        public static bool AreEqual(string? macAddress, string? otherMacAddress) { }
     }
 }
 namespace HomeBlaze.Abstractions.Security

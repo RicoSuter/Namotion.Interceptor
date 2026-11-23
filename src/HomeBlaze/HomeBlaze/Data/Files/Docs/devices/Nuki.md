@@ -15,11 +15,15 @@ The Nuki integration reads and controls Nuki smart locks and Nuki Openers throug
 
 The setup reads the token from the bridge and picks the token mode: `Encrypted` when the bridge accepts it, `Plain` for a software bridge. When it cannot confirm the mode, it shows a warning that says what to check. See [Security](#security).
 
+## Discovery
+
+The Discover page of the create dialog asks the Nuki discovery service, which lists the bridges seen from your public IP address. It only does so when you open the Discover page and on Scan again. When the service cannot be reached, no bridge is listed and the search does not count as failed. A bridge that is already added is recognized by its host address and port.
+
 ## Configuration
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `HostAddress` | string | null | IP address or host name of the bridge with an optional port (8080 by default), for example `192.168.1.50`, `nuki-bridge:8080` or `[fd00::5]:8080` (IPv6 with a port in brackets). An `http://` prefix is allowed, `https://` is not because the bridge offers no HTTPS |
+| `HostAddress` | string | null | IP address or host name of the bridge with an optional port (8080 by default), for example `192.0.2.50`, `nuki-bridge:8080` or `[fd00::5]:8080` (IPv6 with a port in brackets). An `http://` prefix is allowed, `https://` is not because the bridge offers no HTTPS |
 | `Token` | string (secret) | null | API token of the bridge |
 | `TokenMode` | `Encrypted` or `Plain` | `Encrypted` | How requests carry the token, see [Security](#security) |
 | `PollingInterval` | TimeSpan | 10 seconds | How often the device list is read; `Uptime`, the versions and `IsServerConnected` are read every sixth poll. Keep it below 30 seconds to see every ring, see [Opener](#opener) |
@@ -132,7 +136,7 @@ Embed them with a `Widget` block, see [Widget](../administration/widgets/widget.
 ```json
 {
   "$type": "Namotion.Devices.Nuki.NukiBridge",
-  "hostAddress": "192.168.1.50:8080",
+  "hostAddress": "192.0.2.50:8080",
   "token": "your-token",
   "tokenMode": "Encrypted",
   "pollingInterval": "00:00:10",

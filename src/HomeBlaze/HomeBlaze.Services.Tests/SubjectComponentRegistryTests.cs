@@ -1,5 +1,6 @@
 using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Services.Components;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -163,6 +164,28 @@ public class SubjectComponentRegistryTests
         Assert.True(registry.HasComponent(typeof(TestPageSubject), SubjectComponentType.Page));
     }
 
+    [Theory]
+    [InlineData(typeof(TestSetupSubject), true, typeof(TestSetupSetupComponent))]
+    [InlineData(typeof(TestSetupSubject), false, typeof(TestSetupEditComponent))]
+    [InlineData(typeof(TestSubject), true, typeof(TestEditComponent))]
+    [InlineData(typeof(TestSubject), false, typeof(TestEditComponent))]
+    [InlineData(typeof(TestSetupOnlySubject), true, typeof(TestSetupOnlySetupComponent))]
+    [InlineData(typeof(TestSetupOnlySubject), false, null)]
+    [InlineData(typeof(TestPageSubject), true, null)]
+    [InlineData(typeof(TestPageSubject), false, null)]
+    public void WhenEditorComponentIsRequested_ThenSetupIsPreferredOnlyWhenCreating(
+        Type subjectType, bool isCreating, Type? expectedComponentType)
+    {
+        // Arrange
+        var registry = CreateRegistryWithScanning();
+
+        // Act
+        var registration = registry.GetEditorComponent(subjectType, isCreating);
+
+        // Assert
+        Assert.Equal(expectedComponentType, registration?.ComponentType);
+    }
+
     [Fact]
     public void ScanAssemblies_FindsMultipleAttributes()
     {
@@ -178,6 +201,123 @@ public class SubjectComponentRegistryTests
         Assert.NotNull(edit);
         Assert.NotNull(widget1);
         Assert.NotNull(widget2);
+    }
+
+    [Fact]
+    public void WhenAComponentIsAddedAfterTheFirstCall_ThenTheNextCallFindsIt()
+    {
+        // Arrange - the first call caches that there is no component.
+        var typeProvider = new TypeProvider();
+        var registry = new SubjectComponentRegistry(typeProvider);
+        Assert.Null(registry.GetComponent(typeof(TestDerivedSubject), SubjectComponentType.Edit));
+
+        // Act
+        typeProvider.AddTypes([typeof(TestBaseEditComponent)]);
+        var component = registry.GetComponent(typeof(TestDerivedSubject), SubjectComponentType.Edit);
+
+        // Assert
+        Assert.Equal(typeof(TestBaseEditComponent), component?.ComponentType);
+        Assert.Equal(typeof(TestBaseEditComponent), Assert.Single(registry.GetAllComponents()).ComponentType);
+    }
+
+    [Fact]
+    public void WhenTheTypesAreUnchanged_ThenTheSameRegistrationIsReturned()
+    {
+        // Arrange
+        var registry = CreateRegistryWithScanning();
+        var first = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Edit);
+
+        // Act
+        var second = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Edit);
+
+        // Assert
+        Assert.NotNull(first);
+        Assert.Same(first, second);
+    }
+
+    [Fact]
+    public void WhenTypesAreAdded_ThenTheComponentsAreScannedAgain()
+    {
+        // Arrange
+        var typeProvider = new TypeProvider();
+        typeProvider.AddTypes([typeof(TestEditComponent)]);
+        var registry = new SubjectComponentRegistry(typeProvider);
+        var first = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Edit);
+
+        // Act
+        typeProvider.AddTypes([typeof(TestPageComponent)]);
+        var second = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Edit);
+
+        // Assert - an equal registration from a new scan, not the cached one.
+        Assert.Equal(first, second);
+        Assert.NotSame(first, second);
+    }
+
+    [Fact]
+    public async Task WhenTypesAreAddedWhileOtherThreadsRead_ThenNoReaderSeesAComponentDisappearAndAllAreFoundAtTheEnd()
+    {
+        // Arrange
+        const int readerCount = 4;
+        var typeProvider = new TypeProvider();
+        var registry = new SubjectComponentRegistry(typeProvider);
+        Type[] componentTypes =
+        [
+            typeof(TestEditComponent), typeof(TestWidgetComponent), typeof(TestWidget2Component), typeof(TestConfigurableEditComponent),
+            typeof(TestBaseEditComponent), typeof(TestSetupSetupComponent), typeof(TestSetupEditComponent), typeof(TestPageComponent)
+        ];
+        (Type SubjectType, SubjectComponentType Type, string? Name)[] lookups =
+        [
+            (typeof(TestSubject), SubjectComponentType.Edit, null),
+            (typeof(TestSubject), SubjectComponentType.Widget, "status"),
+            (typeof(TestSubject), SubjectComponentType.Widget, "temperature"),
+            (typeof(TestConfigurableSubject), SubjectComponentType.Edit, null),
+            (typeof(TestDerivedSubject), SubjectComponentType.Edit, null),
+            (typeof(TestSetupSubject), SubjectComponentType.Setup, null),
+            (typeof(TestSetupSubject), SubjectComponentType.Edit, null),
+            (typeof(TestPageSubject), SubjectComponentType.Page, null)
+        ];
+
+        var isWriterDone = false;
+        var readersStarted = new CountdownEvent(readerCount);
+        var readers = Enumerable.Range(0, readerCount)
+            .Select(index => DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+            {
+                readersStarted.Signal();
+                var lastFoundCount = 0;
+                bool wasWriterDone;
+                do
+                {
+                    // Read before the pass, so that the last pass runs after every type was added.
+                    wasWriterDone = Volatile.Read(ref isWriterDone);
+                    var foundCount = lookups.Count(lookup => registry.HasComponent(lookup.SubjectType, lookup.Type, lookup.Name));
+                    Assert.True(foundCount >= lastFoundCount);
+                    lastFoundCount = foundCount;
+                }
+                while (!wasWriterDone);
+
+                return lastFoundCount;
+            }, $"component registry reader {index}"))
+            .ToArray();
+
+        // Act
+        try
+        {
+            Assert.True(readersStarted.Wait(TestTimeouts.Default));
+            foreach (var componentType in componentTypes)
+            {
+                typeProvider.AddTypes([componentType]);
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref isWriterDone, true);
+        }
+
+        var foundCounts = await Task.WhenAll(readers).WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.All(foundCounts, foundCount => Assert.Equal(lookups.Length, foundCount));
+        Assert.Equal(componentTypes.Length, registry.GetAllComponents().Count);
     }
 
     // Test fixtures
@@ -205,6 +345,19 @@ public class SubjectComponentRegistryTests
 
     [SubjectComponent(SubjectComponentType.Edit, typeof(TestBaseSubject))]
     public class TestBaseEditComponent { }
+
+    public class TestSetupSubject { }
+
+    [SubjectComponent(SubjectComponentType.Setup, typeof(TestSetupSubject))]
+    public class TestSetupSetupComponent { }
+
+    [SubjectComponent(SubjectComponentType.Edit, typeof(TestSetupSubject))]
+    public class TestSetupEditComponent { }
+
+    public class TestSetupOnlySubject { }
+
+    [SubjectComponent(SubjectComponentType.Setup, typeof(TestSetupOnlySubject))]
+    public class TestSetupOnlySetupComponent { }
 
     public class TestPageSubject { }
 

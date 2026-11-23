@@ -1,0 +1,329 @@
+@using HomeBlaze.Abstractions.Discovery
+@using HomeBlaze.Services.Discovery
+@using HomeBlaze.Services.Navigation
+@using Microsoft.Extensions.Logging
+
+@inject SubjectDiscoveryService DiscoveryService
+@inject SubjectPathResolver PathResolver
+@inject ILogger<SubjectDiscoveryPage> Logger
+
+@implements IDisposable
+
+<div class="subject-discovery-page" data-testid="subject-discovery-page">
+    <div class="subject-discovery-header">
+        <div class="subject-discovery-status" role="status">
+            @if (_isScanning)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                <MudText Typo="Typo.body2" data-testid="discovery-status">Searching your network...</MudText>
+            }
+            else if (_hasScanned)
+            {
+                <MudText Typo="Typo.body2" data-testid="discovery-status">@GetFoundText()</MudText>
+            }
+        </div>
+        <MudSpacer />
+        <MudButton Variant="Variant.Text"
+                   StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="StartScan"
+                   data-testid="discovery-scan-again-button">Scan again</MudButton>
+    </div>
+
+    <div class="subject-type-list">
+        @foreach (var row in _list.Rows)
+        {
+            var result = row.Discovered.Result;
+            var includedItems = result.IncludedItems;
+            var isExpanded = includedItems.Count > 0 && _list.IsExpanded(row);
+            @* The row is a container, because the expander is a button of its own and must not sit inside the select
+               button. *@
+            <div class="subject-discovery-row" @key="(row.Discovered.SubjectType, result.Key)">
+                <div class="subject-discovery-row-line">
+                    @if (row.Discovered.ExistingSubject is { } existingSubject)
+                    {
+                        <div class="subject-type-row subject-discovery-row-existing" aria-disabled="true" data-testid="discovery-row-existing">
+                            <MudIcon Icon="@MudBlazorIconResolver.Resolve(row.Descriptor.IconName)" />
+                            <span class="subject-type-row-text">
+                                <span>@result.DisplayName</span>
+                                <span class="subject-type-row-description">@GetCaption(row), already added</span>
+                            </span>
+                            @if (GetBrowserUrl(existingSubject) is { } url)
+                            {
+                                <MudIconButton Href="@url"
+                                               Icon="@Icons.Material.Filled.OpenInNew"
+                                               Size="Size.Small"
+                                               Class="subject-discovery-row-link"
+                                               aria-label="@($"Open {result.DisplayName}")"
+                                               OnClick="OnNavigating" />
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <button type="button"
+                                class="subject-type-row"
+                                @onclick="() => OnSelected.InvokeAsync(row.Discovered)"
+                                data-testid="discovery-row">
+                            <MudIcon Icon="@MudBlazorIconResolver.Resolve(row.Descriptor.IconName)" />
+                            <span class="subject-type-row-text">
+                                <span>@result.DisplayName</span>
+                                <span class="subject-type-row-description">@GetCaption(row)</span>
+                            </span>
+                        </button>
+                    }
+                    @if (includedItems.Count > 0)
+                    {
+                        <MudIconButton Icon="@(isExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                       Size="Size.Small"
+                                       Class="subject-discovery-row-expander"
+                                       aria-expanded="@(isExpanded ? "true" : "false")"
+                                       aria-label="@SubjectDiscoveryList.GetExpanderLabel(includedItems.Count, isExpanded)"
+                                       OnClick="() => _list.ToggleExpanded(row)"
+                                       data-testid="discovery-row-expander" />
+                    }
+                </div>
+                @if (isExpanded)
+                {
+                    <ul class="subject-discovery-included" data-testid="discovery-included-items">
+                        @foreach (var item in includedItems)
+                        {
+                            <li class="subject-discovery-included-item" data-testid="discovery-included-item">@GetText(item)</li>
+                        }
+                    </ul>
+                }
+            </div>
+        }
+
+        @foreach (var failure in _list.Failures)
+        {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary" data-testid="discovery-failure">@failure</MudText>
+        }
+
+        @if (_hasScanned && !_isScanning && _list.Rows.Count == 0)
+        {
+            <div class="subject-type-empty" role="status" data-testid="discovery-empty-state">
+                <MudText Typo="Typo.body2">No devices found</MudText>
+            </div>
+        }
+
+        @* Inside the scrolling list, so that on a short screen it does not take the space of the rows. *@
+        <MudText Typo="Typo.caption" Class="mud-text-secondary subject-discovery-hint">
+            Missing a device? Pick its type under "All types" and enter its address. In a container on a bridge network,
+            multicast and broadcast do not reach the devices: run HomeBlaze with host networking or add them by address.
+            Battery devices are only found while they are awake. Some device types are found through their maker's
+            online service.
+        </MudText>
+    </div>
+</div>
+
+<style>
+    /* The .subject-type-* styles come from SubjectTypePicker, which stays in the dialog's tree. */
+    .subject-discovery-page {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+        gap: 8px;
+    }
+
+    .subject-discovery-header,
+    .subject-discovery-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .subject-discovery-row {
+        border-top: 1px solid var(--mud-palette-lines-default);
+    }
+
+    .subject-discovery-row-line {
+        display: flex;
+        align-items: center;
+    }
+
+    /* The row carries the border, so the select button and the expander share one line. */
+    .subject-discovery-row-line > .subject-type-row {
+        flex: 1 1 auto;
+        min-width: 0;
+        border-top: 0;
+    }
+
+    .subject-discovery-row-existing {
+        opacity: 0.6;
+        cursor: default;
+    }
+
+    .subject-type-row.subject-discovery-row-existing:hover {
+        background: transparent;
+    }
+
+    .subject-discovery-row-link {
+        margin-left: auto;
+    }
+
+    .subject-discovery-row-expander {
+        flex-shrink: 0;
+        margin-right: 4px;
+    }
+
+    /* Indented to the text of the row: its padding, icon and gap. */
+    .subject-discovery-included {
+        margin: 0;
+        padding: 0 8px 8px 44px;
+        list-style: none;
+        color: var(--mud-palette-text-secondary);
+        font-size: 0.875rem;
+    }
+
+    .subject-discovery-included-item {
+        padding: 2px 0;
+        overflow-wrap: anywhere;
+    }
+
+    .subject-discovery-hint {
+        display: block;
+        padding-top: 12px;
+    }
+</style>
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<SubjectTypeDescriptor> Types { get; set; } = [];
+
+    [Parameter, EditorRequired]
+    public IReadOnlyCollection<IInterceptorSubject> ExistingSubjects { get; set; } = [];
+
+    /// <summary>
+    /// Whether the page is shown. The first time it is, the page starts a scan. A hidden page does not render.
+    /// </summary>
+    [Parameter]
+    public bool IsActive { get; set; }
+
+    [Parameter]
+    public EventCallback<DiscoveredSubject> OnSelected { get; set; }
+
+    /// <summary>
+    /// Raised when the user follows the link to an existing subject, before the browser navigates.
+    /// </summary>
+    [Parameter]
+    public EventCallback OnNavigating { get; set; }
+
+    private readonly SubjectDiscoveryList _list = new();
+    private Dictionary<Type, SubjectTypeDescriptor> _descriptors = [];
+    private IReadOnlyList<SubjectTypeDescriptor>? _describedTypes;
+    private CancellationTokenSource? _scanCancellation;
+    private bool _isScanning;
+    private bool _hasScanned;
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_describedTypes, Types))
+        {
+            _descriptors = Types.ToDictionary(descriptor => descriptor.Type);
+            _describedTypes = Types;
+        }
+
+        if (IsActive && !_hasScanned && !_isScanning)
+        {
+            StartScan();
+        }
+    }
+
+    // The dialog renders on every keystroke of its own fields, also while the page is hidden. Results that arrive
+    // meanwhile are rendered when the page is shown again, as its parameters are set then.
+    protected override bool ShouldRender() => IsActive;
+
+    private void StartScan()
+    {
+        // Canceled but not disposed: the running scan still reads the token after this.
+        _ = _scanCancellation?.CancelAsync();
+        var scanCancellation = new CancellationTokenSource();
+        _scanCancellation = scanCancellation;
+
+        _list.Clear();
+        _isScanning = true;
+        _ = RunScanAsync(scanCancellation.Token);
+    }
+
+    private async Task RunScanAsync(CancellationToken cancellationToken)
+    {
+        var descriptors = _descriptors;
+        try
+        {
+            await DiscoveryService.ScanAsync(
+                descriptors.Keys,
+                ExistingSubjects,
+                discovered => _ = InvokeAsync(() =>
+                {
+                    if (!cancellationToken.IsCancellationRequested && descriptors.TryGetValue(discovered.SubjectType, out var descriptor))
+                    {
+                        _list.Add(discovered, descriptor);
+                        StateHasChanged();
+                    }
+                }),
+                subjectType => _ = InvokeAsync(() =>
+                {
+                    if (!cancellationToken.IsCancellationRequested && descriptors.TryGetValue(subjectType, out var descriptor))
+                    {
+                        _list.AddFailure(descriptor);
+                        StateHasChanged();
+                    }
+                }),
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // A new scan or the disposal of the page took over.
+            return;
+        }
+        catch (Exception exception)
+        {
+            // The page still leaves the scanning state below, so Scan again can retry.
+            Logger.LogError(exception, "The discovery scan failed.");
+        }
+
+        // Posted after every result of the scan, so the dispatcher runs it after them.
+        await InvokeAsync(() =>
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                _isScanning = false;
+                _hasScanned = true;
+                StateHasChanged();
+            }
+        });
+    }
+
+    /// <summary>
+    /// Shows the picked device, and every other found device whose result matches <paramref name="subject"/>, as
+    /// added, with <paramref name="subject"/> as their subject, without a new scan, the next time the page is shown. A
+    /// running scan carries on.
+    /// </summary>
+    internal void MarkAdded(DiscoveredSubject picked, IInterceptorSubject subject)
+    {
+        _list.MarkAdded(picked, subject, Logger);
+    }
+
+    private string GetFoundText()
+    {
+        var count = _list.Rows.Count;
+        return count == 1 ? "Found 1 device" : $"Found {count} devices";
+    }
+
+    private static string GetCaption(SubjectDiscoveryRow row) =>
+        row.Discovered.Result.Detail is { } detail
+            ? $"{row.Descriptor.DisplayName}, {detail}"
+            : row.Descriptor.DisplayName;
+
+    private static string GetText(DiscoveredItem item) =>
+        item.Detail is { } detail ? $"{item.DisplayName}, {detail}" : item.DisplayName;
+
+    private string? GetBrowserUrl(IInterceptorSubject subject) =>
+        PathResolver.GetPath(subject, PathStyle.Route) is { } routePath ? BrowserUrls.FromRoutePath(routePath) : null;
+
+    public void Dispose()
+    {
+        _ = _scanCancellation?.CancelAsync();
+    }
+}

@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Events;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -228,6 +229,28 @@ public partial class SonosSystem : BackgroundService,
         Groups = new Dictionary<string, SonosGroup>(StringComparer.Ordinal);
         Favorites = [];
         Status = ServiceStatus.Stopped;
+    }
+
+    /// <summary>
+    /// Finds a system among <paramref name="subjects"/>, other than <paramref name="system"/>, whose
+    /// <see cref="EventPort"/> is <paramref name="eventPort"/>. Each system binds its event listener on that port, so
+    /// of two systems on one port only the first receives events.
+    /// </summary>
+    /// <param name="subjects">The subjects to search, such as all subjects known to the registry.</param>
+    /// <param name="eventPort">The event port to look for.</param>
+    /// <param name="system">The system the port is for, which is skipped, or null for a new one.</param>
+    /// <returns>The first other system that uses the port, or null.</returns>
+    public static SonosSystem? FindSystemUsingEventPort(IEnumerable<IInterceptorSubject> subjects, int eventPort, SonosSystem? system)
+    {
+        foreach (var subject in subjects)
+        {
+            if (subject is SonosSystem other && !ReferenceEquals(other, system) && other.EventPort == eventPort)
+            {
+                return other;
+            }
+        }
+
+        return null;
     }
 
     [Derived]

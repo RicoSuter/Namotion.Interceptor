@@ -1,9 +1,15 @@
+using System.Net;
+using System.Text;
+using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Devices.Nuki;
 
 namespace HomeBlaze.E2E.Tests.Infrastructure;
 
@@ -66,6 +72,37 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
             provider => new TestTypeRegistration(this, provider.GetRequiredService<TypeProvider>()))));
 
         builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(ServerLog));
+
+        // A scan on the Discover page runs the subject discoveries of the application too, which must not search the
+        // network of the machine, send broadcasts or bind its ports, or tell the Nuki discovery service its public IP
+        // address.
+        builder.ConfigureTestServices(services =>
+        {
+            Replace<ISsdpSearch, EmptySsdpSearch>(services);
+            Replace<IMulticastDnsBrowser, EmptyMulticastDnsBrowser>(services);
+            Replace<IUdpDiscovery, EmptyUdpDiscovery>(services);
+            services.ConfigureHttpClientDefaults(httpClient => httpClient.AddHttpMessageHandler(() => new NukiDiscoveryStub()));
+        });
+    }
+
+    /// <summary>
+    /// Replaces the registration of <typeparamref name="TService"/> with a singleton of
+    /// <typeparamref name="TImplementation"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The host does not register <typeparamref name="TService"/>.</exception>
+    private static void Replace<TService, TImplementation>(IServiceCollection services)
+        where TService : class
+        where TImplementation : class, TService
+    {
+        // A host that stopped registering the service would leave the subject discoveries that need it uncreated in
+        // production, while adding it here kept the tests green.
+        if (!services.Any(descriptor => descriptor.ServiceType == typeof(TService)))
+        {
+            throw new InvalidOperationException($"{typeof(TService)} is not registered by the host");
+        }
+
+        services.RemoveAll<TService>();
+        services.AddSingleton<TService, TImplementation>();
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -86,5 +123,48 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         }
 
         public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class EmptySsdpSearch : ISsdpSearch
+    {
+        public Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<SsdpResponse>>([]);
+    }
+
+    private sealed class EmptyMulticastDnsBrowser : IMulticastDnsBrowser
+    {
+        public Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<MulticastDnsServiceInstance>>([]);
+    }
+
+    private sealed class EmptyUdpDiscovery : IUdpDiscovery
+    {
+        public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken) =>
+            AsyncEnumerable.Empty<UdpDatagram>();
+
+        public IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken) =>
+            AsyncEnumerable.Empty<UdpDatagram>();
+    }
+
+    /// <summary>
+    /// Answers the Nuki discovery service with no bridges and passes every other request on.
+    /// </summary>
+    private sealed class NukiDiscoveryStub : DelegatingHandler
+    {
+        private static readonly string DiscoveryHost = new Uri(NukiBridgeDiscovery.DiscoveryAddress).Host;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (string.Equals(request.RequestUri?.Host, DiscoveryHost, StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    RequestMessage = request,
+                    Content = new StringContent("{\"bridges\":[]}", Encoding.UTF8, "application/json")
+                });
+            }
+
+            return base.SendAsync(request, cancellationToken);
+        }
     }
 }

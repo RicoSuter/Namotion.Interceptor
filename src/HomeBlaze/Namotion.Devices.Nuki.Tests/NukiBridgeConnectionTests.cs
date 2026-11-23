@@ -12,7 +12,7 @@ public class NukiBridgeConnectionTests
 {
     [Theory]
     [InlineData(null, "Host address and token are required.")]
-    [InlineData("user@192.168.1.50", "without a path")]
+    [InlineData("user@192.0.2.50", "without a path")]
     public async Task WhenHostAddressIsMissingOrInvalid_ThenStatusNamesTheProblemAndNothingIsSent(string? hostAddress, string expectedMessage)
     {
         // Arrange
@@ -47,7 +47,7 @@ public class NukiBridgeConnectionTests
         Assert.Equal(TimeSpan.FromSeconds(120), test.Bridge.Uptime);
         Assert.True(test.Bridge.IsServerConnected);
         Assert.Equal("Nuki Bridge (12345678)", test.Bridge.Title);
-        Assert.Equal("192.168.1.50", test.Bridge.IpAddress);
+        Assert.Equal("192.0.2.50", test.Bridge.IpAddress);
         Assert.Equal(1m, test.Bridge.Power);
         Assert.True(test.Lock.IsConnected);
         Assert.True(test.Opener.IsConnected);
@@ -196,15 +196,15 @@ public class NukiBridgeConnectionTests
     }
 
     [Theory]
-    [InlineData("192.168.1.50", "192.168.1.50")]
-    [InlineData("192.168.1.50:8081", "192.168.1.50")]
-    [InlineData("http://192.168.1.50", "192.168.1.50")]
-    [InlineData("https://192.168.1.50", null)]
+    [InlineData("192.0.2.50", "192.0.2.50")]
+    [InlineData("192.0.2.50:8081", "192.0.2.50")]
+    [InlineData("http://192.0.2.50", "192.0.2.50")]
+    [InlineData("https://192.0.2.50", null)]
     [InlineData("HTTP://nuki.local:8081/", "nuki.local")]
     [InlineData("[fe80::1]", "fe80::1")]
     [InlineData("[fe80::1]:8081", "fe80::1")]
     [InlineData("fe80::1", "fe80::1")]
-    [InlineData("192.168.1.50:http", null)]
+    [InlineData("192.0.2.50:http", null)]
     [InlineData(null, null)]
     public void WhenHostAddressIsSet_ThenIpAddressIsTheHostWithoutSchemeBracketsAndPort(string? hostAddress, string? expectedIpAddress)
     {
