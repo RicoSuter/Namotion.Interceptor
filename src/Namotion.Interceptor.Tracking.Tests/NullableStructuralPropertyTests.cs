@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Tests.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests;

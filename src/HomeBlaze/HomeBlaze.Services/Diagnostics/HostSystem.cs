@@ -12,7 +12,8 @@ using DiagnosticsProcess = System.Diagnostics.Process;
 namespace HomeBlaze.Services.Diagnostics;
 
 /// <summary>
-/// The machine HomeBlaze runs on, with the HomeBlaze process as <see cref="Process"/>.
+/// The machine HomeBlaze runs on, with the HomeBlaze process as <see cref="Process"/> and its recent log entries as
+/// <see cref="Logs"/>.
 /// </summary>
 [Category("System")]
 [Description("Reports CPU, memory and uptime of the machine and the process HomeBlaze runs in")]
@@ -111,6 +112,13 @@ public partial class HostSystem : BackgroundService,
     [State(Position = 430)]
     public partial HostProcess Process { get; internal set; }
 
+    /// <summary>
+    /// The recent log entries of the process; its configuration is saved with this subject.
+    /// </summary>
+    [Configuration]
+    [State(Position = 431)]
+    public partial HostLogs Logs { get; internal set; }
+
     [State(IsDiscrete = true)]
     public partial ServiceStatus Status { get; internal set; }
 
@@ -129,12 +137,15 @@ public partial class HostSystem : BackgroundService,
     [Derived]
     public string? IconColor => Status == ServiceStatus.Error ? "Error" : null;
 
-    public HostSystem(ILogger<HostSystem> logger)
-        : this(SystemMetricsReaderFactory.CreateForCurrentPlatform(), HostProcess.CollectAllGarbage, logger)
+    /// <param name="logger">The logger.</param>
+    /// <param name="recentLogStore">The store of recent log entries that <see cref="Logs"/> reports, registered by
+    /// <see cref="ServiceCollectionExtensions.AddHomeBlazeServices"/>; without it <see cref="Logs"/> stays empty.</param>
+    public HostSystem(ILogger<HostSystem> logger, RecentLogStore? recentLogStore = null)
+        : this(SystemMetricsReaderFactory.CreateForCurrentPlatform(), HostProcess.CollectAllGarbage, logger, recentLogStore)
     {
     }
 
-    internal HostSystem(ISystemMetricsReader? reader, Action collectGarbage, ILogger logger)
+    internal HostSystem(ISystemMetricsReader? reader, Action collectGarbage, ILogger logger, RecentLogStore? recentLogStore = null)
     {
         _reader = reader;
         _logger = logger;
@@ -156,14 +167,32 @@ public partial class HostSystem : BackgroundService,
         Uptime = null;
 
         Process = new HostProcess(collectGarbage, RequestPoll);
+        Logs = new HostLogs(recentLogStore ?? new RecentLogStore(), logger);
 
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
         LastUpdated = null;
     }
 
+    // A configuration with "logs": null keeps the current Logs, and a replaced one stops configuring the store.
+    partial void OnLogsChanging(ref HostLogs newValue, ref bool cancel)
+    {
+        if (newValue is null)
+        {
+            cancel = true;
+            return;
+        }
+
+        if (_Logs is { } current && !ReferenceEquals(current, newValue))
+        {
+            current.MarkReplaced();
+        }
+    }
+
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
+        // A reload replaces the nested Logs and applies only this subject.
+        Logs.ApplyConfiguration();
         RequestPoll();
         return Task.CompletedTask;
     }
@@ -172,6 +201,9 @@ public partial class HostSystem : BackgroundService,
     {
         // Detaching a subject only stops it and never disposes it, so the process handle lives in this method.
         using var currentProcess = DiagnosticsProcess.GetCurrentProcess();
+
+        // Loading the configuration from its file does not apply it.
+        Logs.ApplyConfiguration();
 
         _cpuWindow.Reset();
         Process.ResetBaseline();
@@ -228,6 +260,8 @@ public partial class HostSystem : BackgroundService,
         {
             error ??= exception;
         }
+
+        Logs.Update();
 
         if (hasUpdated)
         {

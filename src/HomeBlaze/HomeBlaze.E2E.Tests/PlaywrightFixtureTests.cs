@@ -1,6 +1,9 @@
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -18,6 +21,20 @@ public class PlaywrightFixtureTests
     public PlaywrightFixtureTests(PlaywrightFixture fixture)
     {
         _fixture = fixture;
+    }
+
+    [Fact]
+    public void WhenTheFixtureStartedTheServer_ThenTheBrowserAndTheServicesUseItsOnlyHost()
+    {
+        // Arrange
+        var serverAddress = new Uri(_fixture.ServerAddress);
+
+        // Act
+        var addresses = _fixture.ServerServices.GetRequiredService<IServer>().Features.GetRequiredFeature<IServerAddressesFeature>().Addresses;
+
+        // Assert
+        Assert.Equal(1, _fixture.StartedHostCount);
+        Assert.Contains(addresses, address => new Uri(address) == serverAddress);
     }
 
     [Fact]

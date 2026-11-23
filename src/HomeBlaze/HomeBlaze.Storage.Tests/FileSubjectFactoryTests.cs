@@ -36,6 +36,29 @@ public class FileSubjectFactoryTests
         Assert.DoesNotContain(logger.Levels, level => level >= LogLevel.Warning);
     }
 
+    [Fact]
+    public void WhenAValueOfTheFileCannotBeRead_ThenTheSubjectIsCreatedAndAWarningIsLogged()
+    {
+        // Arrange
+        var logger = new LevelRecordingLogger();
+        using var serviceProvider = new ServiceCollection().BuildServiceProvider();
+        var typeProvider = new TypeProvider();
+        typeProvider.AddTypes([typeof(CallbackSubject)]);
+        var factory = new FileSubjectFactory(
+            new SubjectTypeRegistry(typeProvider),
+            new ConfigurableSubjectSerializer(typeProvider, serviceProvider),
+            serviceProvider,
+            logger);
+        var json = $$"""{ "$type": "{{typeof(CallbackSubject).FullName}}", "name": [1] }""";
+
+        // Act
+        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Callback.json", json);
+
+        // Assert
+        Assert.IsType<CallbackSubject>(subject);
+        Assert.Contains(LogLevel.Warning, logger.Levels);
+    }
+
     private sealed class LevelRecordingLogger : ILogger
     {
         public List<LogLevel> Levels { get; } = [];

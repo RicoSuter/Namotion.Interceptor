@@ -183,7 +183,7 @@ public static class PathExtensions
             return (null, null);
         }
 
-        var result = pathProvider.TryGetPropertyFromPath(registeredSubject, path, includedPropertiesOnly: true, createMissingSubject);
+        var result = pathProvider.TryGetPropertyFromPath(registeredSubject, path, createMissingSubject);
         return result is { } found ? (found.Property, found.Index) : (null, null);
     }
 

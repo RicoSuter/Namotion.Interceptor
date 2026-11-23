@@ -37,12 +37,37 @@ public class MutationCountersTests
     }
 
     [Fact]
-    public void WhenResetCalled_ThenBothCountersReturnToZero()
+    public void WhenFailedCommitsAreCounted_ThenEachKindHasItsOwnCount()
+    {
+        // Arrange
+        var counters = new MutationCounters();
+
+        // Act
+        counters.IncrementCommit();
+        counters.IncrementFailedCommit(CommitFailureKind.Conflict);
+        counters.IncrementFailedCommit(CommitFailureKind.SourceWriteFailure);
+        counters.IncrementFailedCommit(CommitFailureKind.SourceWriteFailure);
+        counters.IncrementFailedCommit(CommitFailureKind.Unexpected);
+
+        // Assert
+        Assert.Equal(1, counters.CommitCount);
+        Assert.Equal(1, counters.ConflictCommitCount);
+        Assert.Equal(2, counters.SourceWriteFailedCommitCount);
+        Assert.Equal(1, counters.UnexpectedFailedCommitCount);
+        Assert.Equal(0, counters.ValueMutationCount);
+    }
+
+    [Fact]
+    public void WhenResetCalled_ThenAllCountersReturnToZero()
     {
         // Arrange
         var counters = new MutationCounters();
         counters.IncrementValue();
         counters.IncrementStructural();
+        counters.IncrementCommit();
+        counters.IncrementFailedCommit(CommitFailureKind.Conflict);
+        counters.IncrementFailedCommit(CommitFailureKind.SourceWriteFailure);
+        counters.IncrementFailedCommit(CommitFailureKind.Unexpected);
 
         // Act
         counters.Reset();
@@ -50,6 +75,10 @@ public class MutationCountersTests
         // Assert
         Assert.Equal(0, counters.ValueMutationCount);
         Assert.Equal(0, counters.StructuralMutationCount);
+        Assert.Equal(0, counters.CommitCount);
+        Assert.Equal(0, counters.ConflictCommitCount);
+        Assert.Equal(0, counters.SourceWriteFailedCommitCount);
+        Assert.Equal(0, counters.UnexpectedFailedCommitCount);
     }
 
     [Fact]

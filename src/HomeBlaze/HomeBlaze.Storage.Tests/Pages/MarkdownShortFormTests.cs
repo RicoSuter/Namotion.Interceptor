@@ -16,7 +16,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// Pages whose blocks have no closing line, loaded with the widget types that ship: such a page must
 /// show what the same page with every closing line shows.
 /// </summary>
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownShortFormTests
 {
     internal const string LayoutWithEveryClosingLine = """

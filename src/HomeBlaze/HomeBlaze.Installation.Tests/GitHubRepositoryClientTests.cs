@@ -21,14 +21,15 @@ public class GitHubRepositoryClientTests
     public async Task WhenTheLatestReleaseIsRead_ThenItIsParsedAndTheRequestIsPolite(string repositoryUrl, string expectedRequestUri)
     {
         // Arrange
-        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson));
+        var answeredAt = new DateTimeOffset(2026, 10, 20, 9, 0, 0, TimeSpan.Zero);
+        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson, answeredAt));
         var client = CreateClient(handler, repositoryUrl);
 
         // Act
         var release = await client.GetLatestReleaseAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(new LatestRelease("0.6.0", new DateTimeOffset(2026, 10, 20, 8, 0, 0, TimeSpan.Zero), new Uri("https://github.com/owner/repo/releases/tag/v0.6.0")), release);
+        Assert.Equal(new LatestRelease("0.6.0", new DateTimeOffset(2026, 10, 20, 8, 0, 0, TimeSpan.Zero), new Uri("https://github.com/owner/repo/releases/tag/v0.6.0"), answeredAt), release);
         var request = Assert.Single(handler.Requests);
         Assert.Equal(expectedRequestUri, request.RequestUri!.ToString());
         Assert.Equal("HomeBlaze/0.5.0", string.Join(' ', request.Headers.GetValues("User-Agent")));

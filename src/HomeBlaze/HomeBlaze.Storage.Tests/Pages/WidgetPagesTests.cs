@@ -15,7 +15,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// Loads the folder of the widget reference with the folder around it as the application does and checks that each
 /// widget page shows what its samples promise, with the two shared sample motors of the folder.
 /// </summary>
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class WidgetPagesTests : IClassFixture<AdministrationFolderFixture>
 {
     private const string PumpPath = "../Pump";

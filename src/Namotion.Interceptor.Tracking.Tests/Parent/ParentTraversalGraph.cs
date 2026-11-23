@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Tracking.Tests.Parent;
@@ -9,12 +10,20 @@ public interface ITraversalMarker;
 public partial class TraversalNode
 {
     public partial IInterceptorSubject? Child { get; set; }
+
+    public partial IInterceptorSubject? SecondChild { get; set; }
+
+    public partial IInterceptorSubject? ThirdChild { get; set; }
 }
 
 [InterceptorSubject]
 public partial class MarkedTraversalNode : ITraversalMarker
 {
     public partial IInterceptorSubject? Child { get; set; }
+
+    public partial IInterceptorSubject? SecondChild { get; set; }
+
+    public partial IInterceptorSubject? ThirdChild { get; set; }
 }
 
 internal static class ParentTraversalGraph
@@ -28,11 +37,11 @@ internal static class ParentTraversalGraph
 
     /// <summary>
     /// Makes <paramref name="parent"/> a parent of <paramref name="child"/>. Two links between the same
-    /// subjects are two parent entries only when their index differs.
+    /// subjects are two parent entries only when their property differs.
     /// </summary>
-    public static void Link(IInterceptorSubject child, IInterceptorSubject parent, object? index = null)
+    public static void Link(IInterceptorSubject child, IInterceptorSubject parent, string propertyName = nameof(TraversalNode.Child))
     {
-        child.AddParent(new PropertyReference(parent, nameof(TraversalNode.Child)), index);
+        child.AddParent(new PropertyReference(parent, propertyName), null);
     }
 
     /// <summary>
@@ -58,6 +67,8 @@ internal static class ParentTraversalGraph
     /// </summary>
     public static Task<ITraversalMarker?> FindMarkerWithinTimeoutAsync(IInterceptorSubject subject)
     {
-        return Task.Run(() => subject.TryGetFirstParent<ITraversalMarker>()).WaitAsync(SearchTimeout);
+        // A dedicated thread, so the timeout measures the search rather than the wait for a starved pool.
+        return DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => subject.TryGetFirstParent<ITraversalMarker>())
+            .WaitAsync(SearchTimeout);
     }
 }

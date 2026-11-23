@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       homeblaze: ${{ github.event_name != 'pull_request' || steps.filter.outputs.homeblaze == 'true' }}
+      automation: ${{ github.event_name != 'pull_request' || steps.filter.outputs.automation == 'true' }}
       nugetplugins: ${{ github.event_name != 'pull_request' || steps.filter.outputs.nugetplugins == 'true' }}
       opcua: ${{ github.event_name != 'pull_request' || steps.filter.outputs.opcua == 'true' }}
       websocket: ${{ github.event_name != 'pull_request' || steps.filter.outputs.websocket == 'true' }}
@@ -56,10 +57,23 @@ jobs:
             homeblaze:
               - 'src/HomeBlaze/**'
               - 'src/Namotion.Interceptor.Expressions/**'
-              - 'src/Directory.Packages.props'
-              - 'src/Directory.Build.props'
-              - 'src/Directory.Build.targets'
-              - '.github/workflows/build.yml'
+              - &build-files
+                - 'src/Directory.Packages.props'
+                - 'src/Directory.Build.props'
+                - 'src/Directory.Build.targets'
+                - 'nuget.config'
+                - '.github/workflows/build.yml'
+            # Everything HomeBlaze.Automation.Tests builds from.
+            automation:
+              - *shared
+              - *build-files
+              - 'src/Namotion.Interceptor.Expressions/**'
+              - 'src/HomeBlaze/HomeBlaze.Automation/**'
+              - 'src/HomeBlaze/HomeBlaze.Automation.Tests/**'
+              - 'src/HomeBlaze/HomeBlaze.Services/**'
+              - 'src/HomeBlaze/HomeBlaze.*Abstractions/**'
+              - 'src/HomeBlaze/Directory.Build.props'
+              - 'src/.editorconfig'
             nugetplugins:
               - 'src/HomeBlaze/Namotion.NuGet.Plugins/**'
               - 'src/HomeBlaze/Namotion.NuGet.Plugins.Tests/**'
@@ -83,8 +97,12 @@ jobs:
               - 'src/HomeBlaze/Namotion.Devices.Luxtronik*/**'
 
   test:
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
 
@@ -98,15 +116,43 @@ jobs:
 
       - name: Run tests (excluding integration tests)
         run: |
+          $coverageArguments = @()
+          if ('${{ runner.os }}' -eq 'Linux') {
+            $coverageArguments = @('--collect:XPlat Code Coverage', '--', 'DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura')
+          }
           dotnet test src/Namotion.Interceptor.slnx `
             --configuration Release `
             --no-build `
             --filter "Category!=Integration" `
+            --logger trx `
             --results-directory ./TestResults `
-            --collect:"XPlat Code Coverage" `
-            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+            --blame-hang-timeout 5m `
+            --blame-hang-dump-type mini `
+            @coverageArguments
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ matrix.os }}
+          path: 'TestResults/**/*.trx'
+          if-no-files-found: warn
+
+      # A test that hangs for 5 minutes is dumped and named in the log, and the dump says where it waits. A job that hits its
+      # time limit while dumping counts as canceled, not failed.
+      - name: Upload hang dumps
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hang-dumps-${{ matrix.os }}
+          path: |
+            TestResults/**/*.dmp
+            TestResults/**/Sequence_*.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload raw coverage file
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
           name: cobertura-coverage
@@ -114,9 +160,11 @@ jobs:
           if-no-files-found: error
 
       - name: Install ReportGenerator
+        if: runner.os == 'Linux'
         run: dotnet tool install --global dotnet-reportgenerator-globaltool
 
       - name: Generate HTML coverage report
+        if: runner.os == 'Linux'
         run: |
           reportgenerator `
             -reports:"**/TestResults/**/coverage.cobertura.xml" `
@@ -124,6 +172,7 @@ jobs:
             -reporttypes:Html
 
       - name: Upload HTML coverage report
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
           name: html-coverage-report
@@ -188,6 +237,8 @@ jobs:
             --no-build `
             --filter "${{ steps.shard.outputs.filter }}" `
             --results-directory ./TestResults `
+            --blame-hang-timeout 5m `
+            --blame-hang-dump-type mini `
             --collect:"XPlat Code Coverage" `
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
@@ -195,6 +246,50 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: cobertura-coverage-homeblaze-integration-${{ strategy.job-index }}
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: warn
+
+      - name: Upload HomeBlaze integration hang dumps
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hang-dumps-homeblaze-integration-${{ strategy.job-index }}
+          path: |
+            TestResults/**/*.dmp
+            TestResults/**/Sequence_*.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  test-automation-integration:
+    timeout-minutes: 40
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.automation == 'true'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build
+        run: dotnet build src/HomeBlaze/HomeBlaze.Automation.Tests --configuration Release
+
+      - name: Run automation integration tests
+        run: |
+          dotnet test src/HomeBlaze/HomeBlaze.Automation.Tests `
+            --configuration Release `
+            --no-build `
+            --filter "Category=Integration" `
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+      - name: Upload automation integration test coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: cobertura-coverage-automation-integration
           path: '**/TestResults/**/coverage.cobertura.xml'
           if-no-files-found: warn
 
@@ -446,7 +541,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Could not read deps.json from the container" }
           if (-not ($deps -match '"Namotion.Interceptor/9\.9\.9"')) { throw "deps.json does not report the library package version" }
           if (-not ($deps -match '"HomeBlaze.Abstractions/1\.0\.0"')) { throw "deps.json does not report the pinned HomeBlaze version" }
-          foreach ($path in @("Root.json", "Files/Plugins.json", "Files/Servers/SqliteHistory.json", "Files/Docs")) {
+          foreach ($path in @("Root.json", "Files/Plugins.json", "Files/Services/SqliteHistory.json", "Files/Docs")) {
             if (-not (Test-Path (Join-Path $data.FullName $path))) { throw "Missing seeded path $path" }
           }
           $historyCreated = $false
@@ -479,6 +574,20 @@ jobs:
             -p:ContainerRuntimeIdentifiers= -p:ContainerImageTag=smoke-arm64 `
             -p:ContainerArchiveOutputPath=${{ runner.temp }}/homeblaze-arm64.tar.gz
 
+  # The one check that the branch rules require. A skipped job passes it, because a job is skipped when its files did not
+  # change, and a skipped matrix job reports under another name than one that runs, so a rule cannot name those jobs.
+  ci:
+    timeout-minutes: 5
+    if: always()
+    needs: [ changes, test, test-homeblaze-integration, test-automation-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration, container-build ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail when a needed job failed or was canceled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          Write-Output '${{ toJSON(needs) }}'
+          exit 1
+
   container-publish:
     timeout-minutes: 30
     # Forks cannot push to this package.
@@ -488,7 +597,7 @@ jobs:
     concurrency:
       group: container-publish-${{ github.ref }}
       cancel-in-progress: false
-    needs: [ container-build, test, test-homeblaze-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration ]
+    needs: [ container-build, test, test-homeblaze-integration, test-automation-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration ]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -642,7 +751,7 @@ jobs:
             -p:SourceCommitDate=${{ steps.build.outputs.SOURCE_COMMIT_DATE }} `
             -p:ContinuousIntegrationBuild=true
 
-      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --no-build --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }}
+      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --no-build --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }} -p:BuildTag=${{ github.event.release.tag_name }}
 
       - name: Remove non-library packages
         run: Get-ChildItem "${{ env.NUGET_DIRECTORY }}" -Include *.nupkg -Recurse | Where-Object { $_.Name -notlike "Namotion.Interceptor*" } | Remove-Item -Force
@@ -674,13 +783,16 @@ jobs:
         run: dotnet tool update Meziantou.Framework.NuGetPackageValidation.Tool --global --version 1.0.46
 
       - name: Validate package
-        run: meziantou.validate-nuget-package --excluded-rules IconMustBeSet,ReadmeMustBeSet,Symbols,ProjectUrlMustBeSet (Get-ChildItem "${{ env.NUGET_DIRECTORY }}/*.nupkg")
+        run: meziantou.validate-nuget-package --excluded-rules Symbols,ProjectUrlMustBeSet (Get-ChildItem "${{ env.NUGET_DIRECTORY }}/*.nupkg")
 
   deploy:
     timeout-minutes: 15
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
-    needs: [ validate, test, test-homeblaze-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration ]
+    needs: [ validate, test, test-homeblaze-integration, test-automation-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration ]
+    permissions:
+      contents: read
+      id-token: write # Required for NuGet trusted publishing (OIDC token exchange)
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -692,11 +804,19 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      # Exchange the GitHub OIDC token for a short-lived (1 hour) NuGet API key via trusted publishing.
+      # Requires a matching trusted publishing policy on nuget.org (repository, workflow file build.yml).
+      - name: NuGet login
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: ${{ secrets.NUGET_USER }} # nuget.org profile name, not the email address
+
       # Publish all NuGet packages to NuGet.org
       # Use --skip-duplicate to prevent errors if a package with the same version already exists.
       # If you retry a failed workflow, already published packages will be skipped without error.
       - name: Publish NuGet package
         run: |
           foreach($file in (Get-ChildItem "${{ env.NUGET_DIRECTORY }}" -Recurse -Include *.nupkg)) {
-              dotnet nuget push $file --api-key "${{ secrets.NUGET_APIKEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+              dotnet nuget push $file --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
           }

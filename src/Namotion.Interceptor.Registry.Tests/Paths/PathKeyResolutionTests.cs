@@ -55,7 +55,7 @@ public class PathKeyResolutionTests
     [InlineData("ById[0f8fad5b-d9cb-469f-a165-70867728950e]", true)]
     [InlineData("ById[0F8FAD5B-D9CB-469F-A165-70867728950E]", false)]
     [InlineData("ById[0f8fad5bd9cb469fa16570867728950e]", false)]
-    public void WhenTypedKeyIsResolved_ThenOnlyTheWrittenFormResolves(string path, bool expectedResolved)
+    public void WhenTypedKeyIsResolved_ThenOnlyTheBuiltFormResolves(string path, bool expectedResolved)
     {
         // Arrange
         var context = CreateContext();
@@ -104,7 +104,7 @@ public class PathKeyResolutionTests
     }
 
     [Fact]
-    public void WhenFlagsKeyIsWritten_ThenPathRoundTrips()
+    public void WhenFlagsKeyIsBuilt_ThenPathRoundTrips()
     {
         // Arrange
         var context = CreateContext();
@@ -123,7 +123,7 @@ public class PathKeyResolutionTests
     }
 
     [Fact]
-    public void WhenGuidAndEnumKeysAreWritten_ThenPathsResolveBackToTheSameItems()
+    public void WhenGuidAndEnumKeysAreBuilt_ThenPathsResolveBackToTheSameItems()
     {
         // Arrange
         var context = CreateContext();
@@ -164,7 +164,7 @@ public class PathKeyResolutionTests
     }
 
     [Fact]
-    public void WhenObjectKeyedDictionaryHasMixedKeys_ThenEveryWrittenPathResolvesBack()
+    public void WhenObjectKeyedDictionaryHasMixedKeys_ThenEveryBuiltPathResolvesBack()
     {
         // Arrange
         var context = CreateContext();
@@ -188,7 +188,7 @@ public class PathKeyResolutionTests
     }
 
     [Fact]
-    public void WhenDoubleKeyIsWrittenUnderGermanCulture_ThenPathIsInvariantAndResolvesBack()
+    public void WhenDoubleKeyIsBuiltUnderGermanCulture_ThenPathIsInvariantAndResolvesBack()
     {
         // Arrange
         var originalCulture = CultureInfo.CurrentCulture;
@@ -267,13 +267,70 @@ public class PathKeyResolutionTests
     }
 
     [Theory]
+    [InlineData("Items[absent]")]
+    [InlineData("Items[1]")] // looked up as the string key "1", which is absent
+    public void WhenPropertyHoldsImmutableDictionaryAndKeyIsAbsent_ThenSubjectPathResolvesToNull(string path)
+    {
+        // Arrange
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "hello" };
+        var container = new TestBroadContainer(context) { Name = "Root" };
+        container.Items = new Dictionary<string, TestItem> { ["key1"] = item }.ToImmutableDictionary();
+        var pathProvider = DefaultPathProvider.Instance;
+        var rootRegistered = container.TryGetRegisteredSubject()!;
+
+        // Act
+        var result = pathProvider.TryGetSubjectFromPath(rootRegistered, path);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenPropertyHoldsImmutableDictionaryAndIntermediateKeyIsAbsent_ThenPropertyPathResolvesToNull()
+    {
+        // Arrange
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "hello" };
+        var container = new TestBroadContainer(context) { Name = "Root" };
+        container.Items = new Dictionary<string, TestItem> { ["key1"] = item }.ToImmutableDictionary();
+        var pathProvider = DefaultPathProvider.Instance;
+        var rootRegistered = container.TryGetRegisteredSubject()!;
+
+        // Act
+        var result = pathProvider.TryGetPropertyFromPath(rootRegistered, "Items[absent].Value");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenPropertyHoldsImmutableDictionaryAndKeyExists_ThenSubjectPathResolves()
+    {
+        // Arrange
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "hello" };
+        var container = new TestBroadContainer(context) { Name = "Root" };
+        container.Items = new Dictionary<string, TestItem> { ["key1"] = item }.ToImmutableDictionary();
+        var pathProvider = DefaultPathProvider.Instance;
+        var rootRegistered = container.TryGetRegisteredSubject()!;
+
+        // Act
+        var result = pathProvider.TryGetSubjectFromPath(rootRegistered, "Items[key1]");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Same(item, result.Subject);
+    }
+
+    [Theory]
     [InlineData("Sensor [Kitchen]", "Items['Sensor [Kitchen]'].Value")]
     [InlineData("'quoted", "Items['''quoted'].Value")]
     [InlineData("", "Items[''].Value")]
     [InlineData("Bob's", "Items[Bob's].Value")]
     [InlineData("a.b", "Items[a.b].Value")]
     [InlineData("a[b", "Items[a[b].Value")]
-    public void WhenStringKeyIsWritten_ThenPathIsQuotedWhereNeededAndResolvesBack(string key, string expectedPath)
+    public void WhenStringKeyIsBuilt_ThenPathIsQuotedWhereNeededAndResolvesBack(string key, string expectedPath)
     {
         // Arrange
         var context = CreateContext();

@@ -1,4 +1,4 @@
-using FluentStorage.Blobs;
+using FluentStorage.Storage;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
@@ -9,7 +9,7 @@ namespace HomeBlaze.Storage.Tests;
 public class StorageTimeoutTests : StorageTestBase
 {
     private readonly ManualTimeProvider _timeProvider = new();
-    private PausableBlobStorage? _client;
+    private PausableStore? _client;
     private int _idleTimerCount;
 
     [Fact]
@@ -19,7 +19,7 @@ public class StorageTimeoutTests : StorageTestBase
         WriteFile("Home.md");
         var storage = await ConnectPausableAsync();
         WriteFile("Added.md");
-        var listingReached = _client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var listingReached = _client!.PauseNext(nameof(IStore.ListObjects));
         var pass = storage.ReconcileAsync();
         await listingReached;
 
@@ -46,7 +46,7 @@ public class StorageTimeoutTests : StorageTestBase
         var gate = GatedFile.PauseNextLoad();
         var pass = storage.ReconcileAsync();
         await gate.WhenReachedAsync();
-        var readReached = _client!.PauseNext(nameof(IBlobStorage.OpenReadAsync));
+        var readReached = _client!.PauseNext(nameof(IStore.OpenRead));
         gate.Release();
         await readReached;
 
@@ -73,7 +73,7 @@ public class StorageTimeoutTests : StorageTestBase
         var gate = GatedFile.PauseNextLoad();
         var pass = storage.ReconcileAsync();
         await gate.WhenReachedAsync();
-        var readReached = _client!.PauseNext(nameof(IBlobStorage.OpenReadAsync));
+        var readReached = _client!.PauseNext(nameof(IStore.OpenRead));
         gate.Release();
         await readReached;
 
@@ -99,7 +99,7 @@ public class StorageTimeoutTests : StorageTestBase
         var storage = await ConnectPausableAsync();
         var file = (GatedFile)storage.Children["Data.gated"];
         ChangeContentOnly("Data.gated", "other");
-        var listingReached = _client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var listingReached = _client!.PauseNext(nameof(IStore.ListObjects));
         var pass = storage.ReconcileAsync(Named("Data.gated"));
         await listingReached;
 
@@ -124,7 +124,7 @@ public class StorageTimeoutTests : StorageTestBase
         var second = (GatedFile)storage.Children["Second.gated"];
         ChangeContentOnly("First.gated", "other");
         ChangeContentOnly("Second.gated", "other");
-        var listingReached = _client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var listingReached = _client!.PauseNext(nameof(IStore.ListObjects));
         var pass = storage.ReconcileAsync(Named("First.gated"));
         await listingReached;
 
@@ -147,7 +147,7 @@ public class StorageTimeoutTests : StorageTestBase
         var storage = await ConnectPausableAsync();
         var file = (GatedFile)storage.Children["Data.gated"];
         ChangeContentOnly("Data.gated", "other");
-        var listingReached = _client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var listingReached = _client!.PauseNext(nameof(IStore.ListObjects));
         var pass = storage.ReconcileAsync(allNamed: true);
         await listingReached;
 
@@ -202,13 +202,13 @@ public class StorageTimeoutTests : StorageTestBase
         WriteFile("Second.md");
         WriteFile("Motor.json", SerializeMotor("Pump"));
         var storage = await ConnectPausableAsync();
-        var listingReached = _client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var listingReached = _client!.PauseNext(nameof(IStore.ListObjects));
         var pass = storage.ReconcileAsync();
         await listingReached;
         _client.FailHangingCall(new IOException("The share did not answer."));
         await pass;
         var statusAfterFailedPass = storage.Status;
-        var openCountBeforeNextPass = _client.GetCallCount(nameof(IBlobStorage.OpenReadAsync));
+        var openCountBeforeNextPass = _client.GetCallCount(nameof(IStore.OpenRead));
 
         // Act
         await storage.ReconcileAsync();
@@ -216,7 +216,7 @@ public class StorageTimeoutTests : StorageTestBase
         // Assert
         Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
         Assert.Equal(StorageStatus.Connected, storage.Status);
-        Assert.Equal(openCountBeforeNextPass, _client.GetCallCount(nameof(IBlobStorage.OpenReadAsync)));
+        Assert.Equal(openCountBeforeNextPass, _client.GetCallCount(nameof(IStore.OpenRead)));
     }
 
     [Fact]
@@ -234,8 +234,8 @@ public class StorageTimeoutTests : StorageTestBase
         nested.ClientDecorator = client =>
         {
             nestedConnectCount++;
-            var nestedClient = new PausableBlobStorage(client);
-            nestedListingReached = nestedClient.PauseNext(nameof(IBlobStorage.ListAsync));
+            var nestedClient = new PausableStore(client);
+            nestedListingReached = nestedClient.PauseNext(nameof(IStore.ListObjects));
             return nestedClient;
         };
 
@@ -273,7 +273,7 @@ public class StorageTimeoutTests : StorageTestBase
     {
         // Arrange
         var storage = await ConnectPausableAsync();
-        var existsReached = _client!.BlockNext(nameof(IBlobStorage.ExistsAsync));
+        var existsReached = _client!.BlockNext(nameof(IStore.ObjectExists));
         var add = storage.AddSubjectAsync("Motor.json", CreateMotor(), CancellationToken.None);
         await existsReached;
 
@@ -302,7 +302,7 @@ public class StorageTimeoutTests : StorageTestBase
         var gate = GatedFile.PauseNextLoad();
         var pass = storage.ReconcileAsync();
         await gate.WhenReachedAsync();
-        var readReached = _client!.PauseNext(nameof(IBlobStorage.OpenReadAsync));
+        var readReached = _client!.PauseNext(nameof(IStore.OpenRead));
         gate.Release();
         await readReached;
 
@@ -335,7 +335,7 @@ public class StorageTimeoutTests : StorageTestBase
         var gate = GatedFile.PauseNextLoad();
         var pass = storage.ReconcileAsync();
         await gate.WhenReachedAsync();
-        var readReached = _client!.PauseNext(nameof(IBlobStorage.OpenReadAsync));
+        var readReached = _client!.PauseNext(nameof(IStore.OpenRead));
         gate.Release();
         await readReached;
         await LetHangingCallTimeOutAsync();
@@ -357,10 +357,10 @@ public class StorageTimeoutTests : StorageTestBase
     public async Task WhenMarkdownFileIsLoadedAndReloaded_ThenLoadAsksStorageForNoMetadata()
     {
         // Arrange
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         WriteFile("Page.md", "first");
-        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableBlobStorage(inner));
-        var callCountOfFirstPass = client!.GetCallCount(nameof(IBlobStorage.GetBlobsAsync));
+        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner));
+        var callCountOfFirstPass = client!.GetCallCount(nameof(IStore.GetObjectInfo));
 
         // Act
         WriteFile("Page.md", "second, with another size");
@@ -369,7 +369,7 @@ public class StorageTimeoutTests : StorageTestBase
         // Assert
         Assert.Equal("second, with another size", Assert.IsType<MarkdownFile>(storage.Children["Page.md"]).Content);
         Assert.Equal(0, callCountOfFirstPass);
-        Assert.Equal(0, client.GetCallCount(nameof(IBlobStorage.GetBlobsAsync)));
+        Assert.Equal(0, client.GetCallCount(nameof(IStore.GetObjectInfo)));
     }
 
     [Fact]
@@ -408,7 +408,7 @@ public class StorageTimeoutTests : StorageTestBase
         var storage = await ConnectPausableAsync();
         WriteFile("First.json", SerializeMotor("First"));
         WriteFile("Second.json", SerializeMotor("Second"));
-        var readReached = _client!.PauseNext(PausableBlobStorage.ReadOperation);
+        var readReached = _client!.PauseNext(PausableStore.ReadOperation);
         var pass = storage.ReconcileAsync();
         await readReached;
 
@@ -436,7 +436,7 @@ public class StorageTimeoutTests : StorageTestBase
         var storage = await ConnectPausableAsync();
         WriteFile("First.gated");
         WriteFile("Second.gated");
-        var readReached = _client!.PauseNext(PausableBlobStorage.ReadOperation);
+        var readReached = _client!.PauseNext(PausableStore.ReadOperation);
         var pass = storage.ReconcileAsync();
         await readReached;
 
@@ -464,7 +464,7 @@ public class StorageTimeoutTests : StorageTestBase
         var file = (GatedFile)storage.Children["Data.gated"];
         WriteFile("Data.gated", "second version");
         WriteFile("Other.md");
-        var readReached = _client!.PauseNext(PausableBlobStorage.ReadOperation);
+        var readReached = _client!.PauseNext(PausableStore.ReadOperation);
         var pass = storage.ReconcileAsync();
         await readReached;
 
@@ -492,7 +492,7 @@ public class StorageTimeoutTests : StorageTestBase
         WriteFile("Notes.md", "first");
         var storage = await ConnectPausableAsync();
         var content = new MemoryStream("second version"u8.ToArray());
-        var writeReached = _client!.PauseNext(nameof(IBlobStorage.WriteAsync));
+        var writeReached = _client!.PauseNext(nameof(IStore.SetObject));
         var write = storage.WriteBlobAsync("Notes.md", content, CancellationToken.None);
         await writeReached;
 
@@ -514,7 +514,7 @@ public class StorageTimeoutTests : StorageTestBase
     {
         // Arrange: neither a file watcher nor a periodic pass.
         var storage = await ConnectPausableAsync(reconcileIntervalSeconds: 0);
-        var writeReached = _client!.PauseNext(nameof(IBlobStorage.WriteAsync));
+        var writeReached = _client!.PauseNext(nameof(IStore.SetObject));
         var add = storage.AddSubjectAsync("Motor.json", CreateMotor("Pump"), CancellationToken.None);
         await writeReached;
         await LetHangingCallTimeOutAsync();
@@ -541,7 +541,7 @@ public class StorageTimeoutTests : StorageTestBase
         // Arrange: neither a file watcher nor a periodic pass.
         WriteFile("Motor.json", SerializeMotor("Pump"));
         var storage = await ConnectPausableAsync(reconcileIntervalSeconds: 0);
-        var deleteReached = _client!.PauseNext(nameof(IBlobStorage.DeleteAsync));
+        var deleteReached = _client!.PauseNext(nameof(IStore.DeleteObject));
         var delete = storage.DeleteBlobAsync("Motor.json", CancellationToken.None);
         await deleteReached;
         await LetHangingCallTimeOutAsync();
@@ -567,7 +567,7 @@ public class StorageTimeoutTests : StorageTestBase
         // Arrange
         var storage = await ConnectPausableAsync();
         var motor = CreateMotor("Pump");
-        var versionReached = _client!.PauseNext(nameof(IBlobStorage.GetBlobsAsync));
+        var versionReached = _client!.PauseNext(nameof(IStore.GetObjectInfo));
         var add = storage.AddSubjectAsync("Motor.json", motor, CancellationToken.None);
         await versionReached;
 
@@ -591,7 +591,7 @@ public class StorageTimeoutTests : StorageTestBase
     {
         // Arrange: without a periodic pass, so that only file events start one.
         var storage = await ConnectPausableAsync(enableFileWatching: true, reconcileIntervalSeconds: 0);
-        var listingReached = _client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var listingReached = _client!.PauseNext(nameof(IStore.ListObjects));
         WriteFile("First.md");
         await AsyncTestHelpers.WaitUntilAsync(() => _timeProvider.ArmedTimerCount == 1, WatcherTimeout);
         _timeProvider.Advance(ReconcileTrigger.MaximumDelay);
@@ -629,7 +629,7 @@ public class StorageTimeoutTests : StorageTestBase
         {
             container.TimeProvider = _timeProvider;
             container.ReconcileIntervalSeconds = reconcileIntervalSeconds;
-            container.ClientDecorator = client => _client = new PausableBlobStorage(client);
+            container.ClientDecorator = client => _client = new PausableStore(client);
         });
 
         _idleTimerCount = _timeProvider.ArmedTimerCount;

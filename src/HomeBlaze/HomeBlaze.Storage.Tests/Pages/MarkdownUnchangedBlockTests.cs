@@ -8,7 +8,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// A reload keeps a block whose text did not change since it was last applied in full, with the subjects of the
 /// blocks inside it, and gives them to the blocks of the new parse.
 /// </summary>
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownUnchangedBlockTests
 {
     private const string CallbackType = $"{Namespace}.TestCallback";

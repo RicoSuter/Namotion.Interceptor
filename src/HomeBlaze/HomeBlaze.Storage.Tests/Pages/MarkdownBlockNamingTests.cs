@@ -12,14 +12,13 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// The configuration of a block is named by the property names of its type: on the head line, in the json
 /// block at every depth, and in what is written back.
 /// </summary>
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownBlockNamingTests
 {
     private const string PanelType = $"{Namespace}.TestPanel";
     private const string ShelfType = $"{Namespace}.TestShelf";
     private const string WidgetType = "HomeBlaze.Components.Widget";
 
-    private const string ShelfPage = $$"""
+    private static readonly string ShelfPage = $$"""
         :: {{ShelfType}}#shelf Rows=1 Columns=2
         ```json
         {
@@ -38,7 +37,7 @@ public class MarkdownBlockNamingTests
         }
         ```
         ::
-        """;
+        """.ReplaceLineEndings("\n");
 
     private static Task<MarkdownPageFixture> CreateFixtureWithComponentsAsync() =>
         MarkdownPageFixture.CreateAsync(services =>

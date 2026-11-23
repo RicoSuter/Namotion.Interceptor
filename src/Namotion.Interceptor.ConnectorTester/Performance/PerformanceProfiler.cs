@@ -181,7 +181,9 @@ public class PerformanceProfiler : IHostedService, IDisposable
     {
         using var process = Process.GetCurrentProcess();
         var workingSetMb = process.WorkingSet64 / (1024.0 * 1024.0);
-        var heapMb = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
+        // Not GC.GetTotalMemory, see HeapSampler.
+        var gcInfo = GC.GetGCMemoryInfo(GCKind.Any);
+        var heapMb = (gcInfo.HeapSizeBytes - gcInfo.FragmentedBytes) / (1024.0 * 1024.0);
         var now = DateTimeOffset.UtcNow;
         var elapsedSec = Math.Max(1.0, Math.Round((now - windowStart).TotalSeconds, 0));
         var allocatedDelta = Math.Max(0, GC.GetTotalAllocatedBytes(precise: true) - windowStartAllocatedBytes);

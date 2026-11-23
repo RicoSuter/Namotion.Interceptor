@@ -1,3 +1,4 @@
+using FluentStorage.Storage;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
@@ -311,6 +312,35 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Equal("# Heading", ReadFile("Notes.md"));
     }
 
+    [Theory]
+    [InlineData("\n", "\n", true)]
+    [InlineData("\r\n", "\r\n", true)]
+    [InlineData("\n", "\r\n", false)]
+    [InlineData("\r\n", "\n", false)]
+    public async Task WhenReplacingMultilineText_ThenOnlyExactLineEndingsMatch(
+        string lineEnding, string passageLineEnding, bool matches)
+    {
+        // Arrange
+        var content = $"# Notes{lineEnding}{lineEnding}First line{lineEnding}second line.{lineEnding}";
+        WriteFile("Notes.md", content);
+        var storage = await ConnectAsync();
+        var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        var passage = $"First line{passageLineEnding}second line.";
+
+        // Act & Assert
+        if (matches)
+        {
+            await markdown.ReplaceTextAsync(passage, "Changed.", CancellationToken.None);
+            Assert.Equal($"# Notes{lineEnding}{lineEnding}Changed.{lineEnding}", ReadFile("Notes.md"));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<ArgumentException>(
+                () => markdown.ReplaceTextAsync(passage, "Changed.", CancellationToken.None));
+            Assert.Equal(content, ReadFile("Notes.md"));
+        }
+    }
+
     [Fact]
     public async Task WhenTheReplacementMakesTheFileExceedTheSizeLimit_ThenItIsRejectedAndTheFileIsUnchanged()
     {
@@ -367,12 +397,12 @@ public class MarkdownFileWriteTests : IDisposable
     {
         // Arrange - the page editor saves its text through WriteAsync, and the storage is still writing it.
         WriteFile("Notes.md", "# Heading\n\nold");
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         var storage = CreateStorage();
-        storage.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        storage.ClientDecorator = inner => client = new PausableStore(inner);
         await storage.ConnectAsync(CancellationToken.None);
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
-        var writeReached = client!.PauseNext(nameof(FluentStorage.Blobs.IBlobStorage.WriteAsync));
+        var writeReached = client!.PauseNext(nameof(IStore.SetObject));
         var save = markdown.WriteAsync("# Heading\n\nsaved by the editor", CancellationToken.None);
         await writeReached;
 
@@ -417,14 +447,14 @@ public class MarkdownFileWriteTests : IDisposable
         // Arrange
         const string content = "# Motors\n\n:: HomeBlaze.Samples.Motor#first Name=First\n::\n\n:: HomeBlaze.Samples.Motor#second Name=Second\n::\n";
         WriteFile("Motors.md", content);
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         var storage = CreateStorage();
-        storage.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        storage.ClientDecorator = inner => client = new PausableStore(inner);
         await storage.ConnectAsync(CancellationToken.None);
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
         var first = markdown.Children["first"];
         var second = markdown.Children["second"];
-        var writeReached = client!.PauseNext(nameof(FluentStorage.Blobs.IBlobStorage.WriteAsync));
+        var writeReached = client!.PauseNext(nameof(IStore.SetObject));
 
         // Act
         var failedDelete = markdown.DeleteBlockAsync(first, CancellationToken.None);
@@ -451,13 +481,13 @@ public class MarkdownFileWriteTests : IDisposable
         // Arrange
         const string content = "# Motors\n\n:: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000\n::\n";
         WriteFile("Motors.md", content);
-        PausableBlobStorage? client = null;
+        PausableStore? client = null;
         var storage = CreateStorage();
-        storage.ClientDecorator = inner => client = new PausableBlobStorage(inner);
+        storage.ClientDecorator = inner => client = new PausableStore(inner);
         await storage.ConnectAsync(CancellationToken.None);
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Motors.md"]);
         var motor = Assert.IsType<Samples.Motor>(markdown.Children["motor"]);
-        var writeReached = client!.PauseNext(nameof(FluentStorage.Blobs.IBlobStorage.WriteAsync));
+        var writeReached = client!.PauseNext(nameof(IStore.SetObject));
 
         // Act
         motor.TargetSpeed = 1500;
@@ -474,7 +504,7 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Equal(content, ReadFile("Motors.md"));
     }
 
-    private const string PageWithActiveContent = """
+    private static readonly string PageWithActiveContent = """
         # Motors
 
         <div class="note">Handle with care</div>
@@ -518,7 +548,7 @@ public class MarkdownFileWriteTests : IDisposable
         ::
 
         End of the page.
-        """;
+        """.ReplaceLineEndings("\n");
 
     [Theory]
     // Widget blocks: added with or without a closing line, an argument, the name or the json block changed, removed.
@@ -963,7 +993,7 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.EndsWith("Changed.", ReadFile("Notes.md"));
     }
 
-    private const string PageWithLayout = """
+    private static readonly string PageWithLayout = """
         # Plant
 
         :: HomeBlaze.Samples.Motor#motor Name=Motor TargetSpeed=1000
@@ -974,7 +1004,7 @@ public class MarkdownFileWriteTests : IDisposable
         :: HomeBlaze.Components.Card#info Title=Info
         Card text.
         ::
-        """;
+        """.ReplaceLineEndings("\n");
 
     [Theory]
     [InlineData("Some text.", "Some text.\n\n:: HomeBlaze.Components.Card Title=New\nNew card.\n::")]
@@ -1025,7 +1055,7 @@ public class MarkdownFileWriteTests : IDisposable
         var storage = await ConnectAsync();
         var markdown = Assert.IsType<MarkdownFile>(storage.Children["Plant.md"]);
         var motor = markdown.Children["motor"];
-        const string content = """
+        var content = """
             # Plant
 
             :: HomeBlaze.Components.Card#info Title=Info
@@ -1036,7 +1066,7 @@ public class MarkdownFileWriteTests : IDisposable
             ::
 
             Some text.
-            """;
+            """.ReplaceLineEndings("\n");
         using var permission = MarkdownPageLayoutPermission.Enter(true);
 
         // Act
@@ -1083,7 +1113,7 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Equal(PageWithLayout, ReadFile("Plant.md"));
     }
 
-    private const string PageWithNestedDevices = """
+    private static readonly string PageWithNestedDevices = """
         # Plant
 
         :: HomeBlaze.Samples.Motor#kitchen Name=Kitchen
@@ -1121,7 +1151,7 @@ public class MarkdownFileWriteTests : IDisposable
         ::
 
         End.
-        """;
+        """.ReplaceLineEndings("\n");
 
     private static readonly string[] NestedDeviceNames = ["kitchen", "flowmotor", "footmotor", "tabmotor"];
 
@@ -1275,7 +1305,7 @@ public class MarkdownFileWriteTests : IDisposable
         Assert.Equal(content, ReadFile("Plant.md"));
     }
 
-    private const string PageWithDanglingReferences = """
+    private static readonly string PageWithDanglingReferences = """
         # Plant
 
         :: HomeBlaze.Components.Widget Path=gone
@@ -1295,7 +1325,7 @@ public class MarkdownFileWriteTests : IDisposable
 
         :: HomeBlaze.Components.Card#info Title=Info
         ::
-        """;
+        """.ReplaceLineEndings("\n");
 
     [Theory]
     [InlineData("Title=Info", "Title=Details")]
@@ -1569,7 +1599,7 @@ public class MarkdownFileWriteTests : IDisposable
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
-        services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
+        services.AddSingleton(sp => new SubjectPathResolver(sp.GetRequiredService<IInterceptorSubjectContext>(), () => sp.GetRequiredService<RootManager>().Root));
         services.AddSingleton<MarkdownContentParser>();
         return services;
     }

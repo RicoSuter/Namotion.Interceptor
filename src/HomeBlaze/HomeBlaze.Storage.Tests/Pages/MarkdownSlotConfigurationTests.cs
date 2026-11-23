@@ -6,7 +6,6 @@ using static HomeBlaze.Storage.Tests.Pages.TestTypeNames;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownSlotConfigurationTests
 {
     [Fact]

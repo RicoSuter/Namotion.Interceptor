@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using FluentStorage.Blobs;
+using FluentStorage.Storage;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
@@ -21,7 +21,7 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
 {
     private readonly ManualTimeProvider _timeProvider = new();
     private readonly LifecycleRecorder _recorder = new();
-    private PausableBlobStorage? _client;
+    private PausableStore? _client;
     private IHostedService? _host;
 
     public StorageHostedSubjectTests()
@@ -625,7 +625,7 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
         var storage = CreateStorage(configure: container =>
         {
             container.TimeProvider = _timeProvider;
-            container.ClientDecorator = client => _client = new PausableBlobStorage(client);
+            container.ClientDecorator = client => _client = new PausableStore(client);
         });
 
         Context!.AddService<ILifecycleHandler>(_recorder);
@@ -647,7 +647,7 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
         var storage = await StartHostedStorageAsync();
         await gate.WhenReachedAsync();
         var idleTimerCount = _timeProvider.ArmedTimerCount;
-        var readReached = _client!.PauseNext(nameof(IBlobStorage.OpenReadAsync));
+        var readReached = _client!.PauseNext(nameof(IStore.OpenRead));
         gate.Release();
         await readReached;
         await AsyncTestHelpers.WaitUntilAsync(() => _timeProvider.ArmedTimerCount == idleTimerCount + 1);

@@ -1,0 +1,16 @@
+@* Razor reads a "text" tag inside a code block as its own text-block marker, so the SVG text element lives in a component of its own. *@
+<text x="@X" y="@Y" text-anchor="middle" font-size="@FontSize" font-weight="@FontWeight" fill="@Fill">@ChildContent</text>
+
+@code {
+    [Parameter, EditorRequired] public string X { get; set; } = "";
+
+    [Parameter, EditorRequired] public string Y { get; set; } = "";
+
+    [Parameter, EditorRequired] public string FontSize { get; set; } = "";
+
+    [Parameter] public string? FontWeight { get; set; }
+
+    [Parameter, EditorRequired] public string Fill { get; set; } = "";
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

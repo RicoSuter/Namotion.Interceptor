@@ -17,7 +17,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// samples that start at the folder of a page, such as <c>../Pump</c>, are followed as well. A sample alone cannot
 /// say whether such a path is right, see <see cref="DocumentationSamplesTests"/>.
 /// </summary>
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class WidgetDocumentationPathTests : IClassFixture<AdministrationFolderFixture>
 {
     private readonly DocumentationFolderFixture _folder;

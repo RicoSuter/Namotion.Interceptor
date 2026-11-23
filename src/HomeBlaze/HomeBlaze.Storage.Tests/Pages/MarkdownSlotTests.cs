@@ -6,7 +6,6 @@ using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownSlotTests
 {
     private const string Namespace = "HomeBlaze.Storage.Tests.Pages";

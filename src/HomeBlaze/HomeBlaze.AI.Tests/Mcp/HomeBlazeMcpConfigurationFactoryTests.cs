@@ -53,7 +53,8 @@ public class HomeBlazeMcpConfigurationFactoryTests
             Assert.Contains("invoke_query", description);
             Assert.Contains("ReadEvaluatedContent", description);
         });
-        Assert.EndsWith(HomeBlazeMcpInstructions.ChangeCaution, tools["set_property"].Description);
+        Assert.Contains(HomeBlazeMcpInstructions.ChangeCaution, tools["set_property"].Description);
+        Assert.Contains(HomeBlazeMcpInstructions.ConfigurationWriteHint, tools["set_property"].Description);
     }
 
     [Fact]
@@ -170,7 +171,7 @@ public class HomeBlazeMcpConfigurationFactoryTests
 
         // Assert
         Assert.Equal(
-            "Property is not writable: /TargetTemperature. It is a configuration property; set_property cannot change configuration, an operation of the subject may.",
+            "Property is not writable: /TargetTemperature. The access policy does not allow it.",
             result.GetProperty("error").GetString());
         Assert.Equal(20m, room.TargetTemperature);
     }
@@ -191,6 +192,28 @@ public class HomeBlazeMcpConfigurationFactoryTests
         // Assert
         Assert.True(result.GetProperty("success").GetBoolean());
         Assert.Equal(23m, room.Temperature);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenASubjectHasOnlyConfigurationProperties_ThenBrowseAndSearchStillListIt(bool forAgents)
+    {
+        // Arrange
+        var (room, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+        var device = new MetadataSearchTestDevice { Host = "localhost" };
+        room.TryGetRegisteredSubject()!.AddProperty<MetadataSearchTestDevice>("Configured", _ => device);
+        var tools = CreateTools(room, forAgents);
+
+        // Act
+        var browse = JsonSerializer.SerializeToElement(await tools["browse"].Handler(
+            JsonSerializer.SerializeToElement(new { format = "json", depth = 1 }), CancellationToken.None));
+        var search = JsonSerializer.SerializeToElement(await tools["search"].Handler(
+            JsonSerializer.SerializeToElement(new { format = "json", types = new[] { nameof(MetadataSearchTestDevice) } }), CancellationToken.None));
+
+        // Assert
+        Assert.True(browse.GetProperty("result").GetProperty("properties").TryGetProperty("Configured", out _));
+        Assert.True(search.GetProperty("results").TryGetProperty("/Configured", out _));
     }
 
     [Fact]

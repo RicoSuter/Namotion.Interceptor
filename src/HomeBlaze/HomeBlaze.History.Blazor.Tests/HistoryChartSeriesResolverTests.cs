@@ -740,7 +740,7 @@ public class HistoryChartSeriesResolverTests
                 handler => handler is PropertyAttributeInitializer);
 
         var root = new ChartTargetSubject(context) { Chart = new HistoryChart { Series = series } };
-        return (new SubjectPathResolver(() => root), root);
+        return (new SubjectPathResolver(context, () => root), root);
     }
 
     private sealed class PathRecordingEngine : IHistoryRecorder

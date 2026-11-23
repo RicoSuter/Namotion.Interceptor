@@ -15,7 +15,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// Loads the demo pages of the sample data with the widget types they use, so that a page which
 /// stops working is found here and not by the person who opens it.
 /// </summary>
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class DemoPagesTests
 {
     // The reader of the JSON adds its own text after this, which is not ours to pin.

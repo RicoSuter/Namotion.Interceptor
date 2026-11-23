@@ -181,6 +181,8 @@ Each interceptor can:
 - Skip calling the next interceptor (blocking the operation)
 - Perform side effects (logging, validation, change tracking)
 
+A write with `PropertyWriteContext.IsDerivedRecalculation` set publishes a derived property's calculated value, which is already committed and returned by the getter. An interceptor must not veto or throw for such a write; it may only drop it as unchanged when the new value equals the current value, as `PropertyValueEqualityCheckHandler` does. Skipping `next` does not only suppress the change notification: it also skips the commit stamp of the terminal write, the lifecycle reconciliation of subject values and the recalculation of dependent derived properties. See [Concurrency and Delivery](tracking.md#concurrency-and-delivery) for the value such a write publishes.
+
 ```csharp
 public class LoggingInterceptor : IWriteInterceptor
 {
@@ -192,5 +194,7 @@ public class LoggingInterceptor : IWriteInterceptor
     }
 }
 ```
+
+An interceptor that changes the written value or writes other properties must declare `[RunsBefore(typeof(SubjectTransactionInterceptor))]` and transform idempotently, see [Edge Cases and Limitations](tracking-transactions.md#edge-cases-and-limitations).
 
 The pipeline is compiled per context and property type and cached. It is rebuilt when the context's services or fallback contexts change.

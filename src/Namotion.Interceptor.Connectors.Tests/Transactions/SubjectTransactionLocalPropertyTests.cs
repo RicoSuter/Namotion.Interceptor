@@ -353,7 +353,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     [Fact]
     public async Task WhenSourceBoundApplyThrows_ThenExternalSourcesAreReverted()
     {
-        // Arrange - Tests Stage 3 failure: source-bound property's OnSet* throws after external write succeeds
+        // Arrange - Tests stage 6 failure: source-bound property's OnSet* throws after external write succeeds
         // This is different from local property failure - it's when applying source-bound values to the local model fails
         var context = CreateContext();
         var device = new ThrowingDevice(context);
@@ -366,14 +366,14 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
             .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
                 new ValueTask<WriteResult>(WriteResult.Success));
 
-        // Bind PropertyA to external source - it will throw during the local apply (Stage 3)
+        // Bind PropertyA to external source - it will throw during the local apply (stage 6)
         new PropertyReference(device, nameof(ThrowingDevice.PropertyA)).SetSource(successSource.Object);
 
         device.ShouldThrow = prop => prop == nameof(ThrowingDevice.PropertyA);
 
         // Act
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
-        device.PropertyA = true;  // Source-bound, OnSet* will throw during Stage 3
+        device.PropertyA = true;  // Source-bound, OnSet* will throw during stage 6
 
         device.ThrowingEnabled = true;
 

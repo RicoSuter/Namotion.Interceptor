@@ -1,14 +1,11 @@
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
-using HomeBlaze.Storage.Tests.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests;
 
-// Writes to an in-memory storage, see the remarks of StorageTestBase.
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class FluentStorageContainerTests
 {
     private static (TypeProvider typeProvider, SubjectTypeRegistry typeRegistry, ConfigurableSubjectSerializer serializer, IServiceProvider serviceProvider, RootManager rootManager) CreateDependencies()
@@ -26,7 +23,7 @@ public class FluentStorageContainerTests
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
-        services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
+        services.AddSingleton(sp => new SubjectPathResolver(context, () => sp.GetRequiredService<RootManager>().Root));
         services.AddSingleton<MarkdownContentParser>();
 
         var serviceProvider = services.BuildServiceProvider();

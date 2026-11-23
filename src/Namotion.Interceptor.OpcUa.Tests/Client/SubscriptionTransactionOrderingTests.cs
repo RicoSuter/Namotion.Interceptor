@@ -3,9 +3,11 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
+using Namotion.Interceptor.Tracking.Transactions.Writers;
 using Opc.Ua;
 using Opc.Ua.Client;
 using static Namotion.Interceptor.OpcUa.Tests.Client.ClientSourceTestFactory;
@@ -89,7 +91,7 @@ public class SubscriptionTransactionOrderingTests
         {
             callback = Task.Run(() => manager.OnFastDataChange(subscription, notification, []));
         }
-        await callback.WaitAsync(TimeSpan.FromSeconds(10));
+        await callback.WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Empty(errors);

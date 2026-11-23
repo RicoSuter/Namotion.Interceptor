@@ -3,6 +3,7 @@ using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
+using Xunit.Abstractions;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -17,10 +18,12 @@ public class NestedSubjectSaveTests
     private const string SavedColumnSpan = "\"columnSpan\": 3";
 
     private readonly PlaywrightFixture _fixture;
+    private readonly ITestOutputHelper _output;
 
-    public NestedSubjectSaveTests(PlaywrightFixture fixture)
+    public NestedSubjectSaveTests(PlaywrightFixture fixture, ITestOutputHelper output)
     {
         _fixture = fixture;
+        _output = output;
     }
 
     [Fact]
@@ -36,6 +39,7 @@ public class NestedSubjectSaveTests
         // The output copy outlives a run, so one that was stopped before its cleanup would leave the value behind.
         Assert.DoesNotContain(SavedColumnSpan, originalContent);
 
+        var isCompleted = false;
         try
         {
             var page = await _fixture.OpenLayoutPageInInlineModeAsync();
@@ -46,11 +50,23 @@ public class NestedSubjectSaveTests
             // Assert: the notification is the last step of the save, so everything it writes is written by now.
             await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = 30000 });
             Assert.Contains(SavedColumnSpan, await File.ReadAllTextAsync(layoutFilePath));
+            isCompleted = true;
         }
         finally
         {
-            cell.ColumnSpan = originalColumnSpan;
-            await File.WriteAllTextAsync(layoutFilePath, originalContent);
+            try
+            {
+                cell.ColumnSpan = originalColumnSpan;
+                await File.WriteAllTextAsync(layoutFilePath, originalContent);
+
+                // File watching is off in testRoot.json, so the pass loads the restored file now and not in a later test.
+                await _fixture.ReconcileStorageAsync();
+            }
+            catch (Exception exception) when (!isCompleted)
+            {
+                // The failure of the test itself is the one to report.
+                _output.WriteLine($"Restoring {layoutFilePath} failed: {exception}");
+            }
         }
     }
 
@@ -68,7 +84,7 @@ public class NestedSubjectSaveTests
             // Assert
             await Assertions.Expect(page.GetByText("Configuration applied but not saved"))
                 .ToBeVisibleAsync(new() { Timeout = 30000 });
-            await Assertions.Expect(page.GetByText("Configuration saved.")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByText("Configuration saved.")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
             Assert.Equal(3, cell.ColumnSpan);
         });
     }

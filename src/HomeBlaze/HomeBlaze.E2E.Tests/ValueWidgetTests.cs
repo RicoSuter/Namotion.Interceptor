@@ -232,10 +232,10 @@ public class ValueWidgetTests
         // Assert
         var card = page.GetCard("Plain Card");
         await Assertions.Expect(card.GetByTestId("card-title")).ToHaveTextAsync("Plain Card", new() { Timeout = Timeout });
-        await Assertions.Expect(card.Locator("a")).ToHaveCountAsync(0);
-        await Assertions.Expect(card.GetByTestId("card-subtitle")).ToHaveCountAsync(0);
-        await Assertions.Expect(card.GetByTestId("card-header-right")).ToHaveCountAsync(0);
-        await Assertions.Expect(card.GetByTestId("card-footer")).ToHaveCountAsync(0);
+        await Assertions.Expect(card.Locator("a")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(card.GetByTestId("card-subtitle")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(card.GetByTestId("card-header-right")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(card.GetByTestId("card-footer")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -247,7 +247,7 @@ public class ValueWidgetTests
         // Assert
         var card = page.GetCard("Plain Card");
         await Assertions.Expect(card).ToHaveClassAsync(new Regex("mud-paper-outlined"), new() { Timeout = Timeout });
-        await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex(@"mud-elevation-[1-9]"));
+        await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex(@"mud-elevation-[1-9]"), new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -259,8 +259,8 @@ public class ValueWidgetTests
         // Assert
         var card = page.GetCard("Raised Card");
         await Assertions.Expect(card).ToHaveClassAsync(new Regex(@"mud-elevation-[1-9]"), new() { Timeout = Timeout });
-        await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex("mud-paper-outlined"));
-        await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex("mud-elevation-0"));
+        await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex("mud-paper-outlined"), new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(card).Not.ToHaveClassAsync(new Regex("mud-elevation-0"), new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -271,7 +271,7 @@ public class ValueWidgetTests
 
         // Assert
         await Assertions.Expect(page.GetCard("Plain Card")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -418,7 +418,7 @@ public class ValueWidgetTests
         // Assert
         await Assertions.Expect(page.GetByTestId("widget-argument-error"))
             .ToHaveTextAsync("Label: expected a value after '>' at position 7", new() { Timeout = Timeout });
-        await Assertions.Expect(page.GetByTestId("value-tile")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("value-tile")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     private static string CreateCssColorPage(string subjectName, string quietColor) =>
@@ -588,7 +588,7 @@ public class ValueWidgetTests
             var errors = page.GetByTestId("widget-argument-error");
             await Assertions.Expect(errors).ToHaveCountAsync(2, new() { Timeout = Timeout });
             await Assertions.Expect(errors.First).ToContainTextAsync("Unknown color 'white;background:red'");
-            await Assertions.Expect(page.GetByTestId("indicator")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByTestId("indicator")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
         finally
         {
@@ -689,7 +689,7 @@ public class ValueWidgetTests
         // Assert
         var row = GetRow(page, "Fehlt");
         await Assertions.Expect(row.GetByTestId("value-missing")).ToHaveTextAsync("–", new() { Timeout = Timeout });
-        await Assertions.Expect(row.GetByTestId("value-text")).ToHaveCountAsync(0);
+        await Assertions.Expect(row.GetByTestId("value-text")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -701,8 +701,8 @@ public class ValueWidgetTests
         // Assert
         var row = GetRow(page, "Zwei Werte");
         await Assertions.Expect(row).ToContainTextAsync("800 von 800", new() { Timeout = Timeout });
-        await Assertions.Expect(row.GetByTestId("value-text")).ToHaveCountAsync(0);
-        await Assertions.Expect(row.GetByTestId("value-missing")).ToHaveCountAsync(0);
+        await Assertions.Expect(row.GetByTestId("value-text")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(row.GetByTestId("value-missing")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -1072,7 +1072,7 @@ public class ValueWidgetTests
         // Assert
         var chip = page.GetByTestId("indicator").Nth(2);
         await Assertions.Expect(chip).ToHaveTextAsync("–", new() { Timeout = Timeout });
-        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         // The map error that the page shows is that of the indicator with a map that does not exist.
         await Assertions.Expect(page.GetByTestId("widget-argument-error")).ToHaveCountAsync(1);
@@ -1156,7 +1156,7 @@ public class ValueWidgetTests
         var panel = GetPanel(page, "Closed Panel");
         var content = panel.GetByTestId("expansion-panel-content");
         await Assertions.Expect(content).ToBeAttachedAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(content).ToBeHiddenAsync();
+        await Assertions.Expect(content).ToBeHiddenAsync(new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await panel.GetByText("Closed Panel", new() { Exact = true }).ClickAsync();
@@ -1202,7 +1202,7 @@ public class ValueWidgetTests
         var first = GetPanel(page, "Exclusive A").GetByTestId("expansion-panel-content");
         var second = GetPanel(page, "Exclusive B").GetByTestId("expansion-panel-content");
         await Assertions.Expect(first).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(second).ToBeHiddenAsync();
+        await Assertions.Expect(second).ToBeHiddenAsync(new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await GetPanel(page, "Exclusive B").GetByText("Exclusive B", new() { Exact = true }).ClickAsync();

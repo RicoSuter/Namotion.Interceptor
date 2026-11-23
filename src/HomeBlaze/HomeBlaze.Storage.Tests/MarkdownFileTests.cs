@@ -9,7 +9,6 @@ using HomeBlaze.Storage;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
-using HomeBlaze.Storage.Tests.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -17,8 +16,6 @@ using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Tests;
 
-// Writes to an in-memory storage, see the remarks of StorageTestBase.
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownFileTests
 {
     [Fact]
@@ -404,8 +401,10 @@ public class MarkdownFileTests
         Assert.Equal("visible", expressions["/Devices/motor/Host"].Value);
     }
 
-    [Fact]
-    public async Task WhenReadingTheRawContent_ThenSecretValuesInTheBlocksAreHidden()
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public async Task WhenReadingTheRawContent_ThenSecretValuesInTheBlocksAreHidden(string lineEnding)
     {
         // Arrange: secrets as arguments and in json blocks, of a widget block, of a widget inside a card and of a
         // typed slot block, next to blocks without secrets and blocks whose type is unknown.
@@ -445,7 +444,7 @@ public class MarkdownFileTests
             ::
 
             Gateway at {{ gateway/Host }}, password {{ gateway/Password }}.
-            """;
+            """.ReplaceLineEndings(lineEnding);
         var markdown = await CreatePageInGraphAsync(content);
 
         // Act
@@ -466,13 +465,13 @@ public class MarkdownFileTests
             Assert.DoesNotContain("card secret", result);
             Assert.DoesNotContain("slot-secret", result);
             Assert.DoesNotContain("also secret", result);
-            Assert.Contains($":: {device}#gateway Host=192.168.1.10 Password=***\n", result);
-            Assert.Contains("\"Host\": \"10.0.0.2\",\n  \"Password\": \"***\"", result);
-            Assert.Contains($"::: {device}#cardgateway Host=card-host Password=***\n", result);
-            Assert.Contains("::: Gateway Host=slot-host Password=***\n", result);
-            Assert.Contains(":: Unknown.Device#unknown Token=***\n```json\n***\n```\n", result);
-            Assert.Contains($":: {typeof(Motor).FullName}#plain Name=Plain TargetSpeed=1000\n", result);
-            Assert.Contains(":: HomeBlaze.Components.Card#card Title=\"Card Title\"\n", result);
+            Assert.Contains($":: {device}#gateway Host=192.168.1.10 Password=***{lineEnding}", result);
+            Assert.Contains($"\"Host\": \"10.0.0.2\",{lineEnding}  \"Password\": \"***\"", result);
+            Assert.Contains($"::: {device}#cardgateway Host=card-host Password=***{lineEnding}", result);
+            Assert.Contains("::: Gateway Host=slot-host Password=***" + lineEnding, result);
+            Assert.Contains($":: Unknown.Device#unknown Token=***{lineEnding}```json{lineEnding}***{lineEnding}```{lineEnding}", result);
+            Assert.Contains($":: {typeof(Motor).FullName}#plain Name=Plain TargetSpeed=1000{lineEnding}", result);
+            Assert.Contains(":: HomeBlaze.Components.Card#card Title=\"Card Title\"" + lineEnding, result);
         }
 
         Assert.EndsWith("Gateway at {{ gateway/Host }}, password {{ gateway/Password }}.", raw);
@@ -578,7 +577,7 @@ public class MarkdownFileTests
             $":: HomeBlaze.Components.ValueTile#tile Path=\"../..{path}\"\n::\n\n" +
             $":: HomeBlaze.Components.Indicator#indicator Path=\"../..{path}\"\n::\n";
         var markdown = await CreatePageInGraphAsync(content, new EmbeddedSecretDevice { Password = "s3cr3t", Host = "visible" });
-        var resolver = new SubjectPathResolver(() => null);
+        var resolver = new SubjectPathResolver(((IInterceptorSubject)markdown).Context, () => null);
         var scope = (IPathScope)markdown;
 
         // Act
@@ -859,7 +858,7 @@ public class MarkdownFileTests
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
-        services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
+        services.AddSingleton(sp => new SubjectPathResolver(context, () => sp.GetRequiredService<RootManager>().Root));
         services.AddSingleton<MarkdownContentParser>();
 
         var serviceProvider = services.BuildServiceProvider();
@@ -883,7 +882,7 @@ public class MarkdownFileTests
         await WriteFileAsync(storage, "Docs/page.md", content);
 
         VirtualFolder? root = null;
-        var pathResolver = new SubjectPathResolver(() => root);
+        var pathResolver = new SubjectPathResolver(context, () => root);
         var parser = new MarkdownContentParser(
             serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>(), pathResolver, serviceProvider.GetRequiredService<TypeProvider>());
         var markdown = new MarkdownFile(storage, "Docs/page.md", parser, serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>());

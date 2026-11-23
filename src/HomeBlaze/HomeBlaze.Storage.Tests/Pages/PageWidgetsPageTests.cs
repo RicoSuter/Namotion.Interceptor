@@ -13,7 +13,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// <summary>
 /// Loads every page of the widget reference with the folder it stands in, as the application does.
 /// </summary>
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class PageWidgetsPageTests
 {
     // Relative to DocumentationFolderFixture.DocumentationFolder, as in WidgetPagesTests.

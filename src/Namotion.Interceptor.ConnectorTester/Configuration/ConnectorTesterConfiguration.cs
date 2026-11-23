@@ -43,4 +43,7 @@ public class ConnectorTesterConfiguration
     public List<ParticipantConfiguration> Clients { get; set; } = [];
 
     public List<ChaosProfileConfiguration> ChaosProfiles { get; set; } = [];
+
+    /// <summary>OPC UA specific settings, ignored by the other connectors.</summary>
+    public OpcUaConfiguration OpcUa { get; set; } = new();
 }

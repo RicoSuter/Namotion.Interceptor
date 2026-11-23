@@ -298,7 +298,7 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         Assert.Single(firstNameChanges);
         Assert.Same(sourceMock.Object, firstNameChanges[0].Origin.Source);
 
-        // Assert 3: stage 1 (source write) contained exactly one batch with exactly one change
+        // Assert 3: stage 4 (source write) contained exactly one batch with exactly one change
         // for FirstName; the derived FullName recalculation is never submitted to the source.
         Assert.Single(writtenBatches);
         Assert.Single(writtenBatches[0]);

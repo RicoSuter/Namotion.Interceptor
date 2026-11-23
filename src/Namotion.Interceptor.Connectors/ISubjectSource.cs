@@ -47,7 +47,7 @@ public interface ISubjectSource : ISubjectConnector
     /// and writes throw <see cref="InvalidOperationException"/>: sibling and landed-model state is
     /// outside the frozen snapshot and can make the payload inconsistent with it. Capture any other
     /// subject state the write needs before <see cref="Tracking.Transactions.SubjectTransaction.CommitAsync"/>,
-    /// and see <see cref="Tracking.Transactions.ITransactionWriter"/> for the full committing access boundary.
+    /// and see <see cref="Tracking.Transactions.Writers.ITransactionWriter"/> for the full committing access boundary.
     /// </para>
     /// </remarks>
     /// <param name="changes">The collection of subject property changes.</param>

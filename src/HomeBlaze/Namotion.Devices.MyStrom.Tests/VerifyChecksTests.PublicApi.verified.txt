@@ -1,0 +1,96 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Devices.MyStrom.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Devices.MyStrom
+{
+    public static class MyStromServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMyStromSwitch(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.MyStrom.MyStromSwitch>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectIcon("Power")]
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    [System.ComponentModel.Category("Switches")]
+    [System.ComponentModel.Description("myStrom WiFi Switch with power metering, temperature sensing, and relay control")]
+    [System.ComponentModel.DisplayName("myStrom switch")]
+    public class MyStromSwitch : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.Common.IUptimeState, HomeBlaze.Abstractions.Devices.IPowerRelay, HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkAdapter, HomeBlaze.Abstractions.Networking.INetworkHost, HomeBlaze.Abstractions.Sensors.IPowerMeter, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public MyStromSwitch(System.Net.Http.IHttpClientFactory httpClientFactory, Microsoft.Extensions.Logging.ILogger<Namotion.Devices.MyStrom.MyStromSwitch> logger) { }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public bool AllowTurnOff { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=401)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Device")]
+        public string? DeviceType { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=402)]
+        [Namotion.Interceptor.Attributes.Derived]
+        [System.ComponentModel.Category("Device")]
+        public string? FirmwareVersion { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Gateway { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string? HostAddress { get; set; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IconColor { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string IconName { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? IpAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public bool IsConnected { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public bool? IsOn { get; }
+        public bool? IsWireless { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=950)]
+        public System.DateTimeOffset? LastUpdated { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? MacAddress { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        public decimal? MeasuredPower { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public string Name { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan PollingInterval { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public System.TimeSpan RetryInterval { get; set; }
+        public int? SignalStrength { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
+        public HomeBlaze.Abstractions.ServiceStatus Status { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public string? StatusMessage { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? SubnetMask { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        public decimal? Temperature { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public string? Title { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public decimal? TotalExportedEnergy { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.WattHour)]
+        public decimal? TotalImportedEnergy { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("TurnOff", "IsEnabled")]
+        public bool TurnOff_IsEnabled { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("TurnOn", "IsEnabled")]
+        public bool TurnOn_IsEnabled { get; }
+        [System.ComponentModel.Category("Device")]
+        public System.TimeSpan? Uptime { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken = default) { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="PowerOff", Position=2, Title="Turn Off")]
+        public System.Threading.Tasks.Task TurnOffAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="PowerSettingsNew", Position=1, Title="Turn On")]
+        public System.Threading.Tasks.Task TurnOnAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+}

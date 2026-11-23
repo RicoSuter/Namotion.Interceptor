@@ -14,6 +14,14 @@ When tradeoffs conflict, prefer in this order:
 2. **Performance** — minimize allocations and CPU time. Both matter; when they trade, allocations usually win (GC pressure compounds across the host).
 3. **Code style / idiom** — non-idiomatic API is fine when 1 or 2 demand it (e.g., `ImmutableArray<T>` in public API instead of `IEnumerable<T>`).
 
+## Scope
+
+Support what real consumers need, not every combination of features. Before adding code for an edge case, check whether an application in this repository (HomeBlaze, the connectors) or a known consumer needs it; ask the maintainer when unsure.
+
+- When it is not needed, disallow it: throw a clear exception at the earliest point and document the rule.
+- Fail deterministically: the same code always throws, independent of timing, thread interleaving or queued work. A rule that only sometimes throws is not fail fast.
+- Open a disallowed pattern up later, in its own change, when a real consumer needs it.
+
 ## Development Commands
 
 ### Build and Test
@@ -99,7 +107,8 @@ The library uses a fluent configuration API:
 
 - **Global Settings**: `Directory.Build.props` with nullable enabled, warnings as errors
 - **Target Frameworks**: `net10.0` for every project, set once in `src/Directory.Build.props`; the Generator assembly alone targets `netstandard2.0` because compilers built on .NET Framework load it. Package versions live in `src/Directory.Packages.props`.
-- **Package Version**: released on NuGet, breaking changes are fine when justified but need user approval
+- **SDK**: `global.json` selects the newest installed .NET 10 SDK (`latestFeature`) and never a .NET 11 SDK, also where one is preinstalled.
+- **Package Version**: released on NuGet. Breaking changes that simplify the code or improve the API are fine; do not add shims or overloads to avoid them. Ask first for behavior or contract changes. List each break with its migration step in the PR.
 - **CI/CD**: GitHub Actions with xUnit testing, coverage reporting, and NuGet publishing
 - **Native AOT**: full compatibility where possible is the target (#516). New code prefers static alternatives to runtime code generation and reflection, and existing sites are fixed when a change already touches them.
 - **InternalsVisibleTo**: only for test and benchmark projects. A library uses another library's public API; the existing exceptions are removed when that code is touched next.
@@ -161,6 +170,9 @@ The library has specialized support for:
 - **Naming**: `When<Condition>_Then<ExpectedBehavior>` (e.g., `WhenDepthIsZero_ThenReturnsNoChildren`)
 - **Structure**: Explicit `// Arrange`, `// Act`, `// Assert` comments separating each phase (use `// Act & Assert` for exception tests)
 - **No hardcoded waits**: Use `AsyncTestHelpers.WaitUntilAsync(() => condition)` or event-based synchronization (`ManualResetEventSlim`, `CountdownEvent`) instead of `Task.Delay`/`Thread.Sleep`. Hardcoded delays are either too long (slow CI) or too short (flaky CI).
+- **Timing on small CI runners**: A positive wait on background work uses `TestTimeouts.Default` (the default of `AsyncTestHelpers.WaitUntilAsync`), and only a check that something does not happen gets a short bound. A race participant that blocks runs through `DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync`, and a deadline is asserted on a `TimeProvider` the test advances, not with a `Stopwatch`.
+- **Nothing a late thread uses is disposed early**: Prefer a `TaskCompletionSource` as a gate; an `ObjectDisposedException` on a background thread crashes the test host.
+- **E2E tests act on a ready page**: Wait for the observable state that means the page handles a key or click, such as `ToBeFocusedAsync()` on the element a dialog focuses itself.
 
 ## Public API Tracking
 

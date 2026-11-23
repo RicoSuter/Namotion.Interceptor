@@ -31,7 +31,7 @@ public class AppBarMenuTests
         // The bar shows its pages before the absence of the menu page tells anything.
         var appBar = page.GetByRole(AriaRole.Banner);
         await Assertions.Expect(appBar.Locator("a[href='pages/Dashboard.md']")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(appBar.Locator($"a[href='{MenuPageUrl}']")).ToHaveCountAsync(0);
+        await Assertions.Expect(appBar.Locator($"a[href='{MenuPageUrl}']")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(page.AppBarMenu().GetByRole(AriaRole.Button, new() { Name = "Open menu", Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = Timeout });
     }
@@ -65,7 +65,7 @@ public class AppBarMenuTests
 
         // Act
         await page.Locator($".mud-popover-open a[href='{MenuPageUrl}']").ClickAsync();
-        await page.WaitForURLAsync(url => url.EndsWith(MenuPageUrl, StringComparison.Ordinal), new() { Timeout = Timeout });
+        await _fixture.WaitForUrlAsync(page, url => url.EndsWith(MenuPageUrl, StringComparison.Ordinal), Timeout);
 
         // Assert
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Menu Page", Exact = true }))

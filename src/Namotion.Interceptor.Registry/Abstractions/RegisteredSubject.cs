@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Derived;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
@@ -36,6 +37,7 @@ public class RegisteredSubject
 
     /// <summary>
     /// Gets the properties which reference this subject.
+    /// One entry per property that holds the subject, with its first key or position (<c>null</c> for a subject reference).
     /// Thread-safe; reads are lock-free once the snapshot is cached.
     /// </summary>
     public ImmutableArray<SubjectPropertyParent> Parents
@@ -43,6 +45,7 @@ public class RegisteredSubject
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
+            DerivedGraphDependencies.RecordRead(Subject);
             var snapshot = Volatile.Read(ref _parentsSnapshot);
             return snapshot is not null
                 ? ImmutableCollectionsMarshal.AsImmutableArray(snapshot)
@@ -83,17 +86,35 @@ public class RegisteredSubject
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void InvalidateParentsSnapshot() => Volatile.Write(ref _parentsSnapshot, null);
 
+    /// <summary>The registered properties, replaced as a whole when a property is added. Not recorded.</summary>
+    internal FrozenDictionary<string, RegisteredSubjectProperty> RegisteredProperties => _properties;
+
     /// <summary>
     /// Gets all registered properties.
     /// </summary>
-    public ImmutableArray<RegisteredSubjectProperty> Properties => _properties.Values;
+    public ImmutableArray<RegisteredSubjectProperty> Properties
+    {
+        get
+        {
+            DerivedGraphDependencies.RecordRead(Subject);
+            return _properties.Values;
+        }
+    }
 
     /// <summary>
     /// Gets all attributes that are attached to this property.
     /// </summary>
     public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
     {
-        foreach (var property in _properties.Values)
+        // Recorded when called, not when enumerated: a getter may enumerate the result after it returned.
+        DerivedGraphDependencies.RecordRead(Subject);
+        return GetPropertyAttributes(_properties, propertyName);
+    }
+
+    internal static IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(
+        FrozenDictionary<string, RegisteredSubjectProperty> properties, string propertyName)
+    {
+        foreach (var property in properties.Values)
         {
             if (property.IsAttribute && property.AttributeMetadata.PropertyName == propertyName)
             {
@@ -110,6 +131,7 @@ public class RegisteredSubject
     /// <returns>The attribute property.</returns>
     public RegisteredSubjectProperty? TryGetPropertyAttribute(string propertyName, string attributeName)
     {
+        DerivedGraphDependencies.RecordRead(Subject);
         foreach (var property in _properties.Values)
         {
             if (property.IsAttribute &&
@@ -130,6 +152,7 @@ public class RegisteredSubject
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectProperty? TryGetProperty(string propertyName)
     {
+        DerivedGraphDependencies.RecordRead(Subject);
         return _properties.GetValueOrDefault(propertyName);
     }
 
@@ -162,63 +185,60 @@ public class RegisteredSubject
         }
     }
 
-    internal void RemoveParentsByProperty(RegisteredSubjectProperty parent)
-    {
-        lock (_lock)
-        {
-            var changed = false;
-
-            if (_additionalParents is not null && _additionalParents.Count > 0)
-            {
-                for (var i = _additionalParents.Count - 1; i >= 0; i--)
-                {
-                    if (_additionalParents[i].Property == parent)
-                    {
-                        _additionalParents.RemoveAt(i);
-                        changed = true;
-                    }
-                }
-            }
-
-            if (_firstParent.Property == parent)
-            {
-                PromoteFirstParentFromAdditional();
-                changed = true;
-            }
-
-            if (changed)
-            {
-                InvalidateParentsSnapshot();
-            }
-        }
-    }
-
-    // Matched by property alone: a subject has one parent entry per property, and comparing
-    // the old index would run a key's Equals override under _lock.
-    internal void UpdateParentIndex(RegisteredSubjectProperty property, object? newIndex)
+    // Matched by property alone: a subject has one parent entry per property that holds it.
+    internal void RemoveParent(RegisteredSubjectProperty property)
     {
         lock (_lock)
         {
             if (_firstParent.Property == property)
             {
-                _firstParent = new SubjectPropertyParent { Property = property, Index = newIndex };
+                PromoteFirstParentFromAdditional();
+                return;
+            }
+
+            var position = IndexOfAdditionalParent(property);
+            if (position >= 0)
+            {
+                _additionalParents!.RemoveAt(position);
+                InvalidateParentsSnapshot();
+            }
+        }
+    }
+
+    internal void UpdateParentIndex(RegisteredSubjectProperty property, object? newIndex)
+    {
+        lock (_lock)
+        {
+            var entry = new SubjectPropertyParent { Property = property, Index = newIndex };
+            if (_firstParent.Property == property)
+            {
+                _firstParent = entry;
                 InvalidateParentsSnapshot();
                 return;
             }
 
-            if (_additionalParents is not null)
+            var position = IndexOfAdditionalParent(property);
+            if (position >= 0)
             {
-                for (var i = 0; i < _additionalParents.Count; i++)
-                {
-                    if (_additionalParents[i].Property == property)
-                    {
-                        _additionalParents[i] = new SubjectPropertyParent { Property = property, Index = newIndex };
-                        InvalidateParentsSnapshot();
-                        return;
-                    }
-                }
+                _additionalParents![position] = entry;
+                InvalidateParentsSnapshot();
             }
         }
+    }
+
+    // Caller must hold _lock.
+    private int IndexOfAdditionalParent(RegisteredSubjectProperty property)
+    {
+        if (_additionalParents is not null)
+        {
+            for (var i = 0; i < _additionalParents.Count; i++)
+            {
+                if (_additionalParents[i].Property == property)
+                    return i;
+            }
+        }
+
+        return -1;
     }
 
     // Promotes the head (not the tail) of the overflow list so the surviving parents
@@ -319,17 +339,34 @@ public class RegisteredSubject
             isIntercepted: true,
             isDynamic: true));
 
-        var property = AddPropertyInternal(name, type, attributes);
+        var hasFailed = true;
+        try
+        {
+            var property = AddPropertyInternal(name, type, attributes);
 
-        // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
-        // TODO(perf): For derived-with-setter this re-enters RecalculateDerivedProperty (total
-        // 3 getter invocations: AttachProperty + invoke below + recalc), but AttachProperty has
-        // already seeded LastKnownValue. Consider a dedicated lifecycle notification for derived,
-        // or passing currentValue so PropertyValueEqualityCheckHandler short-circuits the write.
-        property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null,
-            null, delegate { });
+            // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
+            if (property.Reference.Metadata.IsDerived)
+            {
+                // TODO(perf): AttachProperty has already evaluated the getter and seeded LastKnownValue, yet
+                // publishing reads it again, and once more for the change notification when one is consumed.
+                // For derived-with-setter the write also re-enters RecalculateDerivedProperty, another
+                // evaluation. Consider a dedicated lifecycle notification for derived properties.
+                property.Reference.PublishInitialDerivedPropertyValue();
+            }
+            else
+            {
+                property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject), null, delegate { });
+            }
 
-        return property;
+            hasFailed = false;
+            return property;
+        }
+        finally
+        {
+            // Reported once the property is attached: outside the lifecycle lock, this recalculates and publishes
+            // the derived properties that read the registered properties, which can throw.
+            DerivedGraphDependencies.Changed(Subject, hasFailed);
+        }
     }
 
     private RegisteredSubjectProperty AddPropertyInternal(string name, Type type, Attribute[] attributes)
@@ -343,11 +380,6 @@ public class RegisteredSubject
                 .ToFrozenDictionary(p => p.Key, p => p.Value);
 
             _properties = newProperties;
-
-            foreach (var property in newProperties.Values)
-            {
-                property.AttributesCache = null;
-            }
         }
 
         Subject.AttachSubjectProperty(subjectProperty.Reference);

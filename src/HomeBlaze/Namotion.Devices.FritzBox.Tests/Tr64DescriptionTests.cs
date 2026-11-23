@@ -19,7 +19,7 @@ public class Tr64DescriptionTests
         Assert.Equal("uuid:75802409-bccb-40e7-8e6c-0123456789ab", description.Udn);
         Assert.All(
             [Tr64Services.DeviceInfo, Tr64Services.UserInterface, Tr64Services.Layer3Forwarding, Tr64Services.WanCommonInterfaceConfig,
-             Tr64Services.WanPppConnection, Tr64Services.WanIpConnection, Tr64Services.Hosts],
+             Tr64Services.WanPppConnection, Tr64Services.WanIpConnection, Tr64Services.Hosts, Tr64Services.HostFilter],
             serviceType => Assert.True(description.HasService(serviceType), serviceType));
         Assert.Equal("/upnp/control/hosts", description.TryGetService(Tr64Services.Hosts)!.ControlPath);
         Assert.Equal("/upnp/control/wanpppconn1", description.TryGetService(Tr64Services.WanPppConnection)!.ControlPath);

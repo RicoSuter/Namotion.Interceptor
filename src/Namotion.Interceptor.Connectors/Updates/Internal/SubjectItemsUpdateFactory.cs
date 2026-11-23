@@ -89,13 +89,13 @@ internal static class SubjectItemsUpdateFactory
             // Add Move operations for reordered items
             if (reorderedItems is not null)
             {
-                foreach (var (oldIndex, newIndex, _) in reorderedItems)
+                foreach (var (fromIndex, newIndex, _) in reorderedItems)
                 {
                     operations ??= [];
                     operations.Add(new SubjectCollectionOperation
                     {
                         Action = SubjectCollectionOperationType.Move,
-                        FromIndex = oldIndex,
+                        FromIndex = fromIndex,
                         Index = newIndex
                     });
                 }

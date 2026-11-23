@@ -204,7 +204,7 @@ For high-throughput scenarios (>1000 changes/second, source synchronization, IoT
 
 ### Derived Properties
 
-When `[Derived]` properties read other properties during evaluation, the tracking system records those reads as dependencies. When any dependency changes, the derived property is recalculated and fires its own change event. The example above shows `FullName` updating automatically whenever `FirstName` or `LastName` changes. Derived properties also work across the object graph (a derived property can depend on a child subject's property).
+When `[Derived]` properties read other properties during evaluation, the tracking system records those reads as dependencies. When any dependency changes, the derived property is recalculated and fires its own change event. The example above shows `FullName` updating automatically whenever `FirstName` or `LastName` changes. Derived properties also work across the object graph: a getter that reads a child subject's property, or graph state such as `TryGetFirstParent<T>()`, is recalculated when that property or the graph changes.
 
 ### Lifecycle Tracking
 
@@ -364,7 +364,7 @@ sensor.Temperature = 25.5m;
 // Inbound MQTT messages update the property and trigger change notifications
 ```
 
-The same pattern applies to [OPC UA](docs/connectors-opcua.md) (industrial automation, dynamic property discovery, companion specifications), [Modbus](docs/connectors-modbus.md) (read-only polling of Modbus TCP devices) and [WebSocket](docs/connectors-websocket.md) (digital twin synchronization with sequence numbers and heartbeats). Implementation details for sources, servers, ownership, and write retry are in [Connectors](docs/connectors.md). The wire format used for partial state synchronization is documented in [Subject Updates](docs/connectors-subject-updates.md).
+The same pattern applies to [OPC UA](docs/connectors-opcua.md) (industrial automation, secured connections with certificate validation, dynamic property discovery, companion specifications), [Modbus](docs/connectors-modbus.md) (read-only polling of Modbus TCP devices) and [WebSocket](docs/connectors-websocket.md) (digital twin synchronization with sequence numbers and heartbeats). Implementation details for sources, servers, ownership, and write retry are in [Connectors](docs/connectors.md). The wire format used for partial state synchronization is documented in [Subject Updates](docs/connectors-subject-updates.md).
 
 ## Integrations
 
@@ -373,7 +373,7 @@ Integrations expose subjects through .NET host frameworks. They reuse the tracki
 - **[ASP.NET Core](docs/aspnetcore.md)** - `MapSubjectWebApis<T>` adds REST endpoints for reading the subject graph as JSON, updating properties via JSON paths, and exposing structure metadata. Integrates with data-annotation validation and OpenAPI/Swagger.
 - **[Blazor](docs/blazor.md)** - `<TrackingScope>` automatically re-renders content when any property accessed inside it (or anywhere in its descendant graph) changes. Works with both server and WebAssembly hosting models.
 - **[GraphQL](docs/graphql.md)** - adds a `root` query and a `root` subscription via HotChocolate, streaming property changes to subscribed clients.
-- **[MCP](docs/mcp.md)** *(experimental)* - exposes the subject registry as Model Context Protocol tools (`browse`, `search`, `get_property`, `set_property`, `list_types`) so AI agents can navigate and interact with the object graph.
+- **[MCP](docs/mcp.md)** *(experimental)* - exposes the subject registry as Model Context Protocol tools (`browse`, `search`, `get_property`, `set_property`, `list_types`) so AI agents can navigate and interact with the object graph. An optional access policy (`IMcpAccessPolicy`) decides what the tools may read and change.
 - **[Hosting](docs/hosting.md)** - `WithHostedServices()` integrates with the .NET Generic Host so subjects extending `BackgroundService` (or services dynamically attached to subjects) start and stop with attach/detach.
 
 ## Package Reference
@@ -403,7 +403,7 @@ Integrations expose subjects through .NET host frameworks. They reuse the tracki
 | Package | Description | Documentation |
 |---------|-------------|---------------|
 | **Namotion.Interceptor.Registry** | Runtime property discovery, metadata, and dynamic properties | [Registry](docs/registry.md) |
-| **Namotion.Interceptor.Expressions** | Expressions over property values: comparisons, conditions and templates | [Expressions](docs/expressions.md) |
+| **Namotion.Interceptor.Expressions** | Expressions over property values: comparisons, arithmetic and durations, conditions and templates | [Expressions](docs/expressions.md) |
 
 ### Connectors
 

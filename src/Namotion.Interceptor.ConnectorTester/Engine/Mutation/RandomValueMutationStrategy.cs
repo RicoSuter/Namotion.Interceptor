@@ -14,6 +14,8 @@ public sealed class RandomValueMutationStrategy : IValueMutationStrategy
     private readonly TestCycleCoordinator _coordinator;
     private readonly IInterceptorSubjectContext _context;
     private readonly MutationCounters _counters;
+    private readonly ILogger _logger;
+    private readonly string _participantName;
     private readonly bool _useTransactions;
     private readonly int _valueMutationRate;
     private readonly Random _random = new();
@@ -23,12 +25,15 @@ public sealed class RandomValueMutationStrategy : IValueMutationStrategy
         TestCycleCoordinator coordinator,
         IInterceptorSubjectContext context,
         MutationCounters counters,
-        ParticipantConfiguration participantConfiguration)
+        ParticipantConfiguration participantConfiguration,
+        ILogger logger)
     {
         _graph = graph;
         _coordinator = coordinator;
         _context = context;
         _counters = counters;
+        _logger = logger;
+        _participantName = participantConfiguration.Name;
         _useTransactions = participantConfiguration.UseTransactions;
         _valueMutationRate = participantConfiguration.ValueMutationRate;
     }
@@ -54,7 +59,8 @@ public sealed class RandomValueMutationStrategy : IValueMutationStrategy
                         _counters.IncrementValue();
                     }
 
-                    await transaction.CommitAsync(cancellationToken);
+                    await CommitFailureClassifier.CommitAndRecordAsync(
+                        transaction, _counters, _logger, _participantName, cancellationToken);
                 }
                 else
                 {

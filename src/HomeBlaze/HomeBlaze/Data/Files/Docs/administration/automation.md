@@ -1,0 +1,620 @@
+---
+title: Automations
+navTitle: Automations
+---
+
+# Automations
+
+An automation is a subject that runs rules. A rule starts when one of its triggers fires, checks an optional condition, and then runs its actions in order: it calls operations of devices and services, writes properties, or changes the named state of its automation. Named states let a few rules form a small workflow, such as a washing machine that is idle or running. Automations run inside HomeBlaze without an AI model, and they keep their state across restarts.
+
+This page is the operator guide. The syntax of expressions is the one of [page expressions](pages.md#live-expressions), and why device readings start empty is explained in [Building Subjects](../development/building-subjects.md#readings-are-null-until-observed). How the automation stores, batches and limits its work is collected in [Operational details](#operational-details).
+
+---
+
+## Quick start
+
+1. In the subject browser, create an **Automation** from the group Automation, for example in a folder `Automations`.
+2. Open its page and click **Edit**. In the **Rules** tab, add a rule, write its condition under **Runs when any of these happens**, and add an action under **Then, in this order**. Save is available once nothing is invalid or unfinished.
+3. Keep the rule in **Dry run** and save. Each time the rule would run, the **Runs** tab of the page lists the run with its actions and their values, and nothing is executed.
+4. Switch the rule to **On** once its runs look right.
+
+The demo data has `Demo/ConveyorGuard`, an automation in dry run over the demo conveyor:
+
+- Both rules are Dry run, which never changes the state, so the automation stays in Normal and shows what it would do: it would slow the conveyor down and enter Hot when the temperature stays above 40 for 30 seconds, and would fire again only after it is below 38.
+- Its rule Back to normal is active only in Hot, so it stays inactive in dry run, and the page says next to the rule that would enter Hot that its dry runs do not change the state to Hot.
+- Its cooldown of 10 minutes applies only once the rule is On, see [Only if and cooldown](#only-if-and-cooldown).
+
+---
+
+## Rules and states
+
+```mermaid
+classDiagram
+    direction LR
+    class Automation {
+        Name
+        Enabled
+        States
+        InitialState
+        CurrentState
+        StateEnteredAt
+        Status
+        StatusMessage
+    }
+    class AutomationRule {
+        Name
+        Mode
+        InState
+        OnlyIf
+        Status
+        LastTriggeredAt
+        RunCount
+        LastRunOutcome
+        LastRunMessage
+    }
+    class Trigger
+    class PropertyTrigger {
+        Expression
+        For
+        Rearm
+        OnActivation
+    }
+    class SubjectEventTrigger {
+        SubjectPath
+        EventType
+        Filter
+    }
+    class Action {
+        Id
+        OnError
+    }
+    class InvokeOperation {
+        OperationPath
+        Arguments
+    }
+    class SetProperty {
+        PropertyPath
+        Value
+    }
+    class ChangeState {
+        TargetState
+    }
+    Automation "1" *-- "0..*" AutomationRule : Rules
+    AutomationRule "1" *-- "1..*" Trigger : any of
+    AutomationRule "1" *-- "1..*" Action : in order
+    Trigger <|-- PropertyTrigger
+    Trigger <|-- SubjectEventTrigger
+    Action <|-- InvokeOperation
+    Action <|-- SetProperty
+    Action <|-- ChangeState
+```
+
+- **Rules** process each input in the order of the Rules tab, and several rules can run for one input, each at most once. Each rule has a key such as `k3f9` that never changes, so that its path, such as `/Automations/Storm/Rules[k3f9]/LastTriggeredAt`, stays the same when the rule is renamed or moved in the list.
+- **States** are optional names, such as `Idle` and `Running`. A rule can be **Active in state**: it observes its triggers only while the automation is in that state, and it starts again with fresh holds each time the automation enters it. A rule without a state is active in every state, also in an automation without states.
+- **The initial state** is the state of a new automation and the state that **Reset state** on the page enters. Reset state enters the initial state, clears the last trigger times and then starts every rule that is active in the initial state over, as if it had just entered its state, also when the state did not change: holds start fresh, **Run if already true** fires again when the condition is still true, **Wait for a change** takes a new baseline. Reset state is queued like any input: the events received before it are handled before it, and those received after it by the rules that are active after the reset.
+- **A state changes** only through a **Change state** action of a rule of the same automation, see [State changes](#state-changes).
+
+### State changes
+
+- **The rules after it skip the input**: once a rule changed the state, it finishes its own actions and the rules after it skip that input. A skipped request is [no run](#only-if-and-cooldown), and the rule status names it, such as `Waiting since 2026-11-06 12:01:00: the state changed to Hot for the same input`.
+- **Property conditions wait**: a property condition skipped this way keeps waiting and runs in a later input if its rule is still active then; a rule that the new state deactivates does not run.
+- **Events**: each event is an input of its own, so a state change never skips another rule of the same event: a later rule without a state still runs for it, while a rule **Active in state** of the state that was left runs for it only if it handled the event before the state changed, as a rule before the changing rule does. Such a rule does not run for the event even when a later rule of the same event enters its state again, and its triggers start over as on entering the state: holds start fresh and **When the rule starts** applies.
+- **State change events**: the state change event is published once the input is processed and the rules of the new state are active, so they receive it and the rules of the state that was left do not. When one input changes the state several times, its state change events are published in order after all its runs, so a rule of a state that the input entered and left again does not receive the event that entered it.
+- **Entering a state**: what should happen when a state is entered is an ordinary rule with an event trigger on the state changes of the automation, which can be **Active in state** of the entered state, see [Events](#events).
+
+---
+
+## Triggers
+
+A rule has one or more triggers and runs when any of them fires. Each trigger keeps its own hold and arming, so two triggers that fire shortly after each other request two runs; a [cooldown](#only-if-and-cooldown) limits that. Triggers that fire for the same input request one run, and a run ends the wait of every [waiting](#only-if-and-cooldown) trigger of its rule.
+
+### Property conditions
+
+A property condition fires when its expression changes from not true to true, never on every reading:
+
+| Field | Meaning |
+|---|---|
+| **Fires when** | The condition, such as `/Weather/WS90/WindGust > 8`. Conditions are combined with `and`, `or`, `not` and parentheses. |
+| **For at least** | A hold: the condition must stay true this long before the trigger fires, such as `20s`, `10m` or `1h30m`. The hold restarts when the condition becomes false or unknown. Empty fires at once. |
+| **When the rule starts** | **Run if already true**, the default: when the rule becomes active and the condition is true, the hold starts then. **Wait for a change**: a condition that is already true when the rule becomes active does not fire until it has been false and true again. With **Fires again only after**, it waits for that condition instead of plain false. |
+| **Fires again only after** | A rearm condition, added with the **Fires again only after** button. After the trigger fired, it fires again only after this condition is true, instead of once the condition is false. With `/Weather/WS90/WindGust > 8` and `/Weather/WS90/WindGust < 6`, gusts that move around 8 fire once per storm. A rearm while the condition is still true does not fire: the trigger fires on the next change of the condition to true. |
+
+A rule becomes active when the automation starts, when its mode leaves Off, when a saved change replaces its trigger, and when the automation enters the state the rule is active in. Holds start again after a restart, because the time a value held during the downtime is unknown. A trigger that waits for Only if is not kept across a restart either: with **Run if already true** it fires again after its hold, with **Wait for a change** it waits for the next change.
+
+Tracking ignores a write of an equal value, so a trigger sees changes, not readings. To require a value over several readings, use a hold of about one report interval, such as `WindGust > 8` for `20s`.
+
+### Events
+
+An event trigger fires on every event of one type that a subject publishes, also when two events in a row are the same, such as a button released twice:
+
+| Field | Meaning |
+|---|---|
+| **From** | The subject that publishes the events, or **This automation**, whose events are its own state changes. |
+| **Event** | The event type, such as `ButtonEvent` of a Hue button or `SwitchEvent` of a Shelly switch. The dropdown shows the name with its words split, such as "Button", and the configuration stores the type name `ButtonEvent`. A subject publishes the event types `T` of the `IObservable<T>` interfaces it implements. |
+| **Only events where** | A filter over the event, such as `event/ButtonState == Release`. The rows of the filter offer the fields of the event. |
+
+The filter is checked just before the rule runs, after the earlier rules of the same event ran, as Only if is, so it sees what an earlier rule changed. `event` is the event and `subject` its publisher, as in `event/ButtonState` or `subject/Name`. The arguments of the actions of a rule with an event trigger can read both; they hold the event that started the run. A state change of an automation has the fields `event/PreviousState`, `event/NewState` and `event/Timestamp`, and restoring the state after a restart raises no event.
+
+Events are never replayed. A rule that is switched on, added, or saved with a changed event trigger handles the events received after the Save, also while the automation is still busy with earlier inputs, when another rule already listens to that event of that subject. Otherwise it handles only the events received once the automation applied the Save, which waits for the earlier inputs. An event received before, an event received while the automation is disabled, and one that [Only if](#only-if-and-cooldown) rejected are gone. An event that arrives while the automation is busy waits, and is handled by the rules that are active when it is processed, in rule order.
+
+---
+
+## Only if and cooldown
+
+**Only if** is one condition, checked against the current values when a trigger requests a run. It answers "only if" where triggers answer "when": it never starts a run on its own. A rule without it runs on every trigger.
+
+A property condition that Only if rejects waits: the rule status reads `On: Waiting since 2026-11-06 12:01:00: Only if is false`, and the rule runs once Only if is true while the condition is still true, when a value that Only if reads changes, when the clock makes it true, such as its cooldown ending or a time window opening, or when a saved change relaxes or removes Only if. The wait ends without a run when the condition becomes false or unknown, or when the rule becomes inactive. The automation observes the values that Only if reads only while a trigger of the rule waits. An event that Only if rejects is gone, and the rule status ends with why, such as `On: Armed; not run: Only if is false`. A request that does not run is no run: it is not counted, not listed and not saved.
+
+**At most once every** is a cooldown, such as `30m`. The editor writes it into the condition as `./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m`, joined to the rest with `and`, and shows it as a duration again as long as the condition keeps exactly that form. `LastTriggeredAt` is set when the first action of a run starts, also when the actions then fail, so that a failing device is not retried before the cooldown ends. Requests that Only if rejects, dry runs and Test now do not set it, so a cooldown never applies in dry run. A dry run still checks Only if first.
+
+Put a value the rule must wait for into its trigger and not into Only if: an Only if that is unknown does not run the rule either, but the trigger fires first and then waits, while an unknown trigger shows the missing values in the rule status as soon as they are missing.
+
+---
+
+## Unknown values
+
+A value is missing when its path leads nowhere or the value is null, and device readings are null until the device reports them. An expression that needs a missing value is unknown, which is never the same as false:
+
+| The condition is | The trigger fires | The trigger rearms | The rule status |
+|---|---|---|---|
+| true | Yes, once the hold elapsed | No | Holding, then Triggered, or Waiting while Only if rejects the run |
+| false | No | Yes, without a rearm condition | Armed |
+| unknown | No | No | Unknown since a time, with the missing paths |
+
+With a **Fires again only after** condition, a false expression does not rearm: only a true rearm condition does, even while the expression is unknown.
+
+An Only if that is unknown does not run the rule: the trigger waits, and the rule status reads `On: Waiting since 2026-11-06 12:01:00: Only if is unknown, missing /Weather/WS90/Temperature`. An unknown rule is no error, so the automation keeps its status. To detect an outage, write it out: `/Weather/WS90/Temperature == null` is true while the value is missing, and `(/Weather/WS90/LastUpdated == null or now - /Weather/WS90/LastUpdated > 15m)` covers a subject that keeps its last values and implements `ILastUpdatedProvider`, also when it has not reported since the start, see [Sensor outage](#sensor-outage).
+
+---
+
+## Expressions
+
+Conditions, filters and the arguments of actions are expressions with the syntax of [page expressions](pages.md#live-expressions):
+
+- **Paths** are absolute, such as `/Weather/WS90/WindGust`, or start at the rule: `./LastTriggeredAt` is a property of the rule, and `../CurrentState` or `../StateEnteredAt` one of its automation.
+- **Variables**: `now` is the current instant, `time` the local time of day of the host, `event` the captured event and `subject` its publisher. `event` and `subject` are available in event filters and in the arguments of a rule with an event trigger only; in a rule with both kinds of trigger, they read as missing on a run that a property trigger started.
+- **Arithmetic, comparisons and bare words** follow the [conditions of pages](pages.md#conditions), such as `now - ../StateEnteredAt > 10m`: decimals compute exactly, and a word without `/` right of a comparison is a text, so `/Living/Heating/Mode == Away` compares with the text `Away`, which suits an enum.
+- **Pipes**: conditions, filters and value expressions take no pipes. Only the `{{ }}` of a text template takes the pipes `display` and `raw`, without arguments, as in `{{ ../StateEnteredAt | raw }}`.
+- **Durations** are written with their units from the largest to the smallest: `30s`, `15m`, `2h`, `8h30m`, `1.5d`. Expressions accept decimals, but the duration fields of the editor take whole units, such as `36h` and not `1.5d`. `time >= 8h30m and time < 21h30m` is true during the day.
+- **Secrets**: secret configuration values and properties marked `[ExcludeFromExpressions]` are missing in automations, so that a notification cannot send them.
+- **Variables are lowercase**: `/Door/OpenedAt > Now` compares with the text "Now", not with the time. The editor warns about such a word when it differs from a variable only in case, or when it is compared with a number, a date, a duration or a boolean.
+
+### Time
+
+Compare the time of day with `>=`, `<` and the like, never with `==`: the clock never equals a value exactly, so `time == 7h` never fires, and the editor warns about `==` and `!=` with `now` or `time`. `time >= 7h` is true from 07:00 until midnight, so a trigger on it fires once a day and rearms at midnight, see [Once a day](#once-a-day).
+
+A condition whose every use of the clock is an elapsed time compared with a duration, such as `now - ./LastTriggeredAt > 30m`, or the time of day compared with a duration, such as `time >= 8h30m`, joined with `and` or `or`, is checked again exactly when its result can change. Any other use of `now` or `time`, such as `now > /Door/Deadline`, is checked every second, so such a condition becomes true at most one second late and keeps its automation busy every second while its rule is active; the editor says "Checked every second" under it. Write it as an elapsed time where you can, such as `now - /Door/OpenedAt > 10m` in place of a deadline in `now > /Door/Deadline`.
+
+`time` follows the time zone of the host and never moves backwards within a day. In the hour that repeats when the clocks go back, it stays at the last time before the change until the clock passes it again, so every time of day in that hour is passed once, the first time, and a daily rule runs once on that day too. Elapsed times are measured in UTC.
+
+A hold (**For at least**) keeps its length when the system clock is set forward or back, and `Holding since` in the rule status then moves by the same amount, so it never shows a time in the future. A cooldown follows the system clock, since it compares `now` with `./LastTriggeredAt`, which is kept across restarts.
+
+### Simple and advanced editing
+
+Every condition field of the editor has two modes. **Simple** shows rows of property, comparison and value, joined with `and` or `or`, with the current value and result of each row and the result of the whole condition. **Advanced** shows the expression as text. The stored value is always the text, and `and` binds tighter than `or`. A condition with any other form, such as parentheses, `not` or arithmetic, is shown in Advanced only and is never rewritten by the editor. Event filters show no current values, because there is no event yet.
+
+---
+
+## Actions
+
+The actions under **Then, in this order** run one after the other:
+
+| Action | What it does |
+|---|---|
+| **Call operation** | Calls an operation of a subject, such as `/Living/Blinds/Close`, and waits until it completes, at most one minute. Operations that require confirmation by a person are refused, queries are no operations, and a disabled operation fails. |
+| **Set property** | Writes a property that is writable and is no configuration. |
+| **Change state** | Changes the state of this automation. A change to the current state does nothing. |
+
+The arguments of an operation:
+
+- **Text** is a template: `{{ path }}` inserts a value as pages show it, as in `Gust {{ /Weather/WS90/WindGust }} m/s`. A missing value inserts nothing, and the action still runs, so a notification about an outage can name the missing sensor. **Insert value** picks a path, and the field shows the text as it would be sent now.
+- **Other values** are a constant, such as `300`, or an expression, such as `/Weather/WS90/WindGust * 2`. An expression that is unknown fails the action. Values are the raw stored values, as in expressions and configuration files, and are never scaled by the unit of the parameter: a parameter shown as a percentage takes `0.5` for 50 percent.
+- **A record parameter**, such as the notification of `SendNotification`, is given per member, as `notification.Message`, and its text members are templates as well. A parameter is given either whole or per member, not both.
+- **Keys** match the names of the parameters without regard to case. A key that names no parameter or member of the operation is an error, and so is a missing argument of a parameter that is not optional.
+
+**Set property** takes one value in the same way and writes the raw value of the property.
+
+Authorization has a seam but no rules yet: every operation the automation can see and every writable property is allowed, except operations that require confirmation. The automation asks an authorizer before each call and write, so rules can restrict it later, see [Missing Features](#missing-features).
+
+**On error** decides what a failed action does to the rest of the run: **Continue**, the default, runs the remaining actions; **Stop rule** skips them. Neither undoes actions that succeeded, including a state change, and nothing is retried. A failure is logged and recorded in the run of the rule.
+
+---
+
+## Modes and Test now
+
+| | Off | Dry run | On |
+|---|---|---|---|
+| Triggers observed | No | Yes | Yes |
+| Actions executed | No | No: the run is recorded as **Would have run (dry run)** with its actions and their values | Yes |
+| State changes | No | No: a Change state action does not change the state | Yes |
+| `LastTriggeredAt` set | No | No | Yes |
+| Run recorded | No | Yes, with the outcome DryRun | Yes |
+
+New rules start in Dry run. A rule in Dry run with a Change state action does not change the state, so the rules of that state become active through it only once it is On; the page and the editor say so next to the rule.
+
+**Test now** on the page evaluates a saved rule with the current values:
+
+- **What it shows**: the result of each trigger, of Only if, and the actions with their arguments as they would run now.
+- **The verdict** says whether the rule would run with the current values, or why not. When Only if is false or unknown, it adds that a condition that becomes true meanwhile waits until Only if is true, or the status of the automation while it runs no rules, such as while it is stopped; it does not tell whether a condition fired already. An automation that shows an error while its worker runs, such as after a failed action, keeps running its rules, so the verdict is the one of a running automation with a note on the error. One whose worker ended with an error runs no rules, and the verdict says that it stopped after an error.
+- **Side effects**: none. It works in every mode and executes and records nothing.
+- **Scope**: it tests the saved rule only; the editor shows the current value and result of every condition instead.
+- **Agents** get the same result through `invoke_query` on the `TestNow` query of the rule, such as `/Automations/Storm/Rules[k3f9]/TestNow`.
+
+---
+
+## The page and the widget
+
+The header of the page of an automation shows its title, its status and last error, **Reset state**, which asks for confirmation, and **Edit**. Below it are the tabs **Overview** and **Runs**. The header and the tabs stay in view, and only the content of the tab scrolls.
+
+**Overview** shows:
+
+- **State**: the read-only state diagram with the current state and the time it was entered, when the automation has states.
+- **Notes**: the notes, links and tags of the [metadata](metadata.md#notes-links-and-tags) of the automation, beside the diagram, or below it on a narrow screen. The pencil opens the [Metadata dialog](metadata.md#the-metadata-dialog). It is shown only when a storage keeps the metadata of the automation, and disabled while that storage is not connected. A click on a tag lists everything that has the tag.
+- **Rules**: the rules in run order, each with the state it is active in, its mode, status, last trigger time and run count, and **Test now**. A click on a rule, or on its name with the keyboard, opens the editor on that rule in the **Rules** tab. On a phone the rules are cards. **Last triggered** is when the first action of the last run that was not a dry run started, so a rule in Dry run can list runs while it shows **Never**.
+
+**Runs** lists the runs of the last seven days, at most 20, read from history, see [Recent runs from history](#recent-runs-from-history). The tab shows their number, or `20+` when the list is full. Without a [history store](../architecture/design/history.md), it lists the last run of each rule.
+
+- **Filter**: with more than one rule, chips filter the runs by rule, and the filter stays while you switch tabs. A rule without runs in the list shows "No runs of this rule."
+- **Each run**: its time, its rule and its outcome. A run that completed its actions, and a dry run, shows one line per action: an action whose path is absolute names the subject by its title, with a link to it and the path as tooltip, and one whose path is relative to the rule, or that a dry run could not prepare, shows the text as written. Any other run, such as a failed one, shows its message as written. On a phone the runs are cards.
+
+The widget of an automation, placed on a page, shows its title with a link to its page, its status, its state and since when, and the error of the automation or, when there is none, the first rule that waits for Only if, holds a condition, misses values or did not run its last request.
+
+---
+
+## The editor
+
+**Edit** opens a dialog with three tabs:
+
+- **General**: the name and whether the automation is enabled.
+- **Rules**: the rules in run order, each with its mode, the state it is active in (or "any state"; omitted while there are no states) and its number of triggers, with buttons to move them, and the selected rule with its name, mode, **Active in state** (shown once there are states), **Runs when any of these happens**, **Only if**, and **Then, in this order**.
+- **States**: the state diagram, a button to add a state, and the selected state with its name, whether it is the initial state, the rules that enter, are active in and leave it, and a delete button that is disabled while rules use the state. Renaming a state renames it in every rule's state scope, in its Change state actions and as the initial state, but not in expressions, filters or argument texts that compare with the name, such as `event/NewState == Running` or `../CurrentState == Idle`: the editor lists the rules that still contain the old name as a word, and you change those texts yourself. A click on an edge opens its rule.
+
+An edge of the diagram is a rule that is active in a state, or in any state, and changes to another state with exactly one Change state action. Rules that change no state, or change it in a way the diagram cannot show, are listed below it and stay in the Rules tab, as are the rules after the first 40 edges. The layout is computed; positions are not stored.
+
+Above the tabs, the dialog lists the reasons that keep it from saving: an invalid expression or value, a condition row that is not finished, a duplicate rule name (ignoring case), a duplicate action id within a rule, a state name with white space at its ends, and everything the automation itself checks, such as an unknown state. Save is blocked while any is listed. Selecting another rule or tab discards a condition row that is not finished, a duration that is not valid and a state name that was rejected, and a notice says so. Warnings, such as a bare word that reads as text or a comparison of the clock with `==`, do not block saving.
+
+Conditions and templates show their current values and results, read again every second while the editor is open, and a value that cannot be read shows why. An action whose operation or property appears or goes away while the editor is open shows its inputs and their errors within a second. Save checks everything again, and when it finds an error that the dialog did not list yet, such as an argument of an operation that appeared in a rule that is not shown, it lists the error and keeps the dialog open.
+
+Saving writes the configuration only and never changes the current state, the trigger times or the runs: a trigger that is unchanged keeps its hold, its arming and its wait, also when other triggers of its rule were added, deleted or moved. It keeps the arguments of every action, and prunes the arguments that no longer fit only for an action whose operation was changed. The current state is the exception to a safe rename: if the current state is renamed or removed, also by removing every state, the editor warns, and after saving the automation stops with an error and runs no rule until **Reset state** enters the initial state, or a saved configuration has that state again. Test now reports the rules as inactive meanwhile.
+
+Values typed into a simple row follow these rules. A value that is one token, such as a number, a path, `true` or a word like `Away`, is written as it is; `-5` is a negative number and `-/Heating/Limit` the negated value of a path. Any other value is written as text in quotes, so that it cannot change the meaning of the condition: text with spaces, a date or a time, and `N/A`. A number with a decimal comma such as `1,5` is rejected with the hint to use a point.
+
+---
+
+## Status and errors
+
+`Status` of an automation is `Starting`, `Running`, `Error` or `Stopped`, and `StatusMessage` holds the latest failure, such as a failed action or an invalid configuration, which keeps the previous configuration running. A later run that executes actions and completes all of them clears the error, except the errors about the checkpoint, see [Operational details](#operational-details); a request that did not run does not. A disabled automation keeps its state and its last error. The times in a rule status are in the time zone of the host, while the page shows its own times in your time zone.
+
+The status of a rule starts with its mode, `On`, `DryRun` or `Off` (a rule that is off shows only `Off`), and the examples below show an `On` rule:
+
+| Status | Meaning |
+|---|---|
+| `Off` | The rule is off. |
+| `On: Armed` | A trigger can fire. |
+| `On: Holding since 13:00:00 for 20s` | A condition is true and waits for its hold. |
+| `On: Waiting since 2026-11-06 12:01:00: Only if is false` | A condition fired and Only if rejected its run, so the rule runs once Only if is true. The reason can also be `Only if is unknown, missing /Weather/Gust`, `the state changed to Hot for the same input` or a stopped feedback chain. |
+| `On: Triggered, waiting to rearm` | Every trigger fired and waits until its condition is false, or its **Fires again only after** condition true. |
+| `On: Armed, waiting until false` | Every trigger fired, and one was rearmed while its condition is still true: it fires on the next change to true. |
+| `On: Already true, waiting until false` | With **Wait for a change**, every condition was true when the rule became active. |
+| `On: Already true, waiting to rearm` | The same with a **Fires again only after** condition: it waits for that condition. |
+| `On: Unknown since 2026-11-06 12:00:00, missing /Weather/Gust` | A condition needs values that are missing. |
+| `On: Armed; not run: Only if is false` | A suffix with why the last request did not run, such as an event that Only if rejected. It disappears with the next run, and when the condition of a waiting trigger becomes false. |
+| `On: Inactive outside state Running` | The automation is in another state. |
+| `On: Inactive: the automation is disabled` | The automation is disabled. |
+| `On: Inactive: the automation is stopped` | The automation is stopped. |
+| `On: Not applied: the configuration is invalid` | The saved configuration is invalid, so the previous one keeps running. |
+
+---
+
+## Why didn't my rule run?
+
+1. **Read the status of the rule** on the page of the automation. `Off` and `Inactive ...` say that the rule does not observe its triggers, `Not applied ...` that the saved change is not in effect yet (an invalid one leaves the previous configuration running), `Unknown since ...` names the values that are missing, `Holding since ...` that a hold has not elapsed, `Waiting since ...` that Only if or a state change held the run back, `Triggered, waiting to rearm` and `Already true, waiting until false` that the condition was true already and must change first, and `; not run: ...` why the last request did not run. A rule in Dry run lists its runs but executes nothing.
+2. **Click Test now** on the rule. It shows the result of each trigger and of Only if with the current values, and the arguments the actions would get, so a condition that is false or unknown and a wrong path show up there.
+3. **Read the status of the automation and the log.** A failed or refused action, a stopped feedback chain and an invalid configuration are in `StatusMessage` and in the log, with the full error.
+
+---
+
+## Restart
+
+After a restart, the current state, when it was entered, and the last trigger time and the last run of each rule are restored without a state change event, and offline time counts: a condition such as `now - ../StateEnteredAt > 10m` can be true right after the start. Device readings are not restored; they are missing until the device reports, so rules over them wait. Holds and waiting triggers start over, see [Property conditions](#property-conditions).
+
+The state belongs to the path of the automation: moving it to another folder or renaming its file starts it fresh at the new path, from its initial state. An action and the saved state are not one transaction, so a crash right after a notification can send that notification again after the restart. [Operational details](#operational-details) has where the state is stored and what a crash can lose.
+
+---
+
+## Examples
+
+The paths are illustrative. Each JSON example is the configuration file of the automation, which the editor shows in its tabs, and the shorter examples list the rules as the editor shows them. A hold (`for`) is written as a duration of expressions, such as `20s`, `10m` or `1h30m`, and the form `00:10:00` is read as well.
+
+### Washing machine finished
+
+The memory "it was running" is a state, so a standby reading after a restart in Idle reports nothing. The ten-minute hold keeps the pump phase from reporting a finished cycle.
+
+```json
+{
+  "$type": "HomeBlaze.Automation.Automation",
+  "name": "Washing machine",
+  "states": [ "Idle", "Running" ],
+  "initialState": "Idle",
+  "ruleOrder": [ "started", "finished" ],
+  "rules": {
+    "started": {
+      "name": "Started",
+      "mode": "On",
+      "inState": "Idle",
+      "triggers": [
+        { "$type": "PropertyTrigger", "expression": "/Laundry/Washer/Plug/MeasuredPower > 500" }
+      ],
+      "actions": [
+        { "$type": "ChangeState", "id": "state-1", "targetState": "Running" }
+      ]
+    },
+    "finished": {
+      "name": "Finished",
+      "mode": "On",
+      "inState": "Running",
+      "triggers": [
+        { "$type": "PropertyTrigger", "expression": "/Laundry/Washer/Plug/MeasuredPower < 5", "for": "10m" }
+      ],
+      "actions": [
+        {
+          "$type": "InvokeOperation",
+          "id": "call-1",
+          "operationPath": "/Notifications/Family/SendNotification",
+          "arguments": { "notification.Message": "Washing machine finished" }
+        },
+        { "$type": "ChangeState", "id": "state-1", "targetState": "Idle" }
+      ]
+    }
+  }
+}
+```
+
+### Storm
+
+A gust held for 20 seconds or rain for a minute retracts the blinds, at most once every 30 minutes and not while they move. A gust or rain that is still there when the 30 minutes end or the blinds stop moving retracts them then, and a gust and rain together retract them once. The rearm condition keeps gusts around 8 m/s from firing again before the storm is over.
+
+```json
+{
+  "$type": "HomeBlaze.Automation.Automation",
+  "name": "Storm",
+  "rules": {
+    "retract": {
+      "name": "Retract blinds",
+      "mode": "On",
+      "triggers": [
+        { "$type": "PropertyTrigger", "expression": "/Weather/WS90/WindGust > 8", "for": "20s", "rearm": "/Weather/WS90/WindGust < 6" },
+        { "$type": "PropertyTrigger", "expression": "/Weather/WS90/RainRate > 0", "for": "1m" }
+      ],
+      "onlyIf": "not /Living/Blinds/IsMoving and not /Living/Blinds/IsCalibrating and (./LastTriggeredAt == null or now - ./LastTriggeredAt > 30m)",
+      "actions": [
+        { "$type": "InvokeOperation", "id": "call-1", "operationPath": "/Living/Blinds/Close" },
+        {
+          "$type": "InvokeOperation",
+          "id": "call-2",
+          "operationPath": "/Notifications/Family/SendNotification",
+          "arguments": { "notification.Message": "Blinds retracted: gust {{ /Weather/WS90/WindGust }} m/s, rain {{ /Weather/WS90/RainRate }} mm/h" }
+        }
+      ]
+    }
+  }
+}
+```
+
+### Hue button
+
+Every short press of the button starts the music, also two in a row: a short press ends with the button state `Release`, while a press held long ends with `LongRelease`, which the filter does not match.
+
+```json
+{
+  "$type": "HomeBlaze.Automation.Automation",
+  "name": "Kitchen button",
+  "rules": {
+    "play": {
+      "name": "Play music",
+      "mode": "On",
+      "triggers": [
+        {
+          "$type": "SubjectEventTrigger",
+          "subjectPath": "/Kitchen/Hue/Buttons[dimmer-1]",
+          "eventType": "ButtonEvent",
+          "filter": "event/ButtonState == Release"
+        }
+      ],
+      "actions": [
+        { "$type": "InvokeOperation", "id": "call-1", "operationPath": "/Kitchen/Sonos/Play" }
+      ]
+    }
+  }
+}
+```
+
+### Door reminder
+
+The door state is part of the reminder's trigger and not of Only if, so after a restart in an overdue Open state the rule waits for the first door reading: open sends at once with the original deadline, closed lets Shut reset the state, and no reading keeps the rule unknown. The `raw` pipe writes the instant as ISO 8601, such as `2026-11-06T12:00:00.0000000+00:00`; without it, the text shows the instant as pages do.
+
+```json
+{
+  "$type": "HomeBlaze.Automation.Automation",
+  "name": "Front door",
+  "states": [ "Closed", "Open", "Informed" ],
+  "initialState": "Closed",
+  "ruleOrder": [ "opened", "remind", "shut" ],
+  "rules": {
+    "opened": {
+      "name": "Opened",
+      "mode": "On",
+      "inState": "Closed",
+      "triggers": [ { "$type": "PropertyTrigger", "expression": "/Entrance/Door/DoorState == Open" } ],
+      "actions": [ { "$type": "ChangeState", "id": "state-1", "targetState": "Open" } ]
+    },
+    "remind": {
+      "name": "Remind",
+      "mode": "On",
+      "inState": "Open",
+      "triggers": [ { "$type": "PropertyTrigger", "expression": "now - ../StateEnteredAt > 10m and /Entrance/Door/DoorState == Open" } ],
+      "actions": [
+        {
+          "$type": "InvokeOperation",
+          "id": "call-1",
+          "operationPath": "/Notifications/Family/SendNotification",
+          "arguments": { "notification.Message": "Front door open since {{ ../StateEnteredAt | raw }}" }
+        },
+        { "$type": "ChangeState", "id": "state-1", "targetState": "Informed" }
+      ]
+    },
+    "shut": {
+      "name": "Shut",
+      "mode": "On",
+      "triggers": [ { "$type": "PropertyTrigger", "expression": "/Entrance/Door/DoorState == Closed" } ],
+      "actions": [ { "$type": "ChangeState", "id": "state-1", "targetState": "Closed" } ]
+    }
+  }
+}
+```
+
+### Day and night
+
+Two rules switch between the states Day and Night. After a restart in the wrong period, Run if already true changes to the current period once instead of replaying the missed changes.
+
+```text
+States  Day, Night
+
+Rule  Morning   Active in state: Night
+  When  time >= 8h30m and time < 21h30m
+  Then  Change state to Day
+
+Rule  Evening   Active in state: Day
+  When  time >= 21h30m or time < 8h30m
+  Then  Change state to Night
+```
+
+### Once a day
+
+The condition is true from 07:00 until midnight, so the trigger fires once a day at 07:00 and rearms at midnight. With **Run if already true**, a restart later in the day runs the rule again on that day; with **Wait for a change**, it runs at the next 07:00.
+
+```text
+Rule  Morning heating
+  When  time >= 7h
+  Then  Call /Living/Heating/SetMode  Mode: Comfort
+```
+
+### Quiet hours
+
+Only if holds a notification back at night: a cycle that finishes at 23:00 waits and is reported at 07:00, as long as the machine is still finished then. Add it to the rule Finished of the [washing machine](#washing-machine-finished).
+
+```text
+Rule  Finished   Active in state: Running
+  When     /Laundry/Washer/Plug/MeasuredPower < 5   For at least 10m
+  Only if  time >= 7h and time < 22h
+  Then     Call /Notifications/Family/SendNotification  Message: Washing machine finished
+           Change state to Idle
+```
+
+### One-button toggle
+
+One button switches a lamp on and off with two states. Each press reaches only the rule of the current state, and the state it enters takes effect for the next press, so one press never runs both rules. A press while the previous one is still running its actions waits and is handled afterwards in the new state, so two quick presses switch the lamp on and off again.
+
+```text
+States  Off, On
+
+Rule  Switch on   Active in state: Off
+  When  Event ButtonEvent from /Hall/Hue/Buttons[switch-1]   Only events where: event/ButtonState == Release
+  Then  Call /Hall/Lamp/TurnOn
+        Change state to On
+
+Rule  Switch off   Active in state: On
+  When  Event ButtonEvent from /Hall/Hue/Buttons[switch-1]   Only events where: event/ButtonState == Release
+  Then  Call /Hall/Lamp/TurnOff
+        Change state to Off
+```
+
+### Light off without motion
+
+The hold restarts with every motion, so the light goes off five minutes after the sensor stops reporting motion, and once more five minutes after a restart once the sensor reports no motion.
+
+```text
+Rule  Light off
+  When  /Hall/Motion/IsMotionDetected == false   For at least 5m
+  Then  Call /Hall/Light/TurnOff
+```
+
+### Sensor outage
+
+The first condition covers an integration that empties its values when a sensor goes offline, the second one a subject that keeps its last values and reports `LastUpdated`. After a restart, `LastUpdated` is missing until the first report: the hold keeps that from notifying at once, so a sensor that is dead at startup is reported after 15 minutes, and one that stops reporting after 30.
+
+```text
+Rule  WS90 silent
+  When  /Weather/WS90/Temperature == null                                                   For at least 15m
+  When  (/Weather/WS90/LastUpdated == null or now - /Weather/WS90/LastUpdated > 15m)        For at least 15m
+  Then  Call /Notifications/Family/SendNotification  Message: WS90 has not reported for at least 15 minutes
+```
+
+---
+
+## Operational details
+
+This section describes how the automation stores, batches and limits its work. It is not needed to write rules.
+
+### The checkpoint
+
+Each automation keeps its current state, when it entered it, and the last trigger time and last run of each rule in a checkpoint file, not in its configuration.
+
+- **Location**: the folder `AutomationState` of the [data folder](configuration.md#data-folder), at the path of the automation: `/Demo/ConveyorGuard` has `Data/AutomationState/Demo/ConveyorGuard.json`. A character that a file name cannot hold, such as `:`, and `%` itself are written as `%` and their hexadecimal code, so that every path has a file of its own.
+- **Writes**: the file is replaced as a whole, and each write is flushed to disk. A state change is written before it is published. The runs, run counts and trigger times are written at most every 5 seconds, with the next state change, and when the automation stops.
+- **What a crash loses**: a crash or a power loss can lose the runs of the last 5 seconds, with their run counts and trigger times, so a cooldown can end early and the history shows the run count of such a rule drop, as after a reset of a counter.
+- **Failed writes**: when the runs cannot be written, the status reads "The runs could not be saved and are saved again in 5 seconds: ...", which is shown and logged once and stays, also after a successful run, until the runs are written.
+- **Unreadable file**: a checkpoint that cannot be read is kept next to it as `ConveyorGuard.json.unreadable-<timestamp>`, and the automation starts from its initial state and shows the error until **Reset state** or a saved valid configuration. If the file cannot be moved aside either, the automation writes no checkpoint and keeps the error until **Reset state**, so that the file is never replaced silently. A checkpoint with a run outcome it does not know keeps its state and run counts, without that outcome.
+- **Moves and deletes**: moving or renaming an automation deletes the checkpoint at the old path and starts it again from its initial state, and deleting an automation deletes its checkpoint.
+- **Reset by hand**: stop HomeBlaze and delete the file of the automation.
+
+### Recent runs from history
+
+- **What counts**: the runs that executed actions, including those that failed or that a stop canceled, and dry runs. Requests that Only if rejected and requests skipped after a state change are [no runs](#only-if-and-cooldown).
+- **How runs are found**: every run increments the `RunCount` of its rule, also two identical runs in a row, and the page lists a run for each `RunCount` sample that follows a lower one, with the `LastRunOutcome` and `LastRunMessage` of that time. A count that is lower after a crash starts over without a run, so a crash can drop runs.
+- **Repeated outcome or message**: a run that repeats the outcome or the message of the run before it does not record that value again, so the page reads the value held since then, also from another history store. History does not know a value that has not changed since HomeBlaze started recording, so after a restart such a run can show without its outcome or message until they next change.
+- **Runs close together**: a history store merges the changes of a property within its buffer time, 250 ms by default, so two runs of one rule within that time show as one.
+- **Caption**: the caption of the list says both, that runs close together can show as one and that a crash can drop runs.
+- **Refresh**: the page reads the runs again after new runs, at most every 5 seconds, and while history has not stored a new run count yet, it tries again for up to 30 seconds.
+
+### Limits
+
+- An automation processes its inputs one after the other. At most 1024 inputs wait; more are dropped, the rules are evaluated again with the current values, and the status says how many inputs were dropped. The log summarizes the drops at most once a minute.
+- A chain of more than 16 runs that each caused the next, such as two rules that change each other's values, is stopped and reported with the number of inputs that were dropped. A run of the chain that changes which subject a path leads to, such as replacing a device, usually reaches only the automations with a path through that change: an automation without one then neither reports the chain for it nor counts it among its dropped inputs. An event of the chain is reported only by an automation with an active rule that has a trigger on it.
+- An operation may run for one minute, then its cancellation is requested and the action fails. An operation that ignores its cancellation is still awaited, so that it never overlaps a later run of the automation. Every other rule of the automation waits meanwhile, so give each concern its own automation.
+- Stopping an automation, such as when HomeBlaze shuts down, cancels the running action; the actions after it and the other rules of that input do not run, and the run is recorded as **Canceled**, which the page shows as **Canceled by a stop**. A stop waits at most 10 seconds: a worker that is still in an operation is then abandoned and changes nothing anymore, and an operation that ignores its cancellation is abandoned once its minute is over. An operation that blocks until it is done, rather than completing asynchronously, cannot be abandoned and keeps running until it returns. The runs not written yet are written on the stop, unless the stop is given no time at all, which can lose the runs of the last 5 seconds.
+- `LastRunMessage` holds at most 500 characters; the full errors are in the log.
+
+### Other details
+
+- A rule shows `On: Not applied yet` until the automation applied its configuration for the first time.
+- A saved configuration keeps the events that wait to be processed for every event trigger it leaves unchanged.
+- A system clock that is set forward or back is noticed within a minute.
+- A list or dictionary that a device changes in place is not observed: a path through it, such as `/Room/Devices[lamp]/On`, may keep leading to what it found before until a new list or dictionary is assigned.
+- Neither is an attribute whose value a device changes without a write, such as configuration metadata that becomes secret: a path to its property keeps whether it may be read until the automation resolves the path again, such as after a subject on the path is replaced.
+- In a list or dictionary that holds or held the same device more than once, a path through another of its keys or positions, such as `/Room/Devices[spare]/On`, may keep leading to what it found before until the structure on its path changes again.
+
+---
+
+## Missing Features
+
+The following features are not available yet:
+
+- Authorization rules: an allowlist of the operations and properties an automation may call or write, such as a storm automation that may close the blinds but never open them.
+- History functions in expressions, such as the maximum of a property over the last hours or "was above 500 W in the last 3 hours". Named states cover the washing machine without them.
+- A sun subject with sunrise and sunset instants for light rules.
+- A lock that depends on state and applies to every caller, such as nobody extending the blinds during a storm.
+- Dry runs that simulate state changes, so that a workflow of several states can be observed end to end.
+- Computing when other uses of the clock can change, such as `now` compared with a path, as in `now > /Door/Deadline`.
+- Keeping a trigger that waits for Only if across a restart.
+- Keeping the checkpoint when an automation is renamed or moved.
+- Carrying the current state over when it is renamed in the editor.
+- Event descriptors: display names, descriptions, units or hidden fields for event types, and friendly names for event types.
+- Restoring a property from its history at startup, which would interact with readings that start empty.
+- Testing an unsaved draft in the editor.
+- Stored diagram positions, so that states can be moved by hand.
+- A list of recent runs kept by the automation itself, so that runs close together show separately and a crash drops none.
+- Keeping the events that wait to be processed for an event trigger that a saved configuration changes: they are dropped.
+- Reporting an event source that failed or completed: its trigger stays silent until the graph gives it a new source.
+- Choosing between event types with the same name from different libraries other than by the full type name.
+- Arbitrary scripts, automatic retries, parallel actions and the conversion of automations from HomeBlaze v1.

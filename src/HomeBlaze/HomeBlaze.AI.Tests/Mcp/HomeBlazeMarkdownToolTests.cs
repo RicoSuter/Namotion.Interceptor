@@ -280,7 +280,7 @@ public sealed class HomeBlazeMarkdownToolTests : IDisposable
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         AgentTestRoot? root = null;
-        services.AddSingleton(new SubjectPathResolver(() => root));
+        services.AddSingleton(new SubjectPathResolver(context, () => root));
         services.AddSingleton<MarkdownContentParser>();
         services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
         var serviceProvider = services.BuildServiceProvider();

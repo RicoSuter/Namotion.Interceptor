@@ -49,7 +49,7 @@ public class UnsavedTextTests
         // Assert
         Assert.Contains(Typed, editorTextAfterKeep);
         Assert.EndsWith($"pages/Demo/{PageName}", urlAfterKeep);
-        await page.WaitForURLAsync("**/browser", new() { Timeout = Timeout });
+        await _fixture.WaitForUrlAsync(page, url => url.EndsWith("/browser", StringComparison.Ordinal), Timeout);
         Assert.DoesNotContain(Typed, await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName)));
     }
 
@@ -67,8 +67,8 @@ public class UnsavedTextTests
         await page.GetByRole(AriaRole.Link, new() { Name = "Browser" }).ClickAsync();
 
         // Assert
-        await page.WaitForURLAsync("**/browser", new() { Timeout = Timeout });
-        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true })).ToHaveCountAsync(0);
+        await _fixture.WaitForUrlAsync(page, url => url.EndsWith("/browser", StringComparison.Ordinal), Timeout);
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true })).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         Assert.Contains(Typed, await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(PageName)));
     }
 
@@ -107,13 +107,17 @@ public class UnsavedTextTests
         // Act: the dialog covers the links, so the app navigates as the back button of a phone would.
         await page.EvaluateAsync("url => Blazor.navigateTo(url)", "/browser");
         await page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true }).ClickAsync();
+
+        // As a user does, the app navigates again only once the question is gone, so that its Discard is not taken for
+        // the one of the next question. The text dialog stays open.
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Keep editing", Exact = true })).ToHaveCountAsync(0, new() { Timeout = Timeout });
         var editorTextAfterKeep = await page.EvaluateAsync<string>("() => blazorMonaco.editor.getEditor('markdown-text-editor', true).getValue()");
         await page.EvaluateAsync("url => Blazor.navigateTo(url)", "/browser");
         await page.GetByRole(AriaRole.Button, new() { Name = "Discard", Exact = true }).ClickAsync();
 
         // Assert
         Assert.Contains(Typed, editorTextAfterKeep);
-        await page.WaitForURLAsync("**/browser", new() { Timeout = Timeout });
+        await _fixture.WaitForUrlAsync(page, url => url.EndsWith("/browser", StringComparison.Ordinal), Timeout);
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = Timeout });
     }
 

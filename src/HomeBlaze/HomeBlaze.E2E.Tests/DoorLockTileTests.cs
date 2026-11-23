@@ -87,7 +87,7 @@ public class DoorLockTileTests : IDisposable
 
         // Assert
         await Assertions.Expect(page.GetByTestId("door-lock-tile").First).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(GetTileRoot(GetTile(page, "Front door")).GetByTestId("tile-badge")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(GetTileRoot(GetTile(page, "Missing")).GetByTestId("tile-badge")).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(GetTile(page, "Missing")).ToBeDisabledAsync(new() { Timeout = Timeout });
@@ -168,7 +168,7 @@ public class DoorLockTileTests : IDisposable
         // Assert
         Assert.Equal(error, background);
         await Assertions.Expect(tile.GetByTestId("tile-subtitle")).ToHaveTextAsync("Locked", new() { Timeout = Timeout });
-        await Assertions.Expect(GetConfirmationDialog(page)).ToHaveCountAsync(0);
+        await Assertions.Expect(GetConfirmationDialog(page)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         Assert.Equal(DoorLockState.Locked, GetLock().LockState);
     }
 

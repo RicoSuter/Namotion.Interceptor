@@ -1,0 +1,255 @@
+@using global::HomeBlaze.Abstractions.Metadata
+@using Namotion.Interceptor.Registry.Abstractions
+@implements IDisposable
+@inject PreviewTicker Ticker
+
+<MudPaper Outlined="true" Class="pa-3" data-testid="automation-action">
+    <div class="d-flex flex-wrap align-center gap-2">
+        <MudText Typo="Typo.body2" Style="font-weight: 500; width: 20px;">@(Index + 1)</MudText>
+        <div style="flex: 2 1 260px; min-width: 0;">
+            @switch (_value)
+            {
+                case InvokeOperationAction invoke:
+                    <SubjectPathField Label="Call operation" Value="@invoke.OperationPath" CanSelectProperty="@IsOperation" ValueChanged="SetOperationAsync" />
+                    break;
+                case SetPropertyAction write:
+                    <SubjectPathField Label="Set property" Value="@write.PropertyPath" CanSelectProperty="@IsWritable" ValueChanged="SetPropertyPathAsync" />
+                    break;
+                case ChangeStateAction change:
+                    <MudSelect T="string" Label="Change state to" Value="@change.TargetState" ValueChanged="SetTargetStateAsync"
+                               data-testid="automation-change-state-target">
+                        @foreach (var state in States)
+                        {
+                            <MudSelectItem Value="@state">@state</MudSelectItem>
+                        }
+                    </MudSelect>
+                    break;
+            }
+        </div>
+        <div style="width: 150px;">
+            <MudSelect T="ActionErrorPolicy" Label="On error" Value="@_value.OnError" ToStringFunc="@FormatPolicy" ValueChanged="SetPolicyAsync">
+                <MudSelectItem Value="ActionErrorPolicy.Continue">@FormatPolicy(ActionErrorPolicy.Continue)</MudSelectItem>
+                <MudSelectItem Value="ActionErrorPolicy.StopRule">@FormatPolicy(ActionErrorPolicy.StopRule)</MudSelectItem>
+            </MudSelect>
+        </div>
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" Disabled="@(Index == 0)" aria-label="Move action up"
+                       OnClick="@(() => Moved.InvokeAsync(-1))" />
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" Disabled="@(Index == Count - 1)" aria-label="Move action down"
+                       OnClick="@(() => Moved.InvokeAsync(1))" />
+        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" aria-label="Remove action" OnClick="@(() => Removed.InvokeAsync())" />
+    </div>
+    @if (_value is InvokeOperationAction operation)
+    {
+        @RenderArguments(operation)
+    }
+    else if (_value is SetPropertyAction property)
+    {
+        @RenderValue(property)
+    }
+</MudPaper>
+
+@code {
+    private const string ValueHelperText = "A value, or an expression such as /Weather/WindGust * 2";
+    private const string ValueKey = ActionInputs.ValueKey;
+
+    private AutomationAction _value = null!;
+    private IReadOnlyList<ArgumentField>? _fields;
+    private Type? _targetType;
+    private Dictionary<string, string> _errors = [];
+    private AutomationAction? _checkedValue;
+    private RuleExpressions? _checkedExpressions;
+    private RegisteredSubjectProperty? _target;
+    private IDisposable? _tick;
+
+    [Parameter, EditorRequired] public AutomationAction Value { get; set; } = null!;
+
+    [Parameter] public EventCallback<AutomationAction> ValueChanged { get; set; }
+
+    [Parameter] public int Index { get; set; }
+
+    [Parameter] public int Count { get; set; }
+
+    [Parameter] public IReadOnlyList<string> States { get; set; } = [];
+
+    [Parameter, EditorRequired] public Automation Automation { get; set; } = null!;
+
+    [Parameter, EditorRequired] public string RuleKey { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public RuleExpressions Expressions { get; set; } = null!;
+
+    [Parameter] public EventCallback<int> Moved { get; set; }
+
+    [Parameter] public EventCallback Removed { get; set; }
+
+    /// <summary>Raised when the operation or property at the path of the action appeared, went away or was replaced in the graph.</summary>
+    [Parameter] public EventCallback TargetChanged { get; set; }
+
+    // An edit renders this component again before its parent passes the new action down, and a stale value in that render
+    // would make a field reload its text and lose what was just typed or a row that is not finished. The trigger editors
+    // and TemplateField keep their own copy for the same reason.
+    protected override void OnParametersSet()
+    {
+        _value = Value;
+        Refresh();
+    }
+
+    protected override void OnInitialized() => _tick = Ticker.Subscribe(InvokeAsync, CheckTargetAsync);
+
+    // Each tick resolves the target again, so that an operation or a property that appears after the action was typed shows
+    // its inputs and errors. Only a changed target checks the inputs again.
+    private async Task CheckTargetAsync()
+    {
+        if (ActionInputs.GetTargetPath(_value) is not { } path || ReferenceEquals(AutomationPreview.ResolveTarget(Automation, RuleKey, path), _target))
+        {
+            return;
+        }
+
+        _checkedValue = null;
+        Refresh();
+        StateHasChanged();
+        await TargetChanged.InvokeAsync();
+    }
+
+    public void Dispose() => _tick?.Dispose();
+
+    // The targets are resolved and the inputs checked when the action or the expressions change, not on every render of the editor.
+    private void Refresh()
+    {
+        if (ReferenceEquals(_value, _checkedValue) && ReferenceEquals(Expressions, _checkedExpressions))
+        {
+            return;
+        }
+
+        _checkedValue = _value;
+        _checkedExpressions = Expressions;
+        _target = AutomationPreview.ResolveTarget(Automation, RuleKey, ActionInputs.GetTargetPath(_value));
+        _fields = _value is InvokeOperationAction ? ActionInputs.GetFields(_target) : null;
+        _targetType = _value is SetPropertyAction ? _target?.Type : null;
+        _errors = ActionInputs.Check(_value, _fields, _targetType, Expressions).ToDictionary(error => error.Key, error => error.Error);
+    }
+
+    private string? GetError(string key) => _errors.GetValueOrDefault(key);
+
+    private RenderFragment RenderArguments(InvokeOperationAction invoke) => __builder =>
+    {
+        if (_fields is null)
+        {
+            if (!string.IsNullOrWhiteSpace(invoke.OperationPath))
+            {
+                <MudText Typo="Typo.caption" Color="Color.Warning" Class="mt-1">No operation at this path.</MudText>
+            }
+
+            return;
+        }
+
+        <MudStack Spacing="2" Class="mt-2 ml-6" data-testid="automation-action-arguments">
+            @{ string? group = null; }
+            @foreach (var field in _fields)
+            {
+                var fieldGroup = GetGroup(field.Key);
+                if (fieldGroup is not null && fieldGroup != group)
+                {
+                    <MudText Typo="Typo.overline" Class="mud-text-secondary">@fieldGroup</MudText>
+                }
+
+                group = fieldGroup;
+                var label = field.IsRequired ? $"{field.Label} *" : field.Label;
+                var argument = ActionInputs.GetArgument(invoke, field.Key);
+                var error = GetError(field.Key);
+                if (field.IsTemplate)
+                {
+                    <TemplateField @key="@field.Key" Label="@label" Value="@argument" Expressions="Expressions" IsRequired="@field.IsRequired"
+                                   ValueChanged="@(value => SetArgumentAsync(field.Key, value))" />
+                }
+                else if (field.Choices is { } choices)
+                {
+                    <MudSelect @key="@field.Key" T="string" Label="@label" Value="@argument" Clearable="true" Error="@(error is not null)" ErrorText="@error"
+                               ValueChanged="@(value => SetArgumentAsync(field.Key, value))">
+                        @foreach (var choice in choices)
+                        {
+                            <MudSelectItem Value="@choice">@choice</MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+                else
+                {
+                    <MudTextField @key="@field.Key" T="string" Label="@label" Value="@argument" Immediate="true" HelperText="@ValueHelperText"
+                                  Error="@(error is not null)" ErrorText="@error" ValueChanged="@(value => SetArgumentAsync(field.Key, value))" />
+                }
+            }
+        </MudStack>
+    };
+
+    private RenderFragment RenderValue(SetPropertyAction write) => __builder =>
+    {
+        var error = GetError(ValueKey);
+        <div class="mt-2 ml-6">
+            @if (ArgumentFields.IsText(_targetType))
+            {
+                <TemplateField Label="Value" Value="@write.Value" Expressions="Expressions" ValueChanged="SetWriteValueAsync" />
+            }
+            else
+            {
+                <MudTextField T="string" Label="Value" Value="@write.Value" Immediate="true" HelperText="@ValueHelperText"
+                              Error="@(error is not null)" ErrorText="@error" ValueChanged="SetWriteValueAsync" />
+            }
+        </div>
+    };
+
+    private Task SetAsync(AutomationAction action)
+    {
+        _value = action;
+        Refresh();
+        return ValueChanged.InvokeAsync(action);
+    }
+
+    // Each keystroke of the path is a change, so the arguments stay as they are; the arguments that the operation does not
+    // take are dropped when the rule is saved.
+    private Task SetOperationAsync(string? path) =>
+        _value is InvokeOperationAction invoke ? SetAsync(invoke with { OperationPath = path ?? string.Empty }) : Task.CompletedTask;
+
+    private Task SetPropertyPathAsync(string? path) =>
+        _value is SetPropertyAction write ? SetAsync(write with { PropertyPath = path ?? string.Empty }) : Task.CompletedTask;
+
+    private Task SetWriteValueAsync(string? value) =>
+        _value is SetPropertyAction write ? SetAsync(write with { Value = value ?? string.Empty }) : Task.CompletedTask;
+
+    private Task SetTargetStateAsync(string? state) =>
+        _value is ChangeStateAction change ? SetAsync(change with { TargetState = state ?? string.Empty }) : Task.CompletedTask;
+
+    private Task SetPolicyAsync(ActionErrorPolicy policy) => SetAsync(_value with { OnError = policy });
+
+    // The binder matches keys without regard to case, so another spelling of the same key is replaced.
+    private Task SetArgumentAsync(string key, string? value)
+    {
+        if (_value is not InvokeOperationAction invoke)
+        {
+            return Task.CompletedTask;
+        }
+
+        var arguments = invoke.Arguments
+            .Where(argument => !string.Equals(argument.Key, key, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(argument => argument.Key, argument => argument.Value);
+        if (!string.IsNullOrEmpty(value))
+        {
+            arguments[key] = value;
+        }
+
+        return SetAsync(invoke with { Arguments = arguments });
+    }
+
+    /// <summary>The name of the record parameter that a member field belongs to, or null for a field of a parameter.</summary>
+    private static string? GetGroup(string key)
+    {
+        var separator = key.IndexOf('.');
+        return separator < 0 ? null : key[..separator];
+    }
+
+    private static bool IsOperation(RegisteredSubjectProperty property) =>
+        property.TryGetMethodMetadata() is { Kind: MethodKind.Operation, RequiresConfirmation: false };
+
+    private static bool IsWritable(RegisteredSubjectProperty property) =>
+        property.TryGetMethodMetadata() is null && property.HasPublicSetter && !property.IsConfigurationProperty();
+
+    private static string FormatPolicy(ActionErrorPolicy policy) => policy == ActionErrorPolicy.StopRule ? "Stop rule" : "Continue";
+}

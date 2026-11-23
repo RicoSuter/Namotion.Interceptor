@@ -209,13 +209,15 @@ Apply structural changes in two sub-phases:
 **Sub-phase 1b: Move operations** are applied atomically using snapshot semantics:
 - All moves reference the state **after** removes/inserts have been applied
 - Multiple moves are applied simultaneously (each move reads from the snapshot)
-- Move `fromIndex` accounts for prior removes (intermediate index, not original)
+- Move `fromIndex` is the item's index after all removes and inserts (intermediate index, not original)
+- One move is sent for each retained item whose index among the retained items changes
+- A diff update does not reliably reproduce a collection that holds the same subject more than once
 
 | Operation | Index semantics |
 |-----------|-----------------|
 | `Remove` | Original index, descending order |
 | `Insert` | Final target index |
-| `Move` | `fromIndex`: intermediate (after removes), `index`: final target |
+| `Move` | `fromIndex`: intermediate (after removes and inserts), `index`: final target |
 
 **Example: Remove + Move**
 
@@ -225,15 +227,35 @@ Transform `[A, B, C]` → `[C, B]` (remove A, swap remaining):
 {
   "operations": [
     { "action": "Remove", "index": 0 },
-    { "action": "Move", "fromIndex": 1, "index": 0 }
+    { "action": "Move", "fromIndex": 1, "index": 0 },
+    { "action": "Move", "fromIndex": 0, "index": 1 }
   ]
 }
 ```
 
 After `Remove(0)`: `[B, C]` (indices 0, 1)
-After `Move(from=1, to=0)`: `[C, B]`
+After both moves, read from that snapshot: `[C, B]`
 
-Note: The move's `fromIndex` is 1 (C's position after the remove), not 2 (C's original position).
+Note: C's `fromIndex` is 1 (its position after the remove), not 2 (its original position).
+
+**Example: Insert + Move**
+
+Transform `[A, B]` → `[B, X, A]` (insert X, swap A and B):
+
+```json
+{
+  "operations": [
+    { "action": "Insert", "index": 1, "id": "2" },
+    { "action": "Move", "fromIndex": 2, "index": 0 },
+    { "action": "Move", "fromIndex": 0, "index": 2 }
+  ]
+}
+```
+
+After `Insert(1)`: `[A, X, B]` (indices 0, 1, 2)
+After both moves, read from that snapshot: `[B, X, A]`
+
+Note: B's `fromIndex` is 2 (its position after the insert), not 1 (its position before the insert).
 
 ### Phase 2: Property Updates
 
@@ -280,7 +302,9 @@ After: `[C, A, B]`
 {
   "kind": "Collection",
   "operations": [
-    { "action": "Move", "fromIndex": 2, "index": 0 }
+    { "action": "Move", "fromIndex": 2, "index": 0 },
+    { "action": "Move", "fromIndex": 0, "index": 1 },
+    { "action": "Move", "fromIndex": 1, "index": 2 }
   ],
   "count": 3
 }

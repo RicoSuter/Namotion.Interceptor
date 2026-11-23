@@ -3,6 +3,7 @@ using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Derived;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
 

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NuGet.Frameworks;
+using NuGet.Packaging;
 using NuGet.Packaging.Core;
 using NuGet.Protocol.Core.Types;
 using NuGet.Versioning;
@@ -78,7 +79,9 @@ internal class NuGetDependencyInfoProvider : IDependencyInfoProvider
                     metadataCacheContext, global::NuGet.Common.NullLogger.Instance, cancellationToken);
 
                 var best = packages
-                    .Where(package => range.Satisfies(package.Identity.Version))
+                    .Where(package =>
+                        range.Satisfies(package.Identity.Version) &&
+                        SupportsFramework(package.DependencySets, _targetFramework))
                     .OrderByDescending(package => package.Identity.Version)
                     .FirstOrDefault();
 
@@ -95,5 +98,25 @@ internal class NuGetDependencyInfoProvider : IDependencyInfoProvider
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Gets whether a package declares a dependency group the target framework can use.
+    /// A package without dependency groups is assumed to support every framework.
+    /// </summary>
+    internal static bool SupportsFramework(IEnumerable<PackageDependencyGroup> dependencyGroups, NuGetFramework targetFramework)
+    {
+        var hasDependencyGroups = false;
+        foreach (var dependencyGroup in dependencyGroups)
+        {
+            if (DefaultCompatibilityProvider.Instance.IsCompatible(targetFramework, dependencyGroup.TargetFramework))
+            {
+                return true;
+            }
+
+            hasDependencyGroups = true;
+        }
+
+        return !hasDependencyGroups;
     }
 }

@@ -1,4 +1,5 @@
 using HomeBlaze.Components.Tests.Models;
+using MudBlazor;
 using Xunit;
 
 namespace HomeBlaze.Components.Tests;
@@ -76,6 +77,23 @@ public sealed class ConfigurationPersistenceTests : IDisposable
         // Assert
         Assert.Equal(ConfigurationPersistResult.NoOwner, result);
         Assert.Empty(_graph.Store.WrittenSubjects);
+    }
+
+    [Fact]
+    public async Task WhenTheWriteOfAComponentFails_ThenTheErrorIsShownAndNothingIsThrown()
+    {
+        // Arrange
+        var snackbar = new SnackbarRecorder();
+        _graph.Store.WriteException = new IOException("disk full");
+
+        // Act
+        var isWritten = await _graph.RootManager.WriteConfigurationOrWarnAsync(_graph.Device, snackbar.Snackbar, CancellationToken.None);
+
+        // Assert
+        Assert.False(isWritten);
+        var message = Assert.Single(snackbar.Messages);
+        Assert.Equal(Severity.Error, message.Severity);
+        Assert.Equal("Error saving configuration: disk full", message.Message);
     }
 
     public void Dispose()

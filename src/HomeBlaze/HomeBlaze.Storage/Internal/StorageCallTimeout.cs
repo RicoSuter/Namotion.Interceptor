@@ -6,7 +6,7 @@ namespace HomeBlaze.Storage.Internal;
 /// </summary>
 /// <remarks>
 /// Only the wait ends: the call is not cancelled and finishes or fails on its own. Calls on the storage client
-/// are limited by <see cref="TimeLimitedBlobStorage"/>, which reports the limit as
+/// are limited by <see cref="TimeLimitedStore"/>, which reports the limit as
 /// <see cref="StorageUnresponsiveException"/>. <see cref="WithStorageTimeoutAsync"/> limits the reading of a
 /// stream to its end and reports the limit as a plain <see cref="TimeoutException"/>: one file that is not read
 /// in time says nothing about the other files.

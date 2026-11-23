@@ -36,25 +36,25 @@ public partial class AnalogChannel : IMonitoredService, ITitleProvider, IIconPro
     /// The normalized value (0.0 to 1.0).
     /// </summary>
     [State]
-    public partial double Value { get; set; }
+    public partial double Value { get; internal set; }
 
     /// <summary>
     /// The raw ADC value (e.g., 0-1023 for 10-bit).
     /// </summary>
     [State]
-    public partial int RawValue { get; set; }
+    public partial int RawValue { get; internal set; }
 
     /// <summary>
     /// Channel availability status.
     /// </summary>
     [State]
-    public partial ServiceStatus Status { get; set; }
+    public partial ServiceStatus Status { get; internal set; }
 
     /// <summary>
     /// Status message for errors or info.
     /// </summary>
     [State]
-    public partial string? StatusMessage { get; set; }
+    public partial string? StatusMessage { get; internal set; }
 
     /// <inheritdoc />
     public string Title => $"Channel {ChannelNumber}";

@@ -4,7 +4,6 @@ using HomeBlaze.Storage.Pages;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
-[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownBlockConfigurationTests
 {
     private const string Defaults = """{ "$type": "T", "Outlined": true, "Elevation": 2, "Title": null, "Items": [1, 2], "Style": { "Color": "red" } }""";

@@ -1,0 +1,38 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Reflection.Metadata.MetadataUpdateHandler(typeof(Namotion.Interceptor.Blazor.ComponentFactoryCache.HotReloadHandler))]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Blazor.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Interceptor.Blazor
+{
+    public sealed class BlazorSubjectTrackingOptions
+    {
+        public BlazorSubjectTrackingOptions() { }
+        public int ThrottleMilliseconds { get; set; }
+    }
+    public static class BlazorSubjectTrackingServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddBlazorSubjectTracking(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Interceptor.Blazor.BlazorSubjectTrackingOptions>? configure = null) { }
+    }
+    public abstract class TrackedComponentBase : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        protected TrackedComponentBase() { }
+        public override System.Threading.Tasks.Task SetParametersAsync(Microsoft.AspNetCore.Components.ParameterView parameters) { }
+    }
+    public class TrackingScope : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public TrackingScope() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? ChildContent { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubjectContext? Context { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool ShowDebugInfo { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public int ThrottleMilliseconds { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnAfterRender(bool firstRender) { }
+        protected override void OnParametersSet() { }
+    }
+}

@@ -46,6 +46,16 @@ internal sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, Cancellati
     public static HttpResponseMessage Json(string json) =>
         new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 
+    /// <summary>
+    /// A JSON answer whose <c>Date</c> header, the time on the server's clock, is <paramref name="date"/>.
+    /// </summary>
+    public static HttpResponseMessage Json(string json, DateTimeOffset date)
+    {
+        var response = Json(json);
+        response.Headers.Date = date;
+        return response;
+    }
+
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         Requests.Add(request);
