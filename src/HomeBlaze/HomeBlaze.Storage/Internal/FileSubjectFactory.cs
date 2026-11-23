@@ -80,15 +80,7 @@ internal sealed class FileSubjectFactory
             if (_serializer.Deserialize(json, created: null, skipped.Add) is IInterceptorSubject subject)
             {
                 LogSkippedProperties(path, skipped);
-                if (skipped.Count == 0)
-                {
-                    hasUnstoredSecrets = _serializer.HasUnstoredSecrets(subject);
-                }
-                else if (_serializer.HasUnstoredSecrets(subject))
-                {
-                    LogSecretsKeptInFile(path);
-                }
-
+                hasUnstoredSecrets = ShouldMoveSecrets(path, subject, hasSkippedValues: skipped.Count > 0);
                 return subject;
             }
         }
@@ -119,13 +111,38 @@ internal sealed class FileSubjectFactory
     }
 
     /// <summary>
-    /// Logs as a warning that the file at the path keeps a secret in plaintext, because it has a value that cannot be
-    /// read and a save would replace that value with its default.
+    /// Checks whether the subject that was read from the file at the path holds a secret in plaintext that a save would
+    /// move to the secret store. False when the file has a value that could not be read, because a save would replace
+    /// that value with its default, and when the check fails; both are logged as a warning.
     /// </summary>
-    public void LogSecretsKeptInFile(string path)
-        => _logger?.LogWarning(
-            "The configuration of {Path} holds a secret in plaintext, which stays in the file until the issues of the file are corrected",
-            path);
+    public bool ShouldMoveSecrets(string path, IInterceptorSubject subject, bool hasSkippedValues)
+    {
+        try
+        {
+            if (!_serializer.HasUnstoredSecrets(subject))
+            {
+                return false;
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogWarning(
+                exception,
+                "The configuration of {Path} could not be checked for secrets in plaintext, which stay in the file until it is saved",
+                path);
+            return false;
+        }
+
+        if (hasSkippedValues)
+        {
+            _logger?.LogWarning(
+                "The configuration of {Path} holds a secret in plaintext, which stays in the file until the issues of the file are corrected",
+                path);
+            return false;
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Takes a subject that entered the context when it was created and that no property holds out of that

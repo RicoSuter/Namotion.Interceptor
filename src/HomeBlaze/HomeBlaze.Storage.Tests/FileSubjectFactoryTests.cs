@@ -130,13 +130,39 @@ public class FileSubjectFactoryTests
         }
     }
 
+    [Fact]
+    public void WhenCheckingAJsonFileForPlaintextSecretsFails_ThenTheSubjectIsCreatedAndAWarningIsLogged()
+    {
+        // Arrange
+        var directory = Directory.CreateTempSubdirectory("homeblaze-secrets-");
+        try
+        {
+            var logger = new LevelRecordingLogger();
+            var factory = CreateFactoryWithSecretStore(Path.Combine(directory.FullName, "Secrets.json"), logger);
+            var json = $$"""{ "$type": "{{typeof(UnserializableSecretDevice).FullName}}", "value": {}, "password": "s3cr3t" }""";
+
+            // Act
+            var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out var hasUnstoredSecrets);
+
+            // Assert
+            Assert.IsType<UnserializableSecretDevice>(subject);
+            Assert.False(hasUnstoredSecrets);
+            Assert.Contains(logger.Messages, message => message.Contains("/Gateway.json") && message.Contains("plaintext"));
+            Assert.DoesNotContain(logger.Messages, message => message.Contains("s3cr3t"));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
     private static FileSubjectFactory CreateFactoryWithSecretStore(string secretsPath, ILogger? logger = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(new SecretStore(secretsPath));
         var serviceProvider = services.BuildServiceProvider();
         var typeProvider = new TypeProvider();
-        typeProvider.AddTypes([typeof(EmbeddedSecretDevice)]);
+        typeProvider.AddTypes([typeof(EmbeddedSecretDevice), typeof(UnserializableSecretDevice)]);
         return new FileSubjectFactory(
             new SubjectTypeRegistry(typeProvider),
             new ConfigurableSubjectSerializer(typeProvider, serviceProvider),

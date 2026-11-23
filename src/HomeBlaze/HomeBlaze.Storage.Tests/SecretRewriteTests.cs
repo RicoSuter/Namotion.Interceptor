@@ -68,6 +68,31 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenCheckingAReloadedJsonFileForPlaintextSecretsFails_ThenTheConfigurationIsAppliedAndAWarningIsLogged()
+    {
+        // Arrange
+        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        var deviceType = typeof(UnserializableSecretDevice).FullName;
+        WriteFile("Gateway.json", $$"""{ "$type": "{{deviceType}}", "value": {} }""");
+        var messages = new ConcurrentQueue<string>();
+        var storage = CreateStorage(logger: new RecordingLogger(messages));
+        await storage.ConnectAsync(CancellationToken.None);
+        var device = Assert.IsType<UnserializableSecretDevice>(storage.Children["Gateway"]);
+        var applyCount = device.ApplyCount;
+        WriteFile("Gateway.json", $$"""{ "$type": "{{deviceType}}", "value": {}, "password": "s3cr3t" }""");
+
+        // Act
+        await storage.ReconcileAsync(Named("Gateway.json"));
+
+        // Assert
+        Assert.Same(device, storage.Children["Gateway"]);
+        Assert.Equal("s3cr3t", device.Password);
+        Assert.Equal(applyCount + 1, device.ApplyCount);
+        Assert.Contains(messages, message => message.Contains("Gateway.json") && message.Contains("plaintext"));
+        Assert.DoesNotContain(messages, message => message.Contains("s3cr3t"));
+    }
+
+    [Fact]
     public async Task WhenTheFileStillHasTheExpectedContent_ThenTheConditionalSaveWritesIt()
     {
         // Arrange
@@ -331,5 +356,38 @@ public partial class UnwritableSecretDevice : IConfigurable
     {
         Interlocked.Increment(ref _applyCount);
         return Task.CompletedTask;
+    }
+}
+
+/// <summary>A device whose configuration is read, but throws when it is written: its value cannot be serialized.</summary>
+[InterceptorSubject]
+public partial class UnserializableSecretDevice : IConfigurable
+{
+    private int _applyCount;
+
+    [Configuration(IsSecret = true)]
+    public partial string? Password { get; set; }
+
+    [Configuration]
+    public partial UnserializableValue? Value { get; set; }
+
+    /// <summary>How often the configuration was applied.</summary>
+    public int ApplyCount => Volatile.Read(ref _applyCount);
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _applyCount);
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>A value that is read from JSON and throws when it is written.</summary>
+public sealed class UnserializableValue
+{
+    [Configuration]
+    public string? Text
+    {
+        get => throw new InvalidOperationException("The value cannot be written.");
+        set { }
     }
 }
