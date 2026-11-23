@@ -39,16 +39,16 @@ public class MulticastDnsServiceCollectorTests
             .AddAddress("hue.local", "192.168.1.20")), Sender);
 
         // Act
-        var services = collector.GetServices("_hue._tcp");
+        var instances = collector.GetInstances("_hue._tcp");
 
         // Assert
-        var service = Assert.Single(services);
-        Assert.Equal("Philips Hue - 1A2B3C", service.InstanceName);
-        Assert.Equal("hue.local", service.HostName);
-        Assert.Equal(443, service.Port);
-        Assert.Equal([IPAddress.Parse("192.168.1.20")], service.Addresses);
-        Assert.Equal("001788fffe1a2b3c", service.Properties["BRIDGEID"]);
-        Assert.Equal("", service.Properties["flag"]);
+        var instance = Assert.Single(instances);
+        Assert.Equal("Philips Hue - 1A2B3C", instance.InstanceName);
+        Assert.Equal("hue.local", instance.HostName);
+        Assert.Equal(443, instance.Port);
+        Assert.Equal([IPAddress.Parse("192.168.1.20")], instance.Addresses);
+        Assert.Equal("001788fffe1a2b3c", instance.Properties["BRIDGEID"]);
+        Assert.Equal("", instance.Properties["flag"]);
     }
 
     [Fact]
@@ -60,11 +60,11 @@ public class MulticastDnsServiceCollectorTests
             .AddPointer("_shelly._tcp.local", "shellyplus1pm-a8032ab12345._shelly._tcp.local")), Sender);
 
         // Act
-        var service = Assert.Single(collector.GetServices("_shelly._tcp"));
+        var instance = Assert.Single(collector.GetInstances("_shelly._tcp"));
 
         // Assert
-        Assert.Equal([Sender], service.Addresses);
-        Assert.Null(service.HostName);
+        Assert.Equal([Sender], instance.Addresses);
+        Assert.Null(instance.HostName);
     }
 
     [Fact]
@@ -77,10 +77,10 @@ public class MulticastDnsServiceCollectorTests
             .AddPointer("_hue._tcp.local", "Printer._http._tcp.local")), Sender);
 
         // Act
-        var services = collector.GetServices("_hue._tcp");
+        var instances = collector.GetInstances("_hue._tcp");
 
         // Assert
-        Assert.Empty(services);
+        Assert.Empty(instances);
     }
 
     [Fact]
@@ -95,12 +95,12 @@ public class MulticastDnsServiceCollectorTests
             .AddAddress("HUE.local", "192.168.1.20")), Sender);
 
         // Act
-        var service = Assert.Single(collector.GetServices("_hue._tcp"));
+        var instance = Assert.Single(collector.GetInstances("_hue._tcp"));
 
         // Assert
-        Assert.Equal(443, service.Port);
-        Assert.Equal("abc", service.Properties["bridgeid"]);
-        Assert.Equal([IPAddress.Parse("192.168.1.20")], service.Addresses);
+        Assert.Equal(443, instance.Port);
+        Assert.Equal("abc", instance.Properties["bridgeid"]);
+        Assert.Equal([IPAddress.Parse("192.168.1.20")], instance.Addresses);
     }
 
     [Fact]
@@ -113,15 +113,15 @@ public class MulticastDnsServiceCollectorTests
             .AddService("Bridge._hue._tcp.local", 443, "hue.local")), Sender);
 
         // Act
-        var service = Assert.Single(collector.GetServices("_hue._tcp"));
+        var instance = Assert.Single(collector.GetInstances("_hue._tcp"));
 
         // Assert
-        Assert.Equal("hue.local", service.HostName);
-        Assert.Equal([Sender], service.Addresses);
+        Assert.Equal("hue.local", instance.HostName);
+        Assert.Equal([Sender], instance.Addresses);
     }
 
     [Fact]
-    public void WhenTwoSendersAnnounceTheSameInstance_ThenItIsOneService()
+    public void WhenTwoSendersAnnounceTheSameInstance_ThenItIsOneInstance()
     {
         // Arrange
         var collector = new MulticastDnsServiceCollector();
@@ -130,10 +130,10 @@ public class MulticastDnsServiceCollectorTests
         collector.Add(message, IPAddress.Parse("192.168.1.98"));
 
         // Act
-        var services = collector.GetServices("_hue._tcp");
+        var instances = collector.GetInstances("_hue._tcp");
 
         // Assert
-        Assert.Single(services);
+        Assert.Single(instances);
     }
 
     [Fact]
@@ -152,8 +152,8 @@ public class MulticastDnsServiceCollectorTests
         collector.Add([new PointerRecord("_hue._tcp.local", "AlsoDropped._hue._tcp.local")], Sender);
 
         // Assert
-        var service = Assert.Single(collector.GetServices("_hue._tcp"));
-        Assert.Equal("Kept", service.InstanceName);
+        var instance = Assert.Single(collector.GetInstances("_hue._tcp"));
+        Assert.Equal("Kept", instance.InstanceName);
     }
 
     [Fact]
@@ -178,7 +178,7 @@ public class MulticastDnsServiceCollectorTests
         collector.Add([new PointerRecord("_hue._tcp.local", "AlsoDropped._hue._tcp.local")], Sender);
 
         // Assert
-        var service = Assert.Single(collector.GetServices("_hue._tcp"));
-        Assert.Equal("Kept", service.InstanceName);
+        var instance = Assert.Single(collector.GetInstances("_hue._tcp"));
+        Assert.Equal("Kept", instance.InstanceName);
     }
 }

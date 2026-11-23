@@ -10,7 +10,7 @@ internal sealed class MulticastDnsServiceCollector
 {
     private const int MaximumRecords = 4096;
     private const int MaximumBytes = 256 * 1024;
-    private const int MaximumServices = 64;
+    private const int MaximumInstances = 64;
 
     private readonly Lock _lock = new();
     private readonly List<(DnsRecord Record, IPAddress Sender)> _records = [];
@@ -53,7 +53,7 @@ internal sealed class MulticastDnsServiceCollector
     /// <summary>
     /// Combines the collected records into the instances of <paramref name="serviceType"/>.
     /// </summary>
-    public IReadOnlyList<MulticastDnsServiceInstance> GetServices(string serviceType)
+    public IReadOnlyList<MulticastDnsServiceInstance> GetInstances(string serviceType)
     {
         (DnsRecord Record, IPAddress Sender)[] records;
         lock (_lock)
@@ -63,17 +63,17 @@ internal sealed class MulticastDnsServiceCollector
 
         var serviceName = GetServiceName(serviceType);
         var suffix = "." + serviceName;
-        var instances = records
+        var pointers = records
             .Where(entry => entry.Record is PointerRecord pointer &&
                 IsName(pointer.Name, serviceName) &&
                 pointer.Target.Length > suffix.Length &&
                 pointer.Target.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
             .DistinctBy(entry => ((PointerRecord)entry.Record).Target, StringComparer.OrdinalIgnoreCase)
-            .Take(MaximumServices);
+            .Take(MaximumInstances);
         var dnsRecords = records.Select(entry => entry.Record);
 
-        var services = new List<MulticastDnsServiceInstance>();
-        foreach (var (record, sender) in instances)
+        var instances = new List<MulticastDnsServiceInstance>();
+        foreach (var (record, sender) in pointers)
         {
             var instanceName = ((PointerRecord)record).Target;
             var service = dnsRecords.OfType<ServiceRecord>()
@@ -102,7 +102,7 @@ internal sealed class MulticastDnsServiceCollector
                     .Distinct()
                     .ToArray();
 
-            services.Add(new MulticastDnsServiceInstance(
+            instances.Add(new MulticastDnsServiceInstance(
                 instanceName[..^suffix.Length],
                 service?.Target,
                 service?.Port ?? 0,
@@ -110,7 +110,7 @@ internal sealed class MulticastDnsServiceCollector
                 properties));
         }
 
-        return services;
+        return instances;
     }
 
     /// <summary>

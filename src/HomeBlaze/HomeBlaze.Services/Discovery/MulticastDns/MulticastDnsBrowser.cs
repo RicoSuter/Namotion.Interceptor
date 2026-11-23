@@ -43,7 +43,7 @@ internal sealed class MulticastDnsBrowser : IMulticastDnsBrowser
             .Select(address => QueryAdapterAsync(address, query, collector, window.Token)));
 
         cancellationToken.ThrowIfCancellationRequested();
-        return collector.GetServices(serviceType);
+        return collector.GetInstances(serviceType);
     }
 
     private async Task QueryAdapterAsync(

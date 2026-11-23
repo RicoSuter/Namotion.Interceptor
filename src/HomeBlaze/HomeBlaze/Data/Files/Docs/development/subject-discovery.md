@@ -106,7 +106,7 @@ public sealed record MulticastDnsServiceInstance(
 
 ## Your own I/O
 
-A subject discovery can do I/O of its own, such as asking a vendor's cloud service or reading a description from a device it found. Its constructor can ask for any other service as well, such as `IHttpClientFactory`, `ILogger<T>` or `TimeProvider`:
+A subject discovery can do I/O of its own, such as asking a vendor's cloud service or reading a description from a device it found. Its constructor can ask for any other singleton or transient service, such as `IHttpClientFactory`, `ILogger<T>` or `TimeProvider`; it is created once from the root container, so not a scoped one:
 
 ```csharp
 public sealed class AcmeCloudDiscovery : SubjectDiscovery<AcmeHub, AcmeDiscoveredHub>
