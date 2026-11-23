@@ -840,11 +840,12 @@ internal sealed class StorageReconciler
             using (ExecutionContext.SuppressFlow())
             {
                 var skipped = new List<SkippedConfigurationProperty>();
+                var unstoredSecretReadCount = ConfigurableSubjectSerializer.GetUnstoredSecretReadCount();
                 // Replaced rather than updated: a key that the file no longer has gets its default, as after a restart.
                 _serializer.ReplaceConfiguration(entry.Subject, json, skipped.Add);
                 _subjectFactory.LogSkippedProperties(entry.Path, skipped);
 
-                if (_subjectFactory.ShouldMoveSecrets(entry.Path, entry.Subject, hasSkippedValues: skipped.Count > 0))
+                if (_subjectFactory.ShouldMoveSecrets(entry.Path, entry.Subject, unstoredSecretReadCount, hasSkippedValues: skipped.Count > 0))
                 {
                     ScheduleSecretRewrite(entry.Path, entry.Subject, hash);
                 }

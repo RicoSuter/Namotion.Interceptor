@@ -93,6 +93,28 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAReloadedJsonFileHoldsNoPlaintextSecret_ThenItIsNotSerializedForTheCheck()
+    {
+        // Arrange: serializing this device throws, which the check would log as a warning.
+        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        var deviceType = typeof(UnserializableSecretDevice).FullName;
+        WriteFile("Gateway.json", $$"""{ "$type": "{{deviceType}}", "value": {} }""");
+        var messages = new ConcurrentQueue<string>();
+        var storage = CreateStorage(logger: new RecordingLogger(messages));
+        await storage.ConnectAsync(CancellationToken.None);
+        var device = Assert.IsType<UnserializableSecretDevice>(storage.Children["Gateway"]);
+        var applyCount = device.ApplyCount;
+        WriteFile("Gateway.json", $$"""{ "$type": "{{deviceType}}", "value": {}, "password": null }""");
+
+        // Act
+        await storage.ReconcileAsync(Named("Gateway.json"));
+
+        // Assert
+        Assert.Equal(applyCount + 1, device.ApplyCount);
+        Assert.DoesNotContain(messages, message => message.Contains("plaintext"));
+    }
+
+    [Fact]
     public async Task WhenTheFileStillHasTheExpectedContent_ThenTheConditionalSaveWritesIt()
     {
         // Arrange

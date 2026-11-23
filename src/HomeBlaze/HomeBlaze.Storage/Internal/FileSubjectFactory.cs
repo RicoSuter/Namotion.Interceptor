@@ -75,12 +75,13 @@ internal sealed class FileSubjectFactory
         try
         {
             var skipped = new List<SkippedConfigurationProperty>();
+            var unstoredSecretReadCount = ConfigurableSubjectSerializer.GetUnstoredSecretReadCount();
 
             // Every configurable type is a subject as well.
             if (_serializer.Deserialize(json, created: null, skipped.Add) is IInterceptorSubject subject)
             {
                 LogSkippedProperties(path, skipped);
-                hasUnstoredSecrets = ShouldMoveSecrets(path, subject, hasSkippedValues: skipped.Count > 0);
+                hasUnstoredSecrets = ShouldMoveSecrets(path, subject, unstoredSecretReadCount, hasSkippedValues: skipped.Count > 0);
                 return subject;
             }
         }
@@ -115,8 +116,20 @@ internal sealed class FileSubjectFactory
     /// move to the secret store. False when the file has a value that could not be read, because a save would replace
     /// that value with its default, and when the check fails; both are logged as a warning.
     /// </summary>
-    public bool ShouldMoveSecrets(string path, IInterceptorSubject subject, bool hasSkippedValues)
+    /// <param name="path">The path of the file, for the log.</param>
+    /// <param name="subject">The subject that was read.</param>
+    /// <param name="unstoredSecretReadCount">
+    /// <see cref="ConfigurableSubjectSerializer.GetUnstoredSecretReadCount"/>, taken on the thread of the read right before it.
+    /// </param>
+    /// <param name="hasSkippedValues">Whether the read skipped a value that could not be read.</param>
+    public bool ShouldMoveSecrets(string path, IInterceptorSubject subject, int unstoredSecretReadCount, bool hasSkippedValues)
     {
+        // The check serializes the subject, which is only worth it when the read left a secret value without a key.
+        if (ConfigurableSubjectSerializer.GetUnstoredSecretReadCount() == unstoredSecretReadCount)
+        {
+            return false;
+        }
+
         try
         {
             if (!_serializer.HasUnstoredSecrets(subject))

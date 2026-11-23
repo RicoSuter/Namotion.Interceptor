@@ -96,6 +96,7 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
         if (typeInfo.Kind == JsonTypeInfoKind.Object)
         {
             string? unsupportedSecretMessage = null;
+            List<(string Name, Func<object, object?> Get)>? secretGetters = null;
             foreach (var property in typeInfo.Properties)
             {
                 var propertyName = (property.AttributeProvider as MemberInfo)?.Name ?? property.Name;
@@ -120,6 +121,11 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                     }
                     else if (Secrets is { } secrets)
                     {
+                        if (property.Get is { } get)
+                        {
+                            (secretGetters ??= []).Add((propertyInfo.Name, get));
+                        }
+
                         WrapSecret(property, propertyInfo.Name, secrets);
                     }
                 }
@@ -144,6 +150,11 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                     // For non-subject types (value objects) or subjects without registry, fall back to reflection
                     return HasConfigurationAttribute(property);
                 };
+            }
+
+            if (secretGetters is not null)
+            {
+                CountUnstoredSecretsOnDeserialized(typeInfo, secretGetters, Secrets!);
             }
 
             if (unsupportedSecretMessage is not null)
@@ -173,6 +184,22 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
         {
             property.Set = (owner, value) => set(owner, secrets.Read(owner, propertyName, value));
         }
+    }
+
+    // Also counts a value that the JSON did not set, such as one that the constructor of a nested subject gave it, and
+    // that the setter therefore never saw.
+    private static void CountUnstoredSecretsOnDeserialized(
+        JsonTypeInfo typeInfo, List<(string Name, Func<object, object?> Get)> secretGetters, SecretReferences secrets)
+    {
+        var onDeserialized = typeInfo.OnDeserialized;
+        typeInfo.OnDeserialized = owner =>
+        {
+            onDeserialized?.Invoke(owner);
+            foreach (var (name, get) in secretGetters)
+            {
+                secrets.CountIfUnstored(owner, name, get(owner));
+            }
+        };
     }
 
     private static void RemovePropertiesWithoutConfiguration(JsonTypeInfo typeInfo)

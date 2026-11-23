@@ -29,8 +29,9 @@ public sealed record MarkdownParseResult(
     internal IReadOnlyDictionary<HtmlSegment, MarkdownTextBlock> TextBlocks { get; init; } = NoTextBlocks;
 
     /// <summary>
-    /// The block subjects whose configuration the parse applied, by creating them or updating them in place, with the
-    /// configuration JSON it applied. Read right after the parse; empty for a snapshot that a write published.
+    /// The block subjects whose configuration the parse applied, by creating them or updating them in place, and left a
+    /// secret value without a key in the secret store, with the configuration JSON it applied. Read right after the
+    /// parse; empty for a snapshot that a write published.
     /// </summary>
-    internal IReadOnlyList<(IInterceptorSubject Subject, string Json)> AppliedConfigurations { get; init; } = [];
+    internal IReadOnlyList<(IInterceptorSubject Subject, string Json)> ConfigurationsWithUnstoredSecrets { get; init; } = [];
 }

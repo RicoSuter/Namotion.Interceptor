@@ -156,6 +156,31 @@ public class FileSubjectFactoryTests
         }
     }
 
+    [Fact]
+    public void WhenAJsonFileHoldsNoPlaintextSecret_ThenItIsNotSerializedForTheCheck()
+    {
+        // Arrange: serializing this device throws, which the check would log as a warning.
+        var directory = Directory.CreateTempSubdirectory("homeblaze-secrets-");
+        try
+        {
+            var logger = new LevelRecordingLogger();
+            var factory = CreateFactoryWithSecretStore(Path.Combine(directory.FullName, "Secrets.json"), logger);
+            var json = $$"""{ "$type": "{{typeof(UnserializableSecretDevice).FullName}}", "value": {}, "password": null }""";
+
+            // Act
+            var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out var hasUnstoredSecrets);
+
+            // Assert
+            Assert.IsType<UnserializableSecretDevice>(subject);
+            Assert.False(hasUnstoredSecrets);
+            Assert.DoesNotContain(logger.Levels, level => level >= LogLevel.Warning);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
     private static FileSubjectFactory CreateFactoryWithSecretStore(string secretsPath, ILogger? logger = null)
     {
         var services = new ServiceCollection();
