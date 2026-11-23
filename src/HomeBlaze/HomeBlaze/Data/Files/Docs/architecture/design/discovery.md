@@ -38,7 +38,7 @@ The API and the rules for implementers are in [Writing a Subject Discovery](../.
 
 ### Registry
 
-`SubjectDiscoveryRegistry` in `HomeBlaze.Services` finds the non-abstract `ISubjectDiscovery` types in `TypeProvider.Types`, as `SubjectComponentRegistry` does for components, so plugins add subject discoveries without registration. It creates each once, on first use, through `ActivatorUtilities`, and keeps the instance, because overlapping scans may share it. Types added to `TypeProvider` later are picked up on the next call: each call compares the type list it was built from with the current one by reference and rebuilds only when it changed, as `SubjectComponentRegistry` does.
+`SubjectDiscoveryRegistry` in `HomeBlaze.Services` finds the non-abstract `ISubjectDiscovery` types in `TypeProvider.Types`, as `SubjectComponentRegistry` does for components, so plugins add subject discoveries without registration. It creates each once, on first use, through `ActivatorUtilities`, and keeps the instance, because every scan uses it and a running scan may still hold it across a rebuild. Types added to `TypeProvider` later are picked up on the next call: each call compares the type list it was built from with the current one by reference and rebuilds only when it changed, as `SubjectComponentRegistry` does.
 
 It leaves out, with one logged error each that a rebuild does not repeat, and without blocking the app:
 
@@ -50,7 +50,9 @@ The Discover page also leaves out results whose type `SubjectTypeCatalog.GetCrea
 
 ## Scan session and services
 
-`SubjectDiscoveryService.ScanAsync` runs all subject discoveries of one scan in parallel and passes each the scan's token. The Discover page owns the scans it starts: only Scan again and closing the dialog cancel one, so Back, picking a row or switching to All types leave it running, and its results are complete when the user returns. The deadline of 30 seconds, from an injected `TimeProvider`, is a cap, not a wait: a scan ends as soon as every subject discovery has completed.
+`SubjectDiscoveryService.ScanAsync` runs all subject discoveries of one scan in parallel and passes each the scan's token. The Discover page owns the scans it starts: only closing the dialog cancels one, so Back, picking a row or switching to All types leave it running, and its results are complete when the user returns. The deadline of 30 seconds, from an injected `TimeProvider`, is a cap, not a wait: a scan ends as soon as every subject discovery has completed.
+
+One scan runs at a time across the app, because HomeBlaze has no login and every open dialog asks the same network and cloud services. A scan that starts while another one runs, from another tab or user, waits and starts when the running one has ended; its deadline counts from that start. Closing the dialog cancels a waiting scan, which then runs nothing. Scan again is disabled while the page's own scan runs or waits, so repeated clicks start no burst, and a canceled scan returns at once, so the next one does not wait for a subject discovery that ignores its cancellation.
 
 `ISsdpSearch`, `IMulticastDnsBrowser` and `IUdpDiscovery` are singletons in `HomeBlaze.Services`, which each subject discovery takes through its constructor, so no subject discovery opens a socket of its own and a host can replace them, as the E2E host does. No two subject discoveries ask the same question, so nothing is shared; merging identical in-flight queries, if ever needed, fits inside the services without a contract change.
 
@@ -90,7 +92,7 @@ During a first setup a user adds many found devices, so the folder Create operat
 - Each subject discovery runs in its own task. An exception other than cancellation ends that subject discovery only: it is logged as a warning and shown as one line, such as "Nuki Bridge: search failed", and the results it yielded stay listed. A `Matches` that throws during a scan counts as such a failure; in the dialog it counts as no match.
 - A subject discovery that ignores its cancellation is abandoned at the deadline: the scan ends, and its later results and exceptions are dropped, an exception logged at debug level. An exception after the scan ended, such as from a disposed socket, is not shown.
 - The services fail soft: no usable adapter or a socket error during an exchange returns nothing, with one debug log entry. A listening port that cannot be opened or bound throws instead, so the user learns that another program holds it. A broadcast binds an ephemeral port, which no other program holds.
-- A cloud lookup fails soft too: a network without internet access is no failed search, so a service that cannot be reached, answers with an error, sends an oversized answer or times out yields nothing. Other exceptions, such as an invalid answer, still fail the subject discovery.
+- A cloud lookup fails soft too: a network without internet access is no failed search, so a service that cannot be reached, answers with an error, sends an oversized answer or times out yields nothing. Other exceptions, such as an invalid answer, still fail the subject discovery. The Nuki discovery service sees every lookup from the public IP address of the network, so it is asked at most about once a minute: the outcome of a lookup that reached it or timed out, the bridges or nothing after an error answer such as 429, is reused within that minute. A lookup that got no answer with a status, such as without a route, a name resolution or a connection, or with an oversized answer, is not kept, so the next scan asks again, and neither is a canceled or failed lookup.
 - Every string from the network is untrusted, and Blazor renders it as text.
 
 ## Testing

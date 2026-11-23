@@ -10,7 +10,8 @@ namespace Namotion.Devices.Nuki;
 /// <summary>
 /// Finds Nuki bridges through the Nuki discovery service, which lists the bridges seen from the public IP address of
 /// the caller, and pairs with them. As a subject discovery it finds nothing, instead of failing, when the service
-/// cannot be reached, answers with an error or does not answer in time.
+/// cannot be reached, answers with an error or does not answer in time, and it reuses the outcome of a lookup that
+/// reached the service or timed out for one minute.
 /// </summary>
 public sealed class NukiBridgeDiscovery : SubjectDiscovery<NukiBridge, NukiDiscoveredBridge>
 {
@@ -19,11 +20,18 @@ public sealed class NukiBridgeDiscovery : SubjectDiscovery<NukiBridge, NukiDisco
 
     private static readonly TimeSpan DiscoveryTimeout = TimeSpan.FromSeconds(10);
 
-    private readonly IHttpClientFactory _httpClientFactory;
+    internal static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(1);
 
-    public NukiBridgeDiscovery(IHttpClientFactory httpClientFactory)
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly TimeProvider _timeProvider;
+
+    // Replaced as a whole, so a reader sees the bridges with the time of their lookup.
+    private CachedLookup? _cachedLookup;
+
+    public NukiBridgeDiscovery(IHttpClientFactory httpClientFactory, TimeProvider timeProvider)
     {
         _httpClientFactory = httpClientFactory;
+        _timeProvider = timeProvider;
     }
 
     internal TimeSpan Timeout { get; init; } = DiscoveryTimeout;
@@ -32,22 +40,41 @@ public sealed class NukiBridgeDiscovery : SubjectDiscovery<NukiBridge, NukiDisco
     protected override async IAsyncEnumerable<NukiDiscoveredBridge> DiscoverAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        foreach (var bridge in await GetBridgesAsync(cancellationToken))
+        {
+            yield return bridge;
+        }
+    }
+
+    private async Task<IReadOnlyList<NukiDiscoveredBridge>> GetBridgesAsync(CancellationToken cancellationToken)
+    {
+        // The service sees every scan from the public IP address of the network, so repeated scans could get it blocked.
+        var cachedLookup = Volatile.Read(ref _cachedLookup);
+        if (cachedLookup is not null && _timeProvider.GetElapsedTime(cachedLookup.Timestamp) < CacheDuration)
+        {
+            return cachedLookup.Bridges;
+        }
+
         using var httpClient = _httpClientFactory.CreateClient();
         IReadOnlyList<NukiDiscoveredBridge> bridges;
         try
         {
             bridges = await DiscoverAsync(httpClient, Timeout, cancellationToken);
         }
+        catch (HttpRequestException exception) when (exception.StatusCode is null && !cancellationToken.IsCancellationRequested)
+        {
+            // No answer with a status, usually no network: not shown as a failed search, and nothing is cached, so the
+            // next scan asks again.
+            return [];
+        }
         catch (Exception exception) when (exception is HttpRequestException or TimeoutException && !cancellationToken.IsCancellationRequested)
         {
-            // A network without internet access is common on a local scan, so it is not shown as a failed search.
+            // An error answer, such as a rate limit, or no answer in time is cached, so the service is not asked again.
             bridges = [];
         }
 
-        foreach (var bridge in bridges)
-        {
-            yield return bridge;
-        }
+        Volatile.Write(ref _cachedLookup, new CachedLookup(bridges, _timeProvider.GetTimestamp()));
+        return bridges;
     }
 
     /// <summary>
@@ -149,4 +176,6 @@ public sealed class NukiBridgeDiscovery : SubjectDiscovery<NukiBridge, NukiDisco
                 "settings for a software bridge.");
         }
     }
+
+    private sealed record CachedLookup(IReadOnlyList<NukiDiscoveredBridge> Bridges, long Timestamp);
 }

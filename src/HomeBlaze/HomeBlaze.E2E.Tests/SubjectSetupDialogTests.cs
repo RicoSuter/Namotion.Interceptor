@@ -1253,7 +1253,9 @@ public class SubjectSetupDialogTests
 
             // Act - a new scan matches the found devices against the subjects that exist now, not when the dialog opened.
             var matchCount = DiscoverableTestDiscovery.MatchedHostAddresses.Count;
-            await discoverPage.GetByTestId("discovery-scan-again-button").ClickAsync();
+            var scanAgainButton = discoverPage.GetByTestId("discovery-scan-again-button");
+            await Assertions.Expect(scanAgainButton).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+            await scanAgainButton.ClickAsync();
 
             // Assert - the rows before the new scan already show both devices as added, so the matches of the
             // subject discovery tell that the new scan received the created subjects.

@@ -165,9 +165,9 @@ public sealed class AcmeCloudDiscovery : SubjectDiscovery<AcmeHub, AcmeDiscovere
 
 - **Read only.** A subject discovery only asks; it never changes a device.
 - **Untrusted answers.** Any host on the network can answer. Parse defensively and never throw on received data, bound what you read and keep, and only request addresses you built yourself from an answer, never a URL a device hands you as is.
-- **Cancellation.** Honor the token. A scan ends when every subject discovery has completed, and at the latest after 30 seconds, also for a subject discovery that ignores it, see [Scan session](../architecture/design/discovery.md#scan-session-and-services).
+- **Cancellation.** Honor the token. A scan ends when every subject discovery has completed, and at the latest after 30 seconds, also for a subject discovery that ignores it, see [Scan session](../architecture/design/discovery.md#scan-session-and-services). One scan runs at a time across the app, so subject discoveries of two scans rarely overlap; they still can briefly, as a canceled or timed-out scan returns without waiting for its subject discoveries to finish, so do not rely on running alone.
 - **Failure.** A subject discovery that throws ends only itself, and the page shows one "search failed" line for its type, see [Error handling](../architecture/design/discovery.md#error-handling).
-- **No state.** One instance, created on first use, serves overlapping scans, so keep no state between calls.
+- **No state.** One instance, created on first use, serves every scan, so keep no state between calls other than a cache that is safe across threads, as `NukiBridgeDiscovery` reuses its lookup for a minute.
 - **One per type.** A subject type has at most one subject discovery: the first by full type name, ordinally, that can be created is used, and the others are left out with a logged error, see [Registry](../architecture/design/discovery.md#registry).
 
 ## Testing

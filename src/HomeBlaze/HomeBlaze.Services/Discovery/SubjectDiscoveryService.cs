@@ -18,6 +18,9 @@ public sealed class SubjectDiscoveryService
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SubjectDiscoveryService> _logger;
 
+    // Not disposed, so that a scan still running at shutdown can release it. It holds no wait handle to free.
+    private readonly SemaphoreSlim _scanLock = new(1, 1);
+
     public SubjectDiscoveryService(
         SubjectDiscoveryRegistry registry,
         TimeProvider timeProvider,
@@ -50,12 +53,40 @@ public sealed class SubjectDiscoveryService
     /// <paramref name="onFailure"/> with its subject type; the others carry on.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// One scan runs at a time across the application: a scan that starts while another one runs waits until that one
+    /// has returned, and <see cref="ScanTimeout"/> counts from when it runs. A scan canceled while it waits runs
+    /// nothing.
+    /// </para>
+    /// <para>
     /// The callbacks run on thread pool threads, one at a time, and must neither block nor throw. None runs once the
     /// returned task has completed: a subject discovery still running then, because it ignores its cancellation, is
     /// abandoned and what it reports later is dropped.
+    /// </para>
     /// </remarks>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     public async Task ScanAsync(
+        IReadOnlyCollection<Type> subjectTypes,
+        IReadOnlyCollection<IInterceptorSubject> existingSubjects,
+        Action<DiscoveredSubject> onResult,
+        Action<Type> onFailure,
+        CancellationToken cancellationToken)
+    {
+        // Every open dialog asks the same network and cloud services, so parallel scans would only multiply the traffic.
+        await _scanLock.WaitAsync(cancellationToken);
+        try
+        {
+            // The lock can be granted at the moment the token is canceled.
+            cancellationToken.ThrowIfCancellationRequested();
+            await RunScanAsync(subjectTypes, existingSubjects, onResult, onFailure, cancellationToken);
+        }
+        finally
+        {
+            _scanLock.Release();
+        }
+    }
+
+    private async Task RunScanAsync(
         IReadOnlyCollection<Type> subjectTypes,
         IReadOnlyCollection<IInterceptorSubject> existingSubjects,
         Action<DiscoveredSubject> onResult,

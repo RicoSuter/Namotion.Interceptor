@@ -299,6 +299,130 @@ public class SubjectDiscoveryServiceTests
         Assert.True(service.HasSubjectDiscoveries([typeof(OtherDiscoveryTestSubject)]));
     }
 
+    [Fact]
+    public async Task WhenAScanStartsWhileAnotherRuns_ThenItsDiscoveriesStartOnlyAfterTheFirstHasEnded()
+    {
+        // Arrange
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstEnded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var startCount = 0;
+        var service = CreateService(TimeProvider.System, new LambdaDiscovery<DiscoveryTestSubject>(_ =>
+        {
+            if (Interlocked.Increment(ref startCount) == 1)
+            {
+                firstStarted.SetResult();
+                return TestScans.IgnoreCancellation(release.Task, firstEnded, new TestDiscoveryResult("first"));
+            }
+
+            secondStarted.TrySetResult(firstEnded.Task.IsCompleted);
+            return TestScans.Yield(new TestDiscoveryResult("second"));
+        }));
+        var firstResults = new ConcurrentQueue<DiscoveredSubject>();
+        var secondResults = new ConcurrentQueue<DiscoveredSubject>();
+        var firstScan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], firstResults.Enqueue, _ => { }, CancellationToken.None);
+        await firstStarted.Task.WaitAsync(TestTimeouts.Default);
+
+        // Act
+        var secondScan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], secondResults.Enqueue, _ => { }, CancellationToken.None);
+
+        // A check that nothing happens, so its bound is short.
+        var hasStartedEarly = await Task.WhenAny(secondStarted.Task, Task.Delay(TimeSpan.FromMilliseconds(200))) == secondStarted.Task;
+        release.SetResult();
+        await firstScan.WaitAsync(TestTimeouts.Default);
+        await secondScan.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.False(hasStartedEarly);
+        Assert.True(await secondStarted.Task, "The second scan started a subject discovery before the first one ended.");
+        Assert.Equal(["first"], firstResults.Select(result => result.Result.Key));
+        Assert.Equal(["second"], secondResults.Select(result => result.Result.Key));
+    }
+
+    [Fact]
+    public async Task WhenAWaitingScanIsCanceled_ThenItRunsNothingAndTheNextScanStillWaitsAndRuns()
+    {
+        // Arrange
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstEnded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var laterStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var startCount = 0;
+        var service = CreateService(TimeProvider.System, new LambdaDiscovery<DiscoveryTestSubject>(_ =>
+        {
+            if (Interlocked.Increment(ref startCount) == 1)
+            {
+                firstStarted.SetResult();
+                return TestScans.IgnoreCancellation(release.Task, firstEnded, new TestDiscoveryResult("first"));
+            }
+
+            laterStarted.TrySetResult(firstEnded.Task.IsCompleted);
+            return TestScans.Yield(new TestDiscoveryResult("third"));
+        }));
+        var firstScan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], _ => { }, _ => { }, CancellationToken.None);
+        await firstStarted.Task.WaitAsync(TestTimeouts.Default);
+        using var cancellation = new CancellationTokenSource();
+        var waitingScan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], _ => { }, _ => { }, cancellation.Token);
+
+        // Act
+        await cancellation.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waitingScan.WaitAsync(TestTimeouts.Default));
+        var thirdResults = new ConcurrentQueue<DiscoveredSubject>();
+        var thirdScan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], thirdResults.Enqueue, _ => { }, CancellationToken.None);
+        release.SetResult();
+        await firstScan.WaitAsync(TestTimeouts.Default);
+        await thirdScan.WaitAsync(TestTimeouts.Default);
+
+        // Assert - a canceled scan that released the lock it never held would let the third one run beside the first.
+        Assert.True(await laterStarted.Task, "The scan after the canceled one started before the first one ended.");
+        Assert.Equal(2, startCount);
+        Assert.Equal(["third"], thirdResults.Select(result => result.Result.Key));
+    }
+
+    [Fact]
+    public async Task WhenAScanHasWaitedForAnother_ThenItsTimeLimitCountsFromWhenItRuns()
+    {
+        // Arrange
+        var timeProvider = new FakeTimeProvider();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstEnded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondToken = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var startCount = 0;
+        var service = CreateService(timeProvider, new LambdaDiscovery<DiscoveryTestSubject>(cancellationToken =>
+        {
+            if (Interlocked.Increment(ref startCount) == 1)
+            {
+                firstStarted.SetResult();
+                return TestScans.IgnoreCancellation(release.Task, firstEnded, new TestDiscoveryResult("first"));
+            }
+
+            secondToken.SetResult(cancellationToken);
+            return TestScans.Hang(cancellationToken);
+        }));
+        var firstScan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], _ => { }, _ => { }, CancellationToken.None);
+        await firstStarted.Task.WaitAsync(TestTimeouts.Default);
+        var failures = new ConcurrentQueue<Type>();
+        var secondScan = service.ScanAsync([typeof(DiscoveryTestSubject)], [], _ => { }, failures.Enqueue, CancellationToken.None);
+        var waited = TimeSpan.FromSeconds(20);
+        timeProvider.Advance(waited);
+        release.SetResult();
+        await firstScan.WaitAsync(TestTimeouts.Default);
+        var scanToken = await secondToken.Task.WaitAsync(TestTimeouts.Default);
+
+        // Act - past the time limit counted from the call, but not from when the scan runs.
+        timeProvider.Advance(SubjectDiscoveryService.ScanTimeout - waited);
+        var isCanceledEarly = scanToken.IsCancellationRequested;
+        timeProvider.Advance(waited);
+        await secondScan.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.False(isCanceledEarly);
+        Assert.True(scanToken.IsCancellationRequested);
+        Assert.Empty(failures);
+    }
+
     private sealed class RecordingLogger : ILogger<SubjectDiscoveryService>
     {
         private readonly ConcurrentQueue<LogLevel> _levels = new();
