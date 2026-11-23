@@ -1,11 +1,10 @@
+using System.Text;
 using System.Text.Json;
 
 namespace HomeBlaze.Storage.Internal;
 
 internal static class JsonKeyComparison
 {
-    private static readonly byte[] Utf8ByteOrderMark = [0xEF, 0xBB, 0xBF];
-
     /// <summary>
     /// Gets the paths of the properties of <paramref name="original"/> that <paramref name="replacement"/> does not have
     /// at the same path, such as <c>child.host</c> or <c>items[0].name</c>. Values may differ. A property whose value is
@@ -16,9 +15,9 @@ internal static class JsonKeyComparison
     /// <exception cref="JsonException">Either text is not valid JSON.</exception>
     public static IReadOnlyList<string> FindRemovedKeys(ReadOnlyMemory<byte> original, string replacement)
     {
-        if (original.Span.StartsWith(Utf8ByteOrderMark))
+        if (original.Span.StartsWith(Encoding.UTF8.Preamble))
         {
-            original = original[Utf8ByteOrderMark.Length..];
+            original = original[Encoding.UTF8.Preamble.Length..];
         }
 
         using var originalDocument = JsonDocument.Parse(original);
