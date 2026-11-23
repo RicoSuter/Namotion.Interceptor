@@ -25,7 +25,7 @@ public class MacAddressComparisonTests
     [InlineData("3C8A1F32E157", null)]
     [InlineData(" ", "3C8A1F32E157")]
     [InlineData(":", "-")]
-    [InlineData("::", "")]
+    [InlineData("::", "--")]
     public void WhenTheAddressesDifferOrOneIsMissing_ThenTheyAreNotEqual(string? macAddress, string? otherMacAddress)
     {
         // Act
