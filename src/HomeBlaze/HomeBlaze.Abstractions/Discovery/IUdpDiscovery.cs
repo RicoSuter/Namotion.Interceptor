@@ -7,8 +7,8 @@ namespace HomeBlaze.Abstractions.Discovery;
 /// <remarks>
 /// A call reads at most 512 datagrams and yields only those of at most 1024 bytes; longer ones count towards that
 /// limit but are skipped. A socket error during the exchange ends the call without an exception, logged at debug
-/// level, so a broadcast from a host where it cannot be sent yields nothing. Only a port that
-/// <see cref="ListenAsync"/> cannot bind throws. The end of the window ends the enumeration normally, while a
+/// level, so a broadcast from a host where it cannot be sent yields nothing. Only a listening socket that
+/// <see cref="ListenAsync"/> could not open or bind throws. The end of the window ends the enumeration normally, while a
 /// cancellation of the caller's token throws.
 /// </remarks>
 public interface IUdpDiscovery
@@ -37,7 +37,7 @@ public interface IUdpDiscovery
     /// <param name="window">How long to listen, more than zero and at most 30 seconds.</param>
     /// <param name="cancellationToken">Ends the enumeration with an <see cref="OperationCanceledException"/>.</param>
     /// <exception cref="ArgumentOutOfRangeException">An argument is out of range; thrown by the call itself.</exception>
-    /// <exception cref="System.Net.Sockets.SocketException">The port could not be bound; thrown by the enumeration.</exception>
+    /// <exception cref="System.Net.Sockets.SocketException">The listening socket could not be opened or bound to the port; thrown by the enumeration.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken);
 }

@@ -154,14 +154,6 @@ public class MyStromSwitchDiscoveryTests
         Assert.False(matches);
     }
 
-    private sealed class TestHttpClientFactory : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new();
-    }
-
-    /// <summary>
-    /// Yields the datagrams it was created with to every listener and records the ports listened to.
-    /// </summary>
     [Fact]
     public async Task WhenTheAnnouncementPortCannotBeBound_ThenTheSearchFails()
     {
@@ -173,6 +165,14 @@ public class MyStromSwitchDiscoveryTests
         await Assert.ThrowsAsync<SocketException>(async () => await discovery.DiscoverAsync(CancellationToken.None).ToListAsync());
     }
 
+    private sealed class TestHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new();
+    }
+
+    /// <summary>
+    /// Yields the datagrams it was created with to every listener and records the ports listened to.
+    /// </summary>
     private sealed class FakeUdpDiscovery(params UdpDatagram[] datagrams) : IUdpDiscovery
     {
         public List<int> ListenedPorts { get; } = [];

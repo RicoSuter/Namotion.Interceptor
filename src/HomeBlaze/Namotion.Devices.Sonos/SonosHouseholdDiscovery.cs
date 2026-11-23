@@ -95,7 +95,7 @@ public sealed class SonosHouseholdDiscovery : SubjectDiscovery<SonosSystem, Sono
 
     // The host and port of the location are where the speaker is asked, as seed and for its description; an absolute
     // location such as urn:x has neither. A speaker announces an IP address, so a host name, such as one of the
-    // internet, and an address of this host, which anything on the network can advertise, are not asked.
+    // internet, and a loopback or unspecified address, which anything on the network can advertise, are not asked.
     private static bool IsSpeakerLocation(Uri location) =>
         location.IsAbsoluteUri &&
         string.Equals(location.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) &&
