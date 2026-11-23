@@ -1,8 +1,10 @@
 @using global::HomeBlaze.Abstractions.Discovery
+@using Namotion.Interceptor.Registry.Abstractions
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(SonosSystem))]
 @implements ISubjectEditComponent
 @implements ISubjectDiscoveryComponent
+@inject IInterceptorSubjectContext RootContext
 
 <MudForm>
     <MudTextField @bind-Value="_seedHost"
@@ -19,8 +21,11 @@
                   OnKeyUp="OnFieldChanged"
                   Class="mt-4" />
 
-    <MudNumericField @bind-Value="_eventPort" @bind-Value:after="OnFieldChanged"
-                     Label="Event port" Min="1" Max="65535" Class="mt-4" />
+    <MudNumericField @bind-Value="_eventPort" @bind-Value:after="OnEventPortChanged"
+                     Label="Event port" Min="1" Max="65535"
+                     Error="@(_eventPortConflict is not null)"
+                     ErrorText="@_eventPortConflict"
+                     Class="mt-4" />
 
     <MudNumericField @bind-Value="_pollingIntervalSeconds" @bind-Value:after="OnFieldChanged"
                      Label="Polling interval (seconds)" Min="SonosSystem.MinimumIntervalSeconds" Max="SonosSystem.MaximumIntervalSeconds" Class="mt-4" />
@@ -74,8 +79,12 @@
     private int _originalPollingIntervalSeconds;
     private int _originalRetryIntervalSeconds;
 
+    // Checked when the port changes, not on every render, as it walks all known subjects.
+    private string? _eventPortConflict;
+
     public bool IsValid =>
         _eventPort is >= 1 and <= 65535 &&
+        _eventPortConflict is null &&
         _pollingIntervalSeconds is >= SonosSystem.MinimumIntervalSeconds and <= SonosSystem.MaximumIntervalSeconds &&
         _retryIntervalSeconds is >= SonosSystem.MinimumIntervalSeconds and <= SonosSystem.MaximumIntervalSeconds;
 
@@ -98,12 +107,19 @@
         _pollingIntervalSeconds = (int)(SystemSubject?.PollingInterval.TotalSeconds ?? SonosSystem.DefaultIntervalSeconds);
         _retryIntervalSeconds = (int)(SystemSubject?.RetryInterval.TotalSeconds ?? SonosSystem.DefaultIntervalSeconds);
         StoreOriginals();
+        CheckEventPort();
 
         // A household picked on the Discover page pins the system to it; the originals stay, so the value counts as unsaved.
         if (IsCreating && DiscoveryResult is SonosDiscoveredHousehold household)
         {
             _seedHost = household.SeedHost;
         }
+    }
+
+    private void OnEventPortChanged()
+    {
+        CheckEventPort();
+        OnFieldChanged();
     }
 
     private void OnFieldChanged()
@@ -126,6 +142,14 @@
         }
 
         return Task.CompletedTask;
+    }
+
+    private void CheckEventPort()
+    {
+        var subjects = RootContext.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys ?? [];
+        _eventPortConflict = SonosSystem.FindSystemUsingEventPort(subjects, _eventPort, SystemSubject) is not null
+            ? $"Another Sonos system already uses port {_eventPort}. Each system needs its own event port."
+            : null;
     }
 
     private static string? NormalizeHost(string? host) =>

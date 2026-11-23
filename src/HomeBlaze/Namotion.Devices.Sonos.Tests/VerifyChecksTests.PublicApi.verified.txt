@@ -598,5 +598,6 @@ namespace Namotion.Devices.Sonos
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Makes every room standalone.", Position=3, Title="Ungroup All Rooms")]
         public System.Threading.Tasks.Task UngroupAllAsync(System.Threading.CancellationToken cancellationToken) { }
+        public static Namotion.Devices.Sonos.SonosSystem? FindSystemUsingEventPort(System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject> subjects, int eventPort, Namotion.Devices.Sonos.SonosSystem? system) { }
     }
 }

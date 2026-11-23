@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions.Discovery;
 using Namotion.Devices.Sonos.Client;
@@ -93,12 +94,29 @@ public sealed class SonosHouseholdDiscovery : SubjectDiscovery<SonosSystem, Sono
     }
 
     // The host and port of the location are where the speaker is asked, as seed and for its description; an absolute
-    // location such as urn:x has neither.
+    // location such as urn:x has neither. A speaker announces an IP address, so a host name, such as one of the
+    // internet, and an address of this host, which anything on the network can advertise, are not asked.
     private static bool IsSpeakerLocation(Uri location) =>
         location.IsAbsoluteUri &&
         string.Equals(location.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) &&
-        Uri.CheckHostName(location.Host) != UriHostNameType.Unknown &&
+        IsNetworkAddress(location) &&
         location.Port is >= 1 and <= 65535;
+
+    private static bool IsNetworkAddress(Uri location)
+    {
+        if (location.HostNameType is not (UriHostNameType.IPv4 or UriHostNameType.IPv6) ||
+            !IPAddress.TryParse(location.DnsSafeHost, out var address))
+        {
+            return false;
+        }
+
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+
+        return !IPAddress.IsLoopback(address) && !address.Equals(IPAddress.Any) && !address.Equals(IPAddress.IPv6Any);
+    }
 
     private static string ToSeedHost(SonosDiscoveredSpeaker speaker) =>
         speaker.Port == SonosValues.DevicePort

@@ -17,6 +17,10 @@ public sealed record SonosDiscoveredHousehold : IDiscoveryResult<SonosSystem>
         Speakers = speakers;
         SeedHost = seedHost;
         IncludedItems = ToItems(speakers);
+
+        // The speaker with the lowest ID is the seed.
+        var seedRoomName = speakers[0].RoomName;
+        DisplayName = string.IsNullOrWhiteSpace(seedRoomName) ? "Sonos household" : $"Sonos ({seedRoomName.Trim()})";
     }
 
     /// <summary>
@@ -37,8 +41,11 @@ public sealed record SonosDiscoveredHousehold : IDiscoveryResult<SonosSystem>
     /// <inheritdoc />
     public string Key => HouseholdId;
 
-    /// <inheritdoc />
-    public string DisplayName => "Sonos household";
+    /// <summary>
+    /// The household named after the room of its seed speaker, such as <c>Sonos (Living Room)</c>, or
+    /// <c>Sonos household</c> when the description of that speaker was not read.
+    /// </summary>
+    public string DisplayName { get; }
 
     /// <inheritdoc />
     public string? Detail => Speakers.Count == 1 ? $"1 speaker, {SeedHost}" : $"{Speakers.Count} speakers, {SeedHost}";

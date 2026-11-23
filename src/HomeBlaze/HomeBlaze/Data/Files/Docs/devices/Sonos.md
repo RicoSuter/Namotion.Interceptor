@@ -17,7 +17,7 @@ Controls a Sonos household over the speakers' local UPnP API on port 1400, witho
 
 ## Discovery
 
-The Discover page of the create dialog finds Sonos households over SSDP. Every speaker that answers names its household, so the speakers of one household, satellites included, are one result, and each household on the network is its own result. Picking one fills in `SeedHost` with the speaker that has the lowest RINCON ID, which pins the new system to that household. It does not change `EventPort`, so a second household picked there still needs its own `EventPort`, because each system binds its event listener on that port. A household that is already added is recognized by any player or satellite its system knows, or by the speaker its `SeedHost` names. A system without `SeedHost` that has not connected since HomeBlaze started knows no speakers yet, so its household shows as new until it connects.
+The Discover page of the create dialog finds Sonos households over SSDP. Every speaker that answers names its household, so the speakers of one household, satellites included, are one result, and each household on the network is its own result. A household is shown, and suggested as the subject name, after the room of the speaker with the lowest RINCON ID, such as `Sonos (Living Room)`, or as `Sonos household` when that speaker's description could not be read. Picking one fills in `SeedHost` with that speaker, which pins the new system to that household. It does not change `EventPort`, so a second household picked there still needs its own `EventPort`, because each system binds its event listener on that port; the form rejects a port that another Sonos system already uses. A household that is already added is recognized by any player or satellite its system knows, or by the speaker its `SeedHost` names. A system without `SeedHost` that has not connected since HomeBlaze started knows no speakers yet, so its household shows as new until it connects.
 
 The row of a household lists its speakers, satellites included, under it: each by its room name, with its model and IP address. The search answers carry only IDs, so HomeBlaze reads the device description of each speaker, in parallel and within 2 seconds. A speaker whose description does not answer in time, or answers with something unexpected, is listed by its RINCON ID and IP address instead.
 
@@ -35,7 +35,7 @@ Create a `SonosSystem` in the UI (group "Media") or as a JSON file such as `Devi
 |----------|------|---------|-------------|
 | `SeedHost` | string | null | Any speaker of the household, as `host`, `host:port`, an IPv6 literal or `[IPv6]:port`, without a scheme (port 1400 by default). Empty tries the speakers found since HomeBlaze started, then SSDP discovery. |
 | `EventCallbackHost` | string | null | The address the speakers send events to. Empty detects the local IPv4 address that routes to the seed. |
-| `EventPort` | int | 6329 | The port the event listener binds on all interfaces. |
+| `EventPort` | int | 6329 | The port the event listener binds on all interfaces. Each `SonosSystem` needs its own; the form rejects a port another system uses. |
 | `PollingInterval` | TimeSpan | 30 seconds | How often the system polls. While events are live, a poll reads only what they do not deliver, see [Polling](#polling). |
 | `RetryInterval` | TimeSpan | 30 seconds | The delay before reconnecting after a failed connection. |
 
