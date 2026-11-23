@@ -130,10 +130,10 @@ namespace Namotion.Devices.Ecowitt
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
-    public sealed class EcowittGatewayDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.Ecowitt.EcowittGateway, Namotion.Devices.Ecowitt.EcowittDiscoveredGateway>
+    public sealed class EcowittGatewayDiscovery : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.Ecowitt.EcowittGateway, Namotion.Devices.Ecowitt.EcowittDiscoveredGateway>
     {
-        public EcowittGatewayDiscoverer() { }
-        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Ecowitt.EcowittGatewayDiscoverer.<DiscoverAsync>d__3))]
+        public EcowittGatewayDiscovery() { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Ecowitt.EcowittGatewayDiscovery.<DiscoverAsync>d__3))]
         protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Ecowitt.EcowittDiscoveredGateway> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
         protected override bool Matches(Namotion.Devices.Ecowitt.EcowittGateway existing, Namotion.Devices.Ecowitt.EcowittDiscoveredGateway result) { }
     }

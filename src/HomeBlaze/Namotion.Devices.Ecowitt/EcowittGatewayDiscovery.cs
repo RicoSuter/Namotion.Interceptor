@@ -7,7 +7,7 @@ namespace Namotion.Devices.Ecowitt;
 /// <summary>
 /// Finds Ecowitt gateways with the broadcast request of their local API, sent to UDP port 46000 of the local network.
 /// </summary>
-public sealed class EcowittGatewayDiscoverer : SubjectDiscovery<EcowittGateway, EcowittDiscoveredGateway>
+public sealed class EcowittGatewayDiscovery : SubjectDiscovery<EcowittGateway, EcowittDiscoveredGateway>
 {
     internal static readonly byte[] BroadcastRequest = [0xFF, 0xFF, EcowittBroadcastReply.BroadcastCommand, 0x00, 0x04, 0x16];
 
@@ -33,8 +33,8 @@ public sealed class EcowittGatewayDiscoverer : SubjectDiscovery<EcowittGateway, 
 
     /// <param name="reply">The reply of the gateway.</param>
     /// <param name="senderAddress">
-    /// The address the reply came from, which is the host address, as for the other UDP discoverers, rather than the
-    /// address the reply names.
+    /// The address the reply came from, which is the host address, as for the other UDP subject discoveries, rather
+    /// than the address the reply names.
     /// </param>
     internal static EcowittDiscoveredGateway ToResult(EcowittBroadcastReply reply, IPAddress senderAddress)
     {

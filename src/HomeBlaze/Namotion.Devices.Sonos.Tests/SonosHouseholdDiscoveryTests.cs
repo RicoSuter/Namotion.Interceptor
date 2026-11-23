@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Namotion.Devices.Sonos.Tests;
 
-public class SonosHouseholdDiscovererTests
+public class SonosHouseholdDiscoveryTests
 {
     private const string ZonePlayer = "urn:schemas-upnp-org:device:ZonePlayer:1";
     private const string Household = "Sonos_ZwxPaYZW5IrvVUQVXUr4zlXI6L";
@@ -46,7 +46,7 @@ public class SonosHouseholdDiscovererTests
         ];
 
         // Act
-        var households = SonosHouseholdDiscoverer.ToHouseholds(responses);
+        var households = SonosHouseholdDiscovery.ToHouseholds(responses);
 
         // Assert
         Assert.Equal(2, households.Count);
@@ -73,7 +73,7 @@ public class SonosHouseholdDiscovererTests
         ];
 
         // Act
-        var households = SonosHouseholdDiscoverer.ToHouseholds(responses);
+        var households = SonosHouseholdDiscovery.ToHouseholds(responses);
 
         // Assert
         var household = Assert.Single(households);
@@ -92,7 +92,7 @@ public class SonosHouseholdDiscovererTests
         ];
 
         // Act
-        var households = SonosHouseholdDiscoverer.ToHouseholds(responses);
+        var households = SonosHouseholdDiscovery.ToHouseholds(responses);
 
         // Assert
         Assert.Single(Assert.Single(households).Speakers);
@@ -110,8 +110,8 @@ public class SonosHouseholdDiscovererTests
         ];
 
         // Act
-        var forward = SonosHouseholdDiscoverer.ToHouseholds(responses);
-        var reversed = SonosHouseholdDiscoverer.ToHouseholds([.. responses.Reverse()]);
+        var forward = SonosHouseholdDiscovery.ToHouseholds(responses);
+        var reversed = SonosHouseholdDiscovery.ToHouseholds([.. responses.Reverse()]);
 
         // Assert
         Assert.Equal("192.168.1.120", Assert.Single(forward).SeedHost);
@@ -125,7 +125,7 @@ public class SonosHouseholdDiscovererTests
         SsdpResponse[] responses = [Answer("RINCON_A00000000000001400", "192.168.1.101", port: 80)];
 
         // Act
-        var household = Assert.Single(SonosHouseholdDiscoverer.ToHouseholds(responses));
+        var household = Assert.Single(SonosHouseholdDiscovery.ToHouseholds(responses));
 
         // Assert
         Assert.Equal("192.168.1.101:80", household.SeedHost);
@@ -139,12 +139,12 @@ public class SonosHouseholdDiscovererTests
             Answer("RINCON_A00000000000001400", "192.168.1.101"),
             Answer("RINCON_B00000000000001400", "192.168.1.102"));
         using var handler = new DescriptionHandler(_ => Description("Wohnzimmer", "Sonos One"));
-        ISubjectDiscovery discoverer = new SonosHouseholdDiscoverer(handler, new FakeTimeProvider());
+        ISubjectDiscovery discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
         var scan = new DiscoveryScan(search, new EmptyMulticastDnsBrowser(), new UnusedUdpDiscovery(), CancellationToken.None);
         var existing = CreateSystem(seedHost: "192.168.1.102");
 
         // Act
-        var discovered = await discoverer.DiscoverAsync(scan, [existing], CancellationToken.None).ToListAsync();
+        var discovered = await discovery.DiscoverAsync(scan, [existing], CancellationToken.None).ToListAsync();
 
         // Assert
         var single = Assert.Single(discovered);
@@ -168,7 +168,7 @@ public class SonosHouseholdDiscovererTests
         ];
 
         // Act
-        var household = Assert.Single(SonosHouseholdDiscoverer.ToHouseholds(responses));
+        var household = Assert.Single(SonosHouseholdDiscovery.ToHouseholds(responses));
 
         // Assert
         Assert.Equal(["RINCON_A00000000000001400", "RINCON_E00000000000001400"], household.Speakers.Select(speaker => speaker.Id));
@@ -184,11 +184,11 @@ public class SonosHouseholdDiscovererTests
             new SsdpResponse(new Uri("urn:x"), $"uuid:RINCON_B00000000000001400::{ZonePlayer}", HouseholdHeaders()),
             Answer("RINCON_C00000000000001400", "192.168.1.103"));
         using var handler = new DescriptionHandler(_ => Description("Wohnzimmer", "Sonos One"));
-        ISubjectDiscovery discoverer = new SonosHouseholdDiscoverer(handler, new FakeTimeProvider());
+        ISubjectDiscovery discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
         var scan = new DiscoveryScan(search, new EmptyMulticastDnsBrowser(), new UnusedUdpDiscovery(), CancellationToken.None);
 
         // Act
-        var discovered = await discoverer.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
+        var discovered = await discovery.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
 
         // Assert
         var household = Assert.IsType<SonosDiscoveredHousehold>(Assert.Single(discovered).Result);
@@ -211,15 +211,15 @@ public class SonosHouseholdDiscovererTests
 
             return Description("Wohnzimmer", "Sonos One");
         });
-        var discoverer = new SonosHouseholdDiscoverer(handler, new FakeTimeProvider());
-        var households = SonosHouseholdDiscoverer.ToHouseholds(
+        var discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
+        var households = SonosHouseholdDiscovery.ToHouseholds(
         [
             new(new Uri("http://192.168.1.101:1400/elsewhere?target=192.0.2.1"), $"uuid:RINCON_A00000000000001400::{ZonePlayer}", HouseholdHeaders()),
             new(new Uri("http://192.168.1.102:1401/"), $"uuid:RINCON_B00000000000001400::{ZonePlayer}", HouseholdHeaders())
         ]);
 
         // Act
-        await discoverer.DescribeSpeakersAsync(households, CancellationToken.None);
+        await discovery.DescribeSpeakersAsync(households, CancellationToken.None);
 
         // Assert
         Assert.Equal(
@@ -237,8 +237,8 @@ public class SonosHouseholdDiscovererTests
             "192.168.1.102" => Description("Wohnzimmer", "Sonos Sub"),
             _ => Description(" Bad ", "Sonos One")
         });
-        var discoverer = new SonosHouseholdDiscoverer(handler, new FakeTimeProvider());
-        var households = SonosHouseholdDiscoverer.ToHouseholds(
+        var discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
+        var households = SonosHouseholdDiscovery.ToHouseholds(
         [
             Answer("RINCON_A00000000000001400", "192.168.1.101"),
             Answer("RINCON_B00000000000001400", "192.168.1.102"),
@@ -246,7 +246,7 @@ public class SonosHouseholdDiscovererTests
         ]);
 
         // Act
-        var household = Assert.Single(await discoverer.DescribeSpeakersAsync(households, CancellationToken.None));
+        var household = Assert.Single(await discovery.DescribeSpeakersAsync(households, CancellationToken.None));
 
         // Assert
         Assert.Equal(
@@ -291,8 +291,8 @@ public class SonosHouseholdDiscovererTests
                 otherRequestsAnswered.Release();
             }
         });
-        var discoverer = new SonosHouseholdDiscoverer(handler, timeProvider);
-        var households = SonosHouseholdDiscoverer.ToHouseholds(
+        var discovery = new SonosHouseholdDiscovery(handler, timeProvider);
+        var households = SonosHouseholdDiscovery.ToHouseholds(
         [
             Answer("RINCON_A00000000000001400", "192.168.1.101"),
             Answer("RINCON_B00000000000001400", "192.168.1.102"),
@@ -302,7 +302,7 @@ public class SonosHouseholdDiscovererTests
         ]);
 
         // Act - the deadline passes once only the hanging request is left.
-        var describing = discoverer.DescribeSpeakersAsync(households, CancellationToken.None);
+        var describing = discovery.DescribeSpeakersAsync(households, CancellationToken.None);
         await hangingRequestStarted.Task;
         for (var answered = 0; answered < 4; answered++)
         {
@@ -342,11 +342,11 @@ public class SonosHouseholdDiscovererTests
             "malformed" => Xml("<root><device><roomName>Open"),
             _ => WithCharset(Description("Charset", "Sonos One"), "no-such-charset")
         });
-        var discoverer = new SonosHouseholdDiscoverer(handler, new FakeTimeProvider());
-        var households = SonosHouseholdDiscoverer.ToHouseholds([Answer("RINCON_A00000000000001400", "192.168.1.101")]);
+        var discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
+        var households = SonosHouseholdDiscovery.ToHouseholds([Answer("RINCON_A00000000000001400", "192.168.1.101")]);
 
         // Act
-        var household = Assert.Single(await discoverer.DescribeSpeakersAsync(households, CancellationToken.None));
+        var household = Assert.Single(await discovery.DescribeSpeakersAsync(households, CancellationToken.None));
 
         // Assert
         Assert.Equal([new DiscoveredItem("RINCON_A00000000000001400", "192.168.1.101")], household.IncludedItems);
@@ -359,11 +359,11 @@ public class SonosHouseholdDiscovererTests
         // Arrange
         var longName = new string('r', SonosSpeakerDescriptions.MaximumNameLength - 1) + "\U0001F50A" + "tail";
         using var handler = new DescriptionHandler(_ => Description(longName, new string('m', 200)));
-        var discoverer = new SonosHouseholdDiscoverer(handler, new FakeTimeProvider());
-        var households = SonosHouseholdDiscoverer.ToHouseholds([Answer("RINCON_A00000000000001400", "192.168.1.101")]);
+        var discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
+        var households = SonosHouseholdDiscovery.ToHouseholds([Answer("RINCON_A00000000000001400", "192.168.1.101")]);
 
         // Act
-        var household = Assert.Single(await discoverer.DescribeSpeakersAsync(households, CancellationToken.None));
+        var household = Assert.Single(await discovery.DescribeSpeakersAsync(households, CancellationToken.None));
 
         // Assert - the surrogate pair that would be cut in half is dropped whole.
         var item = Assert.Single(household.IncludedItems);
@@ -374,8 +374,8 @@ public class SonosHouseholdDiscovererTests
     [Fact]
     public async Task WhenASpeakerAnswersWithARedirect_ThenTheRedirectIsNotFollowed()
     {
-        // Arrange - the discoverer with its own handler, against a speaker on the loopback address, with a deadline
-        // that never passes.
+        // Arrange - the subject discovery with its own handler, against a speaker on the loopback address, with a
+        // deadline that never passes.
         var paths = new List<string>();
         await using var speaker = new LoopbackHttpServer(async context =>
         {
@@ -395,11 +395,11 @@ public class SonosHouseholdDiscovererTests
             context.Response.ContentType = "text/xml; charset=utf-8";
             await context.Response.OutputStream.WriteAsync(body);
         });
-        var discoverer = new SonosHouseholdDiscoverer(handler: null, new FakeTimeProvider());
-        var households = SonosHouseholdDiscoverer.ToHouseholds([Answer("RINCON_A00000000000001400", "127.0.0.1", port: speaker.Port)]);
+        var discovery = new SonosHouseholdDiscovery(handler: null, new FakeTimeProvider());
+        var households = SonosHouseholdDiscovery.ToHouseholds([Answer("RINCON_A00000000000001400", "127.0.0.1", port: speaker.Port)]);
 
         // Act
-        var household = Assert.Single(await discoverer.DescribeSpeakersAsync(households, CancellationToken.None));
+        var household = Assert.Single(await discovery.DescribeSpeakersAsync(households, CancellationToken.None));
 
         // Assert
         Assert.Equal([new DiscoveredItem("RINCON_A00000000000001400", "127.0.0.1")], household.IncludedItems);
@@ -409,19 +409,19 @@ public class SonosHouseholdDiscovererTests
     [Fact]
     public async Task WhenASpeakerAnswersOverTheNetwork_ThenItsRoomIsRead()
     {
-        // Arrange - the discoverer with its own handler, against a speaker on the loopback address, with a deadline
-        // that never passes.
+        // Arrange - the subject discovery with its own handler, against a speaker on the loopback address, with a
+        // deadline that never passes.
         await using var speaker = new LoopbackHttpServer(async context =>
         {
             var body = Encoding.UTF8.GetBytes(TestFixtures.Read("device-description-ray.xml"));
             context.Response.ContentType = "text/xml";
             await context.Response.OutputStream.WriteAsync(body);
         });
-        var discoverer = new SonosHouseholdDiscoverer(handler: null, new FakeTimeProvider());
-        var households = SonosHouseholdDiscoverer.ToHouseholds([Answer("RINCON_A00000000000001400", "127.0.0.1", port: speaker.Port)]);
+        var discovery = new SonosHouseholdDiscovery(handler: null, new FakeTimeProvider());
+        var households = SonosHouseholdDiscovery.ToHouseholds([Answer("RINCON_A00000000000001400", "127.0.0.1", port: speaker.Port)]);
 
         // Act
-        var household = Assert.Single(await discoverer.DescribeSpeakersAsync(households, CancellationToken.None));
+        var household = Assert.Single(await discovery.DescribeSpeakersAsync(households, CancellationToken.None));
 
         // Assert
         Assert.Equal([new DiscoveredItem("Büro", $"Sonos Ray, 127.0.0.1")], household.IncludedItems);
@@ -432,16 +432,16 @@ public class SonosHouseholdDiscovererTests
     {
         // Arrange
         using var handler = new DescriptionHandler(_ => Description("Room", "Sonos One"));
-        var discoverer = new SonosHouseholdDiscoverer(handler, new FakeTimeProvider());
+        var discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
         var count = SonosSpeakerDescriptions.MaximumDescriptions + 1;
-        var households = SonosHouseholdDiscoverer.ToHouseholds(
+        var households = SonosHouseholdDiscovery.ToHouseholds(
         [
             .. Enumerable.Range(0, count).Select(index =>
                 Answer($"RINCON_{index:D3}000000000001400", $"10.0.{index / 250}.{index % 250 + 1}"))
         ]);
 
         // Act
-        var household = Assert.Single(await discoverer.DescribeSpeakersAsync(households, CancellationToken.None));
+        var household = Assert.Single(await discovery.DescribeSpeakersAsync(households, CancellationToken.None));
 
         // Assert
         Assert.Equal(SonosSpeakerDescriptions.MaximumDescriptions, handler.RequestCount);
@@ -460,12 +460,12 @@ public class SonosHouseholdDiscovererTests
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             throw new InvalidOperationException("Not reached.");
         });
-        var discoverer = new SonosHouseholdDiscoverer(handler, new FakeTimeProvider());
-        var households = SonosHouseholdDiscoverer.ToHouseholds([Answer("RINCON_A00000000000001400", "192.168.1.101")]);
+        var discovery = new SonosHouseholdDiscovery(handler, new FakeTimeProvider());
+        var households = SonosHouseholdDiscovery.ToHouseholds([Answer("RINCON_A00000000000001400", "192.168.1.101")]);
         using var cancellation = new CancellationTokenSource();
 
         // Act
-        var describing = discoverer.DescribeSpeakersAsync(households, cancellation.Token);
+        var describing = discovery.DescribeSpeakersAsync(households, cancellation.Token);
         await requestStarted.Task;
         await cancellation.CancelAsync();
 
@@ -484,8 +484,8 @@ public class SonosHouseholdDiscovererTests
         };
 
         // Act & Assert
-        Assert.True(SonosHouseholdDiscoverer.IsSameHousehold(system, Found(("RINCON_A00000000000001400", "192.168.1.101"), ("RINCON_B00000000000001400", "192.168.1.102"))));
-        Assert.False(SonosHouseholdDiscoverer.IsSameHousehold(system, Found(("RINCON_C00000000000001400", "192.168.1.103"))));
+        Assert.True(SonosHouseholdDiscovery.IsSameHousehold(system, Found(("RINCON_A00000000000001400", "192.168.1.101"), ("RINCON_B00000000000001400", "192.168.1.102"))));
+        Assert.False(SonosHouseholdDiscovery.IsSameHousehold(system, Found(("RINCON_C00000000000001400", "192.168.1.103"))));
     }
 
     [Fact]
@@ -501,7 +501,7 @@ public class SonosHouseholdDiscovererTests
         system.Players = new Dictionary<string, SonosPlayer>(StringComparer.Ordinal) { [player.Uuid] = player };
 
         // Act & Assert
-        Assert.True(SonosHouseholdDiscoverer.IsSameHousehold(system, Found(("RINCON_S00000000000001400", "192.168.1.110"))));
+        Assert.True(SonosHouseholdDiscovery.IsSameHousehold(system, Found(("RINCON_S00000000000001400", "192.168.1.110"))));
     }
 
     [Theory]
@@ -514,7 +514,7 @@ public class SonosHouseholdDiscovererTests
         var system = CreateSystem(seedHost);
 
         // Act & Assert
-        Assert.True(SonosHouseholdDiscoverer.IsSameHousehold(system, Found(("RINCON_A00000000000001400", "192.168.1.101"), ("RINCON_B00000000000001400", "192.168.1.102"))));
+        Assert.True(SonosHouseholdDiscovery.IsSameHousehold(system, Found(("RINCON_A00000000000001400", "192.168.1.101"), ("RINCON_B00000000000001400", "192.168.1.102"))));
     }
 
     [Fact]
@@ -524,7 +524,7 @@ public class SonosHouseholdDiscovererTests
         var system = CreateSystem("Sonos-Kitchen.local");
 
         // Act & Assert
-        Assert.True(SonosHouseholdDiscoverer.IsSameHousehold(system, Found(("RINCON_A00000000000001400", "sonos-kitchen.local"))));
+        Assert.True(SonosHouseholdDiscovery.IsSameHousehold(system, Found(("RINCON_A00000000000001400", "sonos-kitchen.local"))));
     }
 
     [Theory]
@@ -542,7 +542,7 @@ public class SonosHouseholdDiscovererTests
         };
 
         // Act & Assert
-        Assert.False(SonosHouseholdDiscoverer.IsSameHousehold(system, Found(("RINCON_A00000000000001400", "192.168.1.101"))));
+        Assert.False(SonosHouseholdDiscovery.IsSameHousehold(system, Found(("RINCON_A00000000000001400", "192.168.1.101"))));
     }
 
     private static Dictionary<string, string> HouseholdHeaders() =>

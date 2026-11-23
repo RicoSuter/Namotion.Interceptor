@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Namotion.Devices.MyStrom.Tests;
 
-public class MyStromSwitchDiscovererTests
+public class MyStromSwitchDiscoveryTests
 {
     private const string MacAddress = "FCF5C418ADAC";
     private const string HostAddress = "192.168.1.59";
@@ -29,11 +29,11 @@ public class MyStromSwitchDiscovererTests
     private static async Task<List<DiscoveredSubject>> DiscoverAsync(
         FakeUdpDiscovery udpDiscovery, params IInterceptorSubject[] existingSubjects)
     {
-        ISubjectDiscovery discoverer = new MyStromSwitchDiscoverer();
+        ISubjectDiscovery discovery = new MyStromSwitchDiscovery();
         var scan = new DiscoveryScan(new UnusedSsdpSearch(), new UnusedMulticastDnsBrowser(), udpDiscovery, CancellationToken.None);
 
         var discovered = new List<DiscoveredSubject>();
-        await foreach (var subject in discoverer.DiscoverAsync(scan, existingSubjects, CancellationToken.None))
+        await foreach (var subject in discovery.DiscoverAsync(scan, existingSubjects, CancellationToken.None))
         {
             discovered.Add(subject);
         }
@@ -124,7 +124,7 @@ public class MyStromSwitchDiscovererTests
         var existing = CreateSwitch(hostAddress: "192.168.1.10", macAddress: macAddress);
 
         // Act
-        var matches = MyStromSwitchDiscoverer.IsSameSwitch(existing, Found());
+        var matches = MyStromSwitchDiscovery.IsSameSwitch(existing, Found());
 
         // Assert
         Assert.True(matches);
@@ -139,7 +139,7 @@ public class MyStromSwitchDiscovererTests
         var existing = CreateSwitch(hostAddress: hostAddress);
 
         // Act
-        var matches = MyStromSwitchDiscoverer.IsSameSwitch(existing, Found());
+        var matches = MyStromSwitchDiscovery.IsSameSwitch(existing, Found());
 
         // Assert
         Assert.True(matches);
@@ -158,7 +158,7 @@ public class MyStromSwitchDiscovererTests
         var existing = CreateSwitch(hostAddress: hostAddress, macAddress: macAddress);
 
         // Act
-        var matches = MyStromSwitchDiscoverer.IsSameSwitch(existing, Found());
+        var matches = MyStromSwitchDiscovery.IsSameSwitch(existing, Found());
 
         // Assert
         Assert.False(matches);

@@ -32,7 +32,7 @@ public class EcowittBroadcastReplyTests
     public void WhenTheChecksumOfTheRequestIsComputed_ThenItMatchesTheRequest()
     {
         // Arrange
-        var request = EcowittGatewayDiscoverer.BroadcastRequest;
+        var request = EcowittGatewayDiscovery.BroadcastRequest;
 
         // Act
         var checksum = EcowittBroadcastReply.ComputeChecksum(request.AsSpan(2, request.Length - 3));

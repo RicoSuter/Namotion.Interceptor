@@ -10,7 +10,7 @@ using Xunit;
 
 namespace Namotion.Devices.Ecowitt.Tests;
 
-public class EcowittGatewayDiscovererTests
+public class EcowittGatewayDiscoveryTests
 {
     private const string MacAddress = "3C:8A:1F:32:E1:57";
     private const string HostAddress = "192.168.1.216";
@@ -49,11 +49,11 @@ public class EcowittGatewayDiscovererTests
     private static async Task<List<DiscoveredSubject>> DiscoverAsync(
         FakeUdpDiscovery udpDiscovery, params IInterceptorSubject[] existingSubjects)
     {
-        ISubjectDiscovery discoverer = new EcowittGatewayDiscoverer();
+        ISubjectDiscovery discovery = new EcowittGatewayDiscovery();
         var scan = new DiscoveryScan(new UnusedSsdpSearch(), new UnusedMulticastDnsBrowser(), udpDiscovery, CancellationToken.None);
 
         var discovered = new List<DiscoveredSubject>();
-        await foreach (var subject in discoverer.DiscoverAsync(scan, existingSubjects, CancellationToken.None))
+        await foreach (var subject in discovery.DiscoverAsync(scan, existingSubjects, CancellationToken.None))
         {
             discovered.Add(subject);
         }
@@ -152,7 +152,7 @@ public class EcowittGatewayDiscovererTests
         var reply = Reply(name: name);
 
         // Act
-        var result = EcowittGatewayDiscoverer.ToResult(reply, IPAddress.Parse(HostAddress));
+        var result = EcowittGatewayDiscovery.ToResult(reply, IPAddress.Parse(HostAddress));
 
         // Assert
         Assert.Equal(deviceName, result.DeviceName);
@@ -173,7 +173,7 @@ public class EcowittGatewayDiscovererTests
         var existing = CreateGateway(hostAddress: "192.168.1.10", macAddress: macAddress);
 
         // Act
-        var matches = EcowittGatewayDiscoverer.IsSameGateway(existing, Found());
+        var matches = EcowittGatewayDiscovery.IsSameGateway(existing, Found());
 
         // Assert
         Assert.True(matches);
@@ -188,7 +188,7 @@ public class EcowittGatewayDiscovererTests
         var existing = CreateGateway(hostAddress: hostAddress);
 
         // Act
-        var matches = EcowittGatewayDiscoverer.IsSameGateway(existing, Found());
+        var matches = EcowittGatewayDiscovery.IsSameGateway(existing, Found());
 
         // Assert
         Assert.True(matches);
@@ -207,7 +207,7 @@ public class EcowittGatewayDiscovererTests
         var existing = CreateGateway(hostAddress: hostAddress, macAddress: macAddress);
 
         // Act
-        var matches = EcowittGatewayDiscoverer.IsSameGateway(existing, Found());
+        var matches = EcowittGatewayDiscovery.IsSameGateway(existing, Found());
 
         // Assert
         Assert.False(matches);

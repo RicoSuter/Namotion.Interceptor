@@ -103,10 +103,10 @@ namespace Namotion.Devices.MyStrom
         [HomeBlaze.Abstractions.Attributes.Operation(Icon="PowerSettingsNew", Position=1, Title="Turn On")]
         public System.Threading.Tasks.Task TurnOnAsync(System.Threading.CancellationToken cancellationToken) { }
     }
-    public sealed class MyStromSwitchDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.MyStrom.MyStromSwitch, Namotion.Devices.MyStrom.MyStromDiscoveredSwitch>
+    public sealed class MyStromSwitchDiscovery : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.MyStrom.MyStromSwitch, Namotion.Devices.MyStrom.MyStromDiscoveredSwitch>
     {
-        public MyStromSwitchDiscoverer() { }
-        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.MyStrom.MyStromSwitchDiscoverer.<DiscoverAsync>d__2))]
+        public MyStromSwitchDiscovery() { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.MyStrom.MyStromSwitchDiscovery.<DiscoverAsync>d__2))]
         protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.MyStrom.MyStromDiscoveredSwitch> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
         protected override bool Matches(Namotion.Devices.MyStrom.MyStromSwitch existing, Namotion.Devices.MyStrom.MyStromDiscoveredSwitch result) { }
     }
