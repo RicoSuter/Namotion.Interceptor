@@ -86,7 +86,7 @@ Any host on the network can answer, so what one query can make HomeBlaze hold or
 
 - An SSDP search returns at most 64 answers for the searched target. The answers Rssdp collects during the window of about 3 seconds are not capped.
 - An mDNS browse reads at most 512 messages per adapter and 256 records per message, keeps at most 4096 records and 256 KB of names and TXT entries, after which further records are dropped, and returns at most 64 instances.
-- `FritzBoxDiscovery` describes at most 32 locations per search, one of them reserved for `fritz.box`, and reads a bounded description from each.
+- `FritzBoxDiscovery` describes at most 32 locations per search, one of them reserved for `fritz.box`, and reads a bounded description from each. It asks `fritz.box` only when the name resolves to a private IPv4, link-local or IPv6 unique local address: without a FRITZ!Box the name resolves to AVM's public server or not at all, and a LAN discovery sends no request to the internet.
 
 ## Discover page
 

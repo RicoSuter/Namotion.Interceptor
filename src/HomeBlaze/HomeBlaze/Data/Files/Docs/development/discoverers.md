@@ -144,7 +144,7 @@ public sealed class AcmeCloudDiscoverer : SubjectDiscoverer<AcmeHub, AcmeDiscove
 
 - Keep parsing and matching in `internal static` methods, which the test project of the library reaches through `InternalsVisibleTo`, as `ShellyDeviceDiscoverer.ToDevices` and `IsSameDevice` are tested.
 - To run a whole discoverer, create a `DiscoveryScan` with fake `ISsdpSearch` and `IMulticastDnsBrowser` implementations and call it through `ISubjectDiscoverer.DiscoverAsync(scan, existingSubjects, cancellationToken)`, which also applies the deduplication and `Matches`.
-- The E2E host replaces the shared services with empty ones, so a discoverer that only uses them finds nothing there and needs no setup. One that calls an address of its own, such as a vendor's cloud service, needs a stub in `WebTestingHostFactory`, as the Nuki discovery service has; that stub only reaches an `HttpClient` from `IHttpClientFactory`. The FRITZ!Box discoverer's request to `fritz.box` is not stubbed, because it does not use `IHttpClientFactory`. Behind a FRITZ!Box the router answers it; elsewhere the name resolves publicly or not at all, and the request fails or times out after 3 seconds, which leaves the result empty.
+- The E2E host replaces the shared services with empty ones, so a discoverer that only uses them finds nothing there and needs no setup. One that calls an address of its own, such as a vendor's cloud service, needs a stub in `WebTestingHostFactory`, as the Nuki discovery service has; that stub only reaches an `HttpClient` from `IHttpClientFactory`. The FRITZ!Box discoverer asks `fritz.box` only when the name resolves to an address on the local network, so in the E2E host it makes a name lookup and no request.
 
 ## Example
 

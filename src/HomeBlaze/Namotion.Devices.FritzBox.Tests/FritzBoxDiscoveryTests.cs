@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using Namotion.Devices.FritzBox.Client;
 using Namotion.Devices.FritzBox.Tests.Testing;
 using Namotion.Interceptor.Testing;
@@ -116,10 +118,96 @@ public class FritzBoxDiscoveryTests
             FritzBoxDiscovery.DescribeAsync(httpClient, "127.0.0.1", fake.HttpPort, cancellationTokenSource.Token));
     }
 
+    [Theory]
+    [InlineData("192.168.178.1", true)]
+    [InlineData("10.0.0.1", true)]
+    [InlineData("172.16.0.1", true)]
+    [InlineData("172.31.255.254", true)]
+    [InlineData("169.254.1.1", true)]
+    [InlineData("fd00::1", true)]
+    [InlineData("fe80::1", true)]
+    [InlineData("::ffff:192.168.178.1", true)]
+    [InlineData("172.32.0.1", false)]
+    [InlineData("212.42.244.122", false)]
+    [InlineData("127.0.0.1", false)]
+    [InlineData("2a00:1450::1", false)]
+    public void WhenAnAddressIsChecked_ThenOnlyLocalNetworkAddressesCount(string address, bool isLocal)
+    {
+        // Act
+        var result = FritzBoxDiscovery.IsLocalNetworkAddress(IPAddress.Parse(address));
+
+        // Assert
+        Assert.Equal(isLocal, result);
+    }
+
+    [Fact]
+    public async Task WhenTheNameResolvesOnlyToPublicAddresses_ThenItIsNotOnTheLocalNetwork()
+    {
+        // Act
+        var result = await FritzBoxDiscovery.IsOnLocalNetworkAsync(
+            "fritz.box", (_, _) => Task.FromResult(new[] { IPAddress.Parse("212.42.244.122") }), TimeSpan.FromSeconds(5), CancellationToken.None);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task WhenTheNameResolvesToALocalAddress_ThenItIsOnTheLocalNetwork()
+    {
+        // Act
+        var result = await FritzBoxDiscovery.IsOnLocalNetworkAsync(
+            "fritz.box",
+            (_, _) => Task.FromResult(new[] { IPAddress.Parse("2a00:1450::1"), IPAddress.Parse("192.168.178.1") }),
+            TimeSpan.FromSeconds(5),
+            CancellationToken.None);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Fact]
+    public async Task WhenTheNameDoesNotResolve_ThenItIsNotOnTheLocalNetwork()
+    {
+        // Act
+        var result = await FritzBoxDiscovery.IsOnLocalNetworkAsync(
+            "fritz.box", (_, _) => Task.FromException<IPAddress[]>(new SocketException((int)SocketError.HostNotFound)), TimeSpan.FromSeconds(5), CancellationToken.None);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task WhenTheNameResolvesOnlyToPublicAddresses_ThenDiscoverAsyncDoesNotAskIt()
+    {
+        // Arrange
+        var resolvedHosts = new List<string>();
+
+        // Act
+        var results = await FritzBoxDiscovery.DiscoverAsync(
+            new EmptySsdpSearch(),
+            TimeSpan.FromSeconds(5),
+            (host, _) =>
+            {
+                resolvedHosts.Add(host);
+                return Task.FromResult(new[] { IPAddress.Parse("212.42.244.122") });
+            },
+            CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["fritz.box"], resolvedHosts);
+        Assert.Empty(results);
+    }
+
     /// <summary>
-    /// Builds the client the way <see cref="FritzBoxDiscovery.DiscoverAsync"/> does, so tests exercise the real
+    /// Builds the client the way <see cref="FritzBoxDiscovery.DiscoverAsync(HomeBlaze.Abstractions.Discovery.ISsdpSearch, TimeSpan, CancellationToken)"/> does, so tests exercise the real
     /// discovery settings, including the size cap that the oversized-description test relies on.
     /// </summary>
     private static HttpClient CreateHttpClient() =>
         FritzBoxHttpClient.CreatePlain(TimeSpan.FromSeconds(5), Tr64Description.MaximumBytes);
+
+    private sealed class EmptySsdpSearch : HomeBlaze.Abstractions.Discovery.ISsdpSearch
+    {
+        public Task<IReadOnlyList<HomeBlaze.Abstractions.Discovery.SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<HomeBlaze.Abstractions.Discovery.SsdpResponse>>([]);
+    }
 }
