@@ -535,7 +535,8 @@ public partial class FluentStorageContainer :
 
     /// <summary>
     /// Saves the file of the subject like <see cref="WriteConfigurationAsync(IInterceptorSubject, CancellationToken)"/>,
-    /// but only while the file still has the content of the expected hash, as the storage last read or wrote it.
+    /// but only while the file still has the content of the expected hash, both in the storage and as the storage last
+    /// read or wrote it.
     /// </summary>
     /// <param name="subject">The subject whose file is saved.</param>
     /// <param name="expectedHash">The hash of the content the file must still have, or null to save in any case.</param>
@@ -560,7 +561,12 @@ public partial class FluentStorageContainer :
                 if (fileSubject is not IConfigurable || fileSubject is IStorageFile || entry is null)
                     return;
 
-                if (expectedHash != null && entry.Hash != expectedHash)
+                // The index lags behind a change of the file until a pass processed it, and an unrequested save must
+                // never undo a hand edit.
+                if (expectedHash != null &&
+                    (entry.Hash != expectedHash ||
+                     await connection.Reconciler.TryReadAsync(entry.Path, token) is not { } current ||
+                     StorageHash.Compute(current) != expectedHash))
                     return;
 
                 await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(fileSubject)), token);

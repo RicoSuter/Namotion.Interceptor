@@ -105,6 +105,25 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenTheFileChangedOnDiskBeforeAPassSawIt_ThenTheConditionalSaveWritesNothing()
+    {
+        // Arrange: without file watching, no pass sees the hand edit, so the index still holds the hash as read.
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""");
+        var storage = await ConnectAsync();
+        var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
+        var hashAsRead = StorageHash.Compute(File.ReadAllBytes(GetFullPath("Gateway.json")));
+        var handEdit = $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.9" }""";
+        WriteFile("Gateway.json", handEdit);
+
+        // Act
+        var isWritten = await storage.WriteConfigurationAsync(device, hashAsRead, CancellationToken.None);
+
+        // Assert
+        Assert.False(isWritten);
+        Assert.Equal(handEdit, File.ReadAllText(GetFullPath("Gateway.json")));
+    }
+
+    [Fact]
     public async Task WhenABlockArgumentOfAPageHoldsAPlaintextSecret_ThenOnlyItIsReplacedByAReference()
     {
         // Arrange

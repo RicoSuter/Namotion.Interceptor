@@ -952,8 +952,11 @@ internal sealed class StorageReconciler
     private async Task<byte[]> ReadAsync(string path, CancellationToken cancellationToken)
         => await TryReadAsync(path, cancellationToken) ?? throw new FileNotFoundException($"'{path}' is not in the storage.", path);
 
-    // Null for a file that does not exist, for which the client returns null although its signature does not say so.
-    private async Task<byte[]?> TryReadAsync(string path, CancellationToken cancellationToken)
+    /// <summary>
+    /// Reads the content of a file from the storage within the timeout of the storage; null for a file that does not exist.
+    /// </summary>
+    // The client returns null for a file that does not exist, although its signature does not say so.
+    public async Task<byte[]?> TryReadAsync(string path, CancellationToken cancellationToken)
     {
         await using var stream = await _client.OpenRead(path, cancellationToken);
         if (stream is null)
