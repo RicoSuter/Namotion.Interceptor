@@ -29,8 +29,9 @@ internal sealed class SubjectDiscoveryList
     /// <summary>
     /// Marks the rows that <paramref name="createdSubject"/> represents as added, with it as their subject, and moves
     /// them to their place among the added devices. These are the row of <paramref name="picked"/>, found by its
-    /// subject type and key, and every row not added yet whose result matches <paramref name="createdSubject"/>. A
-    /// result whose <see cref="IDiscoveryResult.Matches"/> throws is logged and does not match.
+    /// subject type and key, and every row not added yet whose subject type <paramref name="createdSubject"/> is an
+    /// instance of and whose result matches it. A result whose <see cref="IDiscoveryResult.Matches"/> throws is logged
+    /// and does not match.
     /// </summary>
     public void MarkAdded(DiscoveredSubject picked, IInterceptorSubject createdSubject, ILogger logger)
     {
@@ -43,7 +44,10 @@ internal sealed class SubjectDiscoveryList
             var isPicked =
                 row.Discovered.SubjectType == picked.SubjectType &&
                 string.Equals(row.Discovered.Result.Key, picked.Result.Key, StringComparison.Ordinal);
-            if (isPicked || (row.Discovered.ExistingSubject is null && Matches(row.Discovered.Result, createdSubject, logger)))
+            if (isPicked ||
+                (row.Discovered.ExistingSubject is null &&
+                 row.Discovered.SubjectType.IsInstanceOfType(createdSubject) &&
+                 Matches(row.Discovered.Result, createdSubject, logger)))
             {
                 _rows[index] = row with { Discovered = row.Discovered with { ExistingSubject = createdSubject } };
                 isChanged = true;
