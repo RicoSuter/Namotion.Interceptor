@@ -629,7 +629,7 @@ namespace HomeBlaze.Abstractions.Discovery
     {
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.SsdpResponse>> SearchAsync(string searchTarget, System.Threading.CancellationToken cancellationToken);
     }
-    public interface ISubjectDiscoverer
+    public interface ISubjectDiscovery
     {
         System.Type SubjectType { get; }
         System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.DiscoveredSubject> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.IInterceptorSubject> existingSubjects, System.Threading.CancellationToken cancellationToken);
@@ -655,11 +655,11 @@ namespace HomeBlaze.Abstractions.Discovery
         public System.Uri Location { get; init; }
         public string? UniqueServiceName { get; init; }
     }
-    public abstract class SubjectDiscoverer<TSubject, TResult> : HomeBlaze.Abstractions.Discovery.ISubjectDiscoverer
+    public abstract class SubjectDiscovery<TSubject, TResult> : HomeBlaze.Abstractions.Discovery.ISubjectDiscovery
         where TSubject :  class, Namotion.Interceptor.IInterceptorSubject
         where TResult :  class, HomeBlaze.Abstractions.Discovery.IDiscoveryResult
     {
-        protected SubjectDiscoverer() { }
+        protected SubjectDiscovery() { }
         protected abstract System.Collections.Generic.IAsyncEnumerable<TResult> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, System.Threading.CancellationToken cancellationToken);
         protected abstract bool Matches(TSubject existing, TResult result);
     }

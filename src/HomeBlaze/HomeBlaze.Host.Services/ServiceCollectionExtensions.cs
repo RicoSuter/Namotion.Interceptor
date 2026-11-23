@@ -28,7 +28,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SubjectComponentRegistry>();
         services.TryAddSingleton(TimeProvider.System);
         // The registry needs the component registry above, which only the host registers.
-        services.AddSingleton<SubjectDiscovererRegistry>();
+        services.AddSingleton<SubjectDiscoveryRegistry>();
         services.AddSingleton<SubjectDiscoveryService>();
         services.AddSingleton<NavigationItemResolver>();
         services.AddSingleton<MetadataLinkResolver>();

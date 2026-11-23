@@ -86,16 +86,13 @@ namespace Namotion.Devices.Nuki
         public static System.TimeSpan GetEffectiveInterval(System.TimeSpan configured, System.TimeSpan fallback) { }
         public static string? ValidateHostAddress(string? hostAddress) { }
     }
-    public sealed class NukiBridgeDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscoverer<Namotion.Devices.Nuki.NukiBridge, Namotion.Devices.Nuki.NukiDiscoveredBridge>
-    {
-        public NukiBridgeDiscoverer(System.Net.Http.IHttpClientFactory httpClientFactory) { }
-        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Nuki.NukiBridgeDiscoverer.<DiscoverAsync>d__2))]
-        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Nuki.NukiDiscoveredBridge> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
-        protected override bool Matches(Namotion.Devices.Nuki.NukiBridge existing, Namotion.Devices.Nuki.NukiDiscoveredBridge result) { }
-    }
-    public static class NukiBridgeDiscovery
+    public sealed class NukiBridgeDiscovery : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.Nuki.NukiBridge, Namotion.Devices.Nuki.NukiDiscoveredBridge>
     {
         public const string DiscoveryAddress = "https://api.nuki.io/discover/bridges";
+        public NukiBridgeDiscovery(System.Net.Http.IHttpClientFactory httpClientFactory) { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Nuki.NukiBridgeDiscovery.<DiscoverAsync>d__4))]
+        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Nuki.NukiDiscoveredBridge> DiscoverAsync(HomeBlaze.Abstractions.Discovery.DiscoveryScan scan, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
+        protected override bool Matches(Namotion.Devices.Nuki.NukiBridge existing, Namotion.Devices.Nuki.NukiDiscoveredBridge result) { }
         public static System.Threading.Tasks.Task<Namotion.Devices.Nuki.NukiTokenModeDetection> DetectTokenModeAsync(string hostAddress, string token, System.Threading.CancellationToken cancellationToken) { }
         public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Namotion.Devices.Nuki.NukiDiscoveredBridge>> DiscoverAsync(System.Net.Http.HttpClient httpClient, System.Threading.CancellationToken cancellationToken) { }
         public static System.Threading.Tasks.Task<string?> PairAsync(string hostAddress, System.Threading.CancellationToken cancellationToken) { }

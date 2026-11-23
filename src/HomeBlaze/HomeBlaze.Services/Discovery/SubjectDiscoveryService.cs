@@ -5,16 +5,16 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Services.Discovery;
 
 /// <summary>
-/// Runs the subject discoverers for the create dialog.
+/// Runs the subject discoveries for the create dialog.
 /// </summary>
 public sealed class SubjectDiscoveryService
 {
     /// <summary>
-    /// The longest a scan runs. It ends earlier once every discoverer has completed.
+    /// The longest a scan runs. It ends earlier once every subject discovery has completed.
     /// </summary>
     internal static readonly TimeSpan ScanTimeout = TimeSpan.FromSeconds(30);
 
-    private readonly Func<IReadOnlyList<ISubjectDiscoverer>> _getDiscoverers;
+    private readonly Func<IReadOnlyList<ISubjectDiscovery>> _getDiscoveries;
     private readonly ISsdpSearch _ssdpSearch;
     private readonly IMulticastDnsBrowser _multicastDnsBrowser;
     private readonly IUdpDiscovery _udpDiscovery;
@@ -22,25 +22,25 @@ public sealed class SubjectDiscoveryService
     private readonly ILogger<SubjectDiscoveryService> _logger;
 
     public SubjectDiscoveryService(
-        SubjectDiscovererRegistry registry,
+        SubjectDiscoveryRegistry registry,
         ISsdpSearch ssdpSearch,
         IMulticastDnsBrowser multicastDnsBrowser,
         IUdpDiscovery udpDiscovery,
         TimeProvider timeProvider,
         ILogger<SubjectDiscoveryService> logger)
-        : this(registry.GetDiscoverers, ssdpSearch, multicastDnsBrowser, udpDiscovery, timeProvider, logger)
+        : this(registry.GetDiscoveries, ssdpSearch, multicastDnsBrowser, udpDiscovery, timeProvider, logger)
     {
     }
 
     internal SubjectDiscoveryService(
-        Func<IReadOnlyList<ISubjectDiscoverer>> getDiscoverers,
+        Func<IReadOnlyList<ISubjectDiscovery>> getDiscoveries,
         ISsdpSearch ssdpSearch,
         IMulticastDnsBrowser multicastDnsBrowser,
         IUdpDiscovery udpDiscovery,
         TimeProvider timeProvider,
         ILogger<SubjectDiscoveryService> logger)
     {
-        _getDiscoverers = getDiscoverers;
+        _getDiscoveries = getDiscoveries;
         _ssdpSearch = ssdpSearch;
         _multicastDnsBrowser = multicastDnsBrowser;
         _udpDiscovery = udpDiscovery;
@@ -49,20 +49,20 @@ public sealed class SubjectDiscoveryService
     }
 
     /// <summary>
-    /// Whether a discoverer finds devices of one of <paramref name="subjectTypes"/>.
+    /// Whether a subject discovery finds devices of one of <paramref name="subjectTypes"/>.
     /// </summary>
-    public bool HasDiscoverers(IReadOnlyCollection<Type> subjectTypes) =>
-        _getDiscoverers().Any(discoverer => subjectTypes.Contains(discoverer.SubjectType));
+    public bool HasDiscoveries(IReadOnlyCollection<Type> subjectTypes) =>
+        _getDiscoveries().Any(discovery => subjectTypes.Contains(discovery.SubjectType));
 
     /// <summary>
-    /// Runs the discoverers of <paramref name="subjectTypes"/> in parallel and reports what they find, until all have
-    /// completed or <see cref="ScanTimeout"/> has passed. A discoverer that throws is logged and reported to
-    /// <paramref name="onFailure"/> with its subject type; the others carry on.
+    /// Runs the subject discoveries of <paramref name="subjectTypes"/> in parallel and reports what they find, until
+    /// all have completed or <see cref="ScanTimeout"/> has passed. A subject discovery that throws is logged and
+    /// reported to <paramref name="onFailure"/> with its subject type; the others carry on.
     /// </summary>
     /// <remarks>
     /// The callbacks run on thread pool threads, one at a time, and must neither block nor throw. None runs once the
-    /// returned task has completed: a discoverer still running then, because it ignores its cancellation, is abandoned
-    /// and what it reports later is dropped.
+    /// returned task has completed: a subject discovery still running then, because it ignores its cancellation, is
+    /// abandoned and what it reports later is dropped.
     /// </remarks>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     public async Task ScanAsync(
@@ -75,16 +75,16 @@ public sealed class SubjectDiscoveryService
         using var timeout = new CancellationTokenSource(ScanTimeout, _timeProvider);
         using var scanCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
 
-        // Read once: a discoverer task can start after the source has been disposed.
+        // Read once: a subject discovery task can start after the source has been disposed.
         var scanToken = scanCancellation.Token;
         var scan = new DiscoveryScan(_ssdpSearch, _multicastDnsBrowser, _udpDiscovery, scanToken);
         var reporter = new ScanReporter(onResult, onFailure);
-        var discoverers = _getDiscoverers().Where(discoverer => subjectTypes.Contains(discoverer.SubjectType));
+        var discoveries = _getDiscoveries().Where(discovery => subjectTypes.Contains(discovery.SubjectType));
         try
         {
-            // Bounded by the token as well, so a discoverer that ignores it cannot hold the scan past its time limit.
-            await Task.WhenAll(discoverers.Select(discoverer => Task.Run(
-                    () => RunAsync(discoverer, scan, existingSubjects, reporter, scanToken))))
+            // Bounded by the token as well, so a subject discovery that ignores it cannot hold the scan past its time limit.
+            await Task.WhenAll(discoveries.Select(discovery => Task.Run(
+                    () => RunAsync(discovery, scan, existingSubjects, reporter, scanToken))))
                 .WaitAsync(scanToken);
         }
         catch (OperationCanceledException) when (scanCancellation.IsCancellationRequested)
@@ -95,7 +95,7 @@ public sealed class SubjectDiscoveryService
         {
             reporter.End();
 
-            // Ends the queries the discoverers shared through the scan.
+            // Ends the queries the subject discoveries shared through the scan.
             await scanCancellation.CancelAsync();
         }
 
@@ -103,7 +103,7 @@ public sealed class SubjectDiscoveryService
     }
 
     private async Task RunAsync(
-        ISubjectDiscoverer discoverer,
+        ISubjectDiscovery discovery,
         DiscoveryScan scan,
         IReadOnlyCollection<IInterceptorSubject> existingSubjects,
         ScanReporter reporter,
@@ -111,7 +111,7 @@ public sealed class SubjectDiscoveryService
     {
         try
         {
-            await foreach (var discovered in discoverer.DiscoverAsync(scan, existingSubjects, cancellationToken))
+            await foreach (var discovered in discovery.DiscoverAsync(scan, existingSubjects, cancellationToken))
             {
                 if (!reporter.TryReportResult(discovered))
                 {
@@ -121,17 +121,17 @@ public sealed class SubjectDiscoveryService
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Canceled by the caller or at the time limit, which is no failure of the discoverer.
+            // Canceled by the caller or at the time limit, which is no failure of the subject discovery.
         }
         catch (Exception exception) when (cancellationToken.IsCancellationRequested)
         {
             // A library reacting to the cancellation, such as by disposing a socket, may throw something else.
-            _logger.LogDebug(exception, "The subject discoverer {Discoverer} ended with an error after the scan ended.", discoverer.GetType());
+            _logger.LogDebug(exception, "The subject discovery {Discovery} ended with an error after the scan ended.", discovery.GetType());
         }
         catch (Exception exception)
         {
-            _logger.LogWarning(exception, "The subject discoverer {Discoverer} failed.", discoverer.GetType());
-            reporter.ReportFailure(discoverer.SubjectType);
+            _logger.LogWarning(exception, "The subject discovery {Discovery} failed.", discovery.GetType());
+            reporter.ReportFailure(discovery.SubjectType);
         }
     }
 

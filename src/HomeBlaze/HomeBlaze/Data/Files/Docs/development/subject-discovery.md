@@ -1,11 +1,11 @@
 ---
-title: Writing a Discoverer
-navTitle: Discoverers
+title: Writing a Subject Discovery
+navTitle: Subject Discovery
 ---
 
-# Writing a Discoverer
+# Writing a Subject Discovery
 
-A discoverer finds devices of one subject type on the network, so that the user can pick them on the Discover page of the create dialog instead of typing their address. It is one class in the device library and an opt-in on the type's Setup or Edit component. There is nothing to register: discoverers are found among the loaded types, as components are.
+A subject discovery finds devices of one subject type on the network, so that the user can pick them on the Discover page of the create dialog instead of typing their address. It is one class in the device library and an opt-in on the type's Setup or Edit component. There is nothing to register: subject discoveries are found among the loaded types, as components are.
 
 Write one when the device announces itself (mDNS, SSDP, UDP) or a vendor service lists it. The design, the internals and the reasons behind them are in [Subject Discovery](../architecture/design/discovery.md).
 
@@ -16,7 +16,7 @@ A result describes one found device. It is a record of your own that implements 
 ```csharp
 public interface IDiscoveryResult
 {
-    /// <summary>Unique within the discoverer that returned it.</summary>
+    /// <summary>Unique within the subject discovery that returned it.</summary>
     string Key { get; }
 
     string DisplayName { get; }
@@ -36,12 +36,12 @@ public sealed record DiscoveredItem(string DisplayName, string? Detail);
 - `Detail` is shown under it, after the type's display name.
 - `IncludedItems` lists what comes with the device when the user creates it, such as the speakers of a Sonos household or the repeaters of a FRITZ!Box mesh. The page shows them collapsed under the row, and they cannot be picked on their own. Leave it out when there is nothing to list.
 
-## The discoverer
+## The subject discovery
 
-Derive from `SubjectDiscoverer<TSubject, TResult>` in `HomeBlaze.Abstractions.Discovery` and implement two methods:
+Derive from `SubjectDiscovery<TSubject, TResult>` in `HomeBlaze.Abstractions.Discovery` and implement two methods:
 
 ```csharp
-public abstract class SubjectDiscoverer<TSubject, TResult> : ISubjectDiscoverer
+public abstract class SubjectDiscovery<TSubject, TResult> : ISubjectDiscovery
     where TSubject : class, IInterceptorSubject
     where TResult : class, IDiscoveryResult
 {
@@ -52,9 +52,9 @@ public abstract class SubjectDiscoverer<TSubject, TResult> : ISubjectDiscoverer
 ```
 
 - `DiscoverAsync` yields each device as soon as it is known, so the page fills while the scan runs.
-- `Matches` decides whether an existing subject already represents the device, by the type's own rule, such as the same MAC address or the same host. It is only called with existing subjects of type `TSubject`, and the first match is shown as "already added" with a link to it. Match on a stable identity, so a device that moved is still recognized. Whether the host address counts as well is the type's rule: `ShellyDeviceDiscoverer` uses it only when no identity is known, so a device that replaced another at the same address is listed as new, while `FritzBoxDiscoverer` accepts either, because its subject connects to whatever answers at that address.
+- `Matches` decides whether an existing subject already represents the device, by the type's own rule, such as the same MAC address or the same host. It is only called with existing subjects of type `TSubject`, and the first match is shown as "already added" with a link to it. Match on a stable identity, so a device that moved is still recognized. Whether the host address counts as well is the type's rule: `ShellyDeviceDiscovery` uses it only when no identity is known, so a device that replaced another at the same address is listed as new, while `FritzBoxDiscovery` accepts either, because its subject connects to whatever answers at that address.
 
-A discoverer creates no subject. The subject is created when the user picks the result, and the result is handed to the component.
+A subject discovery creates no subject. The subject is created when the user picks the result, and the result is handed to the component.
 
 ## The component
 
@@ -81,13 +81,13 @@ The Setup component of the type, or its Edit component when it has none, impleme
 }
 ```
 
-`DiscoveryResult` is null when the user picked the type directly. Read it in `OnInitialized`: `OnParametersSet` runs again on every render of the dialog, such as each keystroke in its name field, and would overwrite what the user typed. What the component fills in, preselects or skips is its own decision. A discoverer whose type has no Setup or Edit component implementing the interface is not used, and an error is logged, see [Registry](../architecture/design/discovery.md#registry).
+`DiscoveryResult` is null when the user picked the type directly. Read it in `OnInitialized`: `OnParametersSet` runs again on every render of the dialog, such as each keystroke in its name field, and would overwrite what the user typed. What the component fills in, preselects or skips is its own decision. A subject discovery whose type has no Setup or Edit component implementing the interface is not used, and an error is logged, see [Registry](../architecture/design/discovery.md#registry).
 
 The `global::` prefix is needed in a razor file of a `*.HomeBlaze` project, because `HomeBlaze` alone resolves to the project namespace.
 
 ## Shared services
 
-`DiscoveryScan` gives every discoverer of a scan the same services. An SSDP or mDNS question that was already asked in the scan returns the same in-flight answer, so two discoverers searching for the same thing cause one query on the network.
+`DiscoveryScan` gives every subject discovery of a scan the same services. An SSDP or mDNS question that was already asked in the scan returns the same in-flight answer, so two subject discoveries searching for the same thing cause one query on the network.
 
 ```csharp
 public sealed class DiscoveryScan
@@ -134,14 +134,14 @@ public readonly record struct UdpDatagram(ReadOnlyMemory<byte> Payload, IPAddres
 
 ## Your own I/O
 
-A discoverer can do I/O of its own, such as asking a vendor's cloud service or reading a description from a device it found. It is created through dependency injection, so its constructor can ask for services such as `IHttpClientFactory`, `ILogger<T>` or `TimeProvider`:
+A subject discovery can do I/O of its own, such as asking a vendor's cloud service or reading a description from a device it found. It is created through dependency injection, so its constructor can ask for services such as `IHttpClientFactory`, `ILogger<T>` or `TimeProvider`:
 
 ```csharp
-public sealed class AcmeCloudDiscoverer : SubjectDiscoverer<AcmeHub, AcmeDiscoveredHub>
+public sealed class AcmeCloudDiscovery : SubjectDiscovery<AcmeHub, AcmeDiscoveredHub>
 {
     private readonly IHttpClientFactory _httpClientFactory;
 
-    public AcmeCloudDiscoverer(IHttpClientFactory httpClientFactory)
+    public AcmeCloudDiscovery(IHttpClientFactory httpClientFactory)
     {
         _httpClientFactory = httpClientFactory;
     }
@@ -150,29 +150,29 @@ public sealed class AcmeCloudDiscoverer : SubjectDiscoverer<AcmeHub, AcmeDiscove
 }
 ```
 
-`NukiBridgeDiscoverer` asks the Nuki discovery service this way.
+`NukiBridgeDiscovery` asks the Nuki discovery service this way.
 
 ## Rules
 
-- **Read only.** A discoverer only asks; it never changes a device.
+- **Read only.** A subject discovery only asks; it never changes a device.
 - **Untrusted answers.** Any host on the network can answer. Parse defensively and never throw on received data, bound what you read and keep, and only request addresses you built yourself from an answer, never a URL a device hands you as is.
-- **Cancellation.** Honor the token. A scan ends when every discoverer has completed, and at the latest after 30 seconds, also for a discoverer that ignores it, see [Scan session](../architecture/design/discovery.md#scan-session-and-shared-services).
-- **Failure.** A discoverer that throws ends only itself, and the page shows one "search failed" line for its type, see [Error handling](../architecture/design/discovery.md#error-handling).
+- **Cancellation.** Honor the token. A scan ends when every subject discovery has completed, and at the latest after 30 seconds, also for a subject discovery that ignores it, see [Scan session](../architecture/design/discovery.md#scan-session-and-shared-services).
+- **Failure.** A subject discovery that throws ends only itself, and the page shows one "search failed" line for its type, see [Error handling](../architecture/design/discovery.md#error-handling).
 - **No state.** One instance, created on first use, serves overlapping scans, so keep no state between calls.
-- **One per type.** A subject type has at most one discoverer: the first by full type name, ordinally, that can be created is used, and the others are left out with a logged error, see [Registry](../architecture/design/discovery.md#registry).
+- **One per type.** A subject type has at most one subject discovery: the first by full type name, ordinally, that can be created is used, and the others are left out with a logged error, see [Registry](../architecture/design/discovery.md#registry).
 
 ## Testing
 
-- Keep parsing and matching in `internal static` methods, which the test project of the library reaches through `InternalsVisibleTo`, as `ShellyDeviceDiscoverer.ToDevices` and `IsSameDevice` are tested.
-- To run a whole discoverer, create a `DiscoveryScan` with fake `ISsdpSearch`, `IMulticastDnsBrowser` and `IUdpDiscovery` implementations and call it through `ISubjectDiscoverer.DiscoverAsync(scan, existingSubjects, cancellationToken)`, which also applies the deduplication and `Matches`.
-- The E2E host replaces the shared services with empty ones, so a discoverer that only uses them finds nothing there and needs no setup. One that calls an address of its own, such as a vendor's cloud service, needs a stub in `WebTestingHostFactory`, as the Nuki discovery service has; that stub only reaches an `HttpClient` from `IHttpClientFactory`. The FRITZ!Box discoverer's request to `fritz.box` is not stubbed, because it does not use `IHttpClientFactory`. Behind a FRITZ!Box the router answers it; elsewhere the name resolves publicly or not at all, and the request fails or times out after 3 seconds, which leaves the result empty.
+- Keep parsing and matching in `internal static` methods, which the test project of the library reaches through `InternalsVisibleTo`, as `ShellyDeviceDiscovery.ToDevices` and `IsSameDevice` are tested.
+- To run a whole subject discovery, create a `DiscoveryScan` with fake `ISsdpSearch`, `IMulticastDnsBrowser` and `IUdpDiscovery` implementations and call it through `ISubjectDiscovery.DiscoverAsync(scan, existingSubjects, cancellationToken)`, which also applies the deduplication and `Matches`.
+- The E2E host replaces the shared services with empty ones, so a subject discovery that only uses them finds nothing there and needs no setup. One that calls an address of its own, such as a vendor's cloud service, needs a stub in `WebTestingHostFactory`, as the Nuki discovery service has; that stub only reaches an `HttpClient` from `IHttpClientFactory`. The FRITZ!Box subject discovery asks `fritz.box` only when the name resolves to an address on the local network, so in the E2E host it makes a name lookup and no request.
 
 ## Example
 
-A discoverer for a plug that announces `_acme._tcp` with its ID in a TXT record:
+A subject discovery for a plug that announces `_acme._tcp` with its ID in a TXT record:
 
 ```csharp
-public sealed class AcmePlugDiscoverer : SubjectDiscoverer<AcmePlug, AcmeDiscoveredPlug>
+public sealed class AcmePlugDiscovery : SubjectDiscovery<AcmePlug, AcmeDiscoveredPlug>
 {
     protected override async IAsyncEnumerable<AcmeDiscoveredPlug> DiscoverAsync(
         DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -200,13 +200,13 @@ public sealed record AcmeDiscoveredPlug(string DeviceId, string HostAddress, str
 }
 ```
 
-The discoverers in this repository show each kind of search:
+The subject discoveries in this repository show each kind of search:
 
-| Discoverer | Search |
+| Subject discovery | Search |
 |---|---|
-| `FritzBoxDiscoverer` | SSDP and `fritz.box`, with the repeaters as included items when one router is found |
-| `SonosHouseholdDiscoverer` | SSDP grouped by a header, with the speakers as included items, read from each speaker's description |
-| `HueBridgeDiscoverer`, `ShellyDeviceDiscoverer` | mDNS |
-| `EcowittGatewayDiscoverer` | UDP broadcast request |
-| `MyStromSwitchDiscoverer` | UDP announcements |
-| `NukiBridgeDiscoverer` | Vendor cloud service |
+| `FritzBoxDiscovery` | SSDP and `fritz.box`, with the repeaters as included items when one router is found |
+| `SonosHouseholdDiscovery` | SSDP grouped by a header, with the speakers as included items, read from each speaker's description |
+| `HueBridgeDiscovery`, `ShellyDeviceDiscovery` | mDNS |
+| `EcowittGatewayDiscovery` | UDP broadcast request |
+| `MyStromSwitchDiscovery` | UDP announcements |
+| `NukiBridgeDiscovery` | Vendor cloud service |

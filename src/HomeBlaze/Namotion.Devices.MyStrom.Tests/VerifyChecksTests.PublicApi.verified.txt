@@ -103,7 +103,7 @@ namespace Namotion.Devices.MyStrom
         [HomeBlaze.Abstractions.Attributes.Operation(Icon="PowerSettingsNew", Position=1, Title="Turn On")]
         public System.Threading.Tasks.Task TurnOnAsync(System.Threading.CancellationToken cancellationToken) { }
     }
-    public sealed class MyStromSwitchDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscoverer<Namotion.Devices.MyStrom.MyStromSwitch, Namotion.Devices.MyStrom.MyStromDiscoveredSwitch>
+    public sealed class MyStromSwitchDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.MyStrom.MyStromSwitch, Namotion.Devices.MyStrom.MyStromDiscoveredSwitch>
     {
         public MyStromSwitchDiscoverer() { }
         [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.MyStrom.MyStromSwitchDiscoverer.<DiscoverAsync>d__2))]

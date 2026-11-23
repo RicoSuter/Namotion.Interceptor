@@ -6,7 +6,7 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.E2E.Tests.Models;
 
 /// <summary>
-/// A subject that <see cref="DiscoverableTestDiscoverer"/> finds a device for.
+/// A subject that <see cref="DiscoverableTestDiscovery"/> finds a device for.
 /// </summary>
 [DisplayName("Discoverable test device")]
 [InterceptorSubject]

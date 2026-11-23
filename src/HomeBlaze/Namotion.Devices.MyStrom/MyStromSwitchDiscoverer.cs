@@ -6,7 +6,7 @@ namespace Namotion.Devices.MyStrom;
 /// <summary>
 /// Finds myStrom switches by the announcements they broadcast to UDP port 7979 of the local network.
 /// </summary>
-public sealed class MyStromSwitchDiscoverer : SubjectDiscoverer<MyStromSwitch, MyStromDiscoveredSwitch>
+public sealed class MyStromSwitchDiscoverer : SubjectDiscovery<MyStromSwitch, MyStromDiscoveredSwitch>
 {
     private const int AnnouncementPort = 7979;
 

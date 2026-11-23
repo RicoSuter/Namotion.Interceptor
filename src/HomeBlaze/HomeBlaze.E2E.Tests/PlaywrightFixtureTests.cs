@@ -40,7 +40,7 @@ public class PlaywrightFixtureTests
     }
 
     [Fact]
-    public async Task WhenTheDiscoverersOfTheApplicationScan_ThenTheyFindNothingWithoutTheNetwork()
+    public async Task WhenTheDiscoveriesOfTheApplicationScan_ThenTheyFindNothingWithoutTheNetwork()
     {
         // Arrange
         var services = _fixture.ServerServices;

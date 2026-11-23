@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Namotion.Devices.Shelly.Tests;
 
-public class ShellyDeviceDiscovererTests
+public class ShellyDeviceDiscoveryTests
 {
     private static ShellyDevice CreateDevice() => new(new TestHttpClientFactory(), NullLogger<ShellyDevice>.Instance);
 
@@ -35,7 +35,7 @@ public class ShellyDeviceDiscovererTests
         var service = Service("ShellyPlus1PM-A8032AB12345");
 
         // Act
-        var devices = ShellyDeviceDiscoverer.ToDevices([service]);
+        var devices = ShellyDeviceDiscovery.ToDevices([service]);
 
         // Assert
         var device = Assert.Single(devices);
@@ -55,7 +55,7 @@ public class ShellyDeviceDiscovererTests
         };
 
         // Act
-        var devices = ShellyDeviceDiscoverer.ToDevices(services);
+        var devices = ShellyDeviceDiscovery.ToDevices(services);
 
         // Assert
         var device = Assert.Single(devices);
@@ -77,7 +77,7 @@ public class ShellyDeviceDiscovererTests
         };
 
         // Act
-        var devices = ShellyDeviceDiscoverer.ToDevices(services);
+        var devices = ShellyDeviceDiscovery.ToDevices(services);
 
         // Assert
         Assert.Equal(2, devices.Count);
@@ -100,7 +100,7 @@ public class ShellyDeviceDiscovererTests
         };
 
         // Act
-        var devices = ShellyDeviceDiscoverer.ToDevices(services);
+        var devices = ShellyDeviceDiscovery.ToDevices(services);
 
         // Assert
         Assert.Empty(devices);
@@ -111,18 +111,18 @@ public class ShellyDeviceDiscovererTests
     {
         // Arrange
         var browser = new AnsweringBrowser(Service("Kitchen"));
-        ISubjectDiscoverer discoverer = new ShellyDeviceDiscoverer();
+        ISubjectDiscovery discovery = new ShellyDeviceDiscovery();
         var scan = new DiscoveryScan(new EmptySsdpSearch(), browser, new UnusedUdpDiscovery(), CancellationToken.None);
 
         // Act
-        var discovered = await discoverer.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
+        var discovered = await discovery.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
 
         // Assert
         var single = Assert.Single(discovered);
         var device = Assert.IsType<ShellyDiscoveredDevice>(single.Result);
         Assert.Equal("shellyplus1pm-a8032ab12345", device.DeviceId);
         Assert.Equal("Kitchen", device.DisplayName);
-        Assert.Equal([ShellyDeviceDiscoverer.ServiceType], browser.ServiceTypes);
+        Assert.Equal([ShellyDeviceDiscovery.ServiceType], browser.ServiceTypes);
     }
 
     [Fact]
@@ -134,8 +134,8 @@ public class ShellyDeviceDiscovererTests
         device.DeviceId = "ShellyPlus1PM-A8032AB12345";
 
         // Act & Assert
-        Assert.True(ShellyDeviceDiscoverer.IsSameDevice(device, Found()));
-        Assert.False(ShellyDeviceDiscoverer.IsSameDevice(device, Found(deviceId: "shellyplus1pm-other")));
+        Assert.True(ShellyDeviceDiscovery.IsSameDevice(device, Found()));
+        Assert.False(ShellyDeviceDiscovery.IsSameDevice(device, Found(deviceId: "shellyplus1pm-other")));
     }
 
     [Fact]
@@ -147,7 +147,7 @@ public class ShellyDeviceDiscovererTests
         device.DeviceInfo = new ShellyDeviceInfo { Id = "shellyplus1pm-a8032ab12345" };
 
         // Act & Assert
-        Assert.True(ShellyDeviceDiscoverer.IsSameDevice(device, Found()));
+        Assert.True(ShellyDeviceDiscovery.IsSameDevice(device, Found()));
     }
 
     [Fact]
@@ -160,8 +160,8 @@ public class ShellyDeviceDiscovererTests
         device.DeviceInfo = new ShellyDeviceInfo { Id = "shellyplus1pm-a8032ab12345" };
 
         // Act & Assert
-        Assert.True(ShellyDeviceDiscoverer.IsSameDevice(device, Found()));
-        Assert.False(ShellyDeviceDiscoverer.IsSameDevice(device, Found(deviceId: "shellyplus1pm-replaced")));
+        Assert.True(ShellyDeviceDiscovery.IsSameDevice(device, Found()));
+        Assert.False(ShellyDeviceDiscovery.IsSameDevice(device, Found(deviceId: "shellyplus1pm-replaced")));
     }
 
     [Fact]
@@ -172,8 +172,8 @@ public class ShellyDeviceDiscovererTests
         device.HostAddress = " 192.168.1.41 ";
 
         // Act & Assert
-        Assert.True(ShellyDeviceDiscoverer.IsSameDevice(device, Found()));
-        Assert.False(ShellyDeviceDiscoverer.IsSameDevice(device, Found(hostAddress: "192.168.1.42")));
+        Assert.True(ShellyDeviceDiscovery.IsSameDevice(device, Found()));
+        Assert.False(ShellyDeviceDiscovery.IsSameDevice(device, Found(hostAddress: "192.168.1.42")));
     }
 
     [Fact]
@@ -186,8 +186,8 @@ public class ShellyDeviceDiscovererTests
         device.DeviceInfo = new ShellyDeviceInfo { Id = "shellyplus1pm-a8032ab12345" };
 
         // Act & Assert
-        Assert.True(ShellyDeviceDiscoverer.IsSameDevice(device, Found()));
-        Assert.False(ShellyDeviceDiscoverer.IsSameDevice(device, Found(deviceId: "shellyplus1pm-other")));
+        Assert.True(ShellyDeviceDiscovery.IsSameDevice(device, Found()));
+        Assert.False(ShellyDeviceDiscovery.IsSameDevice(device, Found(deviceId: "shellyplus1pm-other")));
     }
 
     private sealed class AnsweringBrowser(params MulticastDnsService[] services) : IMulticastDnsBrowser

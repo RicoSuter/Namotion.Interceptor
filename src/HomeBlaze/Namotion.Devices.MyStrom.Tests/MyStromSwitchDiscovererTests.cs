@@ -29,7 +29,7 @@ public class MyStromSwitchDiscovererTests
     private static async Task<List<DiscoveredSubject>> DiscoverAsync(
         FakeUdpDiscovery udpDiscovery, params IInterceptorSubject[] existingSubjects)
     {
-        ISubjectDiscoverer discoverer = new MyStromSwitchDiscoverer();
+        ISubjectDiscovery discoverer = new MyStromSwitchDiscoverer();
         var scan = new DiscoveryScan(new UnusedSsdpSearch(), new UnusedMulticastDnsBrowser(), udpDiscovery, CancellationToken.None);
 
         var discovered = new List<DiscoveredSubject>();

@@ -139,7 +139,7 @@ public class SonosHouseholdDiscovererTests
             Answer("RINCON_A00000000000001400", "192.168.1.101"),
             Answer("RINCON_B00000000000001400", "192.168.1.102"));
         using var handler = new DescriptionHandler(_ => Description("Wohnzimmer", "Sonos One"));
-        ISubjectDiscoverer discoverer = new SonosHouseholdDiscoverer(handler, new FakeTimeProvider());
+        ISubjectDiscovery discoverer = new SonosHouseholdDiscoverer(handler, new FakeTimeProvider());
         var scan = new DiscoveryScan(search, new EmptyMulticastDnsBrowser(), new UnusedUdpDiscovery(), CancellationToken.None);
         var existing = CreateSystem(seedHost: "192.168.1.102");
 
@@ -184,7 +184,7 @@ public class SonosHouseholdDiscovererTests
             new SsdpResponse(new Uri("urn:x"), $"uuid:RINCON_B00000000000001400::{ZonePlayer}", HouseholdHeaders()),
             Answer("RINCON_C00000000000001400", "192.168.1.103"));
         using var handler = new DescriptionHandler(_ => Description("Wohnzimmer", "Sonos One"));
-        ISubjectDiscoverer discoverer = new SonosHouseholdDiscoverer(handler, new FakeTimeProvider());
+        ISubjectDiscovery discoverer = new SonosHouseholdDiscoverer(handler, new FakeTimeProvider());
         var scan = new DiscoveryScan(search, new EmptyMulticastDnsBrowser(), new UnusedUdpDiscovery(), CancellationToken.None);
 
         // Act

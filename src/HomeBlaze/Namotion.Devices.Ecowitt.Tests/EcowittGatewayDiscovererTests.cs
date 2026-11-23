@@ -49,7 +49,7 @@ public class EcowittGatewayDiscovererTests
     private static async Task<List<DiscoveredSubject>> DiscoverAsync(
         FakeUdpDiscovery udpDiscovery, params IInterceptorSubject[] existingSubjects)
     {
-        ISubjectDiscoverer discoverer = new EcowittGatewayDiscoverer();
+        ISubjectDiscovery discoverer = new EcowittGatewayDiscoverer();
         var scan = new DiscoveryScan(new UnusedSsdpSearch(), new UnusedMulticastDnsBrowser(), udpDiscovery, CancellationToken.None);
 
         var discovered = new List<DiscoveredSubject>();

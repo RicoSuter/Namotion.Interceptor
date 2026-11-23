@@ -114,7 +114,7 @@ public class SubjectDiscoveryListTests
     }
 
     [Fact]
-    public void WhenADiscovererFails_ThenItsTypeIsNamedInAFailureLine()
+    public void WhenADiscoveryFails_ThenItsTypeIsNamedInAFailureLine()
     {
         // Arrange
         var list = new SubjectDiscoveryList();

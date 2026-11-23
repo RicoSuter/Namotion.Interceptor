@@ -253,7 +253,7 @@ namespace Namotion.Devices.Sonos
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Turns speech enhancement on or off for this home theater player.", Position=2, Title="Set Speech Enhancement")]
         public System.Threading.Tasks.Task SetSpeechEnhancementAsync(bool speechEnhancement, System.Threading.CancellationToken cancellationToken) { }
     }
-    public sealed class SonosHouseholdDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscoverer<Namotion.Devices.Sonos.SonosSystem, Namotion.Devices.Sonos.SonosDiscoveredHousehold>
+    public sealed class SonosHouseholdDiscoverer : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.Sonos.SonosSystem, Namotion.Devices.Sonos.SonosDiscoveredHousehold>
     {
         public SonosHouseholdDiscoverer() { }
         [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Sonos.SonosHouseholdDiscoverer.<DiscoverAsync>d__5))]

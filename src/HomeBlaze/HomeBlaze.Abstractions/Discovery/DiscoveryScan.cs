@@ -1,8 +1,8 @@
 namespace HomeBlaze.Abstractions.Discovery;
 
 /// <summary>
-/// One scan for devices. Its SSDP and mDNS services send each distinct query once and give every discoverer that asks
-/// the same question the same answer.
+/// One scan for devices. Its SSDP and mDNS services send each distinct query once and give every subject discovery that
+/// asks the same question the same answer.
 /// </summary>
 public sealed class DiscoveryScan
 {
@@ -30,7 +30,7 @@ public sealed class DiscoveryScan
     public IMulticastDnsBrowser MulticastDns { get; }
 
     /// <summary>
-    /// Exchanges UDP datagrams, one exchange per call, not shared between discoverers.
+    /// Exchanges UDP datagrams, one exchange per call, not shared between subject discoveries.
     /// </summary>
     public IUdpDiscovery Udp { get; }
 

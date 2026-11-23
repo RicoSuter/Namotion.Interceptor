@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Xml;
 using HomeBlaze.Abstractions.Discovery;
 using Namotion.Devices.FritzBox.Client;
@@ -32,12 +35,15 @@ public sealed record FritzBoxDiscoveryResult(string HostAddress, string? Friendl
 }
 
 /// <summary>
-/// Finds FRITZ!Box routers on the local network over SSDP and by their usual host name.
+/// Finds FRITZ!Box routers and repeaters on the local network over SSDP and by their usual host name,
+/// <c>fritz.box</c>. As a subject discovery, it lists the repeaters under the router when it is the only one found.
 /// </summary>
-public static class FritzBoxDiscovery
+public sealed class FritzBoxDiscovery : SubjectDiscovery<FritzBox, FritzBoxDiscoveryResult>
 {
     private const string SearchTarget = "urn:dslforum-org:device:InternetGatewayDevice:1";
     private const string WellKnownHost = "fritz.box";
+
+    private static readonly TimeSpan DescriptionTimeout = TimeSpan.FromSeconds(3);
 
     /// <summary>
     /// The most locations described in one search, so that a hostile or malfunctioning answerer on the network
@@ -45,10 +51,70 @@ public static class FritzBoxDiscovery
     /// </summary>
     private const int MaximumLocations = 32;
 
+    /// <inheritdoc />
+    protected override async IAsyncEnumerable<FritzBoxDiscoveryResult> DiscoverAsync(
+        DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (var result in IncludeRepeaters(await DiscoverAsync(scan.Ssdp, DescriptionTimeout, cancellationToken)))
+        {
+            yield return result;
+        }
+    }
+
     /// <summary>
-    /// Searches with <paramref name="ssdpSearch"/> and asks <c>fritz.box</c>, then describes each router found in
-    /// parallel. Never throws for a location that does not answer or does not describe a FRITZ!Box: it is left out
-    /// of the result. Cancellation still propagates.
+    /// Lists the repeaters as included items of the router when exactly one router was found, and leaves the results
+    /// as they are otherwise. Discovery cannot see which mesh a repeater belongs to, so the single router is assumed
+    /// to be its mesh master, whose subject lists the clients of the repeaters; with several routers or none, each
+    /// repeater stays a result of its own.
+    /// </summary>
+    internal static IReadOnlyList<FritzBoxDiscoveryResult> IncludeRepeaters(IReadOnlyList<FritzBoxDiscoveryResult> results)
+    {
+        FritzBoxDiscoveryResult? router = null;
+        var repeaters = new List<DiscoveredItem>();
+        foreach (var result in results)
+        {
+            if (result.IsRepeater)
+            {
+                repeaters.Add(new DiscoveredItem(result.DisplayName, result.HostAddress));
+            }
+            else if (router is null)
+            {
+                router = result;
+            }
+            else
+            {
+                return results;
+            }
+        }
+
+        if (router is null || repeaters.Count == 0)
+        {
+            return results;
+        }
+
+        // The devices answer in any order, and the list should look the same in every scan.
+        repeaters.Sort(static (first, second) =>
+        {
+            var byName = StringComparer.OrdinalIgnoreCase.Compare(first.DisplayName, second.DisplayName);
+            return byName != 0 ? byName : StringComparer.Ordinal.Compare(first.Detail, second.Detail);
+        });
+
+        return [router with { IncludedItems = repeaters }];
+    }
+
+    /// <inheritdoc />
+    protected override bool Matches(FritzBox existing, FritzBoxDiscoveryResult result) => IsSameRouter(existing, result);
+
+    // The UDN recognizes a router that moved to another address; the host address one that was added without
+    // discovery, and a router that replaced it at the same address, which a stale stored UDN must not hide.
+    internal static bool IsSameRouter(FritzBox existing, FritzBoxDiscoveryResult result) =>
+        (result.Udn is not null && string.Equals(existing.Udn?.Trim(), result.Udn, StringComparison.OrdinalIgnoreCase)) ||
+        string.Equals(existing.HostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Searches with <paramref name="ssdpSearch"/> and asks <c>fritz.box</c> when that name resolves to an address on
+    /// the local network, then describes each router found in parallel. Never throws for a location that does not
+    /// answer or does not describe a FRITZ!Box: it is left out of the result. Cancellation still propagates.
     /// </summary>
     /// <param name="ssdpSearch">The SSDP search to use.</param>
     /// <param name="timeout">How long to wait for each description request.</param>
@@ -58,21 +124,33 @@ public static class FritzBoxDiscovery
     /// repeaters last. A router found by both SSDP and the <c>fritz.box</c> fallback is kept once, under its SSDP
     /// host address.
     /// </returns>
-    public static async Task<IReadOnlyList<FritzBoxDiscoveryResult>> DiscoverAsync(
-        ISsdpSearch ssdpSearch, TimeSpan timeout, CancellationToken cancellationToken)
+    public static Task<IReadOnlyList<FritzBoxDiscoveryResult>> DiscoverAsync(
+        ISsdpSearch ssdpSearch, TimeSpan timeout, CancellationToken cancellationToken) =>
+        DiscoverAsync(ssdpSearch, timeout, Dns.GetHostAddressesAsync, cancellationToken);
+
+    internal static async Task<IReadOnlyList<FritzBoxDiscoveryResult>> DiscoverAsync(
+        ISsdpSearch ssdpSearch,
+        TimeSpan timeout,
+        Func<string, CancellationToken, Task<IPAddress[]>> resolveAsync,
+        CancellationToken cancellationToken)
     {
+        // Without a FRITZ!Box on the network the name resolves to AVM's public server or not at all, and a LAN
+        // discovery must not send requests to the internet.
+        var isWellKnownHostLocal = IsOnLocalNetworkAsync(WellKnownHost, resolveAsync, timeout, cancellationToken);
         var responses = await ssdpSearch.SearchAsync(SearchTarget, cancellationToken);
+        var hosts = responses
+            .Select(response => response.Location.Host)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaximumLocations - 1);
+        if (await isWellKnownHostLocal)
+        {
+            hosts = hosts.Append(WellKnownHost);
+        }
 
         using var httpClient = FritzBoxHttpClient.CreatePlain(timeout, Tr64Description.MaximumBytes);
 
         // A slot is reserved for the fritz.box fallback so a flood of SSDP answers cannot push it out of the cap.
-        var distinctHosts = responses
-            .Select(response => response.Location.Host)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(MaximumLocations - 1)
-            .Append(WellKnownHost)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        var distinctHosts = hosts.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var descriptions = await Task.WhenAll(
             distinctHosts.Select(host => DescribeAsync(httpClient, host, Tr64Description.DescriptionPort, cancellationToken)));
 
@@ -87,6 +165,52 @@ public static class FritzBoxDiscovery
 
         return results.Values.OrderBy(result => result.IsRepeater).ToArray();
     }
+
+    /// <summary>
+    /// Whether <paramref name="host"/> resolves, within <paramref name="timeout"/>, to at least one address on the
+    /// local network. A name that does not resolve is not on it. Cancellation still propagates.
+    /// </summary>
+    internal static async Task<bool> IsOnLocalNetworkAsync(
+        string host, Func<string, CancellationToken, Task<IPAddress[]>> resolveAsync, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var addresses = await resolveAsync(host, cancellationToken).WaitAsync(timeout, cancellationToken);
+            return addresses.Any(IsLocalNetworkAddress);
+        }
+        catch (Exception exception) when ((exception is SocketException or TimeoutException) && !cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether an address is a private IPv4 address (RFC 1918), a link-local address, or an IPv6 unique local address.
+    /// </summary>
+    internal static bool IsLocalNetworkAddress(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+
+        if (address.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            return address.IsIPv6LinkLocal || address.IsIPv6UniqueLocal;
+        }
+
+        Span<byte> bytes = stackalloc byte[4];
+        return address.TryWriteBytes(bytes, out _) && IsLocalNetworkAddress(bytes[0], bytes[1]);
+    }
+
+    private static bool IsLocalNetworkAddress(byte first, byte second) => first switch
+    {
+        10 => true,
+        172 => second is >= 16 and <= 31,
+        192 => second == 168,
+        169 => second == 254,
+        _ => false
+    };
 
     /// <summary>
     /// Describes the router at a host, ignoring whatever scheme, port or path an SSDP answer advertised: the

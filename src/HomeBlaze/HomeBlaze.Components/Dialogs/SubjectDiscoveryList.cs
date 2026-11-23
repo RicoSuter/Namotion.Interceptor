@@ -6,8 +6,8 @@ namespace HomeBlaze.Components.Dialogs;
 
 /// <summary>
 /// The rows of the Discover page, the devices that are not added yet first and each part ordered by type and then by
-/// name so the list moves little while results arrive, a line for each discoverer that failed, and which rows show
-/// their included items. Not thread-safe: the page changes it on the renderer's dispatcher.
+/// name so the list moves little while results arrive, a line for each subject discovery that failed, and which rows
+/// show their included items. Not thread-safe: the page changes it on the renderer's dispatcher.
 /// </summary>
 internal sealed class SubjectDiscoveryList
 {

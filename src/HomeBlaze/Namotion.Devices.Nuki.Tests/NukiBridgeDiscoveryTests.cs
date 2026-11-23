@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using HomeBlaze.Abstractions.Discovery;
 using Namotion.Devices.Nuki.Client;
 using Namotion.Devices.Nuki.Tests.Testing;
 using Xunit;
@@ -24,7 +25,7 @@ public class NukiBridgeDiscoveryTests
               {"bridgeId": 47, "port": 8080, "dateUpdated": "2017-06-14T06:53:44Z"}],
              "errorCode": 0}
             """;
-        using var httpClient = CreateClient(json);
+        using var httpClient = CreateAnsweringClient(json);
 
         // Act
         var bridges = await NukiBridgeDiscovery.DiscoverAsync(httpClient, CancellationToken.None);
@@ -38,7 +39,7 @@ public class NukiBridgeDiscoveryTests
     public async Task WhenTheDiscoveryResponseIsLargerThanTheLimit_ThenTheDiscoveryFails()
     {
         // Arrange
-        using var httpClient = CreateClient("{" + new string(' ', NukiBridgeClient.MaxResponseSize) + "}");
+        using var httpClient = CreateAnsweringClient("{" + new string(' ', NukiBridgeClient.MaxResponseSize) + "}");
 
         // Act & Assert
         await Assert.ThrowsAsync<HttpRequestException>(() => NukiBridgeDiscovery.DiscoverAsync(httpClient, CancellationToken.None));
@@ -151,7 +152,44 @@ public class NukiBridgeDiscoveryTests
         Assert.Equal(2, fake.CountRequests("info"));
     }
 
-    private static HttpClient CreateClient(string json) => new(new StubHandler(_ =>
+    [Theory]
+    [InlineData("192.168.1.50", true)]
+    [InlineData("192.168.1.50:8080", true)]
+    [InlineData("http://192.168.1.50:8080", true)]
+    [InlineData("192.168.1.50:8081", false)]
+    [InlineData("192.168.1.51", false)]
+    [InlineData(null, false)]
+    public void WhenHostAddressesAreCompared_ThenHostAndPortDecide(string? hostAddress, bool expected)
+    {
+        // Arrange
+        var result = new NukiDiscoveredBridge(2117604523, "192.168.1.50:8080");
+
+        // Act
+        var isSame = NukiBridgeDiscovery.IsSameBridge(hostAddress, result);
+
+        // Assert
+        Assert.Equal(expected, isSame);
+    }
+
+    [Fact]
+    public async Task WhenTheDiscoveryServiceListsABridge_ThenItIsFound()
+    {
+        // Arrange
+        const string json = """{"bridges": [{"bridgeId": 2117604523, "ip": "192.168.1.50", "port": 8080}], "errorCode": 0}""";
+        ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(json));
+        var scan = new DiscoveryScan(new EmptySsdpSearch(), new EmptyMulticastDnsBrowser(), new UnusedUdpDiscovery(), CancellationToken.None);
+
+        // Act
+        var discovered = await discovery.DiscoverAsync(scan, [], CancellationToken.None).ToListAsync();
+
+        // Assert
+        var bridge = Assert.IsType<NukiDiscoveredBridge>(Assert.Single(discovered).Result);
+        Assert.Equal("2117604523", bridge.Key);
+        Assert.Equal("Nuki Bridge 2117604523", bridge.DisplayName);
+        Assert.Equal("192.168.1.50:8080", bridge.Detail);
+    }
+
+    private static HttpClient CreateAnsweringClient(string json) => new(new StubHandler(_ =>
         Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") })));
 
     private static HttpClient CreateNeverAnsweringClient() => new(new StubHandler(cancellationToken =>
@@ -161,5 +199,31 @@ public class NukiBridgeDiscoveryTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             answer(cancellationToken);
+    }
+
+    private sealed class StubHttpClientFactory(string json) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => CreateAnsweringClient(json);
+    }
+
+    private sealed class EmptySsdpSearch : ISsdpSearch
+    {
+        public Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<SsdpResponse>>([]);
+    }
+
+    private sealed class EmptyMulticastDnsBrowser : IMulticastDnsBrowser
+    {
+        public Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<MulticastDnsService>>([]);
+    }
+
+    private sealed class UnusedUdpDiscovery : IUdpDiscovery
+    {
+        public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

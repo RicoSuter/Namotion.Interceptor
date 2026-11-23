@@ -9,7 +9,7 @@ namespace Namotion.Devices.Sonos;
 /// Finds Sonos households over SSDP: every speaker that answers names its household, and the speakers of one
 /// household are one result. The device description of each speaker names its room and model.
 /// </summary>
-public sealed class SonosHouseholdDiscoverer : SubjectDiscoverer<SonosSystem, SonosDiscoveredHousehold>
+public sealed class SonosHouseholdDiscoverer : SubjectDiscovery<SonosSystem, SonosDiscoveredHousehold>
 {
     internal const string HouseholdHeader = "X-RINCON-HOUSEHOLD";
 

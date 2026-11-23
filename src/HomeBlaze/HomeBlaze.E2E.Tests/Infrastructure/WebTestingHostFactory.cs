@@ -73,8 +73,9 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
 
         builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(ServerLog));
 
-        // A scan on the Discover page runs the discoverers of the application too, which must not search the network
-        // of the machine, send broadcasts or bind its ports, or tell the Nuki discovery service its public IP address.
+        // A scan on the Discover page runs the subject discoveries of the application too, which must not search the
+        // network of the machine, send broadcasts or bind its ports, or tell the Nuki discovery service its public IP
+        // address.
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<ISsdpSearch>();
