@@ -7,7 +7,7 @@ navTitle: Subject Discovery
 
 A subject discovery finds devices of one subject type on the network, so that the user can pick them on the Discover page of the create dialog instead of typing their address. It is one class in the device library and an opt-in on the type's Setup or Edit component. There is nothing to register: subject discoveries are found among the loaded types, as components are.
 
-Write one when the device announces itself (mDNS, SSDP, UDP) or a vendor service lists it. The design, the internals and the reasons behind them are in [Subject Discovery](../architecture/design/discovery.md).
+Write one when the device announces itself (mDNS, SSDP, UDP) or a vendor service lists it. The design, the internals and the reasons behind them are in [the Subject Discovery design](../architecture/design/discovery.md).
 
 ## The result
 
@@ -130,7 +130,7 @@ public readonly record struct UdpDatagram(ReadOnlyMemory<byte> Payload, IPAddres
 - `Udp.BroadcastAsync` sends your request to the given port as a broadcast on every IPv4 adapter, repeats it once after about a second, and yields each answer as it arrives within the window, with the address it came from. A device that receives both requests answers twice, which the deduplication by `Key` absorbs.
 - `Udp.ListenAsync` listens on a port with address reuse for devices that announce themselves, and yields each datagram that arrives within the window.
 - UDP calls are not shared, because each one is its own exchange. Each payload is a copy that stays valid. A socket error, such as a port another program holds without address reuse, ends the call quietly with nothing more yielded. The call itself throws `ArgumentOutOfRangeException` for a port outside 1 to 65535, a request outside 1 to 1024 bytes, or a window of zero or less or of more than 30 seconds, and the enumeration throws only for the caller's cancellation.
-- What one query or UDP call returns is capped, see [Subject Discovery](../architecture/design/discovery.md#scan-session-and-shared-services).
+- What one query or UDP call returns is capped, see [the Subject Discovery design](../architecture/design/discovery.md#scan-session-and-shared-services).
 
 ## Your own I/O
 
@@ -165,7 +165,7 @@ public sealed class AcmeCloudDiscovery : SubjectDiscovery<AcmeHub, AcmeDiscovere
 
 - Keep parsing and matching in `internal static` methods, which the test project of the library reaches through `InternalsVisibleTo`, as `ShellyDeviceDiscovery.ToDevices` and `IsSameDevice` are tested.
 - To run a whole subject discovery, create a `DiscoveryScan` with fake `ISsdpSearch`, `IMulticastDnsBrowser` and `IUdpDiscovery` implementations and call it through `ISubjectDiscovery.DiscoverAsync(scan, existingSubjects, cancellationToken)`, which also applies the deduplication and `Matches`.
-- The E2E host replaces the shared services with empty ones, so a subject discovery that only uses them finds nothing there and needs no setup. One that calls an address of its own, such as a vendor's cloud service, needs a stub in `WebTestingHostFactory`, as the Nuki discovery service has; that stub only reaches an `HttpClient` from `IHttpClientFactory`. The FRITZ!Box subject discovery asks `fritz.box` only when the name resolves to an address on the local network, so in the E2E host it makes a name lookup and no request.
+- The E2E host replaces the shared services with empty ones, so a subject discovery that only uses them finds nothing there and needs no setup. One that calls an address of its own, such as a vendor's cloud service, needs a stub in `WebTestingHostFactory`, as the Nuki discovery service has; that stub only reaches an `HttpClient` from `IHttpClientFactory`. The FRITZ!Box subject discovery asks `fritz.box` only when the name resolves to an address on the local network: on a CI runner it makes only a name lookup, and behind a FRITZ!Box the router answers.
 
 ## Example
 

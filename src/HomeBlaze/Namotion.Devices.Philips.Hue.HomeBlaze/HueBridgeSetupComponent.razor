@@ -1,5 +1,6 @@
 @using HueApi
 @using HueApi.BridgeLocator
+@using HueApiBridgeDiscovery = HueApi.BridgeLocator.HueBridgeDiscovery
 @using global::HomeBlaze.Abstractions.Discovery
 
 @attribute [SubjectComponent(SubjectComponentType.Setup, typeof(HueBridge))]
@@ -104,7 +105,7 @@ else
 
         try
         {
-            _bridges = await global::HueApi.BridgeLocator.HueBridgeDiscovery.FastDiscoveryWithNetworkScanFallbackAsync(
+            _bridges = await HueApiBridgeDiscovery.FastDiscoveryWithNetworkScanFallbackAsync(
                 TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
         }
         catch
