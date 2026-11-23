@@ -1,9 +1,9 @@
 using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Components.Dialogs;
+using HomeBlaze.Components.Tests.Models;
 using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using Namotion.Interceptor;
 using Xunit;
 
@@ -11,8 +11,8 @@ namespace HomeBlaze.Components.Tests;
 
 public class SubjectDiscoveryListTests
 {
-    private static readonly SubjectTypeDescriptor Hue = new(typeof(string), "Hue Bridge", null, "Lighting", "Hub");
-    private static readonly SubjectTypeDescriptor Shelly = new(typeof(int), "Shelly device", null, "Switches", "Power");
+    private static readonly SubjectTypeDescriptor Hue = new(typeof(DiscoveryListHubSubject), "Hue Bridge", null, "Lighting", "Hub");
+    private static readonly SubjectTypeDescriptor Shelly = new(typeof(DiscoveryListSwitchSubject), "Shelly device", null, "Switches", "Power");
 
     private static DiscoveredSubject Found(
         SubjectTypeDescriptor descriptor, string name, IInterceptorSubject? existingSubject = null, Func<IInterceptorSubject, bool>? isMatch = null) =>
@@ -42,7 +42,7 @@ public class SubjectDiscoveryListTests
     {
         // Arrange
         var list = new SubjectDiscoveryList();
-        var existingSubject = Mock.Of<IInterceptorSubject>();
+        var existingSubject = new DiscoveryListHubSubject();
 
         // Act
         list.Add(Found(Hue, "Alpha", existingSubject), Hue);
@@ -59,8 +59,8 @@ public class SubjectDiscoveryListTests
     {
         // Arrange
         var list = new SubjectDiscoveryList();
-        var existingSubject = Mock.Of<IInterceptorSubject>();
-        var createdSubject = Mock.Of<IInterceptorSubject>();
+        var existingSubject = new DiscoveryListHubSubject();
+        var createdSubject = new DiscoveryListHubSubject();
         list.Add(Found(Hue, "Alpha"), Hue);
         list.Add(Found(Shelly, "Beta"), Shelly);
         list.Add(Found(Shelly, "Zeta", existingSubject), Shelly);
@@ -82,7 +82,7 @@ public class SubjectDiscoveryListTests
         list.Add(Found(Hue, "Alpha"), Hue);
 
         // Act
-        list.MarkAdded(Found(Shelly, "Alpha"), Mock.Of<IInterceptorSubject>(), NullLogger.Instance);
+        list.MarkAdded(Found(Shelly, "Alpha"), new DiscoveryListSwitchSubject(), NullLogger.Instance);
 
         // Assert
         Assert.Null(Assert.Single(list.Rows).Discovered.ExistingSubject);
@@ -93,7 +93,7 @@ public class SubjectDiscoveryListTests
     {
         // Arrange
         var list = new SubjectDiscoveryList();
-        var createdSubject = Mock.Of<IInterceptorSubject>();
+        var createdSubject = new DiscoveryListHubSubject();
         var askedSubjects = new List<IInterceptorSubject>();
         bool MatchesCreated(IInterceptorSubject subject)
         {
@@ -103,8 +103,8 @@ public class SubjectDiscoveryListTests
 
         list.Add(Found(Hue, "Alpha"), Hue);
         list.Add(Found(Hue, "Alpha 2", isMatch: MatchesCreated), Hue);
-        list.Add(Found(Shelly, "Beta", isMatch: _ => false), Shelly);
-        list.Add(Found(Shelly, "Gamma", isMatch: MatchesCreated), Shelly);
+        list.Add(Found(Hue, "Beta", isMatch: _ => false), Hue);
+        list.Add(Found(Hue, "Gamma", isMatch: MatchesCreated), Hue);
 
         // Act
         list.MarkAdded(Found(Hue, "Alpha"), createdSubject, NullLogger.Instance);
@@ -117,11 +117,29 @@ public class SubjectDiscoveryListTests
     }
 
     [Fact]
+    public void WhenARowHasAnotherSubjectType_ThenItIsNotMatchedAgainstTheCreatedSubject()
+    {
+        // Arrange
+        var list = new SubjectDiscoveryList();
+        var createdSubject = new DiscoveryListHubSubject();
+        var isAsked = false;
+        list.Add(Found(Hue, "Alpha"), Hue);
+        list.Add(Found(Shelly, "Delta", isMatch: _ => isAsked = true), Shelly);
+
+        // Act
+        list.MarkAdded(Found(Hue, "Alpha"), createdSubject, NullLogger.Instance);
+
+        // Assert
+        Assert.False(isAsked);
+        Assert.Null(list.Rows.Single(row => row.Discovered.Result.DisplayName == "Delta").Discovered.ExistingSubject);
+    }
+
+    [Fact]
     public void WhenTheCreatedSubjectDoesNotMatchThePickedRow_ThenThePickedRowIsMarkedAddedAnyway()
     {
         // Arrange
         var list = new SubjectDiscoveryList();
-        var createdSubject = Mock.Of<IInterceptorSubject>();
+        var createdSubject = new DiscoveryListHubSubject();
         list.Add(Found(Hue, "Alpha", isMatch: _ => false), Hue);
         list.Add(Found(Hue, "Beta"), Hue);
 
@@ -138,8 +156,8 @@ public class SubjectDiscoveryListTests
     {
         // Arrange
         var list = new SubjectDiscoveryList();
-        var existingSubject = Mock.Of<IInterceptorSubject>();
-        var createdSubject = Mock.Of<IInterceptorSubject>();
+        var existingSubject = new DiscoveryListHubSubject();
+        var createdSubject = new DiscoveryListHubSubject();
         var isAsked = false;
         list.Add(Found(Hue, "Alpha"), Hue);
         list.Add(Found(Hue, "Beta", existingSubject, _ => isAsked = true), Hue);
@@ -157,7 +175,7 @@ public class SubjectDiscoveryListTests
     {
         // Arrange
         var list = new SubjectDiscoveryList();
-        var createdSubject = Mock.Of<IInterceptorSubject>();
+        var createdSubject = new DiscoveryListHubSubject();
         var logger = new RecordingLogger();
         list.Add(Found(Hue, "Alpha"), Hue);
         list.Add(Found(Hue, "Beta", isMatch: _ => throw new InvalidOperationException("The match failed.")), Hue);
@@ -277,7 +295,7 @@ public class SubjectDiscoveryListTests
         list.ToggleExpanded(list.Rows[0]);
 
         // Act
-        list.MarkAdded(found, Mock.Of<IInterceptorSubject>(), NullLogger.Instance);
+        list.MarkAdded(found, new DiscoveryListHubSubject(), NullLogger.Instance);
 
         // Assert
         Assert.Equal(["Beta", "Alpha"], Names(list));
@@ -297,7 +315,7 @@ public class SubjectDiscoveryListTests
         list.ToggleExpanded(list.Rows[2]);
 
         // Act
-        list.MarkAdded(found, Mock.Of<IInterceptorSubject>(), NullLogger.Instance);
+        list.MarkAdded(found, new DiscoveryListHubSubject(), NullLogger.Instance);
 
         // Assert
         Assert.Equal(["Beta", "Alpha", "Gamma"], Names(list));
