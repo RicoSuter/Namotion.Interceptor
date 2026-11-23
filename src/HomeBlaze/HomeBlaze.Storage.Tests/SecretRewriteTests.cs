@@ -18,7 +18,7 @@ public class SecretRewriteTests : StorageTestBase
     public async Task WhenAJsonFileHoldsAPlaintextSecret_ThenItIsMovedToTheSecretStoreOnLoad()
     {
         // Arrange
-        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        var secretsPath = UseSecretStore();
         WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""");
 
         // Act
@@ -26,7 +26,7 @@ public class SecretRewriteTests : StorageTestBase
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => HoldsSecretReferenceOnly("Gateway.json"));
-        Assert.Contains("s3cr3t", File.ReadAllText(SecretsPath));
+        Assert.Contains("s3cr3t", File.ReadAllText(secretsPath));
         Assert.Equal("s3cr3t", Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]).Password);
     }
 
@@ -34,7 +34,7 @@ public class SecretRewriteTests : StorageTestBase
     public async Task WhenAPlaintextSecretIsWrittenIntoAWatchedJsonFile_ThenItIsMovedToTheSecretStoreOnReload()
     {
         // Arrange
-        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        var secretsPath = UseSecretStore();
         WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""");
         var storage = await ConnectAsync(enableFileWatching: true);
         var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
@@ -45,14 +45,14 @@ public class SecretRewriteTests : StorageTestBase
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => device.Password == "s3cr3t" && HoldsSecretReferenceOnly("Gateway.json"), WatcherTimeout);
-        Assert.Contains("s3cr3t", File.ReadAllText(SecretsPath));
+        Assert.Contains("s3cr3t", File.ReadAllText(secretsPath));
     }
 
     [Fact]
     public async Task WhenAReloadedPlaintextSecretHasAValueThatCannotBeRead_ThenAWarningTellsThatTheSecretStaysInTheFile()
     {
         // Arrange
-        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        UseSecretStore();
         WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""");
         var messages = new ConcurrentQueue<string>();
         var storage = CreateStorage(logger: new RecordingLogger(messages));
@@ -71,7 +71,7 @@ public class SecretRewriteTests : StorageTestBase
     public async Task WhenCheckingAReloadedJsonFileForPlaintextSecretsFails_ThenTheConfigurationIsAppliedAndAWarningIsLogged()
     {
         // Arrange
-        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        UseSecretStore();
         var deviceType = typeof(UnserializableSecretDevice).FullName;
         WriteFile("Gateway.json", $$"""{ "$type": "{{deviceType}}", "value": {} }""");
         var messages = new ConcurrentQueue<string>();
@@ -155,7 +155,7 @@ public class SecretRewriteTests : StorageTestBase
     public async Task WhenAJsonFileWithAPlaintextSecretHasAKeyTheTypeDoesNotKnow_ThenTheConditionalSaveWritesNothingAndLogsTheKey()
     {
         // Arrange
-        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        UseSecretStore();
         var content = $$"""{ "$type": "{{DeviceType}}", "hostAdress": "10.0.0.1", "password": "s3cr3t" }""";
         WriteFile("Gateway.json", content);
         var messages = new ConcurrentQueue<string>();
@@ -179,7 +179,7 @@ public class SecretRewriteTests : StorageTestBase
     public async Task WhenABlockArgumentOfAPageHoldsAPlaintextSecret_ThenOnlyItIsReplacedByAReference()
     {
         // Arrange
-        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        var secretsPath = UseSecretStore();
         WriteFile("Gateway.md", $"# Gateway\n\nIntro text.\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n\nOutro text.\n");
 
         // Act
@@ -189,7 +189,7 @@ public class SecretRewriteTests : StorageTestBase
         var content = await WaitForSecretReferenceOnlyAsync("Gateway.md");
         Assert.StartsWith($"# Gateway\n\nIntro text.\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=", content);
         Assert.EndsWith("::\n\nOutro text.\n", content);
-        Assert.Contains("s3cr3t", File.ReadAllText(SecretsPath));
+        Assert.Contains("s3cr3t", File.ReadAllText(secretsPath));
         var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
         await AsyncTestHelpers.WaitUntilAsync(
             () => page.Children.TryGetValue("gateway", out var block) && ((EmbeddedSecretDevice)block).Password == "s3cr3t");
@@ -199,7 +199,7 @@ public class SecretRewriteTests : StorageTestBase
     public async Task WhenAJsonBlockOfAPageHoldsAPlaintextSecret_ThenItIsReplacedByAReference()
     {
         // Arrange
-        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        var secretsPath = UseSecretStore();
         WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway\n```json\n{{\n  \"Host\": \"10.0.0.1\",\n  \"Password\": \"s3cr3t\"\n}}\n```\n::\n");
 
         // Act
@@ -209,7 +209,7 @@ public class SecretRewriteTests : StorageTestBase
         var content = await WaitForSecretReferenceOnlyAsync("Gateway.md");
         Assert.StartsWith($"# Gateway\n\n:: {DeviceType}#gateway", content);
         Assert.Contains("10.0.0.1", content);
-        Assert.Contains("s3cr3t", File.ReadAllText(SecretsPath));
+        Assert.Contains("s3cr3t", File.ReadAllText(secretsPath));
     }
 
     [Fact]
@@ -253,7 +253,7 @@ public class SecretRewriteTests : StorageTestBase
     public async Task WhenABlockWithAPlaintextSecretHasAValueThatCannotBeRead_ThenItIsNotRewritten()
     {
         // Arrange: the blocks are rewritten in the order of the page, so the error block would be written first.
-        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        var secretsPath = UseSecretStore();
         var errorBlock = $":: {DeviceType}#broken\n```json\n{{\n  \"Host\": [1],\n  \"Password\": \"error-secret\"\n}}\n```\n::\n";
         WriteFile("Gateway.md", $"# Gateway\n\n{errorBlock}\n:: {DeviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n");
 
@@ -263,7 +263,7 @@ public class SecretRewriteTests : StorageTestBase
         // Assert
         var content = await WaitForSecretReferenceOnlyAsync("Gateway.md");
         Assert.StartsWith($"# Gateway\n\n{errorBlock}\n", content);
-        Assert.DoesNotContain("error-secret", File.ReadAllText(SecretsPath));
+        Assert.DoesNotContain("error-secret", File.ReadAllText(secretsPath));
         var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
         Assert.False(page.Children.ContainsKey("broken"));
     }
@@ -272,7 +272,7 @@ public class SecretRewriteTests : StorageTestBase
     public async Task WhenTheRewriteOfABlockIsRefused_ThenItIsTriedAgainOnlyOnceItsConfigurationChanges()
     {
         // Arrange
-        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        UseSecretStore();
         var deviceType = typeof(UnwritableSecretDevice).FullName;
         WriteFile("Gateway.md", $"# Gateway\n\n:: {deviceType}#gateway Password=s3cr3t\n::\n");
         var storage = await ConnectAsync();
@@ -313,6 +313,8 @@ public class SecretRewriteTests : StorageTestBase
         Assert.Equal(handEdit, page.Content);
         Assert.Equal(1, device.ApplyCount);
     }
+
+    private string UseSecretStore() => SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
 
     // Only for a check that something does not happen, which a passing test always waits for in full.
     private static async Task AssertStaysTrueAsync(Func<bool> condition)
