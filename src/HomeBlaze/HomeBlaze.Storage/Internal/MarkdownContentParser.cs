@@ -409,6 +409,13 @@ public sealed partial class MarkdownContentParser
         {
             // Nothing of this parse is published, so nothing would ever detach the subjects it created.
             ReleaseCreatedSince(state, 0);
+
+            // No snapshot lists what it applied to the subjects it updated in place, so the next parse applies it again.
+            foreach (var (subject, _) in state.AppliedConfigurations)
+            {
+                ForgetAppliedConfiguration(subject);
+            }
+
             throw;
         }
     }
@@ -882,6 +889,9 @@ public sealed partial class MarkdownContentParser
         public void AddCreated(IInterceptorSubject subject) => _created.Add(subject);
 
         public void AddErrorBox() => ErrorBoxCount++;
+
+        /// <summary>The configuration JSON that this parse applied, by the subject it applied it to.</summary>
+        public IReadOnlyList<(IInterceptorSubject Subject, string Json)> AppliedConfigurations => _appliedConfigurations ?? [];
 
         /// <summary>Records that this parse applied the configuration JSON to the subject.</summary>
         public void AddAppliedConfiguration(IInterceptorSubject subject, string json) =>

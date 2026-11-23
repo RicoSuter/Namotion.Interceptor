@@ -334,6 +334,29 @@ public class SecretRewriteTests : StorageTestBase
 
     private string UseSecretStore() => SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
 
+    [Fact]
+    public async Task WhenAParseFailsAfterABlockWithAPlaintextSecretWasUpdated_ThenTheNextParseMovesTheSecret()
+    {
+        // Arrange
+        UseSecretStore();
+        var cancelingType = typeof(CancelingDevice).FullName;
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n\n:: {cancelingType}#canceling Value=1\n::\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var canceling = Assert.IsType<CancelingDevice>(page.Children["canceling"]);
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n\n:: {cancelingType}#canceling Value=2\n::\n");
+        using var cancellation = new CancellationTokenSource();
+        canceling.CancelOnApply = cancellation;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => page.OnFileChangedAsync(cancellation.Token));
+        canceling.CancelOnApply = null;
+
+        // Act
+        await page.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        await WaitForSecretReferenceOnlyAsync("Gateway.md");
+    }
+
     // Only for a check that something does not happen, which a passing test always waits for in full.
     private static async Task AssertStaysTrueAsync(Func<bool> condition)
     {
@@ -436,5 +459,26 @@ public sealed class UnserializableValue
     {
         get => throw new InvalidOperationException("The value cannot be written.");
         set { }
+    }
+}
+
+/// <summary>A device that cancels the parse that applies its configuration in place while <see cref="CancelOnApply"/> is set.</summary>
+[InterceptorSubject]
+public partial class CancelingDevice : IConfigurable
+{
+    [Configuration]
+    public partial int Value { get; set; }
+
+    public CancellationTokenSource? CancelOnApply { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
+    {
+        if (CancelOnApply is { } cancellation)
+        {
+            cancellation.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        return Task.CompletedTask;
     }
 }
