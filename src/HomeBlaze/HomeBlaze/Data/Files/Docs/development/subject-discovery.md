@@ -109,10 +109,10 @@ public sealed record SsdpResponse(Uri Location, string? UniqueServiceName, IRead
 
 public interface IMulticastDnsBrowser
 {
-    Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken);
+    Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken);
 }
 
-public sealed record MulticastDnsService(
+public sealed record MulticastDnsServiceInstance(
     string InstanceName, string? HostName, int Port, IReadOnlyList<IPAddress> Addresses, IReadOnlyDictionary<string, string> Properties);
 
 public interface IUdpDiscovery
@@ -177,11 +177,11 @@ public sealed class AcmePlugDiscovery : SubjectDiscovery<AcmePlug, AcmeDiscovere
     protected override async IAsyncEnumerable<AcmeDiscoveredPlug> DiscoverAsync(
         DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        foreach (var service in await scan.MulticastDns.BrowseAsync("_acme._tcp", cancellationToken))
+        foreach (var instance in await scan.MulticastDns.BrowseAsync("_acme._tcp", cancellationToken))
         {
-            if (service.Properties.TryGetValue("id", out var id) && service.Addresses.Count > 0)
+            if (instance.Properties.TryGetValue("id", out var id) && instance.Addresses.Count > 0)
             {
-                yield return new AcmeDiscoveredPlug(id, service.Addresses[0].ToString(), service.InstanceName);
+                yield return new AcmeDiscoveredPlug(id, instance.Addresses[0].ToString(), instance.InstanceName);
             }
         }
     }

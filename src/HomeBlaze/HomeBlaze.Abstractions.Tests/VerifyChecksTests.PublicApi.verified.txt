@@ -623,7 +623,7 @@ namespace HomeBlaze.Abstractions.Discovery
     }
     public interface IMulticastDnsBrowser
     {
-        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.MulticastDnsService>> BrowseAsync(string serviceType, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.MulticastDnsServiceInstance>> BrowseAsync(string serviceType, System.Threading.CancellationToken cancellationToken);
     }
     public interface ISsdpSearch
     {
@@ -639,9 +639,9 @@ namespace HomeBlaze.Abstractions.Discovery
         System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.UdpDatagram> BroadcastAsync(int port, System.ReadOnlyMemory<byte> request, System.TimeSpan window, System.Threading.CancellationToken cancellationToken);
         System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.UdpDatagram> ListenAsync(int port, System.TimeSpan window, System.Threading.CancellationToken cancellationToken);
     }
-    public sealed class MulticastDnsService : System.IEquatable<HomeBlaze.Abstractions.Discovery.MulticastDnsService>
+    public sealed class MulticastDnsServiceInstance : System.IEquatable<HomeBlaze.Abstractions.Discovery.MulticastDnsServiceInstance>
     {
-        public MulticastDnsService(string InstanceName, string? HostName, int Port, System.Collections.Generic.IReadOnlyList<System.Net.IPAddress> Addresses, System.Collections.Generic.IReadOnlyDictionary<string, string> Properties) { }
+        public MulticastDnsServiceInstance(string InstanceName, string? HostName, int Port, System.Collections.Generic.IReadOnlyList<System.Net.IPAddress> Addresses, System.Collections.Generic.IReadOnlyDictionary<string, string> Properties) { }
         public System.Collections.Generic.IReadOnlyList<System.Net.IPAddress> Addresses { get; init; }
         public string? HostName { get; init; }
         public string InstanceName { get; init; }

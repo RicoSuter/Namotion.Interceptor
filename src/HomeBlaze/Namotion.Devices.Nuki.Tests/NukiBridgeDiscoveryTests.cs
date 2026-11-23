@@ -214,8 +214,8 @@ public class NukiBridgeDiscoveryTests
 
     private sealed class EmptyMulticastDnsBrowser : IMulticastDnsBrowser
     {
-        public Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<MulticastDnsService>>([]);
+        public Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<MulticastDnsServiceInstance>>([]);
     }
 
     private sealed class UnusedUdpDiscovery : IUdpDiscovery

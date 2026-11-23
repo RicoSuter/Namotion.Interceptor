@@ -16,8 +16,8 @@ public sealed class ShellyDeviceDiscovery : SubjectDiscovery<ShellyDevice, Shell
     protected override async IAsyncEnumerable<ShellyDiscoveredDevice> DiscoverAsync(
         DiscoveryScan scan, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var services = await scan.MulticastDns.BrowseAsync(ServiceType, cancellationToken);
-        foreach (var device in ToDevices(services))
+        var instances = await scan.MulticastDns.BrowseAsync(ServiceType, cancellationToken);
+        foreach (var device in ToDevices(instances))
         {
             yield return device;
         }
@@ -26,26 +26,26 @@ public sealed class ShellyDeviceDiscovery : SubjectDiscovery<ShellyDevice, Shell
     /// <inheritdoc />
     protected override bool Matches(ShellyDevice existing, ShellyDiscoveredDevice result) => IsSameDevice(existing, result);
 
-    internal static IReadOnlyList<ShellyDiscoveredDevice> ToDevices(IReadOnlyList<MulticastDnsService> services)
+    internal static IReadOnlyList<ShellyDiscoveredDevice> ToDevices(IReadOnlyList<MulticastDnsServiceInstance> instances)
     {
         // A device announces two instances on the same host, one named by its device ID and one by its user-given
         // name, so the SRV target (the device ID) identifies the device and the instances are merged. An instance
         // without an SRV target is skipped: its name can be the user-given one, which must never become a device ID.
         var devices = new List<ShellyDiscoveredDevice>();
         var indexByDeviceId = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var service in services)
+        foreach (var instance in instances)
         {
-            var deviceId = GetDeviceId(service);
+            var deviceId = GetDeviceId(instance);
             if (deviceId is null)
             {
                 continue;
             }
 
-            var instanceName = service.InstanceName.Trim();
+            var instanceName = instance.InstanceName.Trim();
             var name = instanceName.Length == 0 || string.Equals(instanceName, deviceId, StringComparison.OrdinalIgnoreCase)
                 ? null
                 : instanceName;
-            service.Properties.TryGetValue("app", out var application);
+            instance.Properties.TryGetValue("app", out var application);
             if (string.IsNullOrWhiteSpace(application))
             {
                 application = null;
@@ -65,7 +65,7 @@ public sealed class ShellyDeviceDiscovery : SubjectDiscovery<ShellyDevice, Shell
                 indexByDeviceId.Add(deviceId, devices.Count);
                 devices.Add(new ShellyDiscoveredDevice(
                     deviceId,
-                    service.Addresses[0].ToString(),
+                    instance.Addresses[0].ToString(),
                     application,
                     name ?? deviceId));
             }
@@ -90,10 +90,10 @@ public sealed class ShellyDeviceDiscovery : SubjectDiscovery<ShellyDevice, Shell
             : string.Equals(existing.HostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <returns>The device ID from the SRV target, or null when the service has none.</returns>
-    private static string? GetDeviceId(MulticastDnsService service)
+    /// <returns>The device ID from the SRV target, or null when the instance has none.</returns>
+    private static string? GetDeviceId(MulticastDnsServiceInstance instance)
     {
-        var hostName = service.HostName?.Trim().TrimEnd('.');
+        var hostName = instance.HostName?.Trim().TrimEnd('.');
         if (hostName is not null && hostName.EndsWith(LocalDomainSuffix, StringComparison.OrdinalIgnoreCase))
         {
             hostName = hostName[..^LocalDomainSuffix.Length];

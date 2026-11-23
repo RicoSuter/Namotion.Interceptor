@@ -204,7 +204,7 @@ public class MyStromSwitchDiscoveryTests
 
     private sealed class UnusedMulticastDnsBrowser : IMulticastDnsBrowser
     {
-        public Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
+        public Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
     }
 }

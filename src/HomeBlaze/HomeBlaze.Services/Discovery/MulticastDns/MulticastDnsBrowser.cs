@@ -25,7 +25,7 @@ internal sealed class MulticastDnsBrowser : IMulticastDnsBrowser
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken)
     {
         var query = DnsMessage.CreatePointerQuery(MulticastDnsServiceCollector.GetServiceName(serviceType));
         var collector = new MulticastDnsServiceCollector();

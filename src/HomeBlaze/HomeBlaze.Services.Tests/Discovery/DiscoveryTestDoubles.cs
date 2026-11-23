@@ -136,16 +136,16 @@ internal sealed class FakeSsdpSearch : ISsdpSearch
 /// </summary>
 internal sealed class FakeMulticastDnsBrowser : IMulticastDnsBrowser
 {
-    private readonly TaskCompletionSource<IReadOnlyList<MulticastDnsService>> _answer =
+    private readonly TaskCompletionSource<IReadOnlyList<MulticastDnsServiceInstance>> _answer =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private int _callCount;
 
     public int CallCount => Volatile.Read(ref _callCount);
 
-    public void Answer(params MulticastDnsService[] services) => _answer.TrySetResult(services);
+    public void Answer(params MulticastDnsServiceInstance[] services) => _answer.TrySetResult(services);
 
-    public Task<IReadOnlyList<MulticastDnsService>> BrowseAsync(string serviceType, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _callCount);
         return _answer.Task.WaitAsync(cancellationToken);
