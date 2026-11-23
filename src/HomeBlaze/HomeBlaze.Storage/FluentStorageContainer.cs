@@ -1149,4 +1149,15 @@ public partial class FluentStorageContainer :
         connection?.Dispose();
         base.Dispose();
     }
+
+    /// <summary>
+    /// Disposes the container and completes once the worker of its connection has stopped: the item that it was
+    /// running has finished. A call into the storage that the item gave up can still be running, see
+    /// <see cref="IsStorageUnresponsive"/>.
+    /// </summary>
+    internal Task DisposeAndWaitForWorkerAsync()
+    {
+        Dispose();
+        return _connection?.Worker.StopAsync() ?? Task.CompletedTask;
+    }
 }
