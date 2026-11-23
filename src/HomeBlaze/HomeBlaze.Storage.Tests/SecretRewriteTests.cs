@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Storage.Files;
@@ -111,6 +112,29 @@ public class SecretRewriteTests : StorageTestBase
         Assert.Equal(applyCount + 1, device.ApplyCount);
         Assert.Contains(messages, message => message.Contains("Gateway.json") && message.Contains("plaintext"));
         Assert.DoesNotContain(messages, message => message.Contains("s3cr3t"));
+    }
+
+    [Fact]
+    public async Task WhenASecretChangesBetweenTwoSaves_ThenTheFileKeepsItsContentAndTheStoreHoldsOnlyTheLatestValue()
+    {
+        // Arrange
+        var secretsPath = UseSecretStore();
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""");
+        var storage = await ConnectAsync();
+        var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
+        device.Password = "first";
+        await storage.WriteConfigurationAsync(device, CancellationToken.None);
+        var firstContent = File.ReadAllText(GetFullPath("Gateway.json"));
+        device.Password = "second";
+
+        // Act
+        await storage.WriteConfigurationAsync(device, CancellationToken.None);
+
+        // Assert
+        Assert.Contains("\"password\": \"$secret:", firstContent);
+        Assert.Equal(firstContent, File.ReadAllText(GetFullPath("Gateway.json")));
+        var entry = Assert.Single(JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(secretsPath))!);
+        Assert.Equal("second", entry.Value);
     }
 
     [Fact]
