@@ -1,3 +1,4 @@
+using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Storage.Tests;
@@ -40,10 +41,54 @@ public class SecretRewriteTests : StorageTestBase
         Assert.Contains("s3cr3t", File.ReadAllText(SecretsPath));
     }
 
-    // One read for both checks: a file that is being rewritten can be read empty.
+    [Fact]
+    public async Task WhenTheFileStillHasTheExpectedContent_ThenTheConditionalSaveWritesIt()
+    {
+        // Arrange
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""");
+        var storage = await ConnectAsync();
+        var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
+        device.Host = "10.0.0.2";
+        var expectedHash = StorageHash.Compute(File.ReadAllBytes(GetFullPath("Gateway.json")));
+
+        // Act
+        var isWritten = await storage.WriteConfigurationAsync(device, expectedHash, CancellationToken.None);
+
+        // Assert
+        Assert.True(isWritten);
+        Assert.Contains("10.0.0.2", File.ReadAllText(GetFullPath("Gateway.json")));
+    }
+
+    [Fact]
+    public async Task WhenTheFileNoLongerHasTheExpectedContent_ThenTheConditionalSaveWritesNothing()
+    {
+        // Arrange
+        var content = $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""";
+        WriteFile("Gateway.json", content);
+        var storage = await ConnectAsync();
+        var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
+        device.Host = "10.0.0.2";
+        var staleHash = StorageHash.Compute("an earlier content"u8);
+
+        // Act
+        var isWritten = await storage.WriteConfigurationAsync(device, staleHash, CancellationToken.None);
+
+        // Assert
+        Assert.False(isWritten);
+        Assert.Equal(content, File.ReadAllText(GetFullPath("Gateway.json")));
+    }
+
+    // One read for both checks: a file that is being rewritten can be read empty, or not at all on Windows.
     private bool HoldsSecretReferenceOnly(string relativePath)
     {
-        var text = File.ReadAllText(GetFullPath(relativePath));
-        return text.Contains("\"password\": \"$secret:") && !text.Contains("s3cr3t");
+        try
+        {
+            var text = File.ReadAllText(GetFullPath(relativePath));
+            return text.Contains("\"password\": \"$secret:") && !text.Contains("s3cr3t");
+        }
+        catch (IOException)
+        {
+            return false;
+        }
     }
 }

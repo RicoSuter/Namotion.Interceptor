@@ -530,7 +530,19 @@ public partial class FluentStorageContainer :
     /// </summary>
     /// <returns>False when no file in this storage contains the subject as configuration, such as a subject of a
     /// document or of a file that is no configurable subject, or the storage is not connected.</returns>
-    public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+    public Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+        => WriteConfigurationAsync(subject, expectedHash: null, cancellationToken);
+
+    /// <summary>
+    /// Saves the file of the subject like <see cref="WriteConfigurationAsync(IInterceptorSubject, CancellationToken)"/>,
+    /// but only while the file still has the content of the expected hash, as the storage last read or wrote it.
+    /// </summary>
+    /// <param name="subject">The subject whose file is saved.</param>
+    /// <param name="expectedHash">The hash of the content the file must still have, or null to save in any case.</param>
+    /// <param name="cancellationToken">Cancels the save.</param>
+    /// <returns>False as well when the content of the file is no longer the expected one.</returns>
+    internal async Task<bool> WriteConfigurationAsync(
+        IInterceptorSubject subject, string? expectedHash, CancellationToken cancellationToken)
     {
         var connection = _connection;
         if (connection is null or { IsEnded: true })
@@ -546,6 +558,9 @@ public partial class FluentStorageContainer :
                 var fileSubject = subject.TryGetConfigurationOwner(candidate => connection.Index.TryGetEntry(candidate, out entry));
                 // Only configuration is written here. A document, such as a Markdown page, writes itself, under its own rules.
                 if (fileSubject is not IConfigurable || fileSubject is IStorageFile || entry is null)
+                    return;
+
+                if (expectedHash != null && entry.Hash != expectedHash)
                     return;
 
                 await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(fileSubject)), token);

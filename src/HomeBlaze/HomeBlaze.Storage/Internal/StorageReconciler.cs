@@ -629,11 +629,12 @@ internal sealed class StorageReconciler
         if (StoragePath.IsJson(listed.Path))
         {
             var content = await ReadAsync(listed.Path, cancellationToken);
-            entry.Hash = StorageHash.Compute(content);
+            var hash = StorageHash.Compute(content);
+            entry.Hash = hash;
 
             // More than one candidate cannot be told apart, so none of them is moved.
             // Only into another folder: the registry keeps the old key of a subject that is re-keyed within one dictionary.
-            if (movableEntries.Remove(entry.Hash, out var candidates) && candidates.Count == 1 &&
+            if (movableEntries.Remove(hash, out var candidates) && candidates.Count == 1 &&
                 candidates[0].Parent != entry.Parent)
             {
                 entry.Subject = candidates[0].Subject;
@@ -641,7 +642,7 @@ internal sealed class StorageReconciler
             }
             else
             {
-                entry.Subject = CreateFromJson(listed.Path, DecodeText(content), listed.Version);
+                entry.Subject = CreateFromJson(listed.Path, DecodeText(content), listed.Version, hash);
             }
         }
         else
@@ -714,7 +715,11 @@ internal sealed class StorageReconciler
         });
     }
 
-    private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version)
+    /// <param name="path">The path of the file.</param>
+    /// <param name="json">The text of the file.</param>
+    /// <param name="version">The version of the file as the storage reports it.</param>
+    /// <param name="hash">The hash of the content of the file.</param>
+    private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version, string hash)
     {
         var subject = _subjectFactory.CreateFromJson(_storage, StoragePath.ToFullPath(path), json, out var hasUnstoredSecrets);
         if (subject is JsonFile file)
@@ -723,24 +728,25 @@ internal sealed class StorageReconciler
         }
         else if (hasUnstoredSecrets)
         {
-            ScheduleSecretRewrite(path, subject);
+            ScheduleSecretRewrite(path, subject, hash);
         }
 
         return subject;
     }
 
     /// <summary>
-    /// Saves the subject of a file that holds a secret in plaintext, which moves the secret to the secret store. Queued
-    /// behind the work that runs now, because a save waits for the worker of the storage that runs this work.
+    /// Saves the subject of a file that holds a secret in plaintext, which moves the secret to the secret store.
+    /// Not awaited: the save runs on the worker of the storage, after the work item that calls this. It writes
+    /// nothing when the file no longer has the content of the given hash by then.
     /// </summary>
-    private void ScheduleSecretRewrite(string path, IInterceptorSubject subject)
+    private void ScheduleSecretRewrite(string path, IInterceptorSubject subject, string hash)
     {
         using var suppressedFlow = ExecutionContext.IsFlowSuppressed() ? (AsyncFlowControl?)null : ExecutionContext.SuppressFlow();
         _ = Task.Run(async () =>
         {
             try
             {
-                if (await _storage.WriteConfigurationAsync(subject, _connectionToken))
+                if (await _storage.WriteConfigurationAsync(subject, hash, _connectionToken))
                 {
                     _logger?.LogInformation("Moved the plaintext secrets of {Path} to the secret store.", path);
                 }
@@ -841,7 +847,7 @@ internal sealed class StorageReconciler
                 // Not with a skipped value, which the save would replace with its default.
                 if (skipped.Count == 0 && _serializer.HasUnstoredSecrets(entry.Subject))
                 {
-                    ScheduleSecretRewrite(entry.Path, entry.Subject);
+                    ScheduleSecretRewrite(entry.Path, entry.Subject, hash);
                 }
             }
 
@@ -857,7 +863,7 @@ internal sealed class StorageReconciler
 
         // The file is something else now: a plain file that became a subject, a subject of another type, or a
         // subject that became a plain file. Only a plain file that stays one keeps its instance.
-        var subject = CreateFromJson(entry.Path, json, version);
+        var subject = CreateFromJson(entry.Path, json, version, hash);
         if (subject is JsonFile && entry.Subject is JsonFile)
         {
             return false;
