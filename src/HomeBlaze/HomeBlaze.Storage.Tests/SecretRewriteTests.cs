@@ -223,25 +223,24 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenThePageFileChangedBeforeTheRewrite_ThenTheBlockIsRewrittenOnTheNewText()
+    public async Task WhenThePageFileChangedBeforeTheRewrite_ThenNothingIsWrittenAndTheBlockConfigurationIsAppliedAgain()
     {
-        // Arrange: the secret is set in memory, so the block of the page has no plaintext that would be rewritten on load.
-        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
-        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n");
+        // Arrange: without a secret store, nothing is rewritten on its own.
+        var deviceType = typeof(UnwritableSecretDevice).FullName;
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {deviceType}#gateway Password=s3cr3t\n::\n");
         var storage = await ConnectAsync();
         var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
-        var device = Assert.IsType<EmbeddedSecretDevice>(page.Children["gateway"]);
-        device.Password = "s3cr3t";
-        WriteFile("Gateway.md", $"# Gateway\n\nA hand edit.\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n");
+        var device = Assert.IsType<UnwritableSecretDevice>(page.Children["gateway"]);
+        var handEdit = $"# Gateway\n\nA hand edit.\n\n:: {deviceType}#gateway Password=s3cr3t\n::\n";
+        WriteFile("Gateway.md", handEdit);
 
         // Act
         await page.RewriteBlocksIfFileUnchangedAsync([device]);
 
-        // Assert
-        string? content = null;
-        await AsyncTestHelpers.WaitUntilAsync(() => (content = TryReadText("Gateway.md")) is not null && content.Contains("$secret:"));
-        Assert.StartsWith($"# Gateway\n\nA hand edit.\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=$secret:", content);
-        Assert.Contains("s3cr3t", File.ReadAllText(SecretsPath));
+        // Assert: the configuration applied again is what the parse checks for plaintext secrets.
+        Assert.Equal(handEdit, File.ReadAllText(GetFullPath("Gateway.md")));
+        Assert.Equal(handEdit, page.Content);
+        Assert.Equal(1, device.ApplyCount);
     }
 
     // Only for a check that something does not happen, which a passing test always waits for in full.

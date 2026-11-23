@@ -30,7 +30,7 @@ public sealed record MarkdownParseResult(
 
     /// <summary>
     /// The block subjects whose configuration the parse applied, by creating them or updating them in place, with the
-    /// configuration JSON it applied. Empty for a snapshot that a write published.
+    /// configuration JSON it applied. Read right after the parse; empty for a snapshot that a write published.
     /// </summary>
     internal IReadOnlyList<(IInterceptorSubject Subject, string Json)> AppliedConfigurations { get; init; } = [];
 }

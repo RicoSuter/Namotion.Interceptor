@@ -82,10 +82,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // JSON tries again.
     private readonly ConditionalWeakTable<IInterceptorSubject, string> _secretRewrites = new();
 
-    // The subjects whose rewrite found the file changed. The read of the page that follows applies no configuration of a
-    // block whose text did not change, so it checks these besides the ones it applied.
-    private List<IInterceptorSubject>? _secretRewritesToRecheck;
-
     // The write of this page that the flow runs in, so that a write from inside it is refused instead of waiting
     // for _writeLock. Off the worker, the reload after a write, a refused write-back or a refused structure edit applies
     // configuration within the write.
@@ -236,18 +232,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             AddSecretRewrite(subject, json, ref subjects);
         }
 
-        if (Interlocked.Exchange(ref _secretRewritesToRecheck, null) is { } recheck)
-        {
-            foreach (var subject in recheck)
-            {
-                if (result.BlockSubjects.Values.Contains(subject, ReferenceEqualityComparer.Instance) &&
-                    _parser.TryGetAppliedConfiguration(subject, out var json))
-                {
-                    AddSecretRewrite(subject, json, ref subjects);
-                }
-            }
-        }
-
         if (subjects is null)
         {
             return;
@@ -294,7 +278,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     /// <summary>
     /// Writes the block of each subject, one after the other, while the file is the text the page last read. When the
-    /// file differs, nothing more is written and the page is read again, which schedules the remaining subjects again.
+    /// file differs, nothing more is written and the page is read again with the configurations of the remaining subjects,
+    /// which checks them again.
     /// A refused block write is logged by the write itself.
     /// </summary>
     internal async Task RewriteBlocksIfFileUnchangedAsync(IReadOnlyList<IInterceptorSubject> subjects)
@@ -311,15 +296,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 // arrives, and an unrequested write must never undo a hand edit.
                 if (_parseResult.Page is not { } page || await ReadSourceUnlockedAsync(CancellationToken.None) != page.Source)
                 {
+                    // The read of the page applies the configurations again, so it checks the remaining subjects.
                     _parser.LogSecretRewriteOnChangedFile(FullPath);
-                    ForgetSecretRewritesFrom(subjects, index);
-                    var recheck = subjects.Skip(index).ToList();
-                    if (Interlocked.Exchange(ref _secretRewritesToRecheck, null) is { } earlier)
+                    for (var remaining = index; remaining < subjects.Count; remaining++)
                     {
-                        recheck.AddRange(earlier);
+                        _secretRewrites.Remove(subjects[remaining]);
+                        _parser.ForgetAppliedConfiguration(subjects[remaining]);
                     }
 
-                    Volatile.Write(ref _secretRewritesToRecheck, recheck);
                     await ReloadAfterRefusalAsync(CancellationToken.None);
                     return;
                 }
@@ -329,8 +313,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
         catch
         {
-            // After the read that a failed write does itself, so that read does not try again, which could repeat a write
-            // that keeps failing; a later parse that applies the configuration does.
+            // Unmarked after the write's own reload, so only a later parse that applies the configuration tries again.
             ForgetSecretRewritesFrom(subjects, index);
             throw;
         }

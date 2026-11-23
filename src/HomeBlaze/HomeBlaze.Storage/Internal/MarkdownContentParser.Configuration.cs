@@ -129,10 +129,6 @@ public sealed partial class MarkdownContentParser
         _appliedConfigurationKeys.AddOrUpdate(subject, keys.ToArray());
     }
 
-    /// <summary>Gets the configuration JSON that a parse last applied to the subject.</summary>
-    internal bool TryGetAppliedConfiguration(IInterceptorSubject subject, [NotNullWhen(true)] out string? json) =>
-        _appliedConfigurationJson.TryGetValue(subject, out json);
-
     /// <summary>
     /// Makes the next parse apply the configuration of the block of the subject also when its text did not change.
     /// </summary>
