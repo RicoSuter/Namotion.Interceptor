@@ -84,6 +84,10 @@ public class ConfigurableSubjectSerializer
     /// <summary>
     /// Serializes an IConfigurable to JSON with $type discriminator.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The type of the subject, or of a value in its configuration, has a secret configuration property that is not a string property of a subject.
+    /// </exception>
+    /// <exception cref="IOException">The secret store cannot be written.</exception>
     public string Serialize(IInterceptorSubject subject, ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
     {
         return JsonSerializer.Serialize(GetConfigurable(subject), typeof(IConfigurable), GetOptions(naming));
@@ -96,7 +100,10 @@ public class ConfigurableSubjectSerializer
     /// <param name="subject">The subject to serialize. It must be registered.</param>
     /// <param name="isExcluded">Receives a registered property of the subject and returns true to leave it out.</param>
     /// <param name="naming">The naming of the JSON.</param>
-    /// <exception cref="InvalidOperationException">The subject is not registered.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The subject is not registered, or its type, or that of a value in its configuration, has a secret configuration property that is not a string property of a subject.
+    /// </exception>
+    /// <exception cref="IOException">The secret store cannot be written.</exception>
     /// <remarks>
     /// The value of an excluded property is not read. A subject that is nested in another property is written
     /// in full, also when it has a property that would be excluded.
@@ -147,6 +154,9 @@ public class ConfigurableSubjectSerializer
     /// <see cref="SecretStore"/> yet, such as a value that was read as plaintext. Stores nothing. False without a
     /// <see cref="SecretStore"/> service and for a subject that is not <see cref="IConfigurable"/>.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The type of the subject, or of a value in its configuration, has a secret configuration property that is not a string property of a subject.
+    /// </exception>
     public bool HasUnstoredSecrets(IInterceptorSubject subject) =>
         subject is IConfigurable && _secrets is { } secrets && secrets.HasUnstoredSecrets(() => Serialize(subject));
 

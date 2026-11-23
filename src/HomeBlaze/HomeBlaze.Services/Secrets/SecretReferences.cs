@@ -19,7 +19,7 @@ internal sealed class SecretReferences
     public const string Prefix = "$secret:";
 
     // Set by HasUnstoredSecrets for the serialization it runs, which is synchronous and runs on the calling thread.
-    [ThreadStatic] private static bool t_isCheck;
+    [ThreadStatic] private static bool t_isDryRun;
     [ThreadStatic] private static bool t_hasUnstored;
 
     private readonly SecretStore _store;
@@ -53,7 +53,7 @@ internal sealed class SecretReferences
     }
 
     /// <summary>
-    /// Gets the message of the exception for a secret property that is no <see cref="string"/> property of a subject, or
+    /// Gets the message of the exception for a secret property that is not a <see cref="string"/> property of a subject, or
     /// null for a supported one.
     /// </summary>
     public static string? GetUnsupportedMessage(Type declaringType, string propertyName, Type propertyType) =>
@@ -61,7 +61,7 @@ internal sealed class SecretReferences
             ? $"The secret configuration property '{propertyName}' of '{declaringType.FullName}' must be a string property of a subject."
             : null;
 
-    /// <summary>Throws for a secret property that is no <see cref="string"/> property of a subject.</summary>
+    /// <summary>Throws for a secret property that is not a <see cref="string"/> property of a subject.</summary>
     /// <exception cref="InvalidOperationException">The property is not supported as a secret.</exception>
     public static void EnsureSupported(Type declaringType, string propertyName, Type propertyType)
     {
@@ -90,12 +90,12 @@ internal sealed class SecretReferences
         var key = text[Prefix.Length..];
         if (_store.TryGet(key, out var stored))
         {
-            _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(key, IsUnresolved: false);
+            _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(key, text, IsUnresolved: false);
             return stored;
         }
 
         // Remembered, so the reference is written back while the property stays empty, and a restored store recovers it.
-        _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(key, IsUnresolved: true);
+        _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(key, text, IsUnresolved: true);
         _logger?.LogWarning(
             "The secret {Key} of {Property} of {Type} is not in the secret store {Path}, so the property is empty. Enter it again, or restore the secret store and restart.",
             key, propertyName, owner.GetType().FullName, _store.Path);
@@ -114,23 +114,24 @@ internal sealed class SecretReferences
 
         if (string.IsNullOrEmpty(text))
         {
-            return text is null && remembered is { IsUnresolved: true } unresolved ? Prefix + unresolved.Key : text;
+            return text is null && remembered is { IsUnresolved: true } unresolved ? unresolved.Reference : text;
         }
 
         if (remembered is { IsUnresolved: false } resolved && _store.TryGet(resolved.Key, out var stored) && stored == text)
         {
-            return Prefix + resolved.Key;
+            return resolved.Reference;
         }
 
-        if (t_isCheck)
+        if (t_isDryRun)
         {
             t_hasUnstored = true;
             return text;
         }
 
         var newKey = _store.Add(text);
-        _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(newKey, IsUnresolved: false);
-        return Prefix + newKey;
+        var reference = Prefix + newKey;
+        _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(newKey, reference, IsUnresolved: false);
+        return reference;
     }
 
     /// <summary>
@@ -139,7 +140,10 @@ internal sealed class SecretReferences
     /// </summary>
     public bool HasUnstoredSecrets(Action serialize)
     {
-        t_isCheck = true;
+        // Restored afterwards, so that a nested dry run does not end the one around it.
+        var wasDryRun = t_isDryRun;
+        var hadUnstored = t_hasUnstored;
+        t_isDryRun = true;
         t_hasUnstored = false;
         try
         {
@@ -148,10 +152,11 @@ internal sealed class SecretReferences
         }
         finally
         {
-            t_isCheck = false;
-            t_hasUnstored = false;
+            t_isDryRun = wasDryRun;
+            t_hasUnstored = hadUnstored;
         }
     }
 
-    private readonly record struct RememberedKey(string Key, bool IsUnresolved);
+    // Reference is the key with the prefix, kept so that writing an unchanged secret allocates no string.
+    private readonly record struct RememberedKey(string Key, string Reference, bool IsUnresolved);
 }
