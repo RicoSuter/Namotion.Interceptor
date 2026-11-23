@@ -204,14 +204,15 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             Content = content;
             Frontmatter = frontmatter;
 
+            // Before Children, whose lifecycle handlers can throw.
+            ScheduleSecretRewrites(result);
+
             // Without the flow of the caller, which is the worker of the storage or a refused write, as for
             // every assignment to the tree: lifecycle handlers run here for a page that is in the tree.
             using (ExecutionContext.SuppressFlow())
             {
                 Children = result.Children;
             }
-
-            ScheduleSecretRewrites(result);
         }
         finally
         {
@@ -277,9 +278,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>
-    /// Writes the block of each subject, one after the other, while the file is the text the page last read. When the
-    /// file differs, nothing more is written and the page is read again with the configurations of the remaining subjects,
-    /// which checks them again.
+    /// Writes the block of each subject that a parse marked for its plaintext secrets, one after the other, while the
+    /// file is the text the page last read. When the file differs, nothing more is written and the page is read again
+    /// with the configurations of the remaining subjects, which checks them again.
     /// A refused block write is logged by the write itself.
     /// </summary>
     internal async Task RewriteBlocksIfFileUnchangedAsync(IReadOnlyList<IInterceptorSubject> subjects)
@@ -292,6 +293,13 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         {
             for (; index < subjects.Count; index++)
             {
+                // A key the type does not know inside a value is read without an issue, so the write must keep every
+                // key of the configuration that was checked. Whatever removed the mark decides whether it is tried again.
+                if (!_secretRewrites.TryGetValue(subjects[index], out var checkedJson))
+                {
+                    continue;
+                }
+
                 // The block text is computed from the snapshot, which lags behind a change of the file until its event
                 // arrives, and an unrequested write must never undo a hand edit.
                 if (_parseResult.Page is not { } page || await ReadSourceUnlockedAsync(CancellationToken.None) != page.Source)
@@ -303,9 +311,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                     return;
                 }
 
-                // A key the type does not know inside a value is read without an issue, so the configuration that was
-                // checked for plaintext secrets is what the write must keep every key of.
-                _secretRewrites.TryGetValue(subjects[index], out var checkedJson);
                 switch (await WriteBlockAsync(subjects[index], CancellationToken.None, keptConfigurationJson: checkedJson))
                 {
                     case BlockWriteResult.Written:
@@ -317,8 +322,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                         ForgetSecretRewritesFrom(subjects, index, forgetAppliedConfigurations: true);
                         await ReloadAfterRefusalAsync(CancellationToken.None);
                         return;
-                    case BlockWriteResult.WouldRemoveKeys:
-                        // Stays marked, so the same configuration is not tried again.
+                    case BlockWriteResult.NotWritten:
+                        // Stays marked: the reload of a refused write must not try again, and the same configuration
+                        // would remove the same keys.
                         break;
                     case BlockWriteResult.NotABlock:
                         // The subject left the page.
@@ -1248,7 +1254,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             ForgetAppliedConfigurations(page.AllBlocks[blockIndex], snapshot.BlockSubjects);
             ForgetAppliedBlocksAround(page, page.AllBlocks[blockIndex], snapshot.BlockSubjects);
             await ReloadAfterRefusalAsync(cancellationToken);
-            return BlockWriteResult.RefusedAndReloaded;
+            return BlockWriteResult.NotWritten;
         }
 
         // The first configuration of the write is the one of the subject itself.
@@ -1256,7 +1262,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             JsonKeyComparison.FindRemovedKeys(keptConfigurationJson, write.Configurations[0].ConfigurationJson) is { Count: > 0 } removedKeys)
         {
             _parser.LogSecretRewriteWouldRemoveKeys(FullPath, removedKeys);
-            return BlockWriteResult.WouldRemoveKeys;
+            return BlockWriteResult.NotWritten;
         }
 
         return await PublishAndWriteAsync(snapshot, write, page.AllBlocks[blockIndex], ConfigurationChangedRefusal) is null
@@ -1269,8 +1275,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         Written,
         NotABlock,
         RefusedByPublish,
-        RefusedAndReloaded,
-        WouldRemoveKeys
+        NotWritten
     }
 
     // Under _writeLock, after a refusal. A failed read is logged, and the next pass of the storage reads the file again.

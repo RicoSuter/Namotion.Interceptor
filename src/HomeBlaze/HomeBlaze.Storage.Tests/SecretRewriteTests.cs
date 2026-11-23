@@ -254,12 +254,10 @@ public class SecretRewriteTests : StorageTestBase
     public async Task WhenThePageFileChangedSinceItWasRead_ThenTheBlockRewriteWritesNothingAndReadsThePageAgain()
     {
         // Arrange
-        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n");
-        var storage = await ConnectAsync();
-        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var (page, movedContent) = await ConnectAndWaitForMovedSecretAsync($"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n");
         var device = Assert.IsType<EmbeddedSecretDevice>(page.Children["gateway"]);
         device.Host = "10.0.0.2";
-        var handEdit = $"# Gateway\n\nA hand edit.\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n";
+        var handEdit = movedContent.Replace("# Gateway\n", "# Gateway\n\nA hand edit.\n");
         WriteFile("Gateway.md", handEdit);
 
         // Act
@@ -274,7 +272,23 @@ public class SecretRewriteTests : StorageTestBase
     public async Task WhenThePageFileIsAsItWasRead_ThenTheBlockRewriteWritesTheBlock()
     {
         // Arrange
-        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n");
+        var (page, _) = await ConnectAndWaitForMovedSecretAsync($"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n");
+        var device = Assert.IsType<EmbeddedSecretDevice>(page.Children["gateway"]);
+        device.Host = "10.0.0.2";
+
+        // Act
+        await page.RewriteBlocksIfFileUnchangedAsync([device]);
+
+        // Assert
+        Assert.StartsWith($"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.2 Password=$secret:", File.ReadAllText(GetFullPath("Gateway.md")));
+    }
+
+    [Fact]
+    public async Task WhenNoParseMarkedTheSubject_ThenTheBlockRewriteWritesNothing()
+    {
+        // Arrange: without a secret store, no parse marks a subject.
+        var content = $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n";
+        WriteFile("Gateway.md", content);
         var storage = await ConnectAsync();
         var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
         var device = Assert.IsType<EmbeddedSecretDevice>(page.Children["gateway"]);
@@ -284,7 +298,7 @@ public class SecretRewriteTests : StorageTestBase
         await page.RewriteBlocksIfFileUnchangedAsync([device]);
 
         // Assert
-        Assert.Equal($"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.2\n::\n", File.ReadAllText(GetFullPath("Gateway.md")));
+        Assert.Equal(content, File.ReadAllText(GetFullPath("Gateway.md")));
     }
 
     [Fact]
@@ -334,22 +348,35 @@ public class SecretRewriteTests : StorageTestBase
     [Fact]
     public async Task WhenThePageFileChangedBeforeTheRewrite_ThenNothingIsWrittenAndTheBlockConfigurationIsAppliedAgain()
     {
-        // Arrange: without a secret store, nothing is rewritten on its own.
+        // Arrange: the block cannot be written, so the load's rewrite is refused and reads the page again.
+        UseSecretStore();
         var deviceType = typeof(UnwritableSecretDevice).FullName;
         WriteFile("Gateway.md", $"# Gateway\n\n:: {deviceType}#gateway Password=s3cr3t\n::\n");
         var storage = await ConnectAsync();
         var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
         var device = Assert.IsType<UnwritableSecretDevice>(page.Children["gateway"]);
+        await AsyncTestHelpers.WaitUntilAsync(() => device.ApplyCount == 1);
         var handEdit = $"# Gateway\n\nA hand edit.\n\n:: {deviceType}#gateway Password=s3cr3t\n::\n";
         WriteFile("Gateway.md", handEdit);
 
         // Act
         await page.RewriteBlocksIfFileUnchangedAsync([device]);
 
-        // Assert: the configuration applied again is what the parse checks for plaintext secrets.
+        // Assert: the configuration applied again is what the parse checks for plaintext secrets. Its refused rewrite
+        // may already have applied it once more.
         Assert.Equal(handEdit, File.ReadAllText(GetFullPath("Gateway.md")));
         Assert.Equal(handEdit, page.Content);
-        Assert.Equal(1, device.ApplyCount);
+        Assert.InRange(device.ApplyCount, 2, 3);
+    }
+
+    // The load moves the plaintext secret of the block, which leaves its subject marked with the configuration it checked.
+    private async Task<(MarkdownFile Page, string MovedContent)> ConnectAndWaitForMovedSecretAsync(string content)
+    {
+        UseSecretStore();
+        WriteFile("Gateway.md", content);
+        var storage = await ConnectAsync();
+        var movedContent = await WaitForSecretReferenceOnlyAsync("Gateway.md");
+        return (Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]), movedContent);
     }
 
     private string UseSecretStore() => SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
@@ -380,12 +407,11 @@ public class SecretRewriteTests : StorageTestBase
     [Fact]
     public async Task WhenAReloadPublishesWhileABlockIsRewritten_ThenThePageIsReadAgainWithTheBlockConfigurationAppliedAgain()
     {
-        // Arrange: without a secret store, nothing is rewritten on its own.
+        // Arrange
         var deviceType = typeof(ReloadingDevice).FullName;
-        WriteFile("Gateway.md", $"# Gateway\n\n:: {deviceType}#gateway Host=10.0.0.1\n::\n");
-        var storage = await ConnectAsync();
-        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var (page, movedContent) = await ConnectAndWaitForMovedSecretAsync($"# Gateway\n\n:: {deviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n");
         var device = Assert.IsType<ReloadingDevice>(page.Children["gateway"]);
+        var applyCount = device.ApplyCount;
         device.Host = "10.0.0.2";
 
         // The write reads the configuration of the block after it computed its text from the snapshot, and the reload
@@ -397,8 +423,8 @@ public class SecretRewriteTests : StorageTestBase
 
         // Assert
         Assert.Null(device.ReloadOnRead);
-        Assert.Equal(1, device.ApplyCount);
-        Assert.Equal($"# Gateway\n\n:: {deviceType}#gateway Host=10.0.0.1\n::\n", File.ReadAllText(GetFullPath("Gateway.md")));
+        Assert.Equal(applyCount + 1, device.ApplyCount);
+        Assert.Equal(movedContent, File.ReadAllText(GetFullPath("Gateway.md")));
     }
 
     // Only for a check that something does not happen, which a passing test always waits for in full.
@@ -535,6 +561,9 @@ public partial class ReloadingDevice : IConfigurable
 
     [Configuration]
     public partial string? Host { get; set; }
+
+    [Configuration(IsSecret = true)]
+    public partial string? Password { get; set; }
 
     [Configuration]
     public ReloadingValue Value => new(this);
