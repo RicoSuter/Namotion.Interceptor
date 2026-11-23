@@ -1649,6 +1649,11 @@ namespace HomeBlaze.Components.Components
 }
 namespace HomeBlaze.Components.Controls
 {
+    public sealed class CanvasDiagram : Excubo.Blazor.Diagrams.Diagram, System.IDisposable
+    {
+        public CanvasDiagram() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+    }
     public sealed class PropertyWriter : System.IDisposable
     {
         public static readonly System.TimeSpan PersistDelay;

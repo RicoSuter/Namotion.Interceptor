@@ -532,6 +532,46 @@ public class CanvasLayoutTests
     }
 
     [Fact]
+    public async Task WhenTabWithACanvasIsLeftWhileTheDiagramMeasuresIt_ThenThePageStaysInteractive()
+    {
+        // Arrange: the diagram has measured the position of its canvas and waits for the result.
+        await _fixture.WriteDemoPageAsync(ScratchPage, CreateCanvasAndTextTabsPage());
+        var page = await OpenScratchPageAsync(ViewportWidth, HeldMeasurementScript);
+        await WaitForHeldMeasurementAsync(page);
+        var tabs = page.GetByTestId("tab-layout");
+
+        // Act: the canvas is removed before the diagram measures its size.
+        await tabs.GetByRole(AriaRole.Tab, new() { Name = "Text" }).ClickAsync();
+        await Assertions.Expect(tabs.GetByText("Content of the text tab")).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(GetCanvas(page)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await ReleaseHeldMeasurementAsync(page);
+
+        // Assert
+        await tabs.GetByRole(AriaRole.Tab, new() { Name = "Canvas" }).ClickAsync();
+        await Assertions.Expect(GetNodes(page).First).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(page.Locator("#blazor-error-ui")).ToBeHiddenAsync();
+    }
+
+    [Fact]
+    public async Task WhenPageWithACanvasIsLeftWhileTheDiagramMeasuresIt_ThenThePageStaysInteractive()
+    {
+        // Arrange: the diagram has measured the position of its canvas and waits for the result.
+        await _fixture.WriteDemoPageAsync(ScratchPage, CreateCanvasPage(withTextBelow: false, withOperableWidgets: true, withControlsWidget: false));
+        var page = await OpenScratchPageAsync(ViewportWidth, HeldMeasurementScript);
+        await WaitForHeldMeasurementAsync(page);
+
+        // Act: the canvas is removed before the diagram measures its size.
+        await page.GetByRole(AriaRole.Link, new() { Name = "Linked Card" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Blocks Demo" })).ToBeVisibleAsync(new() { Timeout = Timeout });
+        await Assertions.Expect(GetCanvas(page)).ToHaveCountAsync(0, new() { Timeout = Timeout });
+        await ReleaseHeldMeasurementAsync(page);
+
+        // Assert: the menu of the edit modes opens and closes only with a round trip to the circuit.
+        await WaitForServerAsync(page);
+        await Assertions.Expect(page.Locator("#blazor-error-ui")).ToBeHiddenAsync();
+    }
+
+    [Fact]
     public async Task WhenCanvasWithAMaxWidthIsOnAWiderPage_ThenItKeepsThatWidthAtTheLeft()
     {
         // Arrange
@@ -816,12 +856,17 @@ public class CanvasLayoutTests
 
     private Task<IPage> OpenTabbedCanvasPageAsync() => OpenScratchPageAsync(ViewportWidth);
 
-    private async Task<IPage> OpenScratchPageAsync(int width)
+    private async Task<IPage> OpenScratchPageAsync(int width, string? initScript = null)
     {
         var page = await _fixture.CreatePageAsync(new BrowserNewContextOptions
         {
             ViewportSize = new ViewportSize { Width = width, Height = ViewportHeight },
         });
+        if (initScript is not null)
+        {
+            await page.AddInitScriptAsync(initScript);
+        }
+
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{ScratchPage}");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
         await page.WaitUntilInteractiveAsync(Timeout);
@@ -897,6 +942,60 @@ public class CanvasLayoutTests
             + ":: HomeBlaze.Components.CanvasLayout#second Width=400 Scale=FitWidth MinHeight=100\n"
             + "::: Node X=0 Y=0 Width=400 Height=100\n"
             + ":::: HomeBlaze.Components.Card Title=\"Second\"\n"
+            + "::\n";
+    }
+
+    // The diagram measures its canvas through scripts that it adds to window.Excubo.Diagrams, the position first and then the
+    // size, each a round trip. This holds the measured position from the circuit until the test releases it, so that the
+    // test can remove the canvas between the two measurements. It depends on Excubo.Blazor.Diagrams (checked for 4.1.136),
+    // which keeps scripts that are already there.
+    private const string HeldMeasurementScript =
+        """
+        (() => {
+            let release;
+            const gate = new Promise(resolve => release = resolve);
+            const state = { positions: 0, sizes: 0, release: () => release() };
+            window.heldMeasurement = state;
+            let diagrams;
+            window.Excubo = window.Excubo || {};
+            Object.defineProperty(window.Excubo, 'Diagrams', {
+                configurable: true,
+                get: () => diagrams,
+                set: value => {
+                    if (value === diagrams) return;
+                    const position = value.position;
+                    const size = value.size;
+                    value.position = element => { const result = position(element); state.positions++; return gate.then(() => result); };
+                    value.size = element => { state.sizes++; return size(element); };
+                    diagrams = value;
+                },
+            });
+        })();
+        """;
+
+    private static Task WaitForHeldMeasurementAsync(IPage page)
+    {
+        return page.WaitForFunctionAsync("() => window.heldMeasurement.positions > 0", null, new() { Timeout = Timeout });
+    }
+
+    // Returns once the diagram has asked for the size, so that the answer reaches the circuit before the next event of the test.
+    private static async Task ReleaseHeldMeasurementAsync(IPage page)
+    {
+        await page.EvaluateAsync("() => window.heldMeasurement.release()");
+        await page.WaitForFunctionAsync("() => window.heldMeasurement.sizes > 0", null, new() { Timeout = Timeout });
+    }
+
+    // The first tab holds a canvas and the second one text.
+    private static string CreateCanvasAndTextTabsPage()
+    {
+        return "---\ntitle: Scratch\n---\n\n# Scratch\n\n"
+            + ":: HomeBlaze.Components.TabLayout\n"
+            + "::: Tab#canvasTab Title=\"Canvas\"\n"
+            + ":::: HomeBlaze.Components.CanvasLayout#canvas MinHeight=300\n"
+            + "::::: Node X=40 Y=40 Width=300 Height=200\n"
+            + ":::::: HomeBlaze.Components.Card Title=\"In the canvas\"\n"
+            + "::: Tab#textTab Title=\"Text\"\n"
+            + "Content of the text tab\n"
             + "::\n";
     }
 
