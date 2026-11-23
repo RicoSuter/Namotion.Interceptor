@@ -6,8 +6,9 @@ namespace HomeBlaze.Abstractions.Discovery;
 /// </summary>
 /// <remarks>
 /// A call reads at most 512 datagrams and yields only those of at most 1024 bytes; longer ones count towards that
-/// limit but are skipped. A socket error ends the call without an exception, logged at debug level, so a host where
-/// the socket cannot be opened yields nothing. The end of the window ends the enumeration normally, while a
+/// limit but are skipped. A socket error during the exchange ends the call without an exception, logged at debug
+/// level, so a broadcast from a host where it cannot be sent yields nothing. Only a port that
+/// <see cref="ListenAsync"/> cannot bind throws. The end of the window ends the enumeration normally, while a
 /// cancellation of the caller's token throws.
 /// </remarks>
 public interface IUdpDiscovery
@@ -27,14 +28,16 @@ public interface IUdpDiscovery
 
     /// <summary>
     /// Binds <paramref name="port"/> on every IPv4 address with address reuse and yields each datagram that arrives
-    /// within <paramref name="window"/>, as it arrives. Concurrent calls and other listeners on the host that also use
-    /// address reuse share the port; while a listener holds it without address reuse, the bind fails and the call
-    /// yields nothing.
+    /// within <paramref name="window"/>, as it arrives. Whether the port is shared depends on the platform: on Linux,
+    /// concurrent calls and other listeners that also use address reuse share it, while a listener that holds it
+    /// without address reuse makes the bind fail; on Windows, address reuse binds over a listener that does not
+    /// demand exclusive use.
     /// </summary>
     /// <param name="port">The port to listen on, from 1 to 65535.</param>
     /// <param name="window">How long to listen, more than zero and at most 30 seconds.</param>
     /// <param name="cancellationToken">Ends the enumeration with an <see cref="OperationCanceledException"/>.</param>
     /// <exception cref="ArgumentOutOfRangeException">An argument is out of range; thrown by the call itself.</exception>
+    /// <exception cref="System.Net.Sockets.SocketException">The port could not be bound; thrown by the enumeration.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken);
 }

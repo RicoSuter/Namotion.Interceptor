@@ -1,5 +1,8 @@
+using System.Net;
+using System.Net.Sockets;
 using HomeBlaze.Services.Discovery;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace HomeBlaze.Services.Tests.Discovery;
@@ -73,5 +76,136 @@ public class UdpDiscoveryTests
             {
             }
         });
+    }
+
+    [Fact]
+    public async Task WhenADatagramIsLongerThanTheLimit_ThenItIsSkippedAndTheNextIsYielded()
+    {
+        // Arrange
+        var port = GetFreePort();
+        await using var enumerator = CreateDiscovery().ListenAsync(port, UdpDiscovery.MaximumWindow, CancellationToken.None).GetAsyncEnumerator();
+
+        // Act
+        var moveNext = enumerator.MoveNextAsync();
+        Send(port, new byte[UdpDiscovery.MaximumDatagramLength * 2]);
+        Send(port, new byte[UdpDiscovery.MaximumDatagramLength + 1]);
+        Send(port, [1, 2, 3]);
+        var hasDatagram = await moveNext.AsTask().WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.True(hasDatagram);
+        Assert.Equal([1, 2, 3], enumerator.Current.Payload.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenAnEmptyDatagramArrives_ThenItIsYieldedWithItsSenderAddress()
+    {
+        // Arrange
+        var port = GetFreePort();
+        await using var enumerator = CreateDiscovery().ListenAsync(port, UdpDiscovery.MaximumWindow, CancellationToken.None).GetAsyncEnumerator();
+
+        // Act
+        var moveNext = enumerator.MoveNextAsync();
+        Send(port, []);
+        var hasDatagram = await moveNext.AsTask().WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.True(hasDatagram);
+        Assert.Equal(0, enumerator.Current.Payload.Length);
+        Assert.Equal(IPAddress.Loopback, enumerator.Current.SenderAddress);
+    }
+
+    [Fact]
+    public async Task WhenTheWindowEnds_ThenTheEnumerationEndsNormally()
+    {
+        // Arrange
+        var port = GetFreePort();
+
+        // Act
+        var datagrams = await CreateDiscovery().ListenAsync(port, TimeSpan.FromMilliseconds(50), CancellationToken.None)
+            .ToListAsync().AsTask().WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Empty(datagrams);
+    }
+
+    [Fact]
+    public async Task WhenTheCallerCancelsWhileReceiving_ThenTheEnumerationThrows()
+    {
+        // Arrange
+        var port = GetFreePort();
+        using var cancellation = new CancellationTokenSource();
+        await using var enumerator = CreateDiscovery().ListenAsync(port, UdpDiscovery.MaximumWindow, cancellation.Token).GetAsyncEnumerator();
+        var moveNext = enumerator.MoveNextAsync();
+
+        // Act
+        await cancellation.CancelAsync();
+
+        // Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => moveNext.AsTask().WaitAsync(TestTimeouts.Default));
+    }
+
+    [Fact]
+    public async Task WhenMoreDatagramsThanTheLimitArrive_ThenTheEnumerationEndsAtTheLimit()
+    {
+        // Arrange
+        var port = GetFreePort();
+        var count = 0;
+
+        // Act
+        var listening = Task.Run(async () =>
+        {
+            // Lockstep: each datagram is sent once the one before was received, so none overflows the receive buffer.
+            await using var enumerator = CreateDiscovery().ListenAsync(port, UdpDiscovery.MaximumWindow, CancellationToken.None).GetAsyncEnumerator();
+            var moveNext = enumerator.MoveNextAsync();
+            Send(port, [0]);
+            while (await moveNext)
+            {
+                count++;
+                moveNext = enumerator.MoveNextAsync();
+                Send(port, [0]);
+            }
+        });
+        await listening.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(UdpDiscovery.MaximumDatagrams, count);
+    }
+
+    [Fact]
+    public async Task WhenAnotherSocketHoldsThePortWithoutAddressReuse_ThenTheEnumerationThrows()
+    {
+        // Arrange
+        using var holder = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        if (OperatingSystem.IsWindows())
+        {
+            // Windows lets address reuse bind over a socket that does not demand exclusive use.
+            holder.ExclusiveAddressUse = true;
+        }
+
+        holder.Bind(new IPEndPoint(IPAddress.Any, 0));
+        var port = ((IPEndPoint)holder.LocalEndPoint!).Port;
+
+        // Act & Assert
+        await Assert.ThrowsAsync<SocketException>(async () =>
+            await CreateDiscovery().ListenAsync(port, UdpDiscovery.MaximumWindow, CancellationToken.None)
+                .ToListAsync().AsTask().WaitAsync(TestTimeouts.Default));
+    }
+
+    private static int GetFreePort()
+    {
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        socket.Bind(new IPEndPoint(IPAddress.Any, 0));
+        return ((IPEndPoint)socket.LocalEndPoint!).Port;
+    }
+
+    /// <summary>
+    /// Sends a datagram to the loopback address. A listening enumeration has bound its socket once its first
+    /// <c>MoveNextAsync</c> returned, as an async iterator runs synchronously up to its first pending receive.
+    /// </summary>
+    private static void Send(int port, byte[] payload)
+    {
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        socket.SendTo(payload, new IPEndPoint(IPAddress.Loopback, port));
     }
 }

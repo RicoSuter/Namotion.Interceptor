@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions.Discovery;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -161,9 +162,23 @@ public class MyStromSwitchDiscoveryTests
     /// <summary>
     /// Yields the datagrams it was created with to every listener and records the ports listened to.
     /// </summary>
+    [Fact]
+    public async Task WhenTheAnnouncementPortCannotBeBound_ThenTheSearchFails()
+    {
+        // Arrange
+        ISubjectDiscovery discovery = new MyStromSwitchDiscovery(
+            new FakeUdpDiscovery { ListenException = new SocketException((int)SocketError.AddressAlreadyInUse) });
+
+        // Act & Assert
+        await Assert.ThrowsAsync<SocketException>(async () => await discovery.DiscoverAsync(CancellationToken.None).ToListAsync());
+    }
+
     private sealed class FakeUdpDiscovery(params UdpDatagram[] datagrams) : IUdpDiscovery
     {
         public List<int> ListenedPorts { get; } = [];
+
+        /// <summary>Thrown by the enumeration of <see cref="ListenAsync"/>, as a port that cannot be bound is.</summary>
+        public Exception? ListenException { get; init; }
 
         public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
@@ -176,6 +191,12 @@ public class MyStromSwitchDiscoveryTests
 
         private async IAsyncEnumerable<UdpDatagram> YieldAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
+            if (ListenException is not null)
+            {
+                await Task.Yield();
+                throw ListenException;
+            }
+
             foreach (var datagram in datagrams)
             {
                 cancellationToken.ThrowIfCancellationRequested();

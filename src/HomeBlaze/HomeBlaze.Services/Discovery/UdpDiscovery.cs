@@ -91,11 +91,6 @@ internal sealed class UdpDiscovery : IUdpDiscovery
     {
         cancellationToken.ThrowIfCancellationRequested();
         using var socket = OpenListeningSocket(port);
-        if (socket is null)
-        {
-            yield break;
-        }
-
         using var windowSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         windowSource.CancelAfter(window);
         await foreach (var datagram in ReceiveAsync(socket, port, windowSource.Token))
@@ -139,28 +134,20 @@ internal sealed class UdpDiscovery : IUdpDiscovery
         }
     }
 
-    /// <returns>A socket bound to <paramref name="port"/>, or null when it could not be bound.</returns>
-    private Socket? OpenListeningSocket(int port)
+    /// <exception cref="SocketException">The port could not be bound.</exception>
+    private static Socket OpenListeningSocket(int port)
     {
-        Socket? socket = null;
+        var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         try
         {
-            socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-
             // Takes effect only when set before binding.
             socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             socket.Bind(new IPEndPoint(IPAddress.Any, port));
             return socket;
         }
-        catch (SocketException exception)
-        {
-            socket?.Dispose();
-            _logger.LogDebug(exception, "The UDP port {Port} could not be bound.", port);
-            return null;
-        }
         catch
         {
-            socket?.Dispose();
+            socket.Dispose();
             throw;
         }
     }
