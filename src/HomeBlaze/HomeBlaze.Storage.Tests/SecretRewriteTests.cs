@@ -149,6 +149,30 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAJsonFileWithAPlaintextSecretHasAKeyTheTypeDoesNotKnow_ThenTheConditionalSaveWritesNothingAndLogsTheKey()
+    {
+        // Arrange
+        SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+        var content = $$"""{ "$type": "{{DeviceType}}", "hostAdress": "10.0.0.1", "password": "s3cr3t" }""";
+        WriteFile("Gateway.json", content);
+        var messages = new ConcurrentQueue<string>();
+        var storage = CreateStorage(logger: new RecordingLogger(messages));
+        await storage.ConnectAsync(CancellationToken.None);
+        var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
+        var hash = StorageHash.Compute(File.ReadAllBytes(GetFullPath("Gateway.json")));
+        messages.Clear();
+
+        // Act
+        var isWritten = await storage.WriteConfigurationAsync(device, hash, CancellationToken.None);
+
+        // Assert
+        Assert.False(isWritten);
+        Assert.Equal(content, File.ReadAllText(GetFullPath("Gateway.json")));
+        Assert.Contains(messages, message => message.Contains("Gateway.json") && message.Contains("hostAdress"));
+        Assert.DoesNotContain(messages, message => message.Contains("s3cr3t") || message.Contains("10.0.0.1"));
+    }
+
+    [Fact]
     public async Task WhenABlockArgumentOfAPageHoldsAPlaintextSecret_ThenOnlyItIsReplacedByAReference()
     {
         // Arrange
