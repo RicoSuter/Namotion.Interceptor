@@ -11,7 +11,7 @@ namespace HomeBlaze.Services.Secrets;
 /// <summary>
 /// Turns the values of secret configuration properties into references to the <see cref="SecretStore"/> when they are
 /// written, and references back into values when they are read. Remembers the key of each property of each subject, so
-/// that an unchanged value keeps its key.
+/// that a secret keeps its key when its value changes.
 /// </summary>
 internal sealed class SecretReferences
 {
@@ -104,7 +104,8 @@ internal sealed class SecretReferences
 
     /// <summary>
     /// Gives the JSON value to write for the value of a secret property: a reference for a value other than null or
-    /// empty, which is stored under a new key unless its remembered key holds it already.
+    /// empty. The value is stored under the remembered key of the property, or under a new key when there is none, unless
+    /// that key holds it already.
     /// </summary>
     /// <exception cref="IOException">The store cannot be written.</exception>
     public object? Write(object owner, string propertyName, object? value)
@@ -117,9 +118,26 @@ internal sealed class SecretReferences
             return text is null && remembered is { IsUnresolved: true } unresolved ? unresolved.Reference : text;
         }
 
-        if (remembered is { IsUnresolved: false } resolved && _store.TryGet(resolved.Key, out var stored) && stored == text)
+        if (remembered is { } known)
         {
-            return resolved.Reference;
+            if (!_store.TryGet(known.Key, out var stored) || stored != text)
+            {
+                if (t_isDryRun)
+                {
+                    t_hasUnstored = true;
+                    return text;
+                }
+
+                _store.Set(known.Key, text);
+            }
+
+            if (known.IsUnresolved)
+            {
+                // Only when unchanged: a concurrent read may have remembered another key since.
+                keys!.TryUpdate(propertyName, known with { IsUnresolved = false }, known);
+            }
+
+            return known.Reference;
         }
 
         if (t_isDryRun)
@@ -135,8 +153,8 @@ internal sealed class SecretReferences
     }
 
     /// <summary>
-    /// Runs <paramref name="serialize"/> without storing anything and returns whether it found a secret value that has
-    /// no stored key, such as one read as plaintext.
+    /// Runs <paramref name="serialize"/> without storing anything and returns whether it found a secret value that its
+    /// key does not hold yet, such as one read as plaintext or a changed one.
     /// </summary>
     public bool HasUnstoredSecrets(Action serialize)
     {

@@ -55,24 +55,42 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
-    public void WhenASecretChanges_ThenItGetsANewKeyAndTheOldEntryStays()
+    public void WhenASecretChanges_ThenItKeepsItsKeyAndTheStoreHoldsTheNewValue()
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
         var device = Deserialize(serializer, DeviceJson(password: null));
         device.Password = "hunter2";
-        var oldKey = KeyOf(ReadString(serializer.Serialize(device), "password"));
+        var oldReference = ReadString(serializer.Serialize(device), "password");
         device.Password = "correct horse";
 
         // Act
-        var newKey = KeyOf(ReadString(serializer.Serialize(device), "password"));
+        var newReference = ReadString(serializer.Serialize(device), "password");
 
         // Assert
-        Assert.NotEqual(oldKey, newKey);
-        Assert.True(store.TryGet(oldKey, out var oldValue));
-        Assert.Equal("hunter2", oldValue);
-        Assert.True(store.TryGet(newKey, out var newValue));
-        Assert.Equal("correct horse", newValue);
+        Assert.Equal(oldReference, newReference);
+        Assert.True(store.TryGet(KeyOf(newReference), out var value));
+        Assert.Equal("correct horse", value);
+        Assert.Single(JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(StorePath))!);
+    }
+
+    [Fact]
+    public void WhenASecretChanges_ThenItIsReportedAsUnstoredWithoutStoringIt()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        var device = Deserialize(serializer, DeviceJson(password: null));
+        device.Password = "hunter2";
+        var key = KeyOf(ReadString(serializer.Serialize(device), "password"));
+        device.Password = "correct horse";
+
+        // Act
+        var hasUnstoredSecrets = serializer.HasUnstoredSecrets(device);
+
+        // Assert
+        Assert.True(hasUnstoredSecrets);
+        Assert.True(store.TryGet(key, out var value));
+        Assert.Equal("hunter2", value);
     }
 
     [Fact]
@@ -296,7 +314,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
-    public void WhenAMissingReferenceIsEnteredAgain_ThenTheNewValueGetsANewKey()
+    public void WhenAMissingReferenceIsEnteredAgain_ThenTheValueIsStoredUnderTheSameKey()
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
@@ -308,9 +326,25 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         var key = KeyOf(ReadString(serializer.Serialize(device), "password"));
 
         // Assert
-        Assert.NotEqual(missingKey, key);
+        Assert.Equal(missingKey, key);
         Assert.True(store.TryGet(key, out var value));
         Assert.Equal("hunter2", value);
+    }
+
+    [Fact]
+    public void WhenAMissingReferenceIsEnteredAgain_ThenItIsReportedAsUnstored()
+    {
+        // Arrange
+        var (serializer, _) = CreateSerializer();
+        var device = Deserialize(serializer, DeviceJson(Prefix + "0123456789abcdef0123456789abcdef"));
+        device.Password = "hunter2";
+
+        // Act
+        var hasUnstoredSecrets = serializer.HasUnstoredSecrets(device);
+
+        // Assert
+        Assert.True(hasUnstoredSecrets);
+        Assert.False(File.Exists(StorePath));
     }
 
     [Fact]
