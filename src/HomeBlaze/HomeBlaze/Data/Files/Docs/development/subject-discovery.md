@@ -16,9 +16,10 @@ A result describes one found device. It is a record of your own that implements 
 ```csharp
 public interface IDiscoveryResult
 {
-    /// <summary>Unique within the subject discovery that returned it.</summary>
+    /// <summary>Identifies the device within the subject discovery that found it, the same in every scan.</summary>
     string Key { get; }
 
+    /// <summary>The name the user is shown for the device.</summary>
     string DisplayName { get; }
 
     /// <summary>A second line for the user, such as the host address, or null.</summary>

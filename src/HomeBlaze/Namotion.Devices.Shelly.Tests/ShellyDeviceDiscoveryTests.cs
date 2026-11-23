@@ -90,7 +90,7 @@ public class ShellyDeviceDiscoveryTests
     }
 
     [Fact]
-    public void WhenAServiceHasNoHostName_ThenItIsSkipped()
+    public void WhenAnInstanceHasNoHostName_ThenItIsSkipped()
     {
         // Arrange
         var instances = new[]
