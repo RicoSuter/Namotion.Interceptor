@@ -28,7 +28,7 @@ public sealed record SubjectSetupOptions
     /// stays on the configure page; a subject that has no parent after the callback threw is discarded later.
     /// It requires <see cref="NameField"/> and must not be set together with <see cref="BeforeSave"/>.
     /// </remarks>
-    public Func<CreateSubjectResult, CancellationToken, Task>? OnCreatedAsync { get; init; }
+    public Func<CreateSubjectResult, Task>? OnCreatedAsync { get; init; }
 
     /// <summary>
     /// How the dialog asks for the name, or null when the created subject has no name of its own.

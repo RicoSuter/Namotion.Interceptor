@@ -1717,7 +1717,7 @@ namespace HomeBlaze.Components.Dialogs
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback OnNavigating { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback<HomeBlaze.Abstractions.Discovery.DiscoveredSubject> OnSelected { get; set; }
+        public Microsoft.AspNetCore.Components.EventCallback<HomeBlaze.Services.Discovery.DiscoveredSubject> OnSelected { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.SubjectTypeDescriptor> Types { get; set; }
@@ -1764,7 +1764,7 @@ namespace HomeBlaze.Components.Dialogs
         public SubjectSetupOptions() { }
         public System.Action<Namotion.Interceptor.IInterceptorSubject>? BeforeSave { get; init; }
         public HomeBlaze.Components.Dialogs.SubjectNameOptions? NameField { get; init; }
-        public System.Func<HomeBlaze.Storage.Abstractions.CreateSubjectResult, System.Threading.CancellationToken, System.Threading.Tasks.Task>? OnCreatedAsync { get; init; }
+        public System.Func<HomeBlaze.Storage.Abstractions.CreateSubjectResult, System.Threading.Tasks.Task>? OnCreatedAsync { get; init; }
         public System.Type? Type { get; init; }
     }
     public class SubjectTypePicker : Microsoft.AspNetCore.Components.ComponentBase

@@ -25,7 +25,7 @@ public class ShellyDeviceDiscoveryTests
             properties["app"] = application;
         }
 
-        return new MulticastDnsServiceInstance(instanceName, hostName, 80, [IPAddress.Parse(address)], properties);
+        return new MulticastDnsServiceInstance(instanceName, hostName, [IPAddress.Parse(address)], properties);
     }
 
     [Fact]

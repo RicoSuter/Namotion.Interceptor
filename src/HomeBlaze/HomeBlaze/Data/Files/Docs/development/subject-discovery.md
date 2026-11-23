@@ -116,11 +116,11 @@ public interface IMulticastDnsBrowser
 }
 
 public sealed record MulticastDnsServiceInstance(
-    string InstanceName, string? HostName, int Port, IReadOnlyList<IPAddress> Addresses, IReadOnlyDictionary<string, string> Properties);
+    string InstanceName, string? HostName, IReadOnlyList<IPAddress> Addresses, IReadOnlyDictionary<string, string> Properties);
 ```
 
 - `ISsdpSearch.SearchAsync` sends an M-SEARCH for the search target, such as `urn:dslforum-org:device:InternetGatewayDevice:1`, listens for about 3 seconds and returns the answers for exactly that target.
-- `IMulticastDnsBrowser.BrowseAsync` browses a service type, such as `_hue._tcp`, and returns each instance with its host name, port, addresses and TXT records in `Properties`.
+- `IMulticastDnsBrowser.BrowseAsync` browses a service type, such as `_hue._tcp`, and returns each instance with its host name, addresses and TXT records in `Properties`.
 - What one query returns is capped, see [the Subject Discovery design](../architecture/design/discovery.md#scan-session-and-services).
 
 ## Your own I/O

@@ -17,7 +17,7 @@ public class SubjectSetupOptionsTests
         var options = new SubjectSetupOptions
         {
             BeforeSave = _ => { },
-            OnCreatedAsync = (_, _) => Task.CompletedTask,
+            OnCreatedAsync = _ => Task.CompletedTask,
             NameField = NameField
         };
 
@@ -33,7 +33,7 @@ public class SubjectSetupOptionsTests
         var dialogService = new Mock<IDialogService>(MockBehavior.Strict);
         var options = new SubjectSetupOptions
         {
-            OnCreatedAsync = (_, _) => Task.CompletedTask
+            OnCreatedAsync = _ => Task.CompletedTask
         };
 
         // Act & Assert

@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Components.Dialogs;
 using HomeBlaze.Components.Tests.Models;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Discovery;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;

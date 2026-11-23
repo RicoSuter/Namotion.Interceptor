@@ -10,7 +10,6 @@ public class HueBridgeDiscoveryTests
     private static MulticastDnsServiceInstance Announcement(string? bridgeId, string instanceName = "Philips Hue - 1A2B3C") => new(
         instanceName,
         "001788fffe1a2b3c.local",
-        443,
         [IPAddress.Parse("192.168.1.20")],
         bridgeId is null
             ? new Dictionary<string, string>()
