@@ -6,41 +6,18 @@ namespace HomeBlaze.Services.Tests.Discovery;
 public class SubjectDiscoveryTests
 {
     [Fact]
-    public async Task WhenAResultMatchesAnExistingSubject_ThenItCarriesThatSubject()
+    public async Task WhenTheScanYieldsResults_ThenTheInterfaceYieldsThemAsTheyAre()
     {
         // Arrange
-        var existing = new DiscoveryTestSubject { Address = "a" };
-        var otherType = new OtherDiscoveryTestSubject { Address = "b" };
-        ISubjectDiscovery discovery = new LambdaDiscovery<DiscoveryTestSubject>(
-            _ => TestScans.Yield(new TestDiscoveryResult("a"), new TestDiscoveryResult("b")),
-            (subject, result) => subject.Address == result.Key);
+        var first = new TestDiscoveryResult("a");
+        var again = new TestDiscoveryResult("a", "Same device again");
+        ISubjectDiscovery discovery = new LambdaDiscovery<DiscoveryTestSubject>(_ => TestScans.Yield(first, again));
 
         // Act
-        var discovered = await discovery
-            .DiscoverAsync([otherType, existing], CancellationToken.None)
-            .ToListAsync();
+        var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
 
         // Assert
-        Assert.Equal(2, discovered.Count);
-        Assert.Same(existing, discovered[0].ExistingSubject);
-        Assert.Null(discovered[1].ExistingSubject);
-        Assert.All(discovered, item => Assert.Equal(typeof(DiscoveryTestSubject), item.SubjectType));
-    }
-
-    [Fact]
-    public async Task WhenADeviceIsYieldedTwice_ThenItIsReportedOnce()
-    {
-        // Arrange
-        ISubjectDiscovery discovery = new LambdaDiscovery<DiscoveryTestSubject>(
-            _ => TestScans.Yield(new TestDiscoveryResult("a"), new TestDiscoveryResult("a", "Same device again")));
-
-        // Act
-        var discovered = await discovery
-            .DiscoverAsync([], CancellationToken.None)
-            .ToListAsync();
-
-        // Assert
-        var single = Assert.Single(discovered);
-        Assert.Equal("Device", single.Result.DisplayName);
+        Assert.Equal([first, again], results);
+        Assert.Equal(typeof(DiscoveryTestSubject), discovery.SubjectType);
     }
 }

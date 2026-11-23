@@ -23,9 +23,6 @@ public sealed class ShellyDeviceDiscovery(IMulticastDnsBrowser multicastDnsBrows
         }
     }
 
-    /// <inheritdoc />
-    protected override bool Matches(ShellyDevice existing, ShellyDiscoveredDevice result) => IsSameDevice(existing, result);
-
     internal static IReadOnlyList<ShellyDiscoveredDevice> ToDevices(IReadOnlyList<MulticastDnsServiceInstance> instances)
     {
         // A device announces two instances on the same host, one named by its device ID and one by its user-given
@@ -72,22 +69,6 @@ public sealed class ShellyDeviceDiscovery(IMulticastDnsBrowser multicastDnsBrows
         }
 
         return devices;
-    }
-
-    internal static bool IsSameDevice(ShellyDevice existing, ShellyDiscoveredDevice result)
-    {
-        // The ID the running subject read from the device wins over the stored one, which can be stale after the
-        // device at the host address was replaced, and covers a subject created before discovery stored an ID.
-        var readDeviceId = existing.DeviceInfo?.Id;
-        var storedDeviceId = existing.DeviceId;
-        var deviceId =
-            !string.IsNullOrWhiteSpace(readDeviceId) ? readDeviceId :
-            !string.IsNullOrWhiteSpace(storedDeviceId) ? storedDeviceId.Trim() :
-            null;
-
-        return deviceId is not null
-            ? string.Equals(deviceId, result.DeviceId, StringComparison.OrdinalIgnoreCase)
-            : string.Equals(existing.HostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <returns>The device ID from the SRV target, or null when the instance has none.</returns>

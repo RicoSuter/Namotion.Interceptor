@@ -44,8 +44,10 @@ public sealed class SubjectDiscoveryService
 
     /// <summary>
     /// Runs the subject discoveries of <paramref name="subjectTypes"/> in parallel and reports what they find, until
-    /// all have completed or <see cref="ScanTimeout"/> has passed. A subject discovery that throws is logged and
-    /// reported to <paramref name="onFailure"/> with its subject type; the others carry on.
+    /// all have completed or <see cref="ScanTimeout"/> has passed. Each device is reported once per subject discovery,
+    /// with the first of <paramref name="existingSubjects"/> that its result matches. A subject discovery that throws,
+    /// or whose result throws from <see cref="IDiscoveryResult.Matches"/>, is logged and reported to
+    /// <paramref name="onFailure"/> with its subject type; the others carry on.
     /// </summary>
     /// <remarks>
     /// The callbacks run on thread pool threads, one at a time, and must neither block nor throw. None runs once the
@@ -97,8 +99,19 @@ public sealed class SubjectDiscoveryService
     {
         try
         {
-            await foreach (var discovered in discovery.DiscoverAsync(existingSubjects, cancellationToken))
+            var subjectType = discovery.SubjectType;
+            var candidates = existingSubjects.Where(subjectType.IsInstanceOfType).ToArray();
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            await foreach (var result in discovery.DiscoverAsync(cancellationToken))
             {
+                // A device that answers on several adapters, or to several queries, is listed once.
+                if (!keys.Add(result.Key))
+                {
+                    continue;
+                }
+
+                // Outside the reporter's lock, as Matches is implementer code.
+                var discovered = new DiscoveredSubject(subjectType, result, FindExistingSubject(candidates, result));
                 if (!reporter.TryReportResult(discovered))
                 {
                     break;
@@ -119,6 +132,19 @@ public sealed class SubjectDiscoveryService
             _logger.LogWarning(exception, "The subject discovery {Discovery} failed.", discovery.GetType());
             reporter.ReportFailure(discovery.SubjectType);
         }
+    }
+
+    private static IInterceptorSubject? FindExistingSubject(IInterceptorSubject[] candidates, IDiscoveryResult result)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (result.Matches(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

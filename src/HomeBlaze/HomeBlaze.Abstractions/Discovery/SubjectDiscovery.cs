@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Abstractions.Discovery;
@@ -18,46 +17,16 @@ namespace HomeBlaze.Abstractions.Discovery;
 /// <typeparam name="TResult">The type of result that describes a found device.</typeparam>
 public abstract class SubjectDiscovery<TSubject, TResult> : ISubjectDiscovery
     where TSubject : class, IInterceptorSubject
-    where TResult : class, IDiscoveryResult
+    where TResult : class, IDiscoveryResult<TSubject>
 {
     Type ISubjectDiscovery.SubjectType => typeof(TSubject);
 
-    async IAsyncEnumerable<DiscoveredSubject> ISubjectDiscovery.DiscoverAsync(
-        IReadOnlyCollection<IInterceptorSubject> existingSubjects,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        var candidates = existingSubjects.OfType<TSubject>().ToArray();
-        var keys = new HashSet<string>(StringComparer.Ordinal);
-        await foreach (var result in DiscoverAsync(cancellationToken))
-        {
-            // A device that answers on several adapters, or to several queries, is listed once.
-            if (!keys.Add(result.Key))
-            {
-                continue;
-            }
-
-            TSubject? existingSubject = null;
-            foreach (var candidate in candidates)
-            {
-                if (Matches(candidate, result))
-                {
-                    existingSubject = candidate;
-                    break;
-                }
-            }
-
-            yield return new DiscoveredSubject(typeof(TSubject), result, existingSubject);
-        }
-    }
+    IAsyncEnumerable<IDiscoveryResult> ISubjectDiscovery.DiscoverAsync(CancellationToken cancellationToken) =>
+        DiscoverAsync(cancellationToken);
 
     /// <summary>
     /// Scans and yields each device as soon as it is known. A device may be yielded more than once.
     /// </summary>
     /// <param name="cancellationToken">Canceled when the scan is canceled or reaches its time limit.</param>
     protected abstract IAsyncEnumerable<TResult> DiscoverAsync(CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Whether <paramref name="existing"/> already represents the device of <paramref name="result"/>.
-    /// </summary>
-    protected abstract bool Matches(TSubject existing, TResult result);
 }

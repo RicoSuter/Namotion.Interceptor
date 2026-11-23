@@ -19,7 +19,7 @@ namespace Namotion.Devices.FritzBox;
 /// appear under the router.
 /// </param>
 public sealed record FritzBoxDiscoveryResult(string HostAddress, string? FriendlyName, string? Model, string? Udn, bool IsRepeater)
-    : IDiscoveryResult
+    : IDiscoveryResult<FritzBox>
 {
     /// <inheritdoc />
     public string Key => Udn ?? HostAddress;
@@ -32,6 +32,13 @@ public sealed record FritzBoxDiscoveryResult(string HostAddress, string? Friendl
 
     /// <inheritdoc />
     public IReadOnlyList<DiscoveredItem> IncludedItems { get; init; } = [];
+
+    /// <inheritdoc />
+    public bool Matches(FritzBox subject) =>
+        // The UDN recognizes a router that moved to another address; the host address one that was added without
+        // discovery, and a router that replaced it at the same address, which a stale stored UDN must not hide.
+        (Udn is not null && string.Equals(subject.Udn?.Trim(), Udn, StringComparison.OrdinalIgnoreCase)) ||
+        string.Equals(subject.HostAddress?.Trim(), HostAddress, StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -101,15 +108,6 @@ public sealed class FritzBoxDiscovery(ISsdpSearch ssdpSearch) : SubjectDiscovery
 
         return [router with { IncludedItems = repeaters }];
     }
-
-    /// <inheritdoc />
-    protected override bool Matches(FritzBox existing, FritzBoxDiscoveryResult result) => IsSameRouter(existing, result);
-
-    // The UDN recognizes a router that moved to another address; the host address one that was added without
-    // discovery, and a router that replaced it at the same address, which a stale stored UDN must not hide.
-    internal static bool IsSameRouter(FritzBox existing, FritzBoxDiscoveryResult result) =>
-        (result.Udn is not null && string.Equals(existing.Udn?.Trim(), result.Udn, StringComparison.OrdinalIgnoreCase)) ||
-        string.Equals(existing.HostAddress?.Trim(), result.HostAddress, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Searches with <paramref name="ssdpSearch"/> and asks <c>fritz.box</c> when that name resolves to an address on

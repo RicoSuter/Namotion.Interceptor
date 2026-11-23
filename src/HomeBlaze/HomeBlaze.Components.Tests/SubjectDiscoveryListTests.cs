@@ -1,6 +1,8 @@
 using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Components.Dialogs;
 using HomeBlaze.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor;
 using Xunit;
@@ -12,8 +14,9 @@ public class SubjectDiscoveryListTests
     private static readonly SubjectTypeDescriptor Hue = new(typeof(string), "Hue Bridge", null, "Lighting", "Hub");
     private static readonly SubjectTypeDescriptor Shelly = new(typeof(int), "Shelly device", null, "Switches", "Power");
 
-    private static DiscoveredSubject Found(SubjectTypeDescriptor descriptor, string name, IInterceptorSubject? existingSubject = null) =>
-        new(descriptor.Type, new FoundDevice(name), existingSubject);
+    private static DiscoveredSubject Found(
+        SubjectTypeDescriptor descriptor, string name, IInterceptorSubject? existingSubject = null, Func<IInterceptorSubject, bool>? isMatch = null) =>
+        new(descriptor.Type, new FoundDevice(name) { IsMatch = isMatch }, existingSubject);
 
     private static IEnumerable<string> Names(SubjectDiscoveryList list) =>
         list.Rows.Select(row => row.Discovered.Result.DisplayName);
@@ -64,7 +67,7 @@ public class SubjectDiscoveryListTests
         list.Add(Found(Hue, "Gamma"), Hue);
 
         // Act
-        list.MarkAdded(Found(Hue, "Alpha"), createdSubject);
+        list.MarkAdded(Found(Hue, "Alpha"), createdSubject, NullLogger.Instance);
 
         // Assert
         Assert.Equal(["Gamma", "Beta", "Alpha", "Zeta"], Names(list));
@@ -72,17 +75,102 @@ public class SubjectDiscoveryListTests
     }
 
     [Fact]
-    public void WhenNoRowHasTheTypeAndKey_ThenMarkAddedChangesNothing()
+    public void WhenNoRowHasTheTypeAndKeyAndNoneMatches_ThenMarkAddedChangesNothing()
     {
         // Arrange
         var list = new SubjectDiscoveryList();
         list.Add(Found(Hue, "Alpha"), Hue);
 
         // Act
-        list.MarkAdded(Found(Shelly, "Alpha"), Mock.Of<IInterceptorSubject>());
+        list.MarkAdded(Found(Shelly, "Alpha"), Mock.Of<IInterceptorSubject>(), NullLogger.Instance);
 
         // Assert
         Assert.Null(Assert.Single(list.Rows).Discovered.ExistingSubject);
+    }
+
+    [Fact]
+    public void WhenTheCreatedSubjectMatchesOtherRows_ThenTheyAreMarkedAddedAsWell()
+    {
+        // Arrange
+        var list = new SubjectDiscoveryList();
+        var createdSubject = Mock.Of<IInterceptorSubject>();
+        var askedSubjects = new List<IInterceptorSubject>();
+        bool MatchesCreated(IInterceptorSubject subject)
+        {
+            askedSubjects.Add(subject);
+            return true;
+        }
+
+        list.Add(Found(Hue, "Alpha"), Hue);
+        list.Add(Found(Hue, "Alpha 2", isMatch: MatchesCreated), Hue);
+        list.Add(Found(Shelly, "Beta", isMatch: _ => false), Shelly);
+        list.Add(Found(Shelly, "Gamma", isMatch: MatchesCreated), Shelly);
+
+        // Act
+        list.MarkAdded(Found(Hue, "Alpha"), createdSubject, NullLogger.Instance);
+
+        // Assert
+        Assert.Equal(["Beta", "Alpha", "Alpha 2", "Gamma"], Names(list));
+        Assert.Null(list.Rows[0].Discovered.ExistingSubject);
+        Assert.All(list.Rows.Skip(1), row => Assert.Same(createdSubject, row.Discovered.ExistingSubject));
+        Assert.Equal([createdSubject, createdSubject], askedSubjects);
+    }
+
+    [Fact]
+    public void WhenTheCreatedSubjectDoesNotMatchThePickedRow_ThenThePickedRowIsMarkedAddedAnyway()
+    {
+        // Arrange
+        var list = new SubjectDiscoveryList();
+        var createdSubject = Mock.Of<IInterceptorSubject>();
+        list.Add(Found(Hue, "Alpha", isMatch: _ => false), Hue);
+        list.Add(Found(Hue, "Beta"), Hue);
+
+        // Act
+        list.MarkAdded(Found(Hue, "Alpha"), createdSubject, NullLogger.Instance);
+
+        // Assert
+        Assert.Equal(["Beta", "Alpha"], Names(list));
+        Assert.Same(createdSubject, list.Rows[1].Discovered.ExistingSubject);
+    }
+
+    [Fact]
+    public void WhenARowIsAlreadyAdded_ThenItKeepsItsSubjectAndIsNotMatched()
+    {
+        // Arrange
+        var list = new SubjectDiscoveryList();
+        var existingSubject = Mock.Of<IInterceptorSubject>();
+        var createdSubject = Mock.Of<IInterceptorSubject>();
+        var isAsked = false;
+        list.Add(Found(Hue, "Alpha"), Hue);
+        list.Add(Found(Hue, "Beta", existingSubject, _ => isAsked = true), Hue);
+
+        // Act
+        list.MarkAdded(Found(Hue, "Alpha"), createdSubject, NullLogger.Instance);
+
+        // Assert
+        Assert.False(isAsked);
+        Assert.Same(existingSubject, list.Rows.Single(row => row.Discovered.Result.DisplayName == "Beta").Discovered.ExistingSubject);
+    }
+
+    [Fact]
+    public void WhenMatchesThrows_ThenItIsLoggedAndTheRowIsNotMarkedAdded()
+    {
+        // Arrange
+        var list = new SubjectDiscoveryList();
+        var createdSubject = Mock.Of<IInterceptorSubject>();
+        var logger = new RecordingLogger();
+        list.Add(Found(Hue, "Alpha"), Hue);
+        list.Add(Found(Hue, "Beta", isMatch: _ => throw new InvalidOperationException("The match failed.")), Hue);
+        list.Add(Found(Hue, "Gamma", isMatch: _ => true), Hue);
+
+        // Act
+        list.MarkAdded(Found(Hue, "Alpha"), createdSubject, logger);
+
+        // Assert
+        Assert.Equal(["Beta", "Alpha", "Gamma"], Names(list));
+        Assert.Null(list.Rows[0].Discovered.ExistingSubject);
+        Assert.Same(createdSubject, list.Rows[2].Discovered.ExistingSubject);
+        Assert.Equal([LogLevel.Debug], logger.Levels);
     }
 
     [Fact]
@@ -237,8 +325,27 @@ public class SubjectDiscoveryListTests
 
     private sealed record FoundDevice(string DisplayName, string? KeyOverride = null) : IDiscoveryResult
     {
+        public Func<IInterceptorSubject, bool>? IsMatch { get; init; }
+
         public string Key => KeyOverride ?? DisplayName;
 
         public string? Detail => null;
+
+        public bool Matches(IInterceptorSubject subject) => IsMatch?.Invoke(subject) ?? false;
+    }
+
+    private sealed class RecordingLogger : ILogger
+    {
+        public List<LogLevel> Levels { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            Levels.Add(logLevel);
+        }
     }
 }

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using HomeBlaze.Abstractions.Discovery;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Nuki.Client;
 using Namotion.Devices.Nuki.Tests.Testing;
 using Xunit;
@@ -163,9 +164,10 @@ public class NukiBridgeDiscoveryTests
     {
         // Arrange
         var result = new NukiDiscoveredBridge(2117604523, "192.168.1.50:8080");
+        using var bridge = new NukiBridge(NullLogger<NukiBridge>.Instance) { HostAddress = hostAddress };
 
         // Act
-        var isSame = NukiBridgeDiscovery.IsSameBridge(hostAddress, result);
+        var isSame = result.Matches(bridge);
 
         // Assert
         Assert.Equal(expected, isSame);
@@ -179,10 +181,10 @@ public class NukiBridgeDiscoveryTests
         ISubjectDiscovery discovery = new NukiBridgeDiscovery(new StubHttpClientFactory(json));
 
         // Act
-        var discovered = await discovery.DiscoverAsync([], CancellationToken.None).ToListAsync();
+        var results = await discovery.DiscoverAsync(CancellationToken.None).ToListAsync();
 
         // Assert
-        var bridge = Assert.IsType<NukiDiscoveredBridge>(Assert.Single(discovered).Result);
+        var bridge = Assert.IsType<NukiDiscoveredBridge>(Assert.Single(results));
         Assert.Equal("2117604523", bridge.Key);
         Assert.Equal("Nuki Bridge 2117604523", bridge.DisplayName);
         Assert.Equal("192.168.1.50:8080", bridge.Detail);
