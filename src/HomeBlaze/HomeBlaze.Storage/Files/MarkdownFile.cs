@@ -303,9 +303,16 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                     return;
                 }
 
-                if (await WriteBlockAsync(subjects[index], CancellationToken.None))
+                var result = await WriteBlockAsync(subjects[index], CancellationToken.None);
+                if (result == BlockWriteResult.Written)
                 {
                     _parser.LogMovedSecrets(FullPath);
+                }
+                else if (result == BlockWriteResult.NotWritten)
+                {
+                    // The mark only keeps the reload of a refused write from trying again. No reload followed here, so
+                    // the next parse that applies the configuration checks the subject again.
+                    ForgetSecretRewrite(subjects[index], forgetAppliedConfiguration: true);
                 }
             }
         }
@@ -321,16 +328,21 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
-    // Forgetting the applied configuration makes the next parse apply it again, which checks it again.
     private void ForgetSecretRewritesFrom(IReadOnlyList<IInterceptorSubject> subjects, int index, bool forgetAppliedConfigurations)
     {
         for (; index < subjects.Count; index++)
         {
-            _secretRewrites.Remove(subjects[index]);
-            if (forgetAppliedConfigurations)
-            {
-                _parser.ForgetAppliedConfiguration(subjects[index]);
-            }
+            ForgetSecretRewrite(subjects[index], forgetAppliedConfigurations);
+        }
+    }
+
+    // Forgetting the applied configuration makes the next parse apply it again, which checks it again.
+    private void ForgetSecretRewrite(IInterceptorSubject subject, bool forgetAppliedConfiguration)
+    {
+        _secretRewrites.Remove(subject);
+        if (forgetAppliedConfiguration)
+        {
+            _parser.ForgetAppliedConfiguration(subject);
         }
     }
 
@@ -628,7 +640,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         var write = BeginWrite();
         try
         {
-            return await WriteBlockAsync(subject, cancellationToken);
+            return await WriteBlockAsync(subject, cancellationToken) == BlockWriteResult.Written;
         }
         finally
         {
@@ -1200,13 +1212,13 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     // Under _writeLock: no other write of this file runs, so only a reload can change the snapshot meanwhile.
-    private async Task<bool> WriteBlockAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+    private async Task<BlockWriteResult> WriteBlockAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var snapshot = _parseResult;
         var blockIndex = FindBlock(snapshot.BlockSubjects, subject);
         if (snapshot.Page is not { } page || blockIndex < 0)
         {
-            return false;
+            return BlockWriteResult.NotWritten;
         }
 
         // The block spans index into the text the page was parsed from, which is the source of the
@@ -1223,10 +1235,19 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             ForgetAppliedConfigurations(page.AllBlocks[blockIndex], snapshot.BlockSubjects);
             ForgetAppliedBlocksAround(page, page.AllBlocks[blockIndex], snapshot.BlockSubjects);
             await ReloadAfterRefusalAsync(cancellationToken);
-            return false;
+            return BlockWriteResult.RefusedAndReloaded;
         }
 
-        return await PublishAndWriteAsync(snapshot, write, page.AllBlocks[blockIndex], ConfigurationChangedRefusal) is null;
+        return await PublishAndWriteAsync(snapshot, write, page.AllBlocks[blockIndex], ConfigurationChangedRefusal) is null
+            ? BlockWriteResult.Written
+            : BlockWriteResult.NotWritten;
+    }
+
+    private enum BlockWriteResult
+    {
+        Written,
+        NotWritten,
+        RefusedAndReloaded
     }
 
     // Under _writeLock, after a refusal. A failed read is logged, and the next pass of the storage reads the file again.
