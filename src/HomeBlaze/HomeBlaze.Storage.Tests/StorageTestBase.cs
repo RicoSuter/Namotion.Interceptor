@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Secrets;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Metadata;
@@ -42,6 +43,9 @@ public abstract class StorageTestBase : IDisposable
     /// <summary>The context of the storage connected last.</summary>
     protected IInterceptorSubjectContext? Context { get; private set; }
 
+    /// <summary>The file of a secret store for the storage created next, or null for a storage without one.</summary>
+    protected string? SecretsPath { get; set; }
+
     protected async Task<FluentStorageContainer> ConnectAsync(
         bool enableFileWatching = false,
         Action<FluentStorageContainer>? configure = null)
@@ -71,6 +75,11 @@ public abstract class StorageTestBase : IDisposable
         services.AddSingleton(typeProvider);
         services.AddSingleton(typeRegistry);
         services.AddSingleton(context);
+        if (SecretsPath is { } secretsPath)
+        {
+            services.AddSingleton(new SecretStore(secretsPath));
+        }
+
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();

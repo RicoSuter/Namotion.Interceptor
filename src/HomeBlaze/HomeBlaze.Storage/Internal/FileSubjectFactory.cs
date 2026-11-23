@@ -34,7 +34,7 @@ internal sealed class FileSubjectFactory
     /// <summary>
     /// Creates the subject of a file from the type that is registered for its extension, or a
     /// <see cref="GenericFile"/> when none is. The subject is not loaded. A JSON file is created from its text
-    /// with <see cref="CreateFromJson"/> instead.
+    /// with <see cref="CreateFromJson(IStorageContainer, string, string)"/> instead.
     /// </summary>
     /// <remarks>
     /// The constructor of a registered type takes the storage and the path, and after them services.
@@ -55,8 +55,18 @@ internal sealed class FileSubjectFactory
     /// or a <see cref="JsonFile"/> when the text is plain or invalid JSON. Logs the values that cannot be read, see
     /// <see cref="LogSkippedProperties"/>.
     /// </summary>
-    public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json)
+    public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json) =>
+        CreateFromJson(storage, path, json, out _);
+
+    /// <summary>
+    /// Creates the subject like <see cref="CreateFromJson(IStorageContainer, string, string)"/> and tells whether the
+    /// file holds a secret in plaintext that a save would move to the secret store. False when a value of the file
+    /// cannot be read, because a save would replace that value with its default.
+    /// </summary>
+    public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json, out bool hasUnstoredSecrets)
     {
+        hasUnstoredSecrets = false;
+
         // A configurable subject enters the context when it is created, which runs lifecycle handlers as an
         // assignment to the tree does. With the flow of the caller, work that a handler starts would count as
         // part of the work item that creates the subject, and its calls into the storage would be refused.
@@ -70,6 +80,7 @@ internal sealed class FileSubjectFactory
             if (_serializer.Deserialize(json, created: null, skipped.Add) is IInterceptorSubject subject)
             {
                 LogSkippedProperties(path, skipped);
+                hasUnstoredSecrets = skipped.Count == 0 && _serializer.HasUnstoredSecrets(subject);
                 return subject;
             }
         }

@@ -1,4 +1,5 @@
 using HomeBlaze.Services;
+using HomeBlaze.Services.Secrets;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
@@ -57,6 +58,65 @@ public class FileSubjectFactoryTests
         // Assert
         Assert.IsType<CallbackSubject>(subject);
         Assert.Contains(LogLevel.Warning, logger.Levels);
+    }
+
+    [Theory]
+    [InlineData("\"s3cr3t\"", true)]
+    [InlineData("null", false)]
+    public void WhenAJsonFileIsCreated_ThenItTellsWhetherItHoldsAPlaintextSecret(string password, bool expected)
+    {
+        // Arrange
+        var directory = Directory.CreateTempSubdirectory("homeblaze-secrets-");
+        try
+        {
+            var factory = CreateFactoryWithSecretStore(Path.Combine(directory.FullName, "Secrets.json"));
+            var json = $$"""{ "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "host": "10.0.0.1", "password": {{password}} }""";
+
+            // Act
+            factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out var hasUnstoredSecrets);
+
+            // Assert
+            Assert.Equal(expected, hasUnstoredSecrets);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void WhenAJsonFileWithAPlaintextSecretHasAValueThatCannotBeRead_ThenItIsNotReportedForARewrite()
+    {
+        // Arrange
+        var directory = Directory.CreateTempSubdirectory("homeblaze-secrets-");
+        try
+        {
+            var factory = CreateFactoryWithSecretStore(Path.Combine(directory.FullName, "Secrets.json"));
+            var json = $$"""{ "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "host": [1], "password": "s3cr3t" }""";
+
+            // Act
+            factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out var hasUnstoredSecrets);
+
+            // Assert
+            Assert.False(hasUnstoredSecrets);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    private static FileSubjectFactory CreateFactoryWithSecretStore(string secretsPath)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(new SecretStore(secretsPath));
+        var serviceProvider = services.BuildServiceProvider();
+        var typeProvider = new TypeProvider();
+        typeProvider.AddTypes([typeof(EmbeddedSecretDevice)]);
+        return new FileSubjectFactory(
+            new SubjectTypeRegistry(typeProvider),
+            new ConfigurableSubjectSerializer(typeProvider, serviceProvider),
+            serviceProvider);
     }
 
     private sealed class LevelRecordingLogger : ILogger

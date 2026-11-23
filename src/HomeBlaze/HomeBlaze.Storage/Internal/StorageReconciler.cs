@@ -716,13 +716,44 @@ internal sealed class StorageReconciler
 
     private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version)
     {
-        var subject = _subjectFactory.CreateFromJson(_storage, StoragePath.ToFullPath(path), json);
+        var subject = _subjectFactory.CreateFromJson(_storage, StoragePath.ToFullPath(path), json, out var hasUnstoredSecrets);
         if (subject is JsonFile file)
         {
             SetMetadata(file, version);
         }
+        else if (hasUnstoredSecrets)
+        {
+            ScheduleSecretRewrite(path, subject);
+        }
 
         return subject;
+    }
+
+    /// <summary>
+    /// Saves the subject of a file that holds a secret in plaintext, which moves the secret to the secret store. Queued
+    /// behind the work that runs now, because a save waits for the worker of the storage that runs this work.
+    /// </summary>
+    private void ScheduleSecretRewrite(string path, IInterceptorSubject subject)
+    {
+        using var suppressedFlow = ExecutionContext.IsFlowSuppressed() ? (AsyncFlowControl?)null : ExecutionContext.SuppressFlow();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (await _storage.WriteConfigurationAsync(subject, _connectionToken))
+                {
+                    _logger?.LogInformation("Moved the plaintext secrets of {Path} to the secret store.", path);
+                }
+            }
+            catch (OperationCanceledException) when (_connectionToken.IsCancellationRequested)
+            {
+                // The connection ended. The next connection reads the file again and moves the secrets then.
+            }
+            catch (Exception exception)
+            {
+                _logger?.LogWarning(exception, "The plaintext secrets of {Path} could not be moved to the secret store and stay in the file until it is saved.", path);
+            }
+        });
     }
 
     /// <summary>
@@ -806,6 +837,12 @@ internal sealed class StorageReconciler
                 // Replaced rather than updated: a key that the file no longer has gets its default, as after a restart.
                 _serializer.ReplaceConfiguration(entry.Subject, json, skipped.Add);
                 _subjectFactory.LogSkippedProperties(entry.Path, skipped);
+
+                // Not with a skipped value, which the save would replace with its default.
+                if (skipped.Count == 0 && _serializer.HasUnstoredSecrets(entry.Subject))
+                {
+                    ScheduleSecretRewrite(entry.Path, entry.Subject);
+                }
             }
 
             await configurable.ApplyConfigurationAsync(cancellationToken);
