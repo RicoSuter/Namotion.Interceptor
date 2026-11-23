@@ -9,8 +9,10 @@ using Moq;
 
 namespace HomeBlaze.Storage.Tests;
 
-public class FileSubjectFactoryTests
+public class FileSubjectFactoryTests : IDisposable
 {
+    private readonly DirectoryInfo _secretsDirectory = Directory.CreateTempSubdirectory("homeblaze-secrets-");
+
     [Theory]
     [InlineData("[1, 2, 3]")]
     [InlineData("42")]
@@ -66,100 +68,57 @@ public class FileSubjectFactoryTests
     public void WhenAJsonFileIsCreated_ThenItTellsWhetherItHoldsAPlaintextSecret(string password, bool expected)
     {
         // Arrange
-        var directory = Directory.CreateTempSubdirectory("homeblaze-secrets-");
-        try
-        {
-            var factory = CreateFactoryWithSecretStore(Path.Combine(directory.FullName, "Secrets.json"));
-            var json = $$"""{ "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "host": "10.0.0.1", "password": {{password}} }""";
+        var factory = CreateFactoryWithSecretStore();
+        var json = $$"""{ "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "host": "10.0.0.1", "password": {{password}} }""";
 
-            // Act
-            factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out var hasUnstoredSecrets);
+        // Act
+        factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out var shouldMoveSecrets);
 
-            // Assert
-            Assert.Equal(expected, hasUnstoredSecrets);
-        }
-        finally
-        {
-            directory.Delete(recursive: true);
-        }
+        // Assert
+        Assert.Equal(expected, shouldMoveSecrets);
     }
 
     [Fact]
-    public void WhenAJsonFileWithAPlaintextSecretHasAValueThatCannotBeRead_ThenItIsNotReportedForARewrite()
+    public void WhenAJsonFileWithAPlaintextSecretHasAValueThatCannotBeRead_ThenItIsNotReportedAndAWarningTellsThatTheSecretStaysInTheFile()
     {
         // Arrange
-        var directory = Directory.CreateTempSubdirectory("homeblaze-secrets-");
-        try
-        {
-            var factory = CreateFactoryWithSecretStore(Path.Combine(directory.FullName, "Secrets.json"));
-            var json = $$"""{ "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "host": [1], "password": "s3cr3t" }""";
+        var logger = new LevelRecordingLogger();
+        var factory = CreateFactoryWithSecretStore(logger);
+        var json = $$"""{ "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "host": [1], "password": "s3cr3t" }""";
 
-            // Act
-            factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out var hasUnstoredSecrets);
+        // Act
+        factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out var shouldMoveSecrets);
 
-            // Assert
-            Assert.False(hasUnstoredSecrets);
-        }
-        finally
-        {
-            directory.Delete(recursive: true);
-        }
-    }
-
-    [Fact]
-    public void WhenAJsonFileWithAPlaintextSecretHasAValueThatCannotBeRead_ThenAWarningTellsThatTheSecretStaysInTheFile()
-    {
-        // Arrange
-        var directory = Directory.CreateTempSubdirectory("homeblaze-secrets-");
-        try
-        {
-            var logger = new LevelRecordingLogger();
-            var factory = CreateFactoryWithSecretStore(Path.Combine(directory.FullName, "Secrets.json"), logger);
-            var json = $$"""{ "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "host": [1], "password": "s3cr3t" }""";
-
-            // Act
-            factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out _);
-
-            // Assert
-            Assert.Contains(logger.Messages, message => message.Contains("/Gateway.json") && message.Contains("plaintext"));
-            Assert.DoesNotContain(logger.Messages, message => message.Contains("s3cr3t"));
-        }
-        finally
-        {
-            directory.Delete(recursive: true);
-        }
+        // Assert
+        Assert.False(shouldMoveSecrets);
+        Assert.Contains(logger.Messages, message => message.Contains("/Gateway.json") && message.Contains("plaintext"));
+        Assert.DoesNotContain(logger.Messages, message => message.Contains("s3cr3t"));
     }
 
     [Fact]
     public void WhenCheckingAJsonFileForPlaintextSecretsFails_ThenTheSubjectIsCreatedAndAWarningIsLogged()
     {
         // Arrange
-        var directory = Directory.CreateTempSubdirectory("homeblaze-secrets-");
-        try
-        {
-            var logger = new LevelRecordingLogger();
-            var factory = CreateFactoryWithSecretStore(Path.Combine(directory.FullName, "Secrets.json"), logger);
-            var json = $$"""{ "$type": "{{typeof(UnserializableSecretDevice).FullName}}", "value": {}, "password": "s3cr3t" }""";
+        var logger = new LevelRecordingLogger();
+        var factory = CreateFactoryWithSecretStore(logger);
+        var json = $$"""{ "$type": "{{typeof(UnserializableSecretDevice).FullName}}", "value": {}, "password": "s3cr3t" }""";
 
-            // Act
-            var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out var hasUnstoredSecrets);
+        // Act
+        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out var shouldMoveSecrets);
 
-            // Assert
-            Assert.IsType<UnserializableSecretDevice>(subject);
-            Assert.False(hasUnstoredSecrets);
-            Assert.Contains(logger.Messages, message => message.Contains("/Gateway.json") && message.Contains("plaintext"));
-            Assert.DoesNotContain(logger.Messages, message => message.Contains("s3cr3t"));
-        }
-        finally
-        {
-            directory.Delete(recursive: true);
-        }
+        // Assert
+        Assert.IsType<UnserializableSecretDevice>(subject);
+        Assert.False(shouldMoveSecrets);
+        Assert.Contains(logger.Messages, message => message.Contains("/Gateway.json") && message.Contains("plaintext"));
+        Assert.DoesNotContain(logger.Messages, message => message.Contains("s3cr3t"));
     }
 
-    private static FileSubjectFactory CreateFactoryWithSecretStore(string secretsPath, ILogger? logger = null)
+    public void Dispose() => _secretsDirectory.Delete(recursive: true);
+
+    private FileSubjectFactory CreateFactoryWithSecretStore(ILogger? logger = null)
     {
         var services = new ServiceCollection();
-        services.AddSingleton(new SecretStore(secretsPath));
+        services.AddSingleton(new SecretStore(Path.Combine(_secretsDirectory.FullName, "Secrets.json")));
         var serviceProvider = services.BuildServiceProvider();
         var typeProvider = new TypeProvider();
         typeProvider.AddTypes([typeof(EmbeddedSecretDevice), typeof(UnserializableSecretDevice)]);

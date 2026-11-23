@@ -386,7 +386,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
 
     // InvalidSecretTypeDevice is registered next to the valid types, as the type of another library would be, so that
     // every test also shows that it only fails for itself.
-    internal (ConfigurableSubjectSerializer Serializer, SecretStore Store) CreateSerializer(bool withStore = true, bool hasRegistry = true)
+    private (ConfigurableSubjectSerializer Serializer, SecretStore Store) CreateSerializer(bool withStore = true, bool hasRegistry = true)
     {
         var typeProvider = new TypeProvider();
         typeProvider.AddTypes([typeof(SecretTestDevice), typeof(SecretDefaultDevice), typeof(InvalidSecretTypeDevice)]);
@@ -406,7 +406,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         return (new ConfigurableSubjectSerializer(typeProvider, services.BuildServiceProvider()), store);
     }
 
-    internal static IInterceptorSubjectContext CreateContext() =>
+    private static IInterceptorSubjectContext CreateContext() =>
         InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry()
@@ -415,15 +415,15 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer);
 
-    internal static JsonSerializerOptions CreateResolverOptions() => new()
+    private static JsonSerializerOptions CreateResolverOptions() => new()
     {
         TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(new TypeProvider(), new ServiceCollection().BuildServiceProvider())
     };
 
-    internal static SecretTestDevice Deserialize(ConfigurableSubjectSerializer serializer, string json) =>
+    private static SecretTestDevice Deserialize(ConfigurableSubjectSerializer serializer, string json) =>
         Assert.IsType<SecretTestDevice>(serializer.Deserialize(json));
 
-    internal static string DeviceJson(string? password, string? childPassword = null)
+    private static string DeviceJson(string? password, string? childPassword = null)
     {
         var values = new Dictionary<string, object?>
         {
@@ -440,7 +440,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         return JsonSerializer.Serialize(values);
     }
 
-    internal static string ReadString(string json, params string[] path)
+    private static string ReadString(string json, params string[] path)
     {
         using var document = JsonDocument.Parse(json);
         var element = document.RootElement;
@@ -452,13 +452,13 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         return element.GetString()!;
     }
 
-    internal static bool HasProperty(string json, string name)
+    private static bool HasProperty(string json, string name)
     {
         using var document = JsonDocument.Parse(json);
         return document.RootElement.TryGetProperty(name, out _);
     }
 
-    internal static string KeyOf(string reference)
+    private static string KeyOf(string reference)
     {
         Assert.StartsWith(Prefix, reference);
         return reference[Prefix.Length..];
