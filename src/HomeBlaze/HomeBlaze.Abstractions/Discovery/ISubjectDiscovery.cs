@@ -1,8 +1,8 @@
 namespace HomeBlaze.Abstractions.Discovery;
 
 /// <summary>
-/// Finds devices of one subject type. Derive from <see cref="SubjectDiscovery{TSubject, TResult}"/> instead of
-/// implementing this interface.
+/// Finds devices of one subject type. Deriving from <see cref="SubjectDiscovery{TSubject, TResult}"/> is recommended,
+/// as it types the results and their subjects.
 /// </summary>
 public interface ISubjectDiscovery
 {

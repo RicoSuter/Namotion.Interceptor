@@ -17,7 +17,7 @@ The setup reads the token from the bridge and picks the token mode: `Encrypted` 
 
 ## Discovery
 
-The Discover page of the create dialog asks the Nuki discovery service, which lists the bridges seen from your public IP address. It only does so when you open the Discover page. A bridge that is already added is recognized by its host address and port.
+The Discover page of the create dialog asks the Nuki discovery service, which lists the bridges seen from your public IP address. It only does so when you open the Discover page. When the service cannot be reached, no bridge is listed and the search does not count as failed. A bridge that is already added is recognized by its host address and port.
 
 ## Configuration
 

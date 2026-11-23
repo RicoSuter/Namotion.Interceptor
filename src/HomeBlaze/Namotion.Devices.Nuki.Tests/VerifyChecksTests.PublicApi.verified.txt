@@ -90,7 +90,7 @@ namespace Namotion.Devices.Nuki
     {
         public const string DiscoveryAddress = "https://api.nuki.io/discover/bridges";
         public NukiBridgeDiscovery(System.Net.Http.IHttpClientFactory httpClientFactory) { }
-        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Nuki.NukiBridgeDiscovery.<DiscoverAsync>d__4))]
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Nuki.NukiBridgeDiscovery.<DiscoverAsync>d__8))]
         protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Nuki.NukiDiscoveredBridge> DiscoverAsync([System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
         public static System.Threading.Tasks.Task<Namotion.Devices.Nuki.NukiTokenModeDetection> DetectTokenModeAsync(string hostAddress, string token, System.Threading.CancellationToken cancellationToken) { }
         public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Namotion.Devices.Nuki.NukiDiscoveredBridge>> DiscoverAsync(System.Net.Http.HttpClient httpClient, System.Threading.CancellationToken cancellationToken) { }

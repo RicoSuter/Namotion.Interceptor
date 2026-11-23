@@ -99,6 +99,7 @@ The picker page of `SubjectSetupDialog` gets a toggle at the top: All types or D
 - While the scan runs, the header shows a progress indicator; afterwards it shows the number of devices found.
 - With nothing found, the page says so and points to All types for adding a device by its address. Battery devices that sleep only answer while awake, which the hint mentions.
 - The page always shows a hint that a container on a bridge network receives no multicast, so devices there are added by address or HomeBlaze runs with host networking. A container still has an adapter that claims multicast support, so the case cannot be detected reliably.
+- The hint also says, without naming a vendor, that some device types are found through their maker's online service, because a scan otherwise reads as local only. The Nuki subject discovery asks the Nuki cloud lookup, which lists the bridges seen from the public IP address of HomeBlaze.
 
 ### Handoff
 
@@ -126,6 +127,7 @@ During the first setup a user adds many found devices, so the folder Create oper
 - An `OperationCanceledException` from a canceled session is neither logged nor shown.
 - An exception thrown once the scan has been canceled or has reached its deadline, such as from a library that disposes its socket, counts as the end of the scan: it is logged at debug level and not shown.
 - The SSDP and mDNS services fail soft: no usable adapter or a socket error returns an empty answer and one debug log entry, not an exception.
+- A cloud lookup fails soft as well: the Nuki subject discovery finds nothing when the Nuki cloud lookup cannot be reached, answers with an error status or does not answer within 10 seconds, because a network without internet access is not a failed search. Other exceptions, such as an answer that is not valid JSON, still end the subject discovery.
 - A `Matches` call that throws during a scan ends its subject discovery like any other exception. When the dialog matches the rows against a subject it created, a `Matches` call that throws is logged at debug level and counts as no match.
 - A subject discovery that never completes is canceled at the session deadline. The scan ends then even when the subject discovery ignores its cancellation; the later results and failures of the abandoned subject discovery are dropped, a later exception is still logged, at debug level, and no callback of `ScanAsync` runs once it has returned.
 - Every string from the network is untrusted. Blazor renders it as text, never as markup.

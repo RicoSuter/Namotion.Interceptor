@@ -9,7 +9,8 @@ namespace Namotion.Devices.Nuki;
 
 /// <summary>
 /// Finds Nuki bridges through the Nuki discovery service, which lists the bridges seen from the public IP address of
-/// the caller, and pairs with them.
+/// the caller, and pairs with them. As a subject discovery it finds nothing, instead of failing, when the service
+/// cannot be reached, answers with an error or does not answer in time.
 /// </summary>
 public sealed class NukiBridgeDiscovery : SubjectDiscovery<NukiBridge, NukiDiscoveredBridge>
 {
@@ -25,12 +26,25 @@ public sealed class NukiBridgeDiscovery : SubjectDiscovery<NukiBridge, NukiDisco
         _httpClientFactory = httpClientFactory;
     }
 
+    internal TimeSpan Timeout { get; init; } = DiscoveryTimeout;
+
     /// <inheritdoc />
     protected override async IAsyncEnumerable<NukiDiscoveredBridge> DiscoverAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var httpClient = _httpClientFactory.CreateClient();
-        foreach (var bridge in await DiscoverAsync(httpClient, cancellationToken))
+        IReadOnlyList<NukiDiscoveredBridge> bridges;
+        try
+        {
+            bridges = await DiscoverAsync(httpClient, Timeout, cancellationToken);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TimeoutException && !cancellationToken.IsCancellationRequested)
+        {
+            // A network without internet access is common on a local scan, so it is not shown as a failed search.
+            bridges = [];
+        }
+
+        foreach (var bridge in bridges)
         {
             yield return bridge;
         }
