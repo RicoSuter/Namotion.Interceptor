@@ -34,7 +34,7 @@ internal sealed class FileSubjectFactory
     /// <summary>
     /// Creates the subject of a file from the type that is registered for its extension, or a
     /// <see cref="GenericFile"/> when none is. The subject is not loaded. A JSON file is created from its text
-    /// with <see cref="CreateFromJson(IStorageContainer, string, string)"/> instead.
+    /// with <see cref="CreateFromJson"/> instead.
     /// </summary>
     /// <remarks>
     /// The constructor of a registered type takes the storage and the path, and after them services.
@@ -53,15 +53,8 @@ internal sealed class FileSubjectFactory
     /// <summary>
     /// Creates the subject of a JSON file from its text: the configurable subject it describes,
     /// or a <see cref="JsonFile"/> when the text is plain or invalid JSON. Logs the values that cannot be read, see
-    /// <see cref="LogSkippedProperties"/>.
-    /// </summary>
-    public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json) =>
-        CreateFromJson(storage, path, json, out _);
-
-    /// <summary>
-    /// Creates the subject like <see cref="CreateFromJson(IStorageContainer, string, string)"/> and tells whether the
-    /// file holds a secret in plaintext that a save would move to the secret store. False when a value of the file
-    /// cannot be read, because a save would replace that value with its default.
+    /// <see cref="LogSkippedProperties"/>, and tells whether the file holds a secret in plaintext that a save would move
+    /// to the secret store, see <see cref="ShouldMoveSecrets"/>.
     /// </summary>
     public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json, out bool hasUnstoredSecrets)
     {

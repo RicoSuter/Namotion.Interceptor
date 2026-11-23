@@ -30,7 +30,7 @@ public class FileSubjectFactoryTests
             logger);
 
         // Act
-        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Values.json", json);
+        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Values.json", json, out _);
 
         // Assert
         Assert.IsType<JsonFile>(subject);
@@ -53,7 +53,7 @@ public class FileSubjectFactoryTests
         var json = $$"""{ "$type": "{{typeof(CallbackSubject).FullName}}", "name": [1] }""";
 
         // Act
-        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Callback.json", json);
+        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Callback.json", json, out _);
 
         // Assert
         Assert.IsType<CallbackSubject>(subject);
