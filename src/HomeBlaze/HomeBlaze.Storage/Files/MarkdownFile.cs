@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -256,7 +255,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // Runs after the parse was published, so a subject whose check throws is only skipped.
     private void AddSecretRewrite(IInterceptorSubject subject, string json, ref List<IInterceptorSubject>? subjects)
     {
-        if (TryGetSecretRewrite(subject, out var triedJson) && triedJson == json)
+        if (GetSecretRewrite(subject)?.Json == json)
         {
             return;
         }
@@ -295,7 +294,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             for (; index < subjects.Count; index++)
             {
                 // Whatever removed the mark decides whether it is tried again.
-                if (!TryGetSecretRewrite(subjects[index], out _))
+                if (GetSecretRewrite(subjects[index]) is null)
                 {
                     continue;
                 }
@@ -344,13 +343,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
-    private bool TryGetSecretRewrite(IInterceptorSubject subject, [NotNullWhen(true)] out string? json)
-    {
-        json = subject.Data.TryGetValue((null, SecretRewriteDataKey), out var data) && data is SecretRewrite rewrite && rewrite.Page == this
-            ? rewrite.Json
+    private SecretRewrite? GetSecretRewrite(IInterceptorSubject subject) =>
+        subject.Data.TryGetValue((null, SecretRewriteDataKey), out var data) && data is SecretRewrite rewrite && rewrite.Page == this
+            ? rewrite
             : null;
-        return json is not null;
-    }
 
     // Holds the page, so that the mark of one page is never taken for that of another.
     private sealed record SecretRewrite(MarkdownFile Page, string Json);
@@ -366,7 +362,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // Forgetting the applied configuration makes the next parse apply it again, which checks it again.
     private void ForgetSecretRewrite(IInterceptorSubject subject, bool forgetAppliedConfiguration)
     {
-        if (subject.Data.TryGetValue((null, SecretRewriteDataKey), out var data) && data is SecretRewrite rewrite && rewrite.Page == this)
+        if (GetSecretRewrite(subject) is { } rewrite)
         {
             subject.Data.TryRemove(KeyValuePair.Create<(string?, string), object?>((null, SecretRewriteDataKey), rewrite));
         }
