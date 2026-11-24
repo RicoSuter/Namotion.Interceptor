@@ -363,6 +363,27 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         Assert.False(File.Exists(StorePath));
     }
 
+    [Theory]
+    [InlineData("$secret:")]
+    [InlineData("$secret:0123456789abcdef")]
+    [InlineData("$secret:0123456789ABCDEF0123456789ABCDEF")]
+    [InlineData("$secret:0123456789abcdef0123456789abcdef0")]
+    [InlineData("$secret:0123456789abcdef0123456789abcdeg")]
+    [InlineData(" $secret:0123456789abcdef0123456789abcdef")]
+    public void WhenAValueIsNotTheSecretPrefixWithThirtyTwoLowercaseHexDigits_ThenItIsReadAsPlaintextAndReportedAsUnstored(string value)
+    {
+        // Arrange
+        var (serializer, _) = CreateSerializer();
+
+        // Act
+        var device = Deserialize(serializer, DeviceJson(value));
+        var hasUnstoredSecrets = serializer.HasUnstoredSecrets(device);
+
+        // Assert
+        Assert.Equal(value, device.Password);
+        Assert.True(hasUnstoredSecrets);
+    }
+
     [Fact]
     public void WhenAPlaintextSecretOfANestedSubjectIsDeserialized_ThenItIsReportedAsUnstored()
     {

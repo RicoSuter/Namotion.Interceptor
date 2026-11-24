@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -17,6 +18,10 @@ internal sealed class SecretReferences
 {
     /// <summary>The text that starts a reference, followed by the key.</summary>
     public const string Prefix = "$secret:";
+
+    // A key is a GUID formatted with the "N" format of SecretStore.Add.
+    private const int KeyLength = 32;
+    private static readonly SearchValues<char> KeyCharacters = SearchValues.Create("0123456789abcdef");
 
     // Set by HasUnstoredSecrets for the serialization it runs, which is synchronous and runs on the calling thread.
     [ThreadStatic] private static bool t_isDryRun;
@@ -73,11 +78,12 @@ internal sealed class SecretReferences
 
     /// <summary>
     /// Gives the value to set for the JSON value of a secret property: the stored value of a reference, null for a
-    /// reference to a missing key, and any other value as it is.
+    /// reference to a missing key, and any other value as it is. Only <see cref="Prefix"/> followed by 32 lowercase
+    /// hexadecimal digits is a reference.
     /// </summary>
     public object? Read(object owner, string propertyName, object? value)
     {
-        if (value is not string text || !text.StartsWith(Prefix, StringComparison.Ordinal))
+        if (value is not string text || !IsReference(text))
         {
             if (_keys.TryGetValue(owner, out var keys))
             {
@@ -174,6 +180,11 @@ internal sealed class SecretReferences
             t_hasUnstored = hadUnstored;
         }
     }
+
+    private static bool IsReference(string text) =>
+        text.Length == Prefix.Length + KeyLength &&
+        text.StartsWith(Prefix, StringComparison.Ordinal) &&
+        !text.AsSpan(Prefix.Length).ContainsAnyExcept(KeyCharacters);
 
     // Reference is the key with the prefix, kept so that writing an unchanged secret allocates no string.
     private readonly record struct RememberedKey(string Key, string Reference, bool IsUnresolved);
