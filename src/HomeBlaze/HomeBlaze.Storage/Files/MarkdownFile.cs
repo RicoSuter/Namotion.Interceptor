@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -78,10 +78,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private const string MovedTextRefusal = "The text moved or changed. Select it again.";
     private const string NotInContentRefusal = "The block to insert before is not in this content.";
 
-    // The configuration JSON whose plaintext secrets were last tried to move, per block subject. A write that the page
-    // refuses reads the page again, which applies the same JSON again and must not try again. A parse that applies other
-    // JSON tries again.
-    private readonly ConditionalWeakTable<IInterceptorSubject, string> _secretRewrites = new();
+    // The key in the data of a block subject of the configuration JSON whose plaintext secrets this page last tried to
+    // move. A write that the page refuses reads the page again, which applies the same JSON again and must not try again.
+    // A parse that applies other JSON tries again.
+    private const string SecretRewriteDataKey = "HomeBlaze.Storage.SecretRewrite";
 
     // The write of this page that the flow runs in, so that a write from inside it is refused instead of waiting
     // for _writeLock. Off the worker, the reload after a write, a refused write-back or a refused structure edit applies
@@ -256,7 +256,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // Runs after the parse was published, so a subject whose check throws is only skipped.
     private void AddSecretRewrite(IInterceptorSubject subject, string json, ref List<IInterceptorSubject>? subjects)
     {
-        if (_secretRewrites.TryGetValue(subject, out var triedJson) && triedJson == json)
+        if (TryGetSecretRewrite(subject, out var triedJson) && triedJson == json)
         {
             return;
         }
@@ -274,7 +274,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return;
         }
 
-        _secretRewrites.AddOrUpdate(subject, json);
+        subject.Data[(null, SecretRewriteDataKey)] = new SecretRewrite(this, json);
         (subjects ??= []).Add(subject);
     }
 
@@ -296,7 +296,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             {
                 // A key the type does not know inside a value is read without an issue, so the write must keep every
                 // key of the configuration that was checked. Whatever removed the mark decides whether it is tried again.
-                if (!_secretRewrites.TryGetValue(subjects[index], out var checkedJson))
+                if (!TryGetSecretRewrite(subjects[index], out var checkedJson))
                 {
                     continue;
                 }
@@ -346,6 +346,17 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
+    private bool TryGetSecretRewrite(IInterceptorSubject subject, [NotNullWhen(true)] out string? json)
+    {
+        json = subject.Data.TryGetValue((null, SecretRewriteDataKey), out var data) && data is SecretRewrite rewrite && rewrite.Page == this
+            ? rewrite.Json
+            : null;
+        return json is not null;
+    }
+
+    // Holds the page, so that the mark of one page is never taken for that of another.
+    private sealed record SecretRewrite(MarkdownFile Page, string Json);
+
     private void ForgetSecretRewritesFrom(IReadOnlyList<IInterceptorSubject> subjects, int index, bool forgetAppliedConfigurations)
     {
         for (; index < subjects.Count; index++)
@@ -357,7 +368,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // Forgetting the applied configuration makes the next parse apply it again, which checks it again.
     private void ForgetSecretRewrite(IInterceptorSubject subject, bool forgetAppliedConfiguration)
     {
-        _secretRewrites.Remove(subject);
+        if (subject.Data.TryGetValue((null, SecretRewriteDataKey), out var data) && data is SecretRewrite rewrite && rewrite.Page == this)
+        {
+            subject.Data.TryRemove(KeyValuePair.Create<(string?, string), object?>((null, SecretRewriteDataKey), rewrite));
+        }
+
         if (forgetAppliedConfiguration)
         {
             _parser.ForgetAppliedConfiguration(subject);
