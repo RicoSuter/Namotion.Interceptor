@@ -161,6 +161,27 @@ public class ConfigurableSubjectSerializer
         subject is IConfigurable && _secrets is { } secrets && secrets.HasUnstoredSecrets(() => Serialize(subject));
 
     /// <summary>
+    /// Runs <paramref name="serialize"/>, which serializes with this serializer on the calling thread, and returns its
+    /// result. A secret value that its key does not hold yet is written as a reference without being stored, and
+    /// <paramref name="secretChanges"/> holds it for the writer of the result to store around its write. Serializations
+    /// outside such a call store each value at once.
+    /// </summary>
+    /// <remarks>
+    /// Only the serializations that <paramref name="serialize"/> runs synchronously on the calling thread are captured,
+    /// not those of work it hands to other threads or after its first await.
+    /// </remarks>
+    public TResult CaptureSecretChanges<TResult>(Func<TResult> serialize, out SecretChanges secretChanges)
+    {
+        if (_secrets is { } secrets)
+        {
+            return secrets.Capture(serialize, out secretChanges);
+        }
+
+        secretChanges = SecretChanges.None;
+        return serialize();
+    }
+
+    /// <summary>
     /// Gets the configuration of a new subject of <paramref name="type"/> as
     /// <see cref="Serialize(IInterceptorSubject, ConfigurationNaming)"/> writes it: the values that
     /// <see cref="Deserialize(string, ConfigurationNaming)"/> gives a property that the JSON does not have.
@@ -197,6 +218,8 @@ public class ConfigurableSubjectSerializer
         using var suppressedFlow = ExecutionContext.IsFlowSuppressed() ? (AsyncFlowControl?)null : ExecutionContext.SuppressFlow();
         using var startup = _serviceProvider.GetService<IInterceptorSubjectContext>()?.DeferHostedServiceStarts();
 
+        // Not part of a write, so a secret default is stored at once rather than with the changes of a write around it.
+        var secretChanges = SecretReferences.SuspendCapture();
         IInterceptorSubject? subject = null;
         try
         {
@@ -221,6 +244,7 @@ public class ConfigurableSubjectSerializer
         }
         finally
         {
+            SecretReferences.ResumeCapture(secretChanges);
             if (subject is not null)
             {
                 Release(subject);

@@ -36,10 +36,13 @@ public sealed class SecretStore
     /// <exception cref="UnauthorizedAccessException">The file cannot be written. The value is not stored.</exception>
     public string Add(string value)
     {
-        var key = Guid.NewGuid().ToString("N");
+        var key = CreateKey();
         Set(key, value);
         return key;
     }
+
+    /// <summary>Creates a new random key, 32 lowercase hexadecimal digits, without storing anything.</summary>
+    internal static string CreateKey() => Guid.NewGuid().ToString("N");
 
     /// <summary>
     /// Stores <paramref name="value"/> under <paramref name="key"/>, replacing its value or adding the key when it is

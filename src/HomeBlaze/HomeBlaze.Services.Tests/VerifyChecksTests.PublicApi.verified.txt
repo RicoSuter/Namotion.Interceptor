@@ -16,6 +16,7 @@ namespace HomeBlaze.Services
         public const string TypeDiscriminatorPropertyName = "$type";
         public ConfigurableSubjectSerializer(HomeBlaze.Services.TypeProvider typeProvider, System.IServiceProvider serviceProvider) { }
         public bool CanDeserialize(string json, System.Type propertyType, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
+        public TResult CaptureSecretChanges<TResult>(System.Func<TResult> serialize, out HomeBlaze.Services.Secrets.SecretChanges secretChanges) { }
         public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, System.Action<Namotion.Interceptor.IInterceptorSubject>? created, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, System.Action<Namotion.Interceptor.IInterceptorSubject>? created, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
@@ -680,6 +681,10 @@ namespace HomeBlaze.Services.Navigation
 }
 namespace HomeBlaze.Services.Secrets
 {
+    public sealed class SecretChanges
+    {
+        public System.Threading.Tasks.Task StoreAroundAsync(System.Func<System.Threading.Tasks.Task> writeFile) { }
+    }
     public sealed class SecretStore
     {
         public SecretStore(string path) { }
