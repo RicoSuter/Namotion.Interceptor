@@ -294,9 +294,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         {
             for (; index < subjects.Count; index++)
             {
-                // A key the type does not know inside a value is read without an issue, so the write must keep every
-                // key of the configuration that was checked. Whatever removed the mark decides whether it is tried again.
-                if (!TryGetSecretRewrite(subjects[index], out var checkedJson))
+                // Whatever removed the mark decides whether it is tried again.
+                if (!TryGetSecretRewrite(subjects[index], out _))
                 {
                     continue;
                 }
@@ -312,7 +311,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                     return;
                 }
 
-                switch (await WriteBlockAsync(subjects[index], CancellationToken.None, keptConfigurationJson: checkedJson))
+                switch (await WriteBlockAsync(subjects[index], CancellationToken.None))
                 {
                     case BlockWriteResult.Written:
                         _parser.LogMovedSecrets(FullPath);
@@ -324,8 +323,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                         await ReloadAfterRefusalAsync(CancellationToken.None);
                         return;
                     case BlockWriteResult.NotWritten:
-                        // Stays marked: the reload of a refused write must not try again, and the same configuration
-                        // would remove the same keys.
+                        // Stays marked: the reload of a refused write must not try again.
                         break;
                     case BlockWriteResult.NotABlock:
                         // The subject left the page.
@@ -1265,9 +1263,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     // Under _writeLock: no other write of this file runs, so only a reload can change the snapshot meanwhile.
-    // With `keptConfigurationJson`, nothing is written when the configuration written would lack one of its keys.
-    private async Task<BlockWriteResult> WriteBlockAsync(
-        IInterceptorSubject subject, CancellationToken cancellationToken, string? keptConfigurationJson = null)
+    private async Task<BlockWriteResult> WriteBlockAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var snapshot = _parseResult;
         var blockIndex = FindBlock(snapshot.BlockSubjects, subject);
@@ -1293,14 +1289,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             ForgetAppliedConfigurations(page.AllBlocks[blockIndex], snapshot.BlockSubjects);
             ForgetAppliedBlocksAround(page, page.AllBlocks[blockIndex], snapshot.BlockSubjects);
             await ReloadAfterRefusalAsync(cancellationToken);
-            return BlockWriteResult.NotWritten;
-        }
-
-        // The first configuration of the write is the one of the subject itself.
-        if (keptConfigurationJson is not null &&
-            JsonKeyComparison.FindRemovedKeys(keptConfigurationJson, write.Configurations[0].ConfigurationJson) is { Count: > 0 } removedKeys)
-        {
-            _parser.LogSecretRewriteWouldRemoveKeys(FullPath, removedKeys);
             return BlockWriteResult.NotWritten;
         }
 

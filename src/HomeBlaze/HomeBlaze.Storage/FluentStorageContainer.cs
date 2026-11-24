@@ -540,11 +540,10 @@ public partial class FluentStorageContainer :
     /// </summary>
     /// <param name="subject">The subject whose file is saved.</param>
     /// <param name="expectedHash">
-    /// The hash of the content the file must still have, or null to save in any case. When set, nothing is saved either
-    /// when the save would remove a key of the file.
+    /// The hash of the content the file must still have, or null to save in any case.
     /// </param>
     /// <param name="cancellationToken">Cancels the save.</param>
-    /// <returns>False as well when the content of the file is no longer the expected one, or a key would be removed.</returns>
+    /// <returns>False as well when the content of the file is no longer the expected one.</returns>
     internal async Task<bool> WriteConfigurationAsync(
         IInterceptorSubject subject, string? expectedHash, CancellationToken cancellationToken)
     {
@@ -566,28 +565,17 @@ public partial class FluentStorageContainer :
 
                 // The index lags behind a change of the file until a pass processed it, and an unrequested save must
                 // never undo a hand edit.
-                byte[]? current = null;
                 if (expectedHash != null)
                 {
                     if (entry.Hash != expectedHash)
                         return;
 
-                    current = await connection.Reconciler.TryReadAsync(entry.Path, token);
+                    var current = await connection.Reconciler.TryReadAsync(entry.Path, token);
                     if (current is null || StorageHash.Compute(current) != expectedHash)
                         return;
                 }
 
                 var json = _serializer.CaptureSecretChanges(() => _serializer.Serialize(fileSubject), out var secretChanges);
-
-                // A key that the type does not know, such as a typo or one of a newer version, is read without an
-                // issue, so only this comparison keeps an unrequested save from removing it.
-                if (current is not null && JsonKeyComparison.FindRemovedKeys(StorageReconciler.DecodeText(current), json) is { Count: > 0 } removedKeys)
-                {
-                    _logger?.LogWarning(
-                        "The plaintext secrets of {Path} stay in the file, because saving it would remove {Keys}",
-                        entry.Path, string.Join(", ", removedKeys));
-                    return;
-                }
 
                 await secretChanges.StoreAroundAsync(() => WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(json), token));
                 isWritten = true;

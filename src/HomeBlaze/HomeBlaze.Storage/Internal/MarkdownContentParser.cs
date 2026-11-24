@@ -289,10 +289,6 @@ public sealed partial class MarkdownContentParser
     internal void LogMovedSecrets(string path) =>
         _logger?.LogInformation("Moved the plaintext secrets of a block of the page {Path} to the secret store.", path);
 
-    /// <summary>Logs that the plaintext secrets of a block stay in the page, because writing it would remove keys.</summary>
-    internal void LogSecretRewriteWouldRemoveKeys(string path, IReadOnlyList<string> keys) =>
-        _logger?.LogWarning("The plaintext secrets of a block of the page {Path} stay in the page, because writing the block would remove {Keys}", path, string.Join(", ", keys));
-
     /// <summary>Logs that the plaintext secrets of a block could not be moved to the secret store.</summary>
     internal void LogFailedSecretRewrite(string path, Exception exception) =>
         _logger?.LogWarning(exception, "The plaintext secrets of a block of the page {Path} could not be moved to the secret store and stay in the page until it is saved", path);

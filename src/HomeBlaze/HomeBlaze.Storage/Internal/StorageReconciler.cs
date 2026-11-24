@@ -959,7 +959,7 @@ internal sealed class StorageReconciler
     }
 
     /// <summary>Decodes the content of a file as text, in the encoding its byte order mark names, else UTF-8.</summary>
-    public static string DecodeText(byte[] content)
+    private static string DecodeText(byte[] content)
     {
         // A reader, not Encoding.GetString: it drops a byte order mark, which the JSON parser rejects.
         using var reader = new StreamReader(new MemoryStream(content), Encoding.UTF8);

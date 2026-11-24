@@ -408,28 +408,20 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenAJsonFileWithAPlaintextSecretHasAKeyTheTypeDoesNotKnow_ThenTheConditionalSaveWritesNothingAndLogsTheKey()
+    public async Task WhenAJsonFileWithAPlaintextSecretHasAKeyTheTypeDoesNotKnow_ThenTheSecretIsMovedAndTheKeyIsRemoved()
     {
         // Arrange
         UseSecretStore();
-        var content = $$"""{ "$type": "{{DeviceType}}", "hostAdress": "10.0.0.1", "password": "s3cr3t" }""";
-        WriteFile("Gateway.json", content);
-        var messages = new ConcurrentQueue<string>();
-        var storage = CreateStorage(logger: new RecordingLogger(messages));
-        await storage.ConnectAsync(CancellationToken.None);
-        var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
-        var hash = StorageHash.Compute(File.ReadAllBytes(GetFullPath("Gateway.json")));
-        messages.Clear();
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "hostAdress": "10.0.0.1", "password": "s3cr3t" }""");
 
         // Act
-        var isWritten = await storage.WriteConfigurationAsync(device, hash, CancellationToken.None);
+        var storage = await ConnectAsync();
 
         // Assert
-        Assert.False(isWritten);
-        Assert.Equal(content, File.ReadAllText(GetFullPath("Gateway.json")));
-        Assert.Contains(messages, message => message.Contains("Gateway.json") && message.Contains("hostAdress"));
-        Assert.DoesNotContain(messages, message => message.Contains("s3cr3t") || message.Contains("10.0.0.1"));
-        Assert.Empty(ReadSecrets());
+        await AsyncTestHelpers.WaitUntilAsync(() => HoldsSecretReferenceOnly("Gateway.json"));
+        Assert.DoesNotContain("hostAdress", File.ReadAllText(GetFullPath("Gateway.json")));
+        Assert.Equal("s3cr3t", Assert.Single(ReadSecrets()).Value);
+        Assert.Equal("s3cr3t", Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]).Password);
     }
 
     [Fact]
@@ -470,24 +462,23 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenABlockWithAPlaintextSecretHasANestedKeyTheTypeDoesNotKnow_ThenItIsNotRewritten()
+    public async Task WhenABlockWithAPlaintextSecretHasANestedKeyTheTypeDoesNotKnow_ThenTheSecretIsMovedAndTheKeyIsRemoved()
     {
         // Arrange
         UseSecretStore();
         var deviceType = typeof(NestedSecretDevice).FullName;
-        var content = $"# Gateway\n\n:: {deviceType}#gateway Password=s3cr3t\n```json\n{{\n  \"Options\": {{ \"Endpoint\": \"a\", \"Typo\": 1 }}\n}}\n```\n::\n";
-        WriteFile("Gateway.md", content);
-        var storage = await ConnectAsync();
-        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
-        var device = Assert.IsType<NestedSecretDevice>(page.Children["gateway"]);
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {deviceType}#gateway Password=s3cr3t\n```json\n{{\n  \"Options\": {{ \"Endpoint\": \"a\", \"Typo\": 1 }}\n}}\n```\n::\n");
 
-        // Act: the load scheduled the rewrite, and this one runs after it.
-        await page.RewriteBlocksIfFileUnchangedAsync([device]);
+        // Act
+        var storage = await ConnectAsync();
 
         // Assert
-        Assert.Equal("s3cr3t", device.Password);
-        Assert.Equal(content, File.ReadAllText(GetFullPath("Gateway.md")));
-        Assert.Empty(ReadSecrets());
+        var content = await WaitForSecretReferenceOnlyAsync("Gateway.md");
+        Assert.DoesNotContain("Typo", content);
+        Assert.Contains("\"Endpoint\": \"a\"", content);
+        Assert.Equal("s3cr3t", Assert.Single(ReadSecrets()).Value);
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        Assert.Equal("s3cr3t", Assert.IsType<NestedSecretDevice>(page.Children["gateway"]).Password);
     }
 
     [Fact]
