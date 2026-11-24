@@ -78,8 +78,6 @@ A secret can also be typed into a file in plaintext, by hand or in the raw edito
 
 The file is plaintext, created with permissions that let only the user HomeBlaze runs as read it on Linux and macOS. Anyone who can log in as that user or as root can read it, so limit who can log in, run HomeBlaze as its own user, and in Docker keep the data folder on a volume only the container uses. HomeBlaze reads the file once at startup. Each secret keeps its key, and a changed value replaces its entry, so a token that a device renews often does not make the file grow. Entries of removed secrets stay until a later cleanup. A `Secrets.json` that is not valid JSON stops the start, so a restored copy must be complete. A reference whose key is missing, for example after restoring `Files/` without `Secrets.json`, leaves its property empty with a warning in the log until the secret is entered again, which stores it under the same key. A copied file keeps using the secrets of the original until a secret of the copy is changed, which then gets its own entry. Restoring `Secrets.json` while HomeBlaze runs takes effect after a restart.
 
-Secrets that were stored in plaintext before this version may still be in old backups or in the history of a synced or versioned `Files/` folder. Change them.
-
 `AutomationState/` holds one checkpoint file per automation with its current state and last runs, described in [Automations: The checkpoint](automation.md#the-checkpoint).
 
 `OpcUa/` holds the certificate stores of the OPC UA client and server subjects, `OpcUa/Client/Pki` and `OpcUa/Server/Pki`, described in [OPC UA](opc-ua.md#certificates).
