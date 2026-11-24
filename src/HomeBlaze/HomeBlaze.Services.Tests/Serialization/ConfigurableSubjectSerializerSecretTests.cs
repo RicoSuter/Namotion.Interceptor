@@ -236,6 +236,59 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
+    public void WhenTwoSubjectsReadTheSameReference_ThenAChangeOfTheSecondGivesItANewKeyAndLeavesTheFirstUnchanged()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        var key = store.Add("hunter2");
+        var original = Deserialize(serializer, DeviceJson(Prefix + key));
+        var copy = Deserialize(serializer, DeviceJson(Prefix + key));
+        var unchangedCopyJson = serializer.Serialize(copy);
+        copy.Password = "copy secret";
+
+        // Act
+        var copyJson = serializer.Serialize(copy);
+        var copyJsonAgain = serializer.Serialize(copy);
+        original.Password = "original secret";
+        var originalJson = serializer.Serialize(original);
+
+        // Assert
+        Assert.Equal(Prefix + key, ReadString(unchangedCopyJson, "password"));
+        var copyKey = KeyOf(ReadString(copyJson, "password"));
+        Assert.NotEqual(key, copyKey);
+        Assert.Equal(copyJson, copyJsonAgain);
+        Assert.Equal(Prefix + key, ReadString(originalJson, "password"));
+        Assert.Equal(new Dictionary<string, string> { [key] = "original secret", [copyKey] = "copy secret" }, ReadStoreFile());
+    }
+
+    [Fact]
+    public async Task WhenASubjectThatSharesAKeyChangesItsSecretWithCapturedChanges_ThenTheNewKeyIsStoredBeforeTheFileIsWritten()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        var key = store.Add("hunter2");
+        var original = Deserialize(serializer, DeviceJson(Prefix + key));
+        var copy = Deserialize(serializer, DeviceJson(Prefix + key));
+        copy.Password = "copy secret";
+
+        // Act
+        var json = serializer.CaptureSecretChanges(() => serializer.Serialize(copy), out var secretChanges);
+        string? storedDuringWrite = null;
+        await secretChanges.StoreAroundAsync(() =>
+        {
+            store.TryGet(KeyOf(ReadString(json, "password")), out storedDuringWrite);
+            return Task.CompletedTask;
+        });
+
+        // Assert
+        Assert.NotEqual(Prefix + key, ReadString(json, "password"));
+        Assert.Equal("copy secret", storedDuringWrite);
+        Assert.True(store.TryGet(key, out var originalValue));
+        Assert.Equal("hunter2", originalValue);
+        Assert.Equal("hunter2", original.Password);
+    }
+
+    [Fact]
     public void WhenTheSecretIsNull_ThenItIsLeftOutWithoutAnEntry()
     {
         // Arrange

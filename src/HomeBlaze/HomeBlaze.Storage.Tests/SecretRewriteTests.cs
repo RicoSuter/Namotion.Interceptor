@@ -320,6 +320,38 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenACopiedJsonFileChangesItsSecret_ThenItGetsItsOwnKeyAndTheOriginalKeepsItsSecret()
+    {
+        // Arrange
+        UseSecretStore();
+        var key = SeedSecret("shared-password");
+        var content = $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "$secret:{{key}}" }""";
+        WriteFile("Gateway.json", content);
+        var storage = await ConnectAsync();
+        WriteFile("Copy.json", content);
+        await storage.ReconcileAsync(Named("Copy.json"));
+        var original = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
+        var copy = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Copy"]);
+        copy.Password = "copy-password";
+
+        // Act
+        await storage.WriteConfigurationAsync(copy, CancellationToken.None);
+        var secretsAfterCopySave = ReadSecrets();
+        original.Password = "original-password";
+        await storage.WriteConfigurationAsync(original, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("shared-password", secretsAfterCopySave[key]);
+        Assert.Contains($"\"password\": \"$secret:{key}\"", File.ReadAllText(GetFullPath("Gateway.json")));
+        var secrets = ReadSecrets();
+        Assert.Equal(2, secrets.Count);
+        Assert.Equal("original-password", secrets[key]);
+        var copyKey = Assert.Single(secrets.Keys, candidate => candidate != key);
+        Assert.Equal("copy-password", secrets[copyKey]);
+        Assert.Contains($"\"password\": \"$secret:{copyKey}\"", File.ReadAllText(GetFullPath("Copy.json")));
+    }
+
+    [Fact]
     public async Task WhenTheFileStillHasTheExpectedContent_ThenTheConditionalSaveWritesIt()
     {
         // Arrange

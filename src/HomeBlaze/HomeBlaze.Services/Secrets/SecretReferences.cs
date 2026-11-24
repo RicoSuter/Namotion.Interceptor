@@ -37,6 +37,9 @@ internal sealed class SecretReferences
     // The changed values of the files being written, by key. A page reads its own file while it writes it.
     private readonly ConcurrentDictionary<string, string> _pendingValues = new();
 
+    // The first subject that read or wrote each key, weak so that a released subject neither stays alive nor keeps the key.
+    private readonly ConcurrentDictionary<string, WeakReference<object>> _owners = new();
+
     // Weak, so that a released subject is not kept alive by the key of its secret.
     private readonly ConditionalWeakTable<object, ConcurrentDictionary<string, RememberedKey>> _keys = new();
 
@@ -101,14 +104,15 @@ internal sealed class SecretReferences
         }
 
         var key = text[Prefix.Length..];
+        var isShared = !TryClaim(key, owner);
         if (TryGetValue(key, out var stored))
         {
-            _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(key, text, IsUnresolved: false);
+            _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(key, text, IsUnresolved: false, isShared);
             return stored;
         }
 
         // Remembered, so the reference is written back while the property stays empty, and a restored store recovers it.
-        _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(key, text, IsUnresolved: true);
+        _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(key, text, IsUnresolved: true, isShared);
         _logger?.LogWarning(
             "The secret {Key} of {Property} of {Type} is not in the secret store {Path}, so the property is empty. Enter it again, or restore the secret store and restart.",
             key, propertyName, owner.GetType().FullName, _store.Path);
@@ -117,8 +121,9 @@ internal sealed class SecretReferences
 
     /// <summary>
     /// Gives the JSON value to write for the value of a secret property: a reference for a value other than null or
-    /// empty. The value is stored under the remembered key of the property, or under a new key when there is none, unless
-    /// that key holds it already. Inside <see cref="Capture{TResult}"/> it is recorded in the captured changes instead.
+    /// empty. The value is stored under the remembered key of the property, or under a new key when there is none or
+    /// another subject read the key first, unless that key holds it already. Inside <see cref="Capture{TResult}"/> it is
+    /// recorded in the captured changes instead.
     /// </summary>
     /// <exception cref="IOException">The store cannot be written.</exception>
     public object? Write(object owner, string propertyName, object? value)
@@ -151,27 +156,6 @@ internal sealed class SecretReferences
 
                 return known.Reference;
             }
-
-            if (t_isDryRun)
-            {
-                t_hasUnstored = true;
-                return text;
-            }
-
-            if (changes is not null)
-            {
-                changes.Changes.Add(new Change(owner, propertyName, known.Key, known.Reference, IsNew: false) { Value = text });
-            }
-            else
-            {
-                _store.Set(known.Key, text);
-                if (known.IsUnresolved)
-                {
-                    keys!.TryUpdate(propertyName, known with { IsUnresolved = false }, known);
-                }
-            }
-
-            return known.Reference;
         }
 
         if (t_isDryRun)
@@ -180,6 +164,25 @@ internal sealed class SecretReferences
             return text;
         }
 
+        if (remembered is { IsShared: false } owned)
+        {
+            if (changes is not null)
+            {
+                changes.Changes.Add(new Change(owner, propertyName, owned.Key, owned.Reference, IsNew: false) { Value = text });
+            }
+            else
+            {
+                _store.Set(owned.Key, text);
+                if (owned.IsUnresolved)
+                {
+                    keys!.TryUpdate(propertyName, owned with { IsUnresolved = false }, owned);
+                }
+            }
+
+            return owned.Reference;
+        }
+
+        // No key, or one that another subject read first, such as the original of a copied file, which keeps it.
         if (changes is not null)
         {
             var capturedKey = SecretStore.CreateKey();
@@ -190,7 +193,7 @@ internal sealed class SecretReferences
 
         var newKey = _store.Add(text);
         var reference = Prefix + newKey;
-        _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(newKey, reference, IsUnresolved: false);
+        Remember(owner, propertyName, newKey, reference);
         return reference;
     }
 
@@ -296,8 +299,35 @@ internal sealed class SecretReferences
     private bool TryGetValue(string key, [NotNullWhen(true)] out string? value) =>
         _pendingValues.TryGetValue(key, out value) || _store.TryGet(key, out value);
 
-    private void Remember(Change change) =>
-        _keys.GetOrCreateValue(change.Owner)[change.PropertyName] = new RememberedKey(change.Key, change.Reference, IsUnresolved: false);
+    private void Remember(Change change) => Remember(change.Owner, change.PropertyName, change.Key, change.Reference);
+
+    private void Remember(object owner, string propertyName, string key, string reference) =>
+        _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(key, reference, IsUnresolved: false, IsShared: !TryClaim(key, owner));
+
+    // Makes the owner the first subject of the key unless another one that is still alive is. A copied file shares the
+    // key with its original, and only the first may replace its value. A released subject that was not collected yet
+    // still counts, which costs another subject a new key on its next change.
+    private bool TryClaim(string key, object owner)
+    {
+        while (true)
+        {
+            if (!_owners.TryGetValue(key, out var first))
+            {
+                if (_owners.TryAdd(key, new WeakReference<object>(owner)))
+                {
+                    return true;
+                }
+            }
+            else if (first.TryGetTarget(out var target))
+            {
+                return ReferenceEquals(target, owner);
+            }
+            else if (_owners.TryUpdate(key, new WeakReference<object>(owner), first))
+            {
+                return true;
+            }
+        }
+    }
 
     /// <summary>
     /// Runs <paramref name="serialize"/> without storing anything and returns whether it found a secret value that its
@@ -328,7 +358,7 @@ internal sealed class SecretReferences
         !text.AsSpan(Prefix.Length).ContainsAnyExcept(KeyCharacters);
 
     // Reference is the key with the prefix, kept so that writing an unchanged secret allocates no string.
-    private readonly record struct RememberedKey(string Key, string Reference, bool IsUnresolved);
+    private readonly record struct RememberedKey(string Key, string Reference, bool IsUnresolved, bool IsShared);
 
     /// <summary>A secret value that a captured serialization wrote as a reference without storing it.</summary>
     internal sealed record Change(object Owner, string PropertyName, string Key, string Reference, bool IsNew)
