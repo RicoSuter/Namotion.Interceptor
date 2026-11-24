@@ -2,7 +2,6 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -24,6 +23,9 @@ internal sealed class SecretReferences
     private const int KeyLength = 32;
     private static readonly SearchValues<char> KeyCharacters = SearchValues.Create("0123456789abcdef");
 
+    // The key of the remembered key of a secret property in the data of its subject.
+    private const string RememberedKeyDataKey = "HomeBlaze.Secrets.Key";
+
     // Set by HasUnstoredSecrets for the serialization it runs, which is synchronous and runs on the calling thread.
     [ThreadStatic] private static bool t_isDryRun;
     [ThreadStatic] private static bool t_hasUnstored;
@@ -38,10 +40,9 @@ internal sealed class SecretReferences
     private readonly ConcurrentDictionary<string, string> _pendingValues = new();
 
     // The first subject that read or wrote each key, weak so that a released subject neither stays alive nor keeps the key.
-    private readonly ConcurrentDictionary<string, WeakReference<object>> _owners = new();
-
-    // Weak, so that a released subject is not kept alive by the key of its secret.
-    private readonly ConditionalWeakTable<object, ConcurrentDictionary<string, RememberedKey>> _keys = new();
+    // A subject gives up its entry when it moves to another key, and a dead entry is replaced when its key is read, so
+    // the entries are at most the keys that live subjects use and the keys read since their first subject was released.
+    private readonly ConcurrentDictionary<string, WeakReference<IInterceptorSubject>> _owners = new();
 
     public SecretReferences(SecretStore store, ILogger? logger)
     {
@@ -91,15 +92,11 @@ internal sealed class SecretReferences
     /// reference to a missing key, and any other value as it is. Only <see cref="Prefix"/> followed by 32 lowercase
     /// hexadecimal digits is a reference.
     /// </summary>
-    public object? Read(object owner, string propertyName, object? value)
+    public object? Read(IInterceptorSubject owner, string propertyName, object? value)
     {
         if (value is not string text || !IsReference(text))
         {
-            if (_keys.TryGetValue(owner, out var keys))
-            {
-                keys.TryRemove(propertyName, out _);
-            }
-
+            SetRemembered(owner, propertyName, null);
             return value;
         }
 
@@ -107,12 +104,12 @@ internal sealed class SecretReferences
         var isShared = !TryClaim(key, owner);
         if (TryGetValue(key, out var stored))
         {
-            _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(key, text, IsUnresolved: false, isShared);
+            SetRemembered(owner, propertyName, new RememberedKey(key, text, IsUnresolved: false, isShared));
             return stored;
         }
 
         // Remembered, so the reference is written back while the property stays empty, and a restored store recovers it.
-        _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(key, text, IsUnresolved: true, isShared);
+        SetRemembered(owner, propertyName, new RememberedKey(key, text, IsUnresolved: true, isShared));
         _logger?.LogWarning(
             "The secret {Key} of {Property} of {Type} is not in the secret store {Path}, so the property is empty. Enter it again, or restore the secret store and restart.",
             key, propertyName, owner.GetType().FullName, _store.Path);
@@ -126,10 +123,11 @@ internal sealed class SecretReferences
     /// recorded in the captured changes instead.
     /// </summary>
     /// <exception cref="IOException">The store cannot be written.</exception>
-    public object? Write(object owner, string propertyName, object? value)
+    public object? Write(IInterceptorSubject owner, string propertyName, object? value)
     {
         var text = (string?)value;
-        var remembered = _keys.TryGetValue(owner, out var keys) && keys.TryGetValue(propertyName, out var key) ? key : (RememberedKey?)null;
+        (string? Property, string Key) dataKey = (propertyName, RememberedKeyDataKey);
+        var remembered = owner.Data.TryGetValue(dataKey, out var data) ? data as RememberedKey : null;
 
         if (string.IsNullOrEmpty(text))
         {
@@ -151,7 +149,7 @@ internal sealed class SecretReferences
                 if (known.IsUnresolved)
                 {
                     // Only when unchanged: a concurrent read may have remembered another key since.
-                    keys!.TryUpdate(propertyName, known with { IsUnresolved = false }, known);
+                    owner.Data.TryUpdate(dataKey, known with { IsUnresolved = false }, known);
                 }
 
                 return known.Reference;
@@ -175,7 +173,7 @@ internal sealed class SecretReferences
                 _store.Set(owned.Key, text);
                 if (owned.IsUnresolved)
                 {
-                    keys!.TryUpdate(propertyName, owned with { IsUnresolved = false }, owned);
+                    owner.Data.TryUpdate(dataKey, owned with { IsUnresolved = false }, owned);
                 }
             }
 
@@ -306,19 +304,55 @@ internal sealed class SecretReferences
 
     private void Remember(Change change) => Remember(change.Owner, change.PropertyName, change.Key, change.Reference);
 
-    private void Remember(object owner, string propertyName, string key, string reference) =>
-        _keys.GetOrCreateValue(owner)[propertyName] = new RememberedKey(key, reference, IsUnresolved: false, IsShared: !TryClaim(key, owner));
+    private void Remember(IInterceptorSubject owner, string propertyName, string key, string reference) =>
+        SetRemembered(owner, propertyName, new RememberedKey(key, reference, IsUnresolved: false, IsShared: !TryClaim(key, owner)));
+
+    // In the data of the subject, so it lives as long as the subject. Null forgets the key.
+    private void SetRemembered(IInterceptorSubject owner, string propertyName, RememberedKey? remembered)
+    {
+        (string? Property, string Key) dataKey = (propertyName, RememberedKeyDataKey);
+        while (true)
+        {
+            if (owner.Data.TryGetValue(dataKey, out var data))
+            {
+                var isReplaced = remembered is null
+                    ? owner.Data.TryRemove(KeyValuePair.Create(dataKey, data))
+                    : owner.Data.TryUpdate(dataKey, remembered, data);
+                if (isReplaced)
+                {
+                    if (data is RememberedKey { IsShared: false } previous && previous.Key != remembered?.Key)
+                    {
+                        ReleaseClaim(previous.Key, owner);
+                    }
+
+                    return;
+                }
+            }
+            else if (remembered is null || owner.Data.TryAdd(dataKey, remembered))
+            {
+                return;
+            }
+        }
+    }
+
+    private void ReleaseClaim(string key, IInterceptorSubject owner)
+    {
+        if (_owners.TryGetValue(key, out var first) && first.TryGetTarget(out var target) && ReferenceEquals(target, owner))
+        {
+            _owners.TryRemove(KeyValuePair.Create(key, first));
+        }
+    }
 
     // Makes the owner the first subject of the key unless another one that is still alive is. A copied file shares the
     // key with its original, and only the first may replace its value. A released subject that was not collected yet
     // still counts, which costs another subject a new key on its next change.
-    private bool TryClaim(string key, object owner)
+    private bool TryClaim(string key, IInterceptorSubject owner)
     {
         while (true)
         {
             if (!_owners.TryGetValue(key, out var first))
             {
-                if (_owners.TryAdd(key, new WeakReference<object>(owner)))
+                if (_owners.TryAdd(key, new WeakReference<IInterceptorSubject>(owner)))
                 {
                     return true;
                 }
@@ -327,7 +361,7 @@ internal sealed class SecretReferences
             {
                 return ReferenceEquals(target, owner);
             }
-            else if (_owners.TryUpdate(key, new WeakReference<object>(owner), first))
+            else if (_owners.TryUpdate(key, new WeakReference<IInterceptorSubject>(owner), first))
             {
                 return true;
             }
@@ -363,10 +397,10 @@ internal sealed class SecretReferences
         !text.AsSpan(Prefix.Length).ContainsAnyExcept(KeyCharacters);
 
     // Reference is the key with the prefix, kept so that writing an unchanged secret allocates no string.
-    private readonly record struct RememberedKey(string Key, string Reference, bool IsUnresolved, bool IsShared);
+    private sealed record RememberedKey(string Key, string Reference, bool IsUnresolved, bool IsShared);
 
     /// <summary>A secret value that a captured serialization wrote as a reference without storing it.</summary>
-    internal sealed record Change(object Owner, string PropertyName, string Key, string Reference, bool IsNew)
+    internal sealed record Change(IInterceptorSubject Owner, string PropertyName, string Key, string Reference, bool IsNew)
     {
         public required string Value { get; set; }
     }

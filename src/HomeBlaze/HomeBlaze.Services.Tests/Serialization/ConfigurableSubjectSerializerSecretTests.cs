@@ -262,6 +262,27 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
+    public void WhenTheFirstSubjectOfAKeyMovesToAnotherKey_ThenTheNextSubjectThatReadsTheKeyKeepsItOnChange()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        var key = store.Add("hunter2");
+        var otherKey = store.Add("other");
+        var first = Deserialize(serializer, DeviceJson(Prefix + key));
+        serializer.UpdateConfiguration(first, DeviceJson(Prefix + otherKey));
+        var next = Deserialize(serializer, DeviceJson(Prefix + key));
+        next.Password = "changed";
+
+        // Act
+        var json = serializer.Serialize(next);
+
+        // Assert
+        Assert.Equal(Prefix + key, ReadString(json, "password"));
+        Assert.Equal(new Dictionary<string, string> { [key] = "changed", [otherKey] = "other" }, ReadStoreFile());
+        GC.KeepAlive(first);
+    }
+
+    [Fact]
     public async Task WhenASubjectThatSharesAKeyChangesItsSecretWithCapturedChanges_ThenTheNewKeyIsStoredBeforeTheFileIsWritten()
     {
         // Arrange

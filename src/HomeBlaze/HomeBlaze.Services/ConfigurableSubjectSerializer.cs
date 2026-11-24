@@ -393,7 +393,8 @@ public class ConfigurableSubjectSerializer
                 {
                     if (isSecret && _secrets is not null)
                     {
-                        value = _secrets.Read(subject, property.Name, value);
+                        // A subject: EnsureSupported threw for any other type.
+                        value = _secrets.Read((IInterceptorSubject)subject, property.Name, value);
                     }
 
                     property.SetValue(subject, value);

@@ -1,3 +1,5 @@
+using Namotion.Interceptor;
+
 namespace HomeBlaze.Services.Secrets;
 
 /// <summary>
@@ -21,7 +23,7 @@ public sealed class SecretChanges
 
     internal List<SecretReferences.Change> Changes => _changes ??= [];
 
-    internal SecretReferences.Change? Find(object owner, string propertyName)
+    internal SecretReferences.Change? Find(IInterceptorSubject owner, string propertyName)
     {
         if (_changes is not null)
         {
