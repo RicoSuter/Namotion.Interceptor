@@ -224,7 +224,7 @@ public class ShellyDeviceDiscoveryTests
         var instances = new[]
         {
             Instance("shellyplus2pm-02abcd000001", "ShellyPlus2PM-02ABCD000001.local", "192.0.2.52", "Plus2PM"),
-            Instance("shellyplus2pm-02abcd000001", hostName: null, address: "192.0.2.51", application: "Plus2PM"),
+            Instance("shellyplus2pm-02abcd000001 (2)", hostName: null, address: "192.0.2.51", application: "Plus2PM"),
             Instance("Garden Pump", "Garden-Pump.local", "192.0.2.52", "Plus2PM")
         };
 
