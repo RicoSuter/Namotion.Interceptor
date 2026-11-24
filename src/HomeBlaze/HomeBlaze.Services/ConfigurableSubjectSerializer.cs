@@ -382,7 +382,11 @@ public class ConfigurableSubjectSerializer
         {
             foreach (var child in property.Children)
             {
-                ReleaseSecrets(child.Subject);
+                // Before the subject is detached, so its own property is the one reference of a child released with it.
+                if (child.Subject.GetReferenceCount() <= 1)
+                {
+                    ReleaseSecrets(child.Subject);
+                }
             }
         }
     }
