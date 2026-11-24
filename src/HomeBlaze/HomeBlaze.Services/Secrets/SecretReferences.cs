@@ -238,7 +238,12 @@ internal sealed class SecretReferences
             {
                 _store.Set(change.Key, change.Value);
             }
-            else
+        }
+
+        // After the new values, whose store write can throw: the finally below removes these.
+        foreach (var change in changes)
+        {
+            if (!change.IsNew)
             {
                 _pendingValues[change.Key] = change.Value;
             }
