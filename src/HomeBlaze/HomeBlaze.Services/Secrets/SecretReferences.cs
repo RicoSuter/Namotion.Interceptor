@@ -35,10 +35,10 @@ internal sealed class SecretReferences
     // The changed values of the files being written, by key. A page reads its own file while it writes it.
     private readonly ConcurrentDictionary<string, string> _pendingValues = new();
 
-    // The subjects that hold each key, weak so that a collected subject does not count. A subject lets go of a key when it
-    // moves to another key or is released, and collected holders are dropped when the key is used again. A list stays
+    // The secret properties that hold each key, by subject, weak so that a collected subject does not count. A property
+    // lets go of a key when it moves to another key or its subject is released, and collected holders are dropped when the key is used again. A list stays
     // once created, so there are as many as keys were read or written. Each list is locked while it is used.
-    private readonly ConcurrentDictionary<string, List<WeakReference<IInterceptorSubject>>> _holders = new();
+    private readonly ConcurrentDictionary<string, List<Holder>> _holders = new();
 
     public SecretReferences(SecretStore store, ILogger? logger)
     {
@@ -295,7 +295,7 @@ internal sealed class SecretReferences
         {
             if (dataKey.key == RememberedKeyDataKey && data is RememberedKey remembered)
             {
-                LetGo(remembered.Key, subject);
+                LetGo(remembered.Key, subject, dataKey.property!);
             }
         }
     }
@@ -305,7 +305,7 @@ internal sealed class SecretReferences
     {
         if (remembered is not null)
         {
-            Hold(remembered.Key, owner);
+            Hold(remembered.Key, owner, propertyName);
         }
 
         (string? Property, string Key) dataKey = (propertyName, RememberedKeyDataKey);
@@ -320,7 +320,7 @@ internal sealed class SecretReferences
                 {
                     if (data is RememberedKey previous && previous.Key != remembered?.Key)
                     {
-                        LetGo(previous.Key, owner);
+                        LetGo(previous.Key, owner, propertyName);
                     }
 
                     return;
@@ -333,25 +333,25 @@ internal sealed class SecretReferences
         }
     }
 
-    private void Hold(string key, IInterceptorSubject subject)
+    private void Hold(string key, IInterceptorSubject subject, string propertyName)
     {
         var holders = _holders.GetOrAdd(key, static _ => []);
         lock (holders)
         {
-            if (IndexOf(holders, subject) < 0)
+            if (IndexOf(holders, subject, propertyName) < 0)
             {
-                holders.Add(new WeakReference<IInterceptorSubject>(subject));
+                holders.Add(new Holder(new WeakReference<IInterceptorSubject>(subject), propertyName));
             }
         }
     }
 
-    private void LetGo(string key, IInterceptorSubject subject)
+    private void LetGo(string key, IInterceptorSubject subject, string propertyName)
     {
         if (_holders.TryGetValue(key, out var holders))
         {
             lock (holders)
             {
-                if (IndexOf(holders, subject) is var index and >= 0)
+                if (IndexOf(holders, subject, propertyName) is var index and >= 0)
                 {
                     holders.RemoveAt(index);
                 }
@@ -372,7 +372,7 @@ internal sealed class SecretReferences
         {
             foreach (var holder in holders)
             {
-                if (holder.TryGetTarget(out var target) && !ReferenceEquals(target, subject))
+                if (holder.Subject.TryGetTarget(out var target) && !ReferenceEquals(target, subject))
                 {
                     return true;
                 }
@@ -382,16 +382,16 @@ internal sealed class SecretReferences
         }
     }
 
-    // Under the lock of the list: drops the holders that were collected and gives the index of the subject, or -1.
-    private static int IndexOf(List<WeakReference<IInterceptorSubject>> holders, IInterceptorSubject subject)
+    // Under the lock of the list: drops the holders that were collected and gives the index of the property, or -1.
+    private static int IndexOf(List<Holder> holders, IInterceptorSubject subject, string propertyName)
     {
         var index = -1;
         var count = 0;
         for (var position = 0; position < holders.Count; position++)
         {
-            if (holders[position].TryGetTarget(out var target))
+            if (holders[position].Subject.TryGetTarget(out var target))
             {
-                index = ReferenceEquals(target, subject) ? count : index;
+                index = ReferenceEquals(target, subject) && holders[position].PropertyName == propertyName ? count : index;
                 holders[count++] = holders[position];
             }
         }
@@ -404,6 +404,8 @@ internal sealed class SecretReferences
         text.Length == Prefix.Length + KeyLength &&
         text.StartsWith(Prefix, StringComparison.Ordinal) &&
         !text.AsSpan(Prefix.Length).ContainsAnyExcept(KeyCharacters);
+
+    private readonly record struct Holder(WeakReference<IInterceptorSubject> Subject, string PropertyName);
 
     // Reference is the key with the prefix, kept so that writing an unchanged secret allocates no string.
     private sealed record RememberedKey(string Key, string Reference, bool IsUnresolved);

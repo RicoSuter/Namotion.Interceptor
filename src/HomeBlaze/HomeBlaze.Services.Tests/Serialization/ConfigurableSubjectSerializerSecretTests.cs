@@ -304,6 +304,29 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
+    public void WhenASubjectMovesOneOfTwoPropertiesOffAKey_ThenItStillHoldsTheKeyThroughTheOther()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        var key = Seed(store, "hunter2");
+        var both = Assert.IsType<SecretTestDevice>(serializer.Deserialize(
+            $$"""{ "$type": "{{typeof(SecretTestDevice).FullName}}", "password": "{{Prefix + key}}", "token": "{{Prefix + key}}" }"""));
+        var other = Deserialize(serializer, DeviceJson(Prefix + key));
+        both.Password = "moved";
+        serializer.Serialize(both);
+        other.Password = "changed";
+
+        // Act
+        var json = serializer.Serialize(other);
+
+        // Assert
+        Assert.NotEqual(Prefix + key, ReadString(json, "password"));
+        Assert.True(store.TryGet(key, out var value));
+        Assert.Equal("hunter2", value);
+        Assert.Equal("hunter2", both.Token);
+    }
+
+    [Fact]
     public void WhenASubjectThatHoldsAKeyIsReleased_ThenTheOtherSubjectsKeepTheKeysOnChange()
     {
         // Arrange
@@ -831,6 +854,9 @@ public partial class SecretTestDevice : IConfigurable
 
     [Configuration(IsSecret = true)]
     public partial string? Password { get; set; }
+
+    [Configuration(IsSecret = true)]
+    public partial string? Token { get; set; }
 
     [Configuration]
     public partial SecretTestDevice? Child { get; set; }
