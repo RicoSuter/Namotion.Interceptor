@@ -24,7 +24,7 @@ Unknown component types (for example `light:0`, `dimmer:0`, and the `em1:N` / `p
 
 ## Discovery
 
-The Discover page of the create dialog finds Shelly devices of the second generation and later over mDNS (`_shelly._tcp`) and shows each one with the name you gave it, or its device ID when it has none. A device that is already added is recognized by the device ID the subject read from it once connected, or, while it has not, by its host address. A device that moved to another address before its subject connected since HomeBlaze started shows as new on the Discover page.
+The Discover page of the create dialog finds Shelly devices of the second generation and later over mDNS (`_shelly._tcp`) and shows each one with the name you gave it, or its device ID when it has none. A named device announces itself twice, under its device ID and under its name, and is listed once, under its name. The device ID is taken only from an announced name in its shape, such as `shellyplus1pm-a8032ab12345`; a device that announces only its name is listed under that name and its address. A device that is already added is recognized by the device ID the subject read from it once connected, or, while it has not or when the device announced no ID, by its host address. A device that moved to another address before its subject connected since HomeBlaze started shows as new on the Discover page.
 
 ## Configuration
 

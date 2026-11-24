@@ -182,13 +182,14 @@ namespace Namotion.Devices.Shelly
     }
     public sealed class ShellyDiscoveredDevice : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, HomeBlaze.Abstractions.Discovery.IDiscoveryResult<Namotion.Devices.Shelly.ShellyDevice>, System.IEquatable<Namotion.Devices.Shelly.ShellyDiscoveredDevice>
     {
-        public ShellyDiscoveredDevice(string DeviceId, string HostAddress, string? Application, string DisplayName) { }
+        public ShellyDiscoveredDevice(string? DeviceId, string HostAddress, string? Application, string? Name) { }
         public string? Application { get; init; }
         public string? Detail { get; }
-        public string DeviceId { get; init; }
-        public string DisplayName { get; init; }
+        public string? DeviceId { get; init; }
+        public string DisplayName { get; }
         public string HostAddress { get; init; }
         public string Key { get; }
+        public string? Name { get; init; }
         public bool Matches(Namotion.Devices.Shelly.ShellyDevice subject) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
