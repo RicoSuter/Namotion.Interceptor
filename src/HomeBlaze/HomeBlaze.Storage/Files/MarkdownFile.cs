@@ -273,9 +273,16 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return;
         }
 
-        subject.Data[(null, SecretRewriteDataKey)] = new SecretRewrite(this, json);
+        MarkForSecretRewrite(subject, json);
         (subjects ??= []).Add(subject);
     }
+
+    /// <summary>
+    /// Marks the block subject for <see cref="RewriteBlocksIfFileUnchangedAsync"/>, with the configuration JSON whose
+    /// plaintext secrets it moves.
+    /// </summary>
+    internal void MarkForSecretRewrite(IInterceptorSubject subject, string json) =>
+        subject.Data[(null, SecretRewriteDataKey)] = new SecretRewrite(this, json);
 
     /// <summary>
     /// Writes the block of each subject that a parse marked for its plaintext secrets, one after the other, while the
@@ -313,6 +320,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 switch (await WriteBlockAsync(subjects[index], CancellationToken.None))
                 {
                     case BlockWriteResult.Written:
+                        // Unmarked, so that the same plaintext written back later, such as by an undo, is moved again.
+                        ForgetSecretRewrite(subjects[index], forgetAppliedConfiguration: false);
                         _parser.LogMovedSecrets(FullPath);
                         break;
                     case BlockWriteResult.RefusedByPublish:

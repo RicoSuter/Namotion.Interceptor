@@ -485,6 +485,27 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenTheSamePlaintextSecretIsWrittenBackIntoAPageAfterItWasMoved_ThenItIsMovedAgain()
+    {
+        // Arrange
+        UseSecretStore();
+        var plaintext = $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n";
+        WriteFile("Gateway.md", plaintext);
+        var storage = await ConnectAsync();
+        await WaitForSecretReferenceOnlyAsync("Gateway.md");
+
+        // Waits for the rewrite of the load, which holds the write lock of the page until it is done.
+        await Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]).RewriteBlocksIfFileUnchangedAsync([]);
+
+        // Act: as an undo outside HomeBlaze does.
+        WriteFile("Gateway.md", plaintext);
+        await storage.ReconcileAsync(Named("Gateway.md"));
+
+        // Assert
+        await WaitForSecretReferenceOnlyAsync("Gateway.md");
+    }
+
+    [Fact]
     public async Task WhenThePageFileChangedSinceItWasRead_ThenTheBlockRewriteWritesNothingAndReadsThePageAgain()
     {
         // Arrange
@@ -603,14 +624,20 @@ public class SecretRewriteTests : StorageTestBase
         Assert.InRange(device.ApplyCount, 2, 3);
     }
 
-    // The load moves the plaintext secret of the block, which leaves its subject marked with the configuration it checked.
+    // The load moves the plaintext secret of the block. Once that rewrite is done, the subject of the block is marked
+    // again, as the next parse with plaintext marks it, so that the test runs the rewrite itself.
     private async Task<(MarkdownFile Page, string MovedContent)> ConnectAndWaitForMovedSecretAsync(string content)
     {
         UseSecretStore();
         WriteFile("Gateway.md", content);
         var storage = await ConnectAsync();
         var movedContent = await WaitForSecretReferenceOnlyAsync("Gateway.md");
-        return (Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]), movedContent);
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+
+        // Waits for the rewrite of the load, which holds the write lock of the page until it has unmarked the subject.
+        await page.RewriteBlocksIfFileUnchangedAsync([]);
+        page.MarkForSecretRewrite(page.Children["gateway"], "{}");
+        return (page, movedContent);
     }
 
     private string UseSecretStore() => SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
