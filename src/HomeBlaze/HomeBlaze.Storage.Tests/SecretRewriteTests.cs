@@ -284,6 +284,42 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAWidgetWithASecretIsInsertedIntoAPage_ThenItsBlockReadsTheSecretFromTheStore()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", "# Gateway\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+
+        // Act
+        var result = await page.InsertWidgetAsync(
+            page, null, new EmbeddedSecretDevice { Host = "10.0.0.1", Password = "s3cr3t" }, "gateway", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        Assert.Equal("s3cr3t", Assert.IsType<EmbeddedSecretDevice>(page.Children["gateway"]).Password);
+        Assert.Equal("s3cr3t", Assert.Single(ReadSecrets()).Value);
+        Assert.DoesNotContain("s3cr3t", File.ReadAllText(GetFullPath("Gateway.md")));
+    }
+
+    [Fact]
+    public async Task WhenASubjectWithASecretIsAdded_ThenItsFileReferencesTheStoredSecret()
+    {
+        // Arrange
+        UseSecretStore();
+        var storage = await ConnectAsync();
+
+        // Act
+        await storage.AddSubjectAsync("Gateway.json", new EmbeddedSecretDevice { Host = "10.0.0.1", Password = "s3cr3t" }, CancellationToken.None);
+
+        // Assert
+        var entry = Assert.Single(ReadSecrets());
+        Assert.Equal("s3cr3t", entry.Value);
+        Assert.Contains($"\"password\": \"$secret:{entry.Key}\"", File.ReadAllText(GetFullPath("Gateway.json")));
+    }
+
+    [Fact]
     public async Task WhenTheFileStillHasTheExpectedContent_ThenTheConditionalSaveWritesIt()
     {
         // Arrange
