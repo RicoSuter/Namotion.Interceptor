@@ -319,17 +319,20 @@ public class SecretRewriteTests : StorageTestBase
         Assert.Contains($"\"password\": \"$secret:{entry.Key}\"", File.ReadAllText(GetFullPath("Gateway.json")));
     }
 
-    [Fact]
-    public async Task WhenACopiedJsonFileChangesItsSecret_ThenItGetsItsOwnKeyAndTheOriginalKeepsItsSecret()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenACopiedJsonFileChangesItsSecret_ThenItGetsItsOwnKeyAndTheOriginalKeepsItsSecret(bool isCopyLoadedFirst)
     {
         // Arrange
         UseSecretStore();
         var key = SeedSecret("shared-password");
         var content = $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "$secret:{{key}}" }""";
-        WriteFile("Gateway.json", content);
+        var (firstPath, secondPath) = isCopyLoadedFirst ? ("Copy.json", "Gateway.json") : ("Gateway.json", "Copy.json");
+        WriteFile(firstPath, content);
         var storage = await ConnectAsync();
-        WriteFile("Copy.json", content);
-        await storage.ReconcileAsync(Named("Copy.json"));
+        WriteFile(secondPath, content);
+        await storage.ReconcileAsync(Named(secondPath));
         var original = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
         var copy = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Copy"]);
         copy.Password = "copy-password";

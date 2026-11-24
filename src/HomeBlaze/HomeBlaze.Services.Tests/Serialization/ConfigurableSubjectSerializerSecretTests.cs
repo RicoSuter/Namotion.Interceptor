@@ -262,6 +262,27 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
+    public void WhenTwoSubjectsReadTheSameReference_ThenAChangeOfTheFirstGivesItANewKeyAndLeavesTheSecondUnchanged()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        var key = store.Add("hunter2");
+        var first = Deserialize(serializer, DeviceJson(Prefix + key));
+        var second = Deserialize(serializer, DeviceJson(Prefix + key));
+        first.Password = "first secret";
+
+        // Act
+        var firstJson = serializer.Serialize(first);
+
+        // Assert
+        var firstKey = KeyOf(ReadString(firstJson, "password"));
+        Assert.NotEqual(key, firstKey);
+        Assert.Equal(new Dictionary<string, string> { [key] = "hunter2", [firstKey] = "first secret" }, ReadStoreFile());
+        Assert.Equal("hunter2", Deserialize(serializer, DeviceJson(Prefix + key)).Password);
+        GC.KeepAlive(second);
+    }
+
+    [Fact]
     public void WhenTheFirstSubjectOfAKeyMovesToAnotherKey_ThenTheNextSubjectThatReadsTheKeyKeepsItOnChange()
     {
         // Arrange
