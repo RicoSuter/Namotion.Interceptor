@@ -176,6 +176,7 @@ internal sealed class FileSubjectFactory
             context.TryGetLifecycleInterceptor() is { } lifecycle &&
             lifecycle.TryRunWhileAttached(subject, static () => { }))
         {
+            _serializer.ReleaseSecrets(subject);
             subject.Context.RemoveFallbackContext(context);
         }
     }

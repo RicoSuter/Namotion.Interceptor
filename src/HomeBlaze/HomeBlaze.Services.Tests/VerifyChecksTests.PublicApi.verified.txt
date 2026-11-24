@@ -23,6 +23,7 @@ namespace HomeBlaze.Services
         public System.Text.Json.JsonElement? GetDefaultConfiguration(System.Type type, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public bool HasUnstoredSecrets(Namotion.Interceptor.IInterceptorSubject subject) { }
         public void Release(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public void ReleaseSecrets(Namotion.Interceptor.IInterceptorSubject subject) { }
         public void ReplaceConfiguration(Namotion.Interceptor.IInterceptorSubject subject, string json, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool> isExcluded, HomeBlaze.Services.ConfigurationNaming naming = 0) { }

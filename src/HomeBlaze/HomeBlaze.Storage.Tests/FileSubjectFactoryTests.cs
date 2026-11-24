@@ -113,6 +113,37 @@ public class FileSubjectFactoryTests : IDisposable
         Assert.DoesNotContain(logger.Messages, message => message.Contains("s3cr3t"));
     }
 
+    [Fact]
+    public void WhenASubjectFromJsonIsReleased_ThenAnotherSubjectThatHoldsItsSecretKeyKeepsItOnChange()
+    {
+        // Arrange
+        var store = new SecretStore(Path.Combine(_secretsDirectory.FullName, "Secrets.json"));
+        var key = Guid.NewGuid().ToString("N");
+        store.Set(key, "shared");
+        var services = new ServiceCollection();
+        services.AddSingleton(SubjectContextFactory.Create(services));
+        services.AddSingleton(store);
+        var serviceProvider = services.BuildServiceProvider();
+        var typeProvider = new TypeProvider();
+        typeProvider.AddTypes([typeof(EmbeddedSecretDevice)]);
+        var serializer = new ConfigurableSubjectSerializer(typeProvider, serviceProvider);
+        var factory = new FileSubjectFactory(new SubjectTypeRegistry(typeProvider), serializer, serviceProvider, logger: null);
+        var json = $$"""{ "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "password": "$secret:{{key}}" }""";
+        var released = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out _);
+        var kept = Assert.IsType<EmbeddedSecretDevice>(serializer.Deserialize(json));
+        kept.Password = "changed";
+
+        // Act
+        factory.Release(released);
+        var keptJson = serializer.Serialize(kept);
+
+        // Assert
+        Assert.Contains($"$secret:{key}", keptJson);
+        Assert.True(store.TryGet(key, out var value));
+        Assert.Equal("changed", value);
+        GC.KeepAlive(released);
+    }
+
     public void Dispose() => _secretsDirectory.Delete(recursive: true);
 
     private FileSubjectFactory CreateFactoryWithSecretStore(ILogger? logger = null)

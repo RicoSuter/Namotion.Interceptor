@@ -368,9 +368,11 @@ public class ConfigurableSubjectSerializer
 
     /// <summary>
     /// Lets go of the secret keys that the subject and the subjects in its configuration hold, for a subject that is no
-    /// longer used, so that another subject that holds one of them keeps it when it changes its value.
+    /// longer used, so that another subject that holds one of them keeps it when it changes its value. A subject in its
+    /// configuration that something else references keeps its keys.
     /// </summary>
-    internal void ReleaseSecrets(IInterceptorSubject subject)
+    /// <remarks>Call it before the subject is detached from the context.</remarks>
+    public void ReleaseSecrets(IInterceptorSubject subject)
     {
         if (_secrets is null)
         {
