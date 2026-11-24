@@ -746,8 +746,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                     page, snapshot.BlockSubjects, owner, line, typeName, name, configurationJson, out refusal), refusal)
                 : (null, refusal),
             GetChangedPageRefusal(before),
-            secretChanges,
-            cancellationToken);
+            cancellationToken,
+            secretChanges);
     }
 
     /// <summary>
@@ -947,8 +947,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 return (MarkdownPageOperations.TryAppendSlotBlock(page, subjects, block, slotName, configurationJson, out var refusal), refusal);
             },
             StructureChangedRefusal,
-            secretChanges,
-            cancellationToken);
+            cancellationToken,
+            secretChanges);
     }
 
     /// <summary>
@@ -973,8 +973,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             slotName,
             (MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> subjects, MarkdownBlock container, int line, out string? refusal) =>
                 MarkdownPageOperations.TryInsertWidget(page, subjects, container, line, typeName, name, configurationJson, out refusal),
-            secretChanges,
-            cancellationToken);
+            cancellationToken,
+            secretChanges);
     }
 
     /// <summary>
@@ -996,7 +996,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             slotName,
             (MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> subjects, MarkdownBlock container, int line, out string? refusal) =>
                 MarkdownPageOperations.TryInsertText(page, subjects, container, line, text, out refusal),
-            secretChanges: null,
             cancellationToken);
     }
 
@@ -1004,8 +1003,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         IInterceptorSubject owner,
         string? slotName,
         MarkdownContentInsert insert,
-        SecretChanges? secretChanges,
-        CancellationToken cancellationToken) =>
+        CancellationToken cancellationToken,
+        SecretChanges? secretChanges = null) =>
         EditStructureAsync(
             (snapshot, page) =>
             {
@@ -1025,8 +1024,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 return (MarkdownPageOperations.TryAddToSlot(page, snapshot.BlockSubjects, block, slots, slot, insert, out var refusal), refusal);
             },
             StructureChangedRefusal,
-            secretChanges,
-            cancellationToken);
+            cancellationToken,
+            secretChanges);
 
     // The default slot when the name is null, and only a slot that takes page content: a slot of configured items takes none.
     private static SlotDefinition? FindContentSlot(SlotMap slots, string? slotName)
@@ -1136,12 +1135,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                (snapshot.Page is { } page && MarkdownPageOperations.FindContentBlock(page, snapshot.BlockSubjects, content) is not null);
     }
 
-    private Task<MarkdownEditResult> EditStructureAsync(
-        Func<MarkdownParseResult, MarkdownPage, (MarkdownStructureChange? Change, string? Refusal)> operation,
-        string changedPageRefusal,
-        CancellationToken cancellationToken) =>
-        EditStructureAsync(operation, changedPageRefusal, secretChanges: null, cancellationToken);
-
     private string SerializeNewBlock(IInterceptorSubject subject, out SecretChanges secretChanges) =>
         _serializer.CaptureSecretChanges(() => MarkdownBlockConfiguration.Serialize(_serializer, subject, block: null), out secretChanges);
 
@@ -1150,8 +1143,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private async Task<MarkdownEditResult> EditStructureAsync(
         Func<MarkdownParseResult, MarkdownPage, (MarkdownStructureChange? Change, string? Refusal)> operation,
         string changedPageRefusal,
-        SecretChanges? secretChanges,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SecretChanges? secretChanges = null)
     {
         EnsureNotWithinWrite();
         await _writeLock.WaitAsync(cancellationToken);
@@ -1375,14 +1368,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
         try
         {
-            if (secretChanges is null)
-            {
-                await WriteUnlockedAsync(content);
-            }
-            else
-            {
-                await secretChanges.StoreAroundAsync(() => WriteUnlockedAsync(content));
-            }
+            await (secretChanges is null ? WriteUnlockedAsync(content) : secretChanges.StoreAroundAsync(() => WriteUnlockedAsync(content)));
         }
         catch
         {
