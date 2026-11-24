@@ -26,11 +26,7 @@ internal sealed class SecretReferences
     // The key of the remembered key of a secret property in the data of its subject.
     private const string RememberedKeyDataKey = "HomeBlaze.Secrets.Key";
 
-    // Set by HasUnstoredSecrets for the serialization it runs, which is synchronous and runs on the calling thread.
-    [ThreadStatic] private static bool t_isDryRun;
-    [ThreadStatic] private static bool t_hasUnstored;
-
-    // Set by Capture for the serialization it runs, as the dry run is.
+    // Set by Capture for the serialization it runs, which is synchronous and runs on the calling thread.
     [ThreadStatic] private static SecretChanges? t_changes;
 
     private readonly SecretStore _store;
@@ -134,7 +130,7 @@ internal sealed class SecretReferences
             return text is null && remembered is { IsUnresolved: true } unresolved ? unresolved.Reference : text;
         }
 
-        var changes = t_isDryRun ? null : t_changes;
+        var changes = t_changes;
         if (changes?.Find(owner, propertyName) is { } captured)
         {
             // The same property serialized again for the same write.
@@ -142,57 +138,42 @@ internal sealed class SecretReferences
             return captured.Reference;
         }
 
-        if (remembered is { } known)
+        if (remembered is { } known && TryGetValue(known.Key, out var stored) && stored == text)
         {
-            if (TryGetValue(known.Key, out var stored) && stored == text)
-            {
-                if (known.IsUnresolved)
-                {
-                    // Only when unchanged: a concurrent read may have remembered another key since.
-                    owner.Data.TryUpdate(dataKey, known with { IsUnresolved = false }, known);
-                }
-
-                return known.Reference;
-            }
-        }
-
-        if (t_isDryRun)
-        {
-            t_hasUnstored = true;
-            return text;
-        }
-
-        if (remembered is { IsShared: false } owned)
-        {
-            if (changes is not null)
-            {
-                changes.Changes.Add(new Change(owner, propertyName, owned.Key, owned.Reference, IsNew: false) { Value = text });
-            }
-            else
-            {
-                _store.Set(owned.Key, text);
-                if (owned.IsUnresolved)
-                {
-                    owner.Data.TryUpdate(dataKey, owned with { IsUnresolved = false }, owned);
-                }
-            }
-
-            return owned.Reference;
+            MarkResolved(owner, dataKey, known);
+            return known.Reference;
         }
 
         // No key, or one that another subject read first, such as the original of a copied file, which keeps it.
+        var isNew = remembered is not { IsShared: false };
+        var key = isNew ? SecretStore.CreateKey() : remembered!.Key;
+        var reference = isNew ? Prefix + key : remembered!.Reference;
         if (changes is not null)
         {
-            var capturedKey = SecretStore.CreateKey();
-            var capturedReference = Prefix + capturedKey;
-            changes.Changes.Add(new Change(owner, propertyName, capturedKey, capturedReference, IsNew: true) { Value = text });
-            return capturedReference;
+            changes.Changes.Add(new Change(owner, propertyName, key, reference, isNew) { Value = text });
+            return reference;
         }
 
-        var newKey = _store.Add(text);
-        var reference = Prefix + newKey;
-        Remember(owner, propertyName, newKey, reference);
+        _store.Set(key, text);
+        if (isNew)
+        {
+            Remember(owner, propertyName, key, reference);
+        }
+        else
+        {
+            MarkResolved(owner, dataKey, remembered!);
+        }
+
         return reference;
+    }
+
+    // Only when unchanged: a concurrent read may have remembered another key since.
+    private static void MarkResolved(IInterceptorSubject owner, (string?, string) dataKey, RememberedKey remembered)
+    {
+        if (remembered.IsUnresolved)
+        {
+            owner.Data.TryUpdate(dataKey, remembered with { IsUnresolved = false }, remembered);
+        }
     }
 
     /// <summary>
@@ -365,29 +346,6 @@ internal sealed class SecretReferences
             {
                 return true;
             }
-        }
-    }
-
-    /// <summary>
-    /// Runs <paramref name="serialize"/> without storing anything and returns whether it found a secret value that its
-    /// key does not hold yet, such as one read as plaintext or a changed one.
-    /// </summary>
-    public bool HasUnstoredSecrets(Action serialize)
-    {
-        // Restored afterwards, so that a nested dry run does not end the one around it.
-        var wasDryRun = t_isDryRun;
-        var hadUnstored = t_hasUnstored;
-        t_isDryRun = true;
-        t_hasUnstored = false;
-        try
-        {
-            serialize();
-            return t_hasUnstored;
-        }
-        finally
-        {
-            t_isDryRun = wasDryRun;
-            t_hasUnstored = hadUnstored;
         }
     }
 

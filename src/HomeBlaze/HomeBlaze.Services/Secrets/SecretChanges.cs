@@ -23,6 +23,8 @@ public sealed class SecretChanges
 
     internal List<SecretReferences.Change> Changes => _changes ??= [];
 
+    internal bool IsEmpty => _changes is null;
+
     internal SecretReferences.Change? Find(IInterceptorSubject owner, string propertyName)
     {
         if (_changes is not null)

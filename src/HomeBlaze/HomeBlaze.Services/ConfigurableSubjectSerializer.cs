@@ -157,8 +157,17 @@ public class ConfigurableSubjectSerializer
     /// <exception cref="InvalidOperationException">
     /// The type of the subject, or of a value in its configuration, has a secret configuration property that is not a string property of a subject.
     /// </exception>
-    public bool HasUnstoredSecrets(IInterceptorSubject subject) =>
-        subject is IConfigurable && _secrets is { } secrets && secrets.HasUnstoredSecrets(() => Serialize(subject));
+    public bool HasUnstoredSecrets(IInterceptorSubject subject)
+    {
+        if (subject is not IConfigurable || _secrets is not { } secrets)
+        {
+            return false;
+        }
+
+        // The captured changes are dropped, so nothing is stored.
+        secrets.Capture(() => Serialize(subject), out var changes);
+        return !changes.IsEmpty;
+    }
 
     /// <summary>
     /// Runs <paramref name="serialize"/>, which serializes with this serializer on the calling thread, and returns its

@@ -159,8 +159,9 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
         return typeInfo;
     }
 
-    // Only wrapped for a property of a subject, see SecretReferences.EnsureSupported. The getter serves every write, also of the overload of the serializer that excludes properties. The setter only
-    // serves subjects nested in a configuration: the serializer sets the properties of the subject it reads itself.
+    // Only wrapped for a property of a subject, see SecretReferences.EnsureSupported. The getter serves every write, also
+    // of the overload of the serializer that excludes properties. The setter only serves subjects nested in a
+    // configuration: the serializer sets the properties of the subject it reads itself.
     // The getter runs before ShouldSerialize, so a value that ShouldSerialize drops still leaves an unused store entry.
     private static void WrapSecret(JsonPropertyInfo property, string propertyName, SecretReferences secrets)
     {
