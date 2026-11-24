@@ -304,6 +304,60 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
+    public void WhenASubjectThatHoldsAKeyIsReleased_ThenTheOtherSubjectsKeepTheKeysOnChange()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        var key = store.Add("hunter2");
+        var childKey = store.Add("inner");
+        var released = Deserialize(serializer, DeviceJson(Prefix + key, childPassword: Prefix + childKey));
+        var kept = Deserialize(serializer, DeviceJson(Prefix + key, childPassword: Prefix + childKey));
+        kept.Password = "changed";
+        kept.Child!.Password = "changed inner";
+
+        // Act
+        serializer.Release(released);
+        var json = serializer.Serialize(kept);
+
+        // Assert
+        Assert.Equal(Prefix + key, ReadString(json, "password"));
+        Assert.Equal(Prefix + childKey, ReadString(json, "child", "password"));
+        Assert.Equal(new Dictionary<string, string> { [key] = "changed", [childKey] = "changed inner" }, ReadStoreFile());
+        GC.KeepAlive(released);
+    }
+
+    [Fact]
+    public void WhenASubjectThatHoldsAKeyIsDiscarded_ThenTheSubjectThatReadsTheKeyKeepsItOnChange()
+    {
+        // Arrange: as a dialog serializes the subject it configured before it discards it.
+        var typeProvider = new TypeProvider();
+        typeProvider.AddTypes([typeof(SecretTestDevice)]);
+        using var serviceProvider = new ServiceCollection()
+            .AddSingleton(typeProvider)
+            .AddSingleton(CreateContext())
+            .AddSingleton(new SecretStore(StorePath))
+            .AddSingleton<ConfigurableSubjectSerializer>()
+            .AddSingleton<SubjectFactory>()
+            .BuildServiceProvider();
+        var serializer = serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>();
+        var factory = serviceProvider.GetRequiredService<SubjectFactory>();
+        var discarded = (SecretTestDevice)factory.CreateSubject(typeof(SecretTestDevice));
+        discarded.Password = "hunter2";
+        var reference = ReadString(serializer.Serialize(discarded), "password");
+        factory.DiscardSubject(discarded);
+        var block = Deserialize(serializer, DeviceJson(reference));
+        block.Password = "changed";
+
+        // Act
+        var json = serializer.Serialize(block);
+
+        // Assert
+        Assert.Equal(reference, ReadString(json, "password"));
+        Assert.Equal(new Dictionary<string, string> { [KeyOf(reference)] = "changed" }, ReadStoreFile());
+        GC.KeepAlive(discarded);
+    }
+
+    [Fact]
     public async Task WhenASubjectThatSharesAKeyChangesItsSecretWithCapturedChanges_ThenTheNewKeyIsStoredBeforeTheFileIsWritten()
     {
         // Arrange

@@ -288,6 +288,18 @@ internal sealed class SecretReferences
     private void Remember(IInterceptorSubject owner, string propertyName, string key, string reference) =>
         SetRemembered(owner, propertyName, new RememberedKey(key, reference, IsUnresolved: false));
 
+    /// <summary>Lets go of the keys that the secret properties of the subject hold, for a subject that is released.</summary>
+    public void Release(IInterceptorSubject subject)
+    {
+        foreach (var (dataKey, data) in subject.Data)
+        {
+            if (dataKey.key == RememberedKeyDataKey && data is RememberedKey remembered)
+            {
+                LetGo(remembered.Key, subject);
+            }
+        }
+    }
+
     // In the data of the subject, so it lives as long as the subject. Null forgets the key.
     private void SetRemembered(IInterceptorSubject owner, string propertyName, RememberedKey? remembered)
     {

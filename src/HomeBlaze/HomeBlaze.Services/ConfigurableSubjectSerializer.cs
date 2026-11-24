@@ -342,7 +342,8 @@ public class ConfigurableSubjectSerializer
     /// <summary>
     /// Releases a subject that <see cref="Deserialize(string, ConfigurationNaming)"/> created and that is not used
     /// after all: detaches it and the subjects in its properties from the context, which stops their hosted
-    /// services. A hosted service that was not started yet is stopped without having been started.
+    /// services, and lets go of their secret keys, see <see cref="ReleaseSecrets"/>. A hosted service that was not
+    /// started yet is stopped without having been started.
     /// </summary>
     /// <remarks>
     /// Does nothing for a subject that a property references. Such a subject is in the graph and leaves the
@@ -355,11 +356,34 @@ public class ConfigurableSubjectSerializer
             return;
         }
 
+        ReleaseSecrets(subject);
+
         // The context the constructor got from the service provider is a fallback context of the subject.
         // Removing it is what detaches a subject that no property holds.
         if (_serviceProvider.GetService<IInterceptorSubjectContext>() is { } context)
         {
             subject.Context.RemoveFallbackContext(context);
+        }
+    }
+
+    /// <summary>
+    /// Lets go of the secret keys that the subject and the subjects in its configuration hold, for a subject that is no
+    /// longer used, so that another subject that holds one of them keeps it when it changes its value.
+    /// </summary>
+    internal void ReleaseSecrets(IInterceptorSubject subject)
+    {
+        if (_secrets is null)
+        {
+            return;
+        }
+
+        _secrets.Release(subject);
+        foreach (var property in subject.GetConfigurationProperties())
+        {
+            foreach (var child in property.Children)
+            {
+                ReleaseSecrets(child.Subject);
+            }
         }
     }
 
