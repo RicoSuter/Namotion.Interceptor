@@ -5,7 +5,6 @@
 @using HomeBlaze.Components.Dialogs
 @using HomeBlaze.Services
 @using HomeBlaze.Services.Components
-@using HomeBlaze.Services.Secrets
 @using HomeBlaze.Storage.Blazor.Models
 @using HomeBlaze.Storage.Files
 @using HomeBlaze.Storage.Internal
@@ -233,11 +232,17 @@ else
         // can also have inserted or removed blocks, and writing the editor text below overwrites that.
         var configurationJson = Serializer.CaptureSecretChanges(
             () => MarkdownBlockConfiguration.Serialize(Serializer, subject, block), out var secretChanges);
-        SetCurrentContent(MarkdownBlockWriter.WriteConfiguration(_currentContent, block, configurationJson));
+        var content = MarkdownBlockWriter.WriteConfiguration(_currentContent, block, configurationJson);
 
-        // The reload inside the write keeps the edited subject and applies its configuration.
-        await _sourceEditor.SetTextAsync(_currentContent);
-        await WriteShownTextAsync(_currentContent, secretChanges);
+        // Inside, so that the editor never shows a reference whose key is not stored, which its next save would write.
+        await secretChanges.StoreAroundAsync(async () =>
+        {
+            SetCurrentContent(content);
+
+            // The reload inside the write keeps the edited subject and applies its configuration.
+            await _sourceEditor.SetTextAsync(content);
+            await WriteShownTextAsync(content);
+        });
     }
 
     private async Task OnEditExpressionClick(DecorationRegion region)
@@ -327,18 +332,9 @@ else
 
     // Writes the text that the editor shows. The storage reloads the file inside the write, so the decorations are refreshed
     // after it, so that the regions carry the subjects of the reloaded page.
-    // `secretChanges` are those of a configuration in the text, which are stored around the write of the file.
-    private async Task WriteShownTextAsync(string content, SecretChanges? secretChanges = null)
+    private async Task WriteShownTextAsync(string content)
     {
-        if (secretChanges is null)
-        {
-            await File!.WriteAsync(content, CancellationToken.None);
-        }
-        else
-        {
-            await secretChanges.StoreAroundAsync(() => File!.WriteAsync(content, CancellationToken.None));
-        }
-
+        await File!.WriteAsync(content, CancellationToken.None);
         await _sourceEditor!.RefreshDecorationsAsync();
         _originalContent = content;
         ReportIsDirty();
