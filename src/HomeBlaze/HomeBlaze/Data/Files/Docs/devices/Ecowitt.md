@@ -9,6 +9,10 @@ Any Ecowitt gateway that exposes the local HTTP API:
 - GW2000, GW2000X
 - HP2550, HP2560, HP3500
 
+## Discovery
+
+The Discover page of the create dialog finds gateways with the broadcast request of the local API, sent to UDP port 46000, and shows each one with the name it announces and its firmware version. Picking one fills in the address its reply came from as the host address. A gateway that is already added is recognized by its MAC address, which the subject reads from the gateway once it has connected, or by its host address. The request is a broadcast, so HomeBlaze in a Docker container finds gateways only with host networking.
+
 ## Configuration
 
 | Property | Description | Default |

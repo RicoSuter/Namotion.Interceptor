@@ -39,12 +39,12 @@ public class MacAddressesTests
     }
 
     [Theory]
-    [InlineData("82:A6:88:A1:34:13", true)]
-    [InlineData("32:2E:F0:0B:D8:9C", true)]
-    [InlineData("d6-7b-bc-7c-7f-75", true)]
-    [InlineData("FE:66:09:38:97:A3", true)]
-    [InlineData("00:04:4B:A9:B7:3C", false)]
-    [InlineData("3C:8A:1F:32:E1:57", false)]
+    [InlineData("82:00:00:00:00:01", true)]
+    [InlineData("32:00:00:00:00:02", true)]
+    [InlineData("d6-00-00-00-00-03", true)]
+    [InlineData("FE:00:00:00:00:04", true)]
+    [InlineData("00:00:5E:00:53:01", false)]
+    [InlineData("3C:00:00:00:00:05", false)]
     [InlineData("01:00:5E:00:00:01", false)]
     [InlineData("not a mac", false)]
     [InlineData(null, false)]

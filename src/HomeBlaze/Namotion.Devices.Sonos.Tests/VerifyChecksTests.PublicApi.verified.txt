@@ -47,6 +47,16 @@ namespace Namotion.Devices.Sonos
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
+    public sealed class SonosDiscoveredHousehold : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, HomeBlaze.Abstractions.Discovery.IDiscoveryResult<Namotion.Devices.Sonos.SonosSystem>, System.IEquatable<Namotion.Devices.Sonos.SonosDiscoveredHousehold>
+    {
+        public string? Detail { get; }
+        public string DisplayName { get; }
+        public string HouseholdId { get; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.DiscoveredItem> IncludedItems { get; }
+        public string Key { get; }
+        public string SeedHost { get; }
+        public bool Matches(Namotion.Devices.Sonos.SonosSystem subject) { }
+    }
     public sealed class SonosFaultException : System.Exception
     {
         public string Action { get; }
@@ -243,6 +253,12 @@ namespace Namotion.Devices.Sonos
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Turns speech enhancement on or off for this home theater player.", Position=2, Title="Set Speech Enhancement")]
         public System.Threading.Tasks.Task SetSpeechEnhancementAsync(bool speechEnhancement, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public sealed class SonosHouseholdDiscovery : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.Sonos.SonosSystem, Namotion.Devices.Sonos.SonosDiscoveredHousehold>
+    {
+        public SonosHouseholdDiscovery(HomeBlaze.Abstractions.Discovery.ISsdpSearch ssdpSearch) { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.Sonos.SonosHouseholdDiscovery.<DiscoverAsync>d__6))]
+        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Sonos.SonosDiscoveredHousehold> DiscoverAsync([System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class SonosPlayer : Namotion.Devices.Sonos.SonosDevice, HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Media.IAudioPlayer, HomeBlaze.Abstractions.Media.IMediaPlaybackController, HomeBlaze.Abstractions.Media.IMediaPlaybackState, HomeBlaze.Abstractions.Media.IMediaTrackState, HomeBlaze.Abstractions.Media.IVolumeController, HomeBlaze.Abstractions.Media.IVolumeState, Namotion.Interceptor.IInterceptorSubject
@@ -582,5 +598,6 @@ namespace Namotion.Devices.Sonos
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Makes every room standalone.", Position=3, Title="Ungroup All Rooms")]
         public System.Threading.Tasks.Task UngroupAllAsync(System.Threading.CancellationToken cancellationToken) { }
+        public static Namotion.Devices.Sonos.SonosSystem? FindSystemUsingEventPort(System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject> subjects, int eventPort, Namotion.Devices.Sonos.SonosSystem? system) { }
     }
 }

@@ -16,7 +16,7 @@ using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Tests;
 
-public class MarkdownFileWriteTests : IDisposable
+public class MarkdownFileWriteTests : IAsyncLifetime
 {
     private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("homeblaze-markdown-");
     private readonly List<FluentStorageContainer> _storages = [];
@@ -1616,14 +1616,12 @@ public class MarkdownFileWriteTests : IDisposable
 
     private string ReadFile(string relativePath) => File.ReadAllText(GetFullPath(relativePath));
 
-    public void Dispose()
-    {
-        foreach (var storage in _storages)
-        {
-            storage.Dispose();
-        }
+    public Task InitializeAsync() => Task.CompletedTask;
 
-        _directory.Delete(recursive: true);
+    public async Task DisposeAsync()
+    {
+        await StorageCleanup.DisposeAsync(_storages);
+        await StorageCleanup.DeleteAsync(_directory);
     }
 
     /// <summary>A stream whose reads wait until <see cref="Open"/> is called.</summary>

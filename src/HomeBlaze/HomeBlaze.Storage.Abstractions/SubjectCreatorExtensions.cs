@@ -6,21 +6,27 @@ namespace HomeBlaze.Storage.Abstractions;
 public static class SubjectCreatorExtensions
 {
     /// <summary>
-    /// Opens the create dialog and adds the created subject to storage.
+    /// Opens the create dialog and adds each created subject to storage as <c>{name}.json</c>. A subject without a
+    /// name is not added.
     /// </summary>
     /// <param name="subjectSetupService">The setup service.</param>
-    /// <param name="storage">The storage the subject is added to.</param>
+    /// <param name="storage">The storage the subjects are added to.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    public static async Task CreateSubjectAndAddToStorageAsync(
+    public static Task CreateSubjectsAndAddToStorageAsync(
         this ISubjectSetupService subjectSetupService,
         IStorageContainer storage,
         CancellationToken cancellationToken)
     {
-        var result = await subjectSetupService.CreateSubjectAsync(storage, cancellationToken);
-        if (result?.Name is not { } name)
-            return;
+        return subjectSetupService.CreateSubjectsAsync(
+            storage,
+            async (result, addCancellationToken) =>
+            {
+                if (result.Name is not { } name)
+                    return;
 
-        var fileName = $"{name}{FileExtensions.Json}";
-        await storage.AddSubjectAsync(fileName, result.Subject, cancellationToken);
+                var fileName = $"{name}{FileExtensions.Json}";
+                await storage.AddSubjectAsync(fileName, result.Subject, addCancellationToken);
+            },
+            cancellationToken);
     }
 }

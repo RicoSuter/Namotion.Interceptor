@@ -117,7 +117,7 @@ public class EcowittClient
         // The device info endpoint varies by firmware. Try known field names.
         var model = json.TryGetProperty("model", out var modelProp) ? modelProp.GetString() : null;
 
-        // Fallback: extract model from apName (e.g. "GW2000A-WIFIE157" → "GW2000A")
+        // Fallback: extract model from apName (e.g. "GW2000A-WIFI0001" → "GW2000A")
         if (model == null && json.TryGetProperty("apName", out var apNameProp))
         {
             var apName = apNameProp.GetString();

@@ -1,4 +1,6 @@
+using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Components.Editors;
+using Namotion.Interceptor;
 using Xunit;
 
 namespace HomeBlaze.Components.Tests;
@@ -46,5 +48,52 @@ public class SubjectEditPanelParametersTests
 
         // Assert
         Assert.True((bool)parameters["IsCreating"]!);
+    }
+
+    [Fact]
+    public void WhenADiscoveryResultIsGiven_ThenItIsPassedUnderItsParameterName()
+    {
+        // Arrange
+        var result = new FoundDevice();
+
+        // Act
+        var parameters = SubjectEditPanel.CreateHostedComponentParameters(true, null, result);
+
+        // Assert
+        Assert.Equal(2, parameters.Count);
+        Assert.Same(result, parameters["DiscoveryResult"]);
+        Assert.True((bool)parameters["IsCreating"]!);
+    }
+
+    [Fact]
+    public void WhenEditorParametersAndADiscoveryResultAreGiven_ThenBothAreMergedAndThePanelResultWins()
+    {
+        // Arrange
+        var result = new FoundDevice();
+        var editorParameters = new Dictionary<string, object?>
+        {
+            ["InitialRuleKey"] = "rule-1",
+            ["DiscoveryResult"] = new FoundDevice()
+        };
+
+        // Act
+        var parameters = SubjectEditPanel.CreateHostedComponentParameters(true, editorParameters, result);
+
+        // Assert
+        Assert.Equal(3, parameters.Count);
+        Assert.Equal("rule-1", parameters["InitialRuleKey"]);
+        Assert.Same(result, parameters["DiscoveryResult"]);
+        Assert.True((bool)parameters["IsCreating"]!);
+    }
+
+    private sealed class FoundDevice : IDiscoveryResult
+    {
+        public string Key => "device";
+
+        public string DisplayName => "Device";
+
+        public string? Detail => null;
+
+        public bool Matches(IInterceptorSubject subject) => false;
     }
 }

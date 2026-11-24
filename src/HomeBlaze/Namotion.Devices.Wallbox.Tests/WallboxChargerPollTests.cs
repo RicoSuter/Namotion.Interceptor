@@ -467,15 +467,15 @@ public class WallboxChargerPollTests
 
         charger.IsPluggedIn = charger.ChargerStatus is WallboxChargerStatus.Disconnected or WallboxChargerStatus.Ready
             ? false
-            : !status.IsFinished;
+            : status.IsFinished != true;
 
         charger.IsCharging = charger.ChargerStatus is WallboxChargerStatus.Charging or WallboxChargerStatus.Discharging;
         charger.ChargingPower = status.ChargingPowerInKw * 1000m;
 
         charger.ChargingCurrent = status.ChargingCurrent > 0
             ? status.ChargingCurrent
-            : status.CurrentMode > 0 && status.ChargingPowerInKw > 0
-                ? Math.Round(status.ChargingPowerInKw * 1000m / (230m * status.CurrentMode), 1)
+            : status is { CurrentMode: { } phases and > 0, ChargingPowerInKw: { } powerInKw and > 0 }
+                ? Math.Round(powerInKw * 1000m / (230m * phases), 1)
                 : 0;
 
         charger.MaximumAvailableChargingCurrent = status.MaxAvailablePower > 0
@@ -500,7 +500,7 @@ public class WallboxChargerPollTests
         charger.Session.AddedGreenEnergy = status.AddedGreenEnergy * 1000m;
         charger.Session.AddedGridEnergy = status.AddedGridEnergy * 1000m;
         charger.Session.AddedRange = status.AddedRange;
-        charger.Session.ChargingTime = TimeSpan.FromSeconds(status.ChargingTime);
+        charger.Session.ChargingTime = status.ChargingTime is { } chargingSeconds ? TimeSpan.FromSeconds(chargingSeconds) : null;
         charger.Session.SessionCost = status.AddedEnergy > 0 && status.Cost == 0 ? null : status.Cost;
 
         charger.IsEcoSmartEnabled = status.ConfigData?.Ecosmart?.IsEnabled;
