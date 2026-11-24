@@ -36,8 +36,8 @@ internal sealed class SecretReferences
     private readonly ConcurrentDictionary<string, string> _pendingValues = new();
 
     // The subjects that hold each key, weak so that a collected subject does not count. A subject lets go of a key when it
-    // moves to another key or is released, a key whose holders all let go is removed, and collected holders are dropped
-    // when the key is used again. Each list is locked while it is used, and only the list in the dictionary is changed.
+    // moves to another key or is released, and collected holders are dropped when the key is used again. A list stays
+    // once created, so there are as many as keys were read or written. Each list is locked while it is used.
     private readonly ConcurrentDictionary<string, List<WeakReference<IInterceptorSubject>>> _holders = new();
 
     public SecretReferences(SecretStore store, ILogger? logger)
@@ -335,44 +335,26 @@ internal sealed class SecretReferences
 
     private void Hold(string key, IInterceptorSubject subject)
     {
-        while (true)
+        var holders = _holders.GetOrAdd(key, static _ => []);
+        lock (holders)
         {
-            var holders = _holders.GetOrAdd(key, static _ => []);
-            lock (holders)
+            if (IndexOf(holders, subject) < 0)
             {
-                // A list that LetGo removed meanwhile is no longer seen by anyone.
-                if (!_holders.TryGetValue(key, out var current) || !ReferenceEquals(current, holders))
-                {
-                    continue;
-                }
-
-                if (IndexOf(holders, subject) < 0)
-                {
-                    holders.Add(new WeakReference<IInterceptorSubject>(subject));
-                }
-
-                return;
+                holders.Add(new WeakReference<IInterceptorSubject>(subject));
             }
         }
     }
 
     private void LetGo(string key, IInterceptorSubject subject)
     {
-        if (!_holders.TryGetValue(key, out var holders))
+        if (_holders.TryGetValue(key, out var holders))
         {
-            return;
-        }
-
-        lock (holders)
-        {
-            if (IndexOf(holders, subject) is var index and >= 0)
+            lock (holders)
             {
-                holders.RemoveAt(index);
-            }
-
-            if (holders.Count == 0)
-            {
-                _holders.TryRemove(KeyValuePair.Create(key, holders));
+                if (IndexOf(holders, subject) is var index and >= 0)
+                {
+                    holders.RemoveAt(index);
+                }
             }
         }
     }
@@ -400,11 +382,22 @@ internal sealed class SecretReferences
         }
     }
 
-    // Under the lock of the list. Removes the holders that were collected, so the list stays as long as its live holders.
+    // Under the lock of the list: drops the holders that were collected and gives the index of the subject, or -1.
     private static int IndexOf(List<WeakReference<IInterceptorSubject>> holders, IInterceptorSubject subject)
     {
-        holders.RemoveAll(static holder => !holder.TryGetTarget(out _));
-        return holders.FindIndex(holder => holder.TryGetTarget(out var target) && ReferenceEquals(target, subject));
+        var index = -1;
+        var count = 0;
+        for (var position = 0; position < holders.Count; position++)
+        {
+            if (holders[position].TryGetTarget(out var target))
+            {
+                index = ReferenceEquals(target, subject) ? count : index;
+                holders[count++] = holders[position];
+            }
+        }
+
+        holders.RemoveRange(count, holders.Count - count);
+        return index;
     }
 
     private static bool IsReference(string text) =>
