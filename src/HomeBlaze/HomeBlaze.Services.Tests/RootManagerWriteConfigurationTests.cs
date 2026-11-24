@@ -1,3 +1,4 @@
+using HomeBlaze.Services.Secrets;
 using HomeBlaze.Services.Tests.Serialization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -104,6 +105,45 @@ public class RootManagerWriteConfigurationTests : IDisposable
         // Assert
         Assert.True(isWritten);
         Assert.DoesNotContain("\"child\": 5", await File.ReadAllTextAsync(_configurationFilePath));
+    }
+
+    [Fact]
+    public async Task WhenTheRootFileCannotBeWritten_ThenAChangedSecretIsNotStored()
+    {
+        // Arrange
+        var secretsPath = Path.Combine(Path.GetTempPath(), $"homeblaze-secrets-{Guid.NewGuid():N}.json");
+        var store = new SecretStore(secretsPath);
+        var key = store.Add("old-password");
+        var typeProvider = new TypeProvider();
+        typeProvider.AddTypes([typeof(SecretTestDevice)]);
+        using var serviceProvider = new ServiceCollection().AddSingleton(store).BuildServiceProvider();
+        var configuration = new Mock<IConfiguration>();
+
+        // A directory where the file would be, so the write fails.
+        var configurationPath = Directory.CreateTempSubdirectory("homeblaze-root-").FullName;
+        configuration.Setup(instance => instance[HomeBlazePaths.RootConfigurationFileKey]).Returns(configurationPath);
+        var serializer = new ConfigurableSubjectSerializer(typeProvider, serviceProvider);
+        RootManager? rootManager = null;
+        using var manager = rootManager = new RootManager(
+            new SubjectTypeRegistry(typeProvider), serializer, _context, new SubjectPathResolver(_context, () => rootManager!.Root), configuration.Object);
+        var root = (SecretTestDevice)serializer.Deserialize($$"""{ "$type": "{{typeof(SecretTestDevice).FullName}}", "password": "$secret:{{key}}" }""")!;
+        root.Password = "new-password";
+        manager.Root = root;
+
+        try
+        {
+            // Act
+            var exception = await Record.ExceptionAsync(() => manager.WriteConfigurationAsync(root, CancellationToken.None));
+
+            // Assert
+            Assert.True(exception is IOException or UnauthorizedAccessException);
+            Assert.Equal("old-password", new SecretStore(secretsPath).TryGet(key, out var value) ? value : null);
+        }
+        finally
+        {
+            Directory.Delete(configurationPath);
+            File.Delete(secretsPath);
+        }
     }
 
     /// <summary>Blocks the thread of the next read of one property of one subject, after the value was read, until it is released.</summary>
