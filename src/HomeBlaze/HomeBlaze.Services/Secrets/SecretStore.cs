@@ -31,16 +31,6 @@ public sealed class SecretStore
     /// <summary>Gets the value stored under <paramref name="key"/>.</summary>
     public bool TryGet(string key, [NotNullWhen(true)] out string? value) => _values.TryGetValue(key, out value);
 
-    /// <summary>Stores <paramref name="value"/> under a new key and returns the key once the file is written.</summary>
-    /// <exception cref="IOException">The file cannot be written. The value is not stored.</exception>
-    /// <exception cref="UnauthorizedAccessException">The file cannot be written. The value is not stored.</exception>
-    public string Add(string value)
-    {
-        var key = CreateKey();
-        Set(key, value);
-        return key;
-    }
-
     /// <summary>Creates a new random key, 32 lowercase hexadecimal digits, without storing anything.</summary>
     internal static string CreateKey() => Guid.NewGuid().ToString("N");
 

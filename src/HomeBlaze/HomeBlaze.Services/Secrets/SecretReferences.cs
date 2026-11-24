@@ -19,7 +19,7 @@ internal sealed class SecretReferences
     /// <summary>The text that starts a reference, followed by the key.</summary>
     public const string Prefix = "$secret:";
 
-    // A key is a GUID formatted with the "N" format of SecretStore.Add.
+    // A key is the format of SecretStore.CreateKey.
     private const int KeyLength = 32;
     private static readonly SearchValues<char> KeyCharacters = SearchValues.Create("0123456789abcdef");
 

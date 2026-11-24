@@ -643,7 +643,12 @@ public class SecretRewriteTests : StorageTestBase
     private string UseSecretStore() => SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
 
     // Through a store of its own, before the storage creates the one it reads.
-    private string SeedSecret(string value) => new SecretStore(SecretsPath!).Add(value);
+    private string SeedSecret(string value)
+    {
+        var key = Guid.NewGuid().ToString("N");
+        new SecretStore(SecretsPath!).Set(key, value);
+        return key;
+    }
 
     private Dictionary<string, string> ReadSecrets() => File.Exists(SecretsPath)
         ? JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(SecretsPath))!

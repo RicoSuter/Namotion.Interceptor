@@ -121,7 +121,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
-        var key = store.Add("hunter2");
+        var key = Seed(store, "hunter2");
         var device = Deserialize(serializer, DeviceJson(Prefix + key));
         device.Password = "correct horse";
 
@@ -149,7 +149,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
-        var key = store.Add("hunter2");
+        var key = Seed(store, "hunter2");
         var device = Deserialize(serializer, DeviceJson(Prefix + key, childPassword: "inner"));
         device.Password = "correct horse";
         serializer.CaptureSecretChanges(() => serializer.Serialize(device), out _);
@@ -173,7 +173,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
-        var key = store.Add("hunter2");
+        var key = Seed(store, "hunter2");
         var device = Deserialize(serializer, DeviceJson(Prefix + key));
         device.Password = "correct horse";
         serializer.CaptureSecretChanges(() => serializer.Serialize(device), out var secretChanges);
@@ -213,7 +213,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
-        var key = store.Add("hunter2");
+        var key = Seed(store, "hunter2");
         var device = Deserialize(serializer, DeviceJson(Prefix + key));
         device.Password = "correct horse";
         serializer.CaptureSecretChanges(() => serializer.Serialize(device), out var secretChanges);
@@ -240,7 +240,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
-        var key = store.Add("hunter2");
+        var key = Seed(store, "hunter2");
         var original = Deserialize(serializer, DeviceJson(Prefix + key));
         var copy = Deserialize(serializer, DeviceJson(Prefix + key));
         var unchangedCopyJson = serializer.Serialize(copy);
@@ -266,7 +266,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
-        var key = store.Add("hunter2");
+        var key = Seed(store, "hunter2");
         var first = Deserialize(serializer, DeviceJson(Prefix + key));
         var second = Deserialize(serializer, DeviceJson(Prefix + key));
         first.Password = "first secret";
@@ -287,8 +287,8 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
-        var key = store.Add("hunter2");
-        var otherKey = store.Add("other");
+        var key = Seed(store, "hunter2");
+        var otherKey = Seed(store, "other");
         var first = Deserialize(serializer, DeviceJson(Prefix + key));
         serializer.UpdateConfiguration(first, DeviceJson(Prefix + otherKey));
         var next = Deserialize(serializer, DeviceJson(Prefix + key));
@@ -308,8 +308,8 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
-        var key = store.Add("hunter2");
-        var childKey = store.Add("inner");
+        var key = Seed(store, "hunter2");
+        var childKey = Seed(store, "inner");
         var released = Deserialize(serializer, DeviceJson(Prefix + key, childPassword: Prefix + childKey));
         var kept = Deserialize(serializer, DeviceJson(Prefix + key, childPassword: Prefix + childKey));
         kept.Password = "changed";
@@ -362,7 +362,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
-        var key = store.Add("hunter2");
+        var key = Seed(store, "hunter2");
         var original = Deserialize(serializer, DeviceJson(Prefix + key));
         var copy = Deserialize(serializer, DeviceJson(Prefix + key));
         copy.Password = "copy secret";
@@ -437,7 +437,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
-        var key = store.Add("hunter2");
+        var key = Seed(store, "hunter2");
         var json = $$"""{ "$type": "{{typeof(SecretTestDevice).FullName}}", "Password": "{{Prefix + key}}" }""";
         var device = Assert.IsType<SecretTestDevice>(serializer.Deserialize(json, ConfigurationNaming.CSharpProperty));
 
@@ -469,7 +469,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
-        var key = store.Add("inner");
+        var key = Seed(store, "inner");
         var json = DeviceJson(password: null, childPassword: Prefix + key);
 
         // Act
@@ -563,7 +563,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         // Arrange
         var (serializer, store) = CreateSerializer(hasRegistry: hasRegistry);
-        var key = store.Add("hunter2");
+        var key = Seed(store, "hunter2");
 
         // Act
         var device = Deserialize(serializer, DeviceJson(Prefix + key));
@@ -578,7 +578,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
-        var key = store.Add("hunter2");
+        var key = Seed(store, "hunter2");
         var device = Deserialize(serializer, DeviceJson(password: null));
 
         // Act
@@ -796,6 +796,13 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         }
 
         return element.GetString()!;
+    }
+
+    private static string Seed(SecretStore store, string value)
+    {
+        var key = SecretStore.CreateKey();
+        store.Set(key, value);
+        return key;
     }
 
     private Dictionary<string, string> ReadStoreFile() =>

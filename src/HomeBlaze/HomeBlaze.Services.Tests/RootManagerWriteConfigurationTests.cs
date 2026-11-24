@@ -113,7 +113,8 @@ public class RootManagerWriteConfigurationTests : IDisposable
         // Arrange
         var secretsPath = Path.Combine(Path.GetTempPath(), $"homeblaze-secrets-{Guid.NewGuid():N}.json");
         var store = new SecretStore(secretsPath);
-        var key = store.Add("old-password");
+        var key = SecretStore.CreateKey();
+        store.Set(key, "old-password");
         var typeProvider = new TypeProvider();
         typeProvider.AddTypes([typeof(SecretTestDevice)]);
         using var serviceProvider = new ServiceCollection().AddSingleton(store).BuildServiceProvider();

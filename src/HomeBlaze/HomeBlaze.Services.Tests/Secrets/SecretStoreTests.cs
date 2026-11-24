@@ -10,46 +10,15 @@ public class SecretStoreTests : IDisposable
     private string StorePath => Path.Combine(_directory.FullName, "Secrets.json");
 
     [Fact]
-    public void WhenAValueIsAdded_ThenItIsReadBackByItsKey()
+    public void WhenKeysAreCreated_ThenEachIsItsOwnThirtyTwoLowercaseHexDigits()
     {
-        // Arrange
-        var store = new SecretStore(StorePath);
-
         // Act
-        var key = store.Add("hunter2");
+        var first = SecretStore.CreateKey();
+        var second = SecretStore.CreateKey();
 
         // Assert
-        Assert.Matches("^[0-9a-f]{32}$", key);
-        Assert.True(store.TryGet(key, out var value));
-        Assert.Equal("hunter2", value);
-    }
-
-    [Fact]
-    public void WhenTheSameValueIsAddedTwice_ThenEachAddGetsItsOwnKey()
-    {
-        // Arrange
-        var store = new SecretStore(StorePath);
-
-        // Act
-        var first = store.Add("hunter2");
-        var second = store.Add("hunter2");
-
-        // Assert
+        Assert.Matches("^[0-9a-f]{32}$", first);
         Assert.NotEqual(first, second);
-    }
-
-    [Fact]
-    public void WhenTheStoreIsCreatedAgain_ThenItReadsTheAddedValues()
-    {
-        // Arrange
-        var key = new SecretStore(StorePath).Add("hunter2");
-
-        // Act
-        var store = new SecretStore(StorePath);
-
-        // Assert
-        Assert.True(store.TryGet(key, out var value));
-        Assert.Equal("hunter2", value);
     }
 
     [Fact]
@@ -57,8 +26,10 @@ public class SecretStoreTests : IDisposable
     {
         // Arrange
         var store = new SecretStore(StorePath);
-        var key = store.Add("hunter2");
-        var otherKey = store.Add("other");
+        const string key = "0123456789abcdef0123456789abcdef";
+        const string otherKey = "fedcba9876543210fedcba9876543210";
+        store.Set(key, "hunter2");
+        store.Set(otherKey, "other");
 
         // Act
         store.Set(key, "correct horse");
@@ -90,7 +61,8 @@ public class SecretStoreTests : IDisposable
     {
         // Arrange
         var first = new SecretStore(StorePath);
-        var key = first.Add("hunter2");
+        const string key = "0123456789abcdef0123456789abcdef";
+        first.Set(key, "hunter2");
         first.Set(key, "correct horse");
 
         // Act
@@ -127,20 +99,6 @@ public class SecretStoreTests : IDisposable
         var exception = Assert.Throws<InvalidOperationException>(() => new SecretStore(StorePath));
         Assert.Contains(StorePath, exception.Message);
         Assert.Equal(content, File.ReadAllText(StorePath));
-    }
-
-    [UnixFact]
-    [UnsupportedOSPlatform("windows")]
-    public void WhenAValueIsAdded_ThenOnlyTheOwnerCanReadTheFile()
-    {
-        // Arrange
-        var store = new SecretStore(StorePath);
-
-        // Act
-        store.Add("hunter2");
-
-        // Assert
-        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(StorePath));
     }
 
     [UnixFact]
