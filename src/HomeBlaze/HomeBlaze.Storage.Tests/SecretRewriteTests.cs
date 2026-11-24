@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Services.Secrets;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Logging;
@@ -14,6 +15,7 @@ namespace HomeBlaze.Storage.Tests;
 public class SecretRewriteTests : StorageTestBase
 {
     private static readonly string DeviceType = typeof(EmbeddedSecretDevice).FullName!;
+    private static readonly string TwoSecretDeviceType = typeof(TwoSecretDevice).FullName!;
 
     [Fact]
     public async Task WhenAJsonFileHoldsAPlaintextSecret_ThenItIsMovedToTheSecretStoreOnLoad()
@@ -138,6 +140,150 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAJsonFileIsSaved_ThenANewSecretIsStoredBeforeTheWriteAndAChangedOneAfterIt()
+    {
+        // Arrange
+        UseSecretStore();
+        var key = SeedSecret("old-password");
+        WriteFile("Gateway.json", $$"""{ "$type": "{{TwoSecretDeviceType}}", "password": "$secret:{{key}}" }""");
+        PausableStore? client = null;
+        var storage = CreateStorage();
+        storage.ClientDecorator = inner => client = new PausableStore(inner);
+        await storage.ConnectAsync(CancellationToken.None);
+        var device = Assert.IsType<TwoSecretDevice>(storage.Children["Gateway"]);
+        device.Password = "new-password";
+        device.Token = "new-token";
+        var writeReached = client!.PauseNext(nameof(FluentStorage.Storage.IStore.SetObject));
+
+        // Act
+        var save = storage.WriteConfigurationAsync(device, CancellationToken.None);
+        await writeReached;
+        var secretsDuringWrite = ReadSecrets();
+        client.Release();
+        var isWritten = await save;
+
+        // Assert
+        Assert.True(isWritten);
+        Assert.Equal("old-password", secretsDuringWrite[key]);
+        Assert.Contains("new-token", secretsDuringWrite.Values);
+        var secrets = ReadSecrets();
+        Assert.Equal(2, secrets.Count);
+        Assert.Equal("new-password", secrets[key]);
+        Assert.Contains($"\"password\": \"$secret:{key}\"", File.ReadAllText(GetFullPath("Gateway.json")));
+    }
+
+    [Fact]
+    public async Task WhenTheWriteOfAJsonFileFails_ThenTheChangedSecretIsNotStored()
+    {
+        // Arrange
+        UseSecretStore();
+        var key = SeedSecret("old-password");
+        var content = $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "$secret:{{key}}" }""";
+        WriteFile("Gateway.json", content);
+        PausableStore? client = null;
+        var storage = CreateStorage();
+        storage.ClientDecorator = inner => client = new PausableStore(inner);
+        await storage.ConnectAsync(CancellationToken.None);
+        var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
+        device.Password = "new-password";
+        var writeReached = client!.PauseNext(nameof(FluentStorage.Storage.IStore.SetObject));
+
+        // Act
+        var save = storage.WriteConfigurationAsync(device, CancellationToken.None);
+        await writeReached;
+        client.FailHangingCall(new IOException("The share is gone."));
+        var failure = await Record.ExceptionAsync(() => save);
+
+        // Assert
+        Assert.IsType<IOException>(failure);
+        Assert.Equal(new Dictionary<string, string> { [key] = "old-password" }, ReadSecrets());
+        Assert.Equal(content, File.ReadAllText(GetFullPath("Gateway.json")));
+    }
+
+    [Fact]
+    public async Task WhenAPageBlockWriteIsRefused_ThenTheSecretStoreIsUnchangedAndTheBlockTakesItsOldValuesAgain()
+    {
+        // Arrange
+        UseSecretStore();
+        var key = SeedSecret("old-password");
+        var ownerType = typeof(SecretListOwner).FullName;
+        var content = $"# Gateway\n\n:: {ownerType}#owner Host=10.0.0.1 Password=$secret:{key}\n::: Item Host=a\n:::\n::: Item Host=b\n:::\n::\n";
+        WriteFile("Gateway.md", content);
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var device = Assert.IsType<SecretListOwner>(page.Children["owner"]);
+        device.Host = "10.0.0.2";
+        device.Password = "new-password";
+
+        // Refused after the configuration of the block was serialized: the order of the items differs from their blocks.
+        device.Items = [device.Items[1], device.Items[0]];
+
+        // Act
+        var isWritten = await page.WriteConfigurationAsync(device, CancellationToken.None);
+
+        // Assert
+        Assert.False(isWritten);
+        Assert.Equal("10.0.0.1", device.Host);
+        Assert.Equal("old-password", device.Password);
+        Assert.Equal(new Dictionary<string, string> { [key] = "old-password" }, ReadSecrets());
+        Assert.Equal(content, File.ReadAllText(GetFullPath("Gateway.md")));
+    }
+
+    [Fact]
+    public async Task WhenTheWriteOfAPageFails_ThenTheChangedSecretIsNotStored()
+    {
+        // Arrange
+        UseSecretStore();
+        var key = SeedSecret("old-password");
+        var content = $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=$secret:{key}\n::\n";
+        WriteFile("Gateway.md", content);
+        PausableStore? client = null;
+        var storage = CreateStorage();
+        storage.ClientDecorator = inner => client = new PausableStore(inner);
+        await storage.ConnectAsync(CancellationToken.None);
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var device = Assert.IsType<EmbeddedSecretDevice>(page.Children["gateway"]);
+        device.Host = "10.0.0.2";
+        device.Password = "new-password";
+        var writeReached = client!.PauseNext(nameof(FluentStorage.Storage.IStore.SetObject));
+
+        // Act
+        var save = page.WriteConfigurationAsync(device, CancellationToken.None);
+        await writeReached;
+        client.FailHangingCall(new IOException("The share is gone."));
+        var failure = await Record.ExceptionAsync(() => save);
+
+        // Assert
+        Assert.IsType<IOException>(failure);
+        Assert.Equal(new Dictionary<string, string> { [key] = "old-password" }, ReadSecrets());
+        Assert.Equal("10.0.0.1", device.Host);
+        Assert.Equal("old-password", device.Password);
+    }
+
+    [Fact]
+    public async Task WhenAPageBlockIsSaved_ThenTheChangedSecretIsStoredUnderItsKey()
+    {
+        // Arrange
+        UseSecretStore();
+        var key = SeedSecret("old-password");
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=$secret:{key}\n::\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var device = Assert.IsType<EmbeddedSecretDevice>(page.Children["gateway"]);
+        device.Host = "10.0.0.2";
+        device.Password = "new-password";
+
+        // Act
+        var isWritten = await page.WriteConfigurationAsync(device, CancellationToken.None);
+
+        // Assert
+        Assert.True(isWritten);
+        Assert.Equal(new Dictionary<string, string> { [key] = "new-password" }, ReadSecrets());
+        Assert.Equal($"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.2 Password=$secret:{key}\n::\n", File.ReadAllText(GetFullPath("Gateway.md")));
+        Assert.Equal("new-password", device.Password);
+    }
+
+    [Fact]
     public async Task WhenTheFileStillHasTheExpectedContent_ThenTheConditionalSaveWritesIt()
     {
         // Arrange
@@ -215,6 +361,7 @@ public class SecretRewriteTests : StorageTestBase
         Assert.Equal(content, File.ReadAllText(GetFullPath("Gateway.json")));
         Assert.Contains(messages, message => message.Contains("Gateway.json") && message.Contains("hostAdress"));
         Assert.DoesNotContain(messages, message => message.Contains("s3cr3t") || message.Contains("10.0.0.1"));
+        Assert.Empty(ReadSecrets());
     }
 
     [Fact]
@@ -272,6 +419,7 @@ public class SecretRewriteTests : StorageTestBase
         // Assert
         Assert.Equal("s3cr3t", device.Password);
         Assert.Equal(content, File.ReadAllText(GetFullPath("Gateway.md")));
+        Assert.Empty(ReadSecrets());
     }
 
     [Fact]
@@ -404,6 +552,13 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     private string UseSecretStore() => SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+
+    // Through a store of its own, before the storage creates the one it reads.
+    private string SeedSecret(string value) => new SecretStore(SecretsPath!).Add(value);
+
+    private Dictionary<string, string> ReadSecrets() => File.Exists(SecretsPath)
+        ? JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(SecretsPath))!
+        : [];
 
     [Fact]
     public async Task WhenAParseFailsAfterABlockWithAPlaintextSecretWasUpdated_ThenTheNextParseMovesTheSecret()
@@ -618,6 +773,39 @@ public sealed class ReloadingValue(ReloadingDevice device)
             return null;
         }
     }
+}
+
+/// <summary>A device with a secret and a list slot, whose block is refused when its items change their order.</summary>
+[InterceptorSubject]
+public partial class SecretListOwner : IConfigurable
+{
+    public SecretListOwner()
+    {
+        Items = [];
+    }
+
+    [Configuration]
+    public partial string? Host { get; set; }
+
+    [Configuration(IsSecret = true)]
+    public partial string? Password { get; set; }
+
+    [Slot("Item")]
+    public partial EmbeddedSecretDevice[] Items { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class TwoSecretDevice : IConfigurable
+{
+    [Configuration(IsSecret = true)]
+    public partial string? Password { get; set; }
+
+    [Configuration(IsSecret = true)]
+    public partial string? Token { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 [InterceptorSubject]

@@ -577,7 +577,7 @@ public partial class FluentStorageContainer :
                         return;
                 }
 
-                var json = _serializer.Serialize(fileSubject);
+                var json = _serializer.CaptureSecretChanges(() => _serializer.Serialize(fileSubject), out var secretChanges);
 
                 // A key that the type does not know, such as a typo or one of a newer version, is read without an
                 // issue, so only this comparison keeps an unrequested save from removing it.
@@ -589,7 +589,7 @@ public partial class FluentStorageContainer :
                     return;
                 }
 
-                await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(json), token);
+                await secretChanges.StoreAroundAsync(() => WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(json), token));
                 isWritten = true;
 
                 _logger?.LogDebug("Saved subject to storage: {Path}", entry.Path);
@@ -637,7 +637,8 @@ public partial class FluentStorageContainer :
             }
 
             var entry = new StorageEntry { Path = relativePath, IsFolder = false, Subject = subject };
-            await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(subject)), token);
+            var json = _serializer.CaptureSecretChanges(() => _serializer.Serialize(subject), out var secretChanges);
+            await secretChanges.StoreAroundAsync(() => WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(json), token));
 
             connection.Index.EnsureFolders(relativePath);
             connection.Index.Set(entry);

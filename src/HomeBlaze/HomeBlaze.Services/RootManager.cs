@@ -161,8 +161,8 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         {
             _logger?.LogInformation("Saving root configuration to: {Path}", ConfigurationPath);
 
-            var json = _serializer.Serialize(root);
-            await File.WriteAllTextAsync(ConfigurationPath, json, cancellationToken);
+            var json = _serializer.CaptureSecretChanges(() => _serializer.Serialize(root), out var secretChanges);
+            await secretChanges.StoreAroundAsync(() => File.WriteAllTextAsync(ConfigurationPath, json, cancellationToken));
 
             _logger?.LogInformation("Root configuration saved successfully");
         }
