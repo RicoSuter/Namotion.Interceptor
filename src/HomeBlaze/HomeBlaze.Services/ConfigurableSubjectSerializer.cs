@@ -386,7 +386,7 @@ public class ConfigurableSubjectSerializer
             return false;
         }
 
-        return TryConvert(root, type, naming, ref converted);
+        return TryConvertSecrets(root, type, naming, ref converted);
     }
 
     /// <summary>
@@ -401,10 +401,10 @@ public class ConfigurableSubjectSerializer
     public bool TryConvertSecrets(string json, Type type, ConfigurationNaming naming, out string converted)
     {
         converted = json;
-        return _secretConverter is not null && ParseObject(json) is { } root && TryConvert(root, type, naming, ref converted);
+        return _secretConverter is not null && ParseObject(json) is { } root && TryConvertSecrets(root, type, naming, ref converted);
     }
 
-    private bool TryConvert(JsonObject root, Type type, ConfigurationNaming naming, ref string converted)
+    private bool TryConvertSecrets(JsonObject root, Type type, ConfigurationNaming naming, ref string converted)
     {
         if (!_secretConverter!.TryConvert(root, type, GetOptions(naming), naming))
         {
