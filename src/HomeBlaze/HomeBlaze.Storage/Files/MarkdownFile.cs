@@ -19,8 +19,8 @@ namespace HomeBlaze.Storage.Files;
 /// Represents a Markdown file in storage with support for blocks and expressions.
 /// </summary>
 [InterceptorSubject]
-[FileExtension(".md")]
-[FileExtension(".markdown")]
+[FileExtension(FileExtensions.Markdown)]
+[FileExtension(FileExtensions.MarkdownLong)]
 public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage, IConfigurationWriter, IPathScope, ILinkScope
 {
     /// <summary>
@@ -208,7 +208,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         _isGraphAheadOfSnapshot = true;
         Thread.MemoryBarrier();
 
-        // A read of the text that the snapshot describes, such as the read inside the write of a structure edit, takes the
+        // The text that the snapshot describes, such as the text a structure edit hands over inside its write, takes the
         // subjects of the snapshot: the edit has put them where their blocks went, which their keys may not tell. The
         // reload lock keeps any other reload from publishing meanwhile. A write-back that publishes after this read
         // leaves these subjects matched to the text read here, and the next reload, whose text then differs from the
@@ -1235,8 +1235,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
-    // After the write: the read inside it has created the subject of a new block and the segments of the text, when the
-    // storage read the file there. Without that read, the published snapshot still names a moved subject, because the edit
+    // After the write: the text the storage handed over inside it has created the subject of a new block and the segments
+    // of the text, when the storage handed it over. Without that read, the published snapshot still names a moved subject, because the edit
     // carried it, but has no text blocks. A new block without a subject, such as one of an unknown type, falls back to the
     // text that the change wrote.
     private IInterceptorSubject? FindResultSubject(MarkdownStructureChange change)
@@ -1360,7 +1360,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
 
         // The text was computed from the snapshot, so it would undo what a reload published since then.
-        // The text blocks have the lines of the text before the write; the read inside the write finds the new ones.
+        // The text blocks have the lines of the text before the write; the text handed over inside the write has the new ones.
         var published = snapshot with
         {
             Page = write.Page,

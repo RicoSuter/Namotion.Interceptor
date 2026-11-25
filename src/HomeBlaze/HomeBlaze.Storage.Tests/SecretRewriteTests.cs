@@ -936,6 +936,24 @@ public class SecretRewriteTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAMarkdownLongPageWithAPlaintextSecretIsLoaded_ThenTheFileIsConverted()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.markdown", $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n");
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        var text = TryReadText("Gateway.markdown")!;
+        Assert.DoesNotContain("s3cr3t", text);
+        Assert.Contains("Password=$secret:", text);
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.markdown"]);
+        Assert.Equal("s3cr3t", ((EmbeddedSecretDevice)page.Children["gateway"]).Password);
+    }
+
+    [Fact]
     public async Task WhenAPageChangesToHoldAPlaintextSecret_ThenTheChangeIsConverted()
     {
         // Arrange
@@ -983,14 +1001,16 @@ public class SecretRewriteTests : StorageTestBase
         UseSecretStore();
         var original = $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n";
         WriteFile("Gateway.md", original);
-        var lastWrite = File.GetLastWriteTimeUtc(GetFullPath("Gateway.md"));
+        PausableStore? client = null;
+        var storage = CreateStorage();
+        storage.ClientDecorator = inner => client = new PausableStore(inner);
 
         // Act
-        await ConnectAsync();
+        await storage.ConnectAsync(CancellationToken.None);
 
         // Assert
         Assert.Equal(original, TryReadText("Gateway.md"));
-        Assert.Equal(lastWrite, File.GetLastWriteTimeUtc(GetFullPath("Gateway.md")));
+        Assert.Equal(0, client!.GetCallCount(nameof(FluentStorage.Storage.IStore.SetObject)));
     }
 
     [Fact]

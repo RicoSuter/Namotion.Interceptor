@@ -804,7 +804,7 @@ internal sealed class StorageReconciler
 
     private static bool IsConvertible(string path)
         => (StoragePath.IsJson(path) && !StorageMetadataPath.IsMetadataFile(path)) ||
-           path.EndsWith(".md", StringComparison.OrdinalIgnoreCase);
+           StoragePath.IsMarkdown(path);
 
     private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version, string hash)
     {
