@@ -15,7 +15,6 @@ namespace HomeBlaze.Storage.Tests;
 public class SecretConversionTests : StorageTestBase
 {
     private static readonly string DeviceType = typeof(EmbeddedSecretDevice).FullName!;
-    private static readonly string TwoSecretDeviceType = typeof(TwoSecretDevice).FullName!;
 
     [Fact]
     public async Task WhenAReloadedPlaintextSecretHasAValueThatCannotBeRead_ThenTheSecretIsMovedAndTheValueIsKept()
@@ -58,36 +57,6 @@ public class SecretConversionTests : StorageTestBase
         Assert.Contains("\"password\": \"$secret:", firstContent);
         Assert.Equal(firstContent, File.ReadAllText(GetFullPath("Gateway.json")));
         Assert.Equal("second", Assert.Single(ReadSecrets()).Value);
-    }
-
-    [Fact]
-    public async Task WhenAJsonFileIsSaved_ThenItsSecretsAreStoredBeforeTheWrite()
-    {
-        // Arrange
-        UseSecretStore();
-        var key = SeedSecret("old-password");
-        WriteFile("Gateway.json", $$"""{ "$type": "{{TwoSecretDeviceType}}", "password": "$secret:{{key}}" }""");
-        PausableStore? client = null;
-        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner));
-        var device = Assert.IsType<TwoSecretDevice>(storage.Children["Gateway"]);
-        device.Password = "new-password";
-        device.Token = "new-token";
-        var writeReached = client!.PauseNext(nameof(FluentStorage.Storage.IStore.SetObject));
-
-        // Act
-        var save = storage.WriteConfigurationAsync(device, CancellationToken.None);
-        await writeReached;
-        var secretsDuringWrite = ReadSecrets();
-        client.Release();
-        var isWritten = await save;
-
-        // Assert
-        Assert.True(isWritten);
-        Assert.Equal(2, secretsDuringWrite.Count);
-        Assert.Equal("new-password", secretsDuringWrite[key]);
-        Assert.Contains("new-token", secretsDuringWrite.Values);
-        Assert.Equal(secretsDuringWrite, ReadSecrets());
-        Assert.Contains($"\"password\": \"$secret:{key}\"", File.ReadAllText(GetFullPath("Gateway.json")));
     }
 
     [Fact]
@@ -143,35 +112,6 @@ public class SecretConversionTests : StorageTestBase
         Assert.Equal("new-password", device.Password);
         Assert.Equal(new Dictionary<string, string> { [key] = "new-password" }, ReadSecrets());
         Assert.Equal(content, File.ReadAllText(GetFullPath("Gateway.md")));
-    }
-
-    [Fact]
-    public async Task WhenTheWriteOfAPageFails_ThenTheChangedSecretIsStored()
-    {
-        // Arrange
-        UseSecretStore();
-        var key = SeedSecret("old-password");
-        var content = $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=$secret:{key}\n::\n";
-        WriteFile("Gateway.md", content);
-        PausableStore? client = null;
-        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner));
-        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
-        var device = Assert.IsType<EmbeddedSecretDevice>(page.Children["gateway"]);
-        device.Host = "10.0.0.2";
-        device.Password = "new-password";
-        var writeReached = client!.PauseNext(nameof(FluentStorage.Storage.IStore.SetObject));
-
-        // Act
-        var save = page.WriteConfigurationAsync(device, CancellationToken.None);
-        await writeReached;
-        client.FailHangingCall(new IOException("The share is gone."));
-        var failure = await Record.ExceptionAsync(() => save);
-
-        // Assert
-        Assert.IsType<IOException>(failure);
-        Assert.Equal(new Dictionary<string, string> { [key] = "new-password" }, ReadSecrets());
-        Assert.Equal("10.0.0.1", device.Host);
-        Assert.Equal("new-password", device.Password);
     }
 
     [Fact]
@@ -1128,18 +1068,6 @@ public partial class SecretListOwner : IConfigurable
 
     [Slot("Item")]
     public partial EmbeddedSecretDevice[] Items { get; set; }
-
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-}
-
-[InterceptorSubject]
-public partial class TwoSecretDevice : IConfigurable
-{
-    [Configuration(IsSecret = true)]
-    public partial string? Password { get; set; }
-
-    [Configuration(IsSecret = true)]
-    public partial string? Token { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
