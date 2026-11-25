@@ -28,7 +28,7 @@ internal sealed class SecretConverter
     public bool TryConvert(JsonObject root, Type type, JsonSerializerOptions options, ConfigurationNaming naming)
     {
         List<KeyValuePair<string, string>>? values = null;
-        VisitProperties(root, type, options.GetTypeInfo(type), options, isRoot: true, naming, ref values);
+        VisitProperties(root, options.GetTypeInfo(type), options, isRoot: true, naming, ref values);
         if (values is null)
         {
             return false;
@@ -59,8 +59,7 @@ internal sealed class SecretConverter
             {
                 if (derivedType.TypeDiscriminator is string name && name == typeName)
                 {
-                    type = derivedType.DerivedType;
-                    typeInfo = options.GetTypeInfo(type);
+                    typeInfo = options.GetTypeInfo(derivedType.DerivedType);
                     break;
                 }
             }
@@ -69,7 +68,7 @@ internal sealed class SecretConverter
         switch (typeInfo.Kind)
         {
             case JsonTypeInfoKind.Object when node is JsonObject value:
-                VisitProperties(value, type, typeInfo, options, isRoot: false, naming, ref values);
+                VisitProperties(value, typeInfo, options, isRoot: false, naming, ref values);
                 break;
             case JsonTypeInfoKind.Enumerable when node is JsonArray items && typeInfo.ElementType is { } itemType:
                 foreach (var item in items)
@@ -89,7 +88,7 @@ internal sealed class SecretConverter
     }
 
     private static void VisitProperties(
-        JsonObject value, Type type, JsonTypeInfo typeInfo, JsonSerializerOptions options, bool isRoot,
+        JsonObject value, JsonTypeInfo typeInfo, JsonSerializerOptions options, bool isRoot,
         ConfigurationNaming naming, ref List<KeyValuePair<string, string>>? values)
     {
         foreach (var property in typeInfo.Properties)
@@ -105,7 +104,7 @@ internal sealed class SecretConverter
             var isSecret = SecretReferences.IsSecret(propertyInfo);
             if (isSecret)
             {
-                SecretReferences.EnsureSupported(type, propertyInfo.Name, propertyInfo.PropertyType);
+                SecretReferences.EnsureSupported(typeInfo.Type, propertyInfo.Name, propertyInfo.PropertyType);
             }
 
             if (!value.TryGetPropertyValue(name, out var propertyValue) || propertyValue is null)
