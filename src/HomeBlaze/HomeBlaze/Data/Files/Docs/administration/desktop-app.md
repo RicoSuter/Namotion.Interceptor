@@ -9,6 +9,16 @@ HomeBlaze also ships as a native desktop app for Windows, Linux and macOS. It op
 
 ---
 
+## Download
+
+Every run of the repository's [build workflow](https://github.com/RicoSuter/Namotion.Interceptor/actions/workflows/build.yml) that changes HomeBlaze builds the app for Windows (x64), Linux (x64) and macOS (Apple silicon). Open a run, and download `HomeBlaze-Desktop-win-x64`, `HomeBlaze-Desktop-linux-x64` or `HomeBlaze-Desktop-osx-arm64` from the artifacts at the bottom of its summary page; this needs a GitHub sign-in, and a run keeps them for 14 days. The builds bring their own .NET runtime, so nothing else has to be installed for .NET. They are not signed, so each operating system asks for one extra step before the first start:
+
+- **Windows.** Unzip the download and start `HomeBlaze.App.exe`. When SmartScreen warns about an unknown publisher, choose **More info**, then **Run anyway**.
+- **Linux.** Unzip the download, unpack `HomeBlaze-Desktop-linux-x64.tar.gz` with `tar -xzf`, and start `HomeBlaze/HomeBlaze.App`. The window needs WebKitGTK, which Debian and Ubuntu install with `sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0 libnotify4`.
+- **macOS.** Unzip the download and unpack the archive inside it. macOS refuses to start an unsigned app that was downloaded, so clear the download mark once with `xattr -dr com.apple.quarantine HomeBlaze`, then start `HomeBlaze/HomeBlaze.App`.
+
+---
+
 ## Connecting or running locally
 
 Point the app at a HomeBlaze instance that runs elsewhere, by its address, and the window behaves like a browser tab open to that address. Or let the app run HomeBlaze itself: it starts HomeBlaze in the background and opens the window on it. A locally run instance listens only on this computer, so nothing else on the network can reach it, which matters because HomeBlaze itself has no login.

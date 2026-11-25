@@ -328,6 +328,58 @@ jobs:
           path: '**/TestResults/**/coverage.cobertura.xml'
           if-no-files-found: warn
 
+  # Self-contained builds of the desktop app, downloadable from the run's summary page. Each is built on its own
+  # operating system, so the macOS executable carries the signature macOS requires before it runs anything.
+  desktop-app:
+    timeout-minutes: 20
+    needs: changes
+    if: needs.changes.outputs.homeblaze == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            runtime: win-x64
+          - os: ubuntu-latest
+            runtime: linux-x64
+          - os: macos-latest
+            runtime: osx-arm64
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Publish desktop app
+        run: |
+          dotnet publish src/HomeBlaze/HomeBlaze.App --configuration Release --runtime ${{ matrix.runtime }} --self-contained `
+            --output "${{ runner.temp }}/HomeBlaze" -p:ContinuousIntegrationBuild=true
+
+      # A publish without HomeBlaze's static files still starts, but serves every page unstyled and inert.
+      - name: Check static files
+        run: |
+          foreach ($path in @("HomeBlaze.staticwebassets.endpoints.json", "wwwroot/app.css", "wwwroot/_framework/blazor.web.js", "wwwroot/_content/MudBlazor/MudBlazor.min.css")) {
+            $file = Get-Item (Join-Path "${{ runner.temp }}/HomeBlaze" $path) -ErrorAction SilentlyContinue
+            if ($null -eq $file -or $file.Length -eq 0) { throw "The publish output has no $path" }
+          }
+
+      # An artifact does not keep the executable bit, so the Linux and macOS builds go into an archive that does.
+      - name: Archive desktop app
+        if: runner.os != 'Windows'
+        run: tar -czf "${{ runner.temp }}/HomeBlaze-Desktop-${{ matrix.runtime }}.tar.gz" -C "${{ runner.temp }}" HomeBlaze
+
+      - name: Upload desktop app
+        uses: actions/upload-artifact@v7
+        with:
+          name: HomeBlaze-Desktop-${{ matrix.runtime }}
+          path: ${{ runner.os == 'Windows' && format('{0}/HomeBlaze', runner.temp) || format('{0}/HomeBlaze-Desktop-{1}.tar.gz', runner.temp, matrix.runtime) }}
+          compression-level: ${{ runner.os == 'Windows' && 6 || 0 }}
+          if-no-files-found: error
+          retention-days: 14
+
   test-nugetplugins-integration:
     timeout-minutes: 15
     runs-on: ubuntu-latest
@@ -579,7 +631,7 @@ jobs:
   ci:
     timeout-minutes: 5
     if: always()
-    needs: [ changes, test, test-homeblaze-integration, test-automation-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration, container-build ]
+    needs: [ changes, test, test-homeblaze-integration, test-automation-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration, container-build, desktop-app ]
     runs-on: ubuntu-latest
     steps:
       - name: Fail when a needed job failed or was canceled
