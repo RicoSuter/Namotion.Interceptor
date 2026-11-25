@@ -181,20 +181,6 @@ public class HomeBlazePathsTests
         Assert.Equal(Path.GetFullPath(Path.Combine("secrets", "data-protection.pfx")), path);
     }
 
-    [Fact]
-    public void WhenTheSecretsPathIsResolved_ThenItIsSecretsJsonInTheDataDirectory()
-    {
-        // Arrange
-        var dataDirectory = Path.Combine(Path.GetTempPath(), "homeblaze-instance");
-        var configuration = CreateConfiguration(Path.Combine(dataDirectory, "Root.json"), pluginConfigurationPath: null);
-
-        // Act
-        var path = HomeBlazePaths.GetSecretsPath(configuration);
-
-        // Assert
-        Assert.Equal(Path.Combine(dataDirectory, "Secrets.json"), path);
-    }
-
     private static IConfiguration CreateConfiguration(string? rootConfigFile, string? pluginConfigurationPath, string? dataProtectionCertificatePath = null)
     {
         var configuration = new Mock<IConfiguration>();

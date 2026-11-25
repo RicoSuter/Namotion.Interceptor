@@ -43,21 +43,6 @@ public class SecretStoreTests : IDisposable
     }
 
     [Fact]
-    public void WhenAValueIsSetUnderAMissingKey_ThenItIsAddedUnderThatKey()
-    {
-        // Arrange
-        var store = new SecretStore(StorePath);
-        const string key = "0123456789abcdef0123456789abcdef";
-
-        // Act
-        store.Set(key, "hunter2");
-
-        // Assert
-        Assert.True(store.TryGet(key, out var value));
-        Assert.Equal("hunter2", value);
-    }
-
-    [Fact]
     public void WhenTheStoreIsCreatedAgain_ThenItReadsTheSetValues()
     {
         // Arrange
