@@ -766,11 +766,20 @@ public partial class FluentStorageContainer :
         }
 
         var text = StorageText.Decode(bytes, out var encoding, out var hasByteOrderMark);
-        var isConverted = StoragePath.IsJson(path)
-            ? _serializer.TryConvertSecrets(text, ConfigurationNaming.JsonProperty, out var converted)
-            : PageConverter.TryConvert(text, out converted);
-        return isConverted ? StorageText.Encode(converted, encoding, hasByteOrderMark) : bytes;
+        return TryConvertSecrets(path, text, out var converted) ? StorageText.Encode(converted, encoding, hasByteOrderMark) : bytes;
     }
+
+    /// <summary>
+    /// Replaces the plaintext secrets of the text of a JSON file or, for any other path, a page by references. Returns
+    /// false, with <paramref name="converted"/> being <paramref name="text"/>, when it holds no plaintext secret.
+    /// </summary>
+    /// <exception cref="IOException">The secret store cannot be written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written.</exception>
+    /// <exception cref="InvalidOperationException">A type in the text has a secret configuration property that is
+    /// not a string property of a subject.</exception>
+    internal bool TryConvertSecrets(string path, string text, out string converted) => StoragePath.IsJson(path)
+        ? _serializer.TryConvertSecrets(text, ConfigurationNaming.JsonProperty, out converted)
+        : PageConverter.TryConvert(text, out converted);
 
     // The bytes belong to the write and are not changed by anyone else, because a write that was given up still
     // reads them after the caller got its result, see TimeLimitedStore.

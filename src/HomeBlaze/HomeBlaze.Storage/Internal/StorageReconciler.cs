@@ -5,7 +5,6 @@ using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Abstractions.Metadata;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Metadata;
-using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -26,7 +25,6 @@ internal sealed class StorageReconciler
     private readonly FluentStorageContainer _storage;
     private readonly FileSubjectFactory _subjectFactory;
     private readonly ConfigurableSubjectSerializer _serializer;
-    private readonly SecretPageConverter _pageConverter;
     private readonly StorageIndex _index;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger? _logger;
@@ -60,7 +58,6 @@ internal sealed class StorageReconciler
         _storage = storage;
         _subjectFactory = subjectFactory;
         _serializer = serializer;
-        _pageConverter = storage.PageConverter;
         _index = index;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -648,17 +645,10 @@ internal sealed class StorageReconciler
             }
             else
             {
-                var (converted, text) = await ConvertSecretsAsync(listed.Path, content, cancellationToken);
-                if (!ReferenceEquals(converted, content))
-                {
-                    // The listed version is of the content before the write-back. Without a version the next pass
-                    // compares the file by its hash, which also finds an edit made right after the write-back.
-                    hash = StorageHash.Compute(converted);
-                    entry.Version = default;
-                }
-
-                entry.Hash = hash;
-                entry.Subject = CreateFromJson(listed.Path, text, entry.Version);
+                var converted = await ConvertSecretsAsync(listed.Path, content, hash, entry.Version, cancellationToken);
+                entry.Hash = converted.Hash;
+                entry.Version = converted.Version;
+                entry.Subject = CreateFromJson(listed.Path, converted.Text, entry.Version);
             }
         }
         else
@@ -672,16 +662,11 @@ internal sealed class StorageReconciler
             {
                 // Read and converted here, so that the page parses the text whose hash is recorded.
                 var content = await ReadAsync(listed.Path, cancellationToken);
-                var (converted, text) = await ConvertSecretsAsync(listed.Path, content, cancellationToken);
-                if (!ReferenceEquals(converted, content))
-                {
-                    // Recorded without a version, as for a converted JSON file.
-                    entry.Version = default;
-                }
-
-                entry.Hash = StorageHash.Compute(converted);
+                var converted = await ConvertSecretsAsync(listed.Path, content, StorageHash.Compute(content), entry.Version, cancellationToken);
+                entry.Hash = converted.Hash;
+                entry.Version = converted.Version;
                 SetMetadata(page, listed.Version);
-                await page.OnFileChangedAsync(text, cancellationToken);
+                await page.OnFileChangedAsync(converted.Text, cancellationToken);
             }
             else
             {
@@ -751,32 +736,32 @@ internal sealed class StorageReconciler
     /// the file still has the content that was converted.
     /// </summary>
     /// <returns>
-    /// The content to continue with and its text: the converted content once it is written, else the given content.
+    /// The content to continue with, its text, hash and version: the converted content once it is written, without a
+    /// version, else the given content with its hash and version. Without a version the next pass compares the file by
+    /// its hash, which also finds an edit made right after the write-back.
     /// </returns>
-    private async Task<(byte[] Content, string Text)> ConvertSecretsAsync(
-        string path, byte[] content, CancellationToken cancellationToken)
+    private async Task<ConvertedContent> ConvertSecretsAsync(
+        string path, byte[] content, string hash, StorageVersion version, CancellationToken cancellationToken)
     {
         var text = StorageText.Decode(content, out var encoding, out var hasByteOrderMark);
+        var unchanged = new ConvertedContent(content, text, hash, version);
         string convertedText;
         try
         {
-            var isConverted = StoragePath.IsJson(path)
-                ? _serializer.TryConvertSecrets(text, ConfigurationNaming.JsonProperty, out convertedText)
-                : _pageConverter.TryConvert(text, out convertedText);
-            if (!isConverted)
+            if (!_storage.TryConvertSecrets(path, text, out convertedText))
             {
-                return (content, text);
+                return unchanged;
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             _logger?.LogWarning(exception, "The plaintext secrets of {Path} could not be moved to the secret store and stay in the file.", path);
-            return (content, text);
+            return unchanged;
         }
         catch (InvalidOperationException exception)
         {
             _logger?.LogWarning(exception, "A type in {Path} has a secret configuration property that is not a string property of a subject, so the file is not converted.", path);
-            return (content, text);
+            return unchanged;
         }
 
         var converted = StorageText.Encode(convertedText, encoding, hasByteOrderMark);
@@ -787,7 +772,7 @@ internal sealed class StorageReconciler
             if (current is null || !current.AsSpan().SequenceEqual(content))
             {
                 _notifyChanged(path);
-                return (content, text);
+                return unchanged;
             }
 
             // Not disposed when the write fails, see TimeLimitedStore.
@@ -800,11 +785,11 @@ internal sealed class StorageReconciler
             // The write can have reached the storage, so a pass reads the file again.
             _logger?.LogWarning(exception, "The converted secrets of {Path} could not be written back; the file keeps its plaintext until it changes again.", path);
             _notifyChanged(path);
-            return (content, text);
+            return unchanged;
         }
 
         _logger?.LogInformation("Moved the plaintext secrets of {Path} to the secret store.", path);
-        return (converted, convertedText);
+        return new ConvertedContent(converted, convertedText, StorageHash.Compute(converted), default);
     }
 
     /// <summary>Gets whether the plaintext secrets of the file are converted: those of a JSON file other than metadata, and of a page.</summary>
@@ -857,14 +842,7 @@ internal sealed class StorageReconciler
             string? text = null;
             if (isReadHere && hash != entry.Hash)
             {
-                (var converted, text) = await ConvertSecretsAsync(entry.Path, content, cancellationToken);
-                if (!ReferenceEquals(converted, content))
-                {
-                    // Recorded without a version, as for a file converted when it is added.
-                    content = converted;
-                    hash = StorageHash.Compute(converted);
-                    version = default;
-                }
+                (content, text, hash, version) = await ConvertSecretsAsync(entry.Path, content, hash, version, cancellationToken);
             }
 
             if (hash != entry.Hash)
@@ -900,14 +878,7 @@ internal sealed class StorageReconciler
             string? text = null;
             if (isReadHere && hash != entry.Hash && IsConvertible(entry.Path))
             {
-                (var converted, text) = await ConvertSecretsAsync(entry.Path, content, cancellationToken);
-                if (!ReferenceEquals(converted, content))
-                {
-                    // Without a version, as for a file converted when it is added.
-                    content = converted;
-                    hash = StorageHash.Compute(converted);
-                    version = default;
-                }
+                (content, text, hash, version) = await ConvertSecretsAsync(entry.Path, content, hash, version, cancellationToken);
             }
 
             if (hash != entry.Hash && await ApplyContentAsync(entry, version, hash, text ?? DecodeText(content), cancellationToken))
@@ -1063,4 +1034,6 @@ internal sealed class StorageReconciler
     private static string DecodeText(byte[] content) => StorageText.Decode(content, out _, out _);
 
     private readonly record struct StorageListing(string Path, bool IsFolder, StorageVersion Version);
+
+    private readonly record struct ConvertedContent(byte[] Content, string Text, string Hash, StorageVersion Version);
 }
