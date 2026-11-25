@@ -173,23 +173,14 @@ public class SecretConverterTests : IDisposable
         Assert.Same(json, converted);
     }
 
-    [Fact]
-    public void WhenATypeHasASecretThatIsNotAStringAndTheJsonHasNoValueForIt_ThenConvertingThrows()
+    [Theory]
+    [InlineData("")]
+    [InlineData(""", "pin": 1234""")]
+    public void WhenATypeHasASecretThatIsNotAString_ThenConvertingThrowsWithOrWithoutAValueForIt(string pin)
     {
         // Arrange
         var (serializer, _) = Create();
-        var json = $$"""{ "$type": "{{typeof(ConverterInvalidDevice).FullName}}" }""";
-
-        // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => serializer.TryConvertSecrets(json, ConfigurationNaming.JsonProperty, out _));
-    }
-
-    [Fact]
-    public void WhenATypeHasASecretThatIsNotAString_ThenConvertingThrows()
-    {
-        // Arrange
-        var (serializer, _) = Create();
-        var json = $$"""{ "$type": "{{typeof(ConverterInvalidDevice).FullName}}", "pin": 1234 }""";
+        var json = $$"""{ "$type": "{{typeof(ConverterInvalidDevice).FullName}}"{{pin}} }""";
 
         // Act & Assert
         Assert.Throws<InvalidOperationException>(() => serializer.TryConvertSecrets(json, ConfigurationNaming.JsonProperty, out _));

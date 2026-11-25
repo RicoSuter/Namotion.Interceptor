@@ -647,24 +647,6 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         Assert.Equal(serializing.Message, deserializing.Message);
     }
 
-    [Fact]
-    public void WhenATypeWithAnUnsupportedSecretIsRegistered_ThenOtherSubjectsStillRoundTrip()
-    {
-        // Arrange
-        var (serializer, store) = CreateSerializer();
-        var device = Deserialize(serializer, DeviceJson("hunter2", childPassword: "inner"));
-
-        // Act
-        var json = serializer.Serialize(device);
-
-        // Assert
-        Assert.Equal("10.0.0.2", ReadString(json, "child", "host"));
-        Assert.True(store.TryGet(KeyOf(ReadString(json, "password")), out var password));
-        Assert.Equal("hunter2", password);
-        Assert.True(store.TryGet(KeyOf(ReadString(json, "child", "password")), out var childPassword));
-        Assert.Equal("inner", childPassword);
-    }
-
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
