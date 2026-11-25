@@ -768,9 +768,14 @@ internal sealed class StorageReconciler
                 return (content, text);
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             _logger?.LogWarning(exception, "The plaintext secrets of {Path} could not be moved to the secret store and stay in the file.", path);
+            return (content, text);
+        }
+        catch (InvalidOperationException exception)
+        {
+            _logger?.LogWarning(exception, "A type in {Path} has a secret configuration property that is not a string property of a subject, so the file is not converted.", path);
             return (content, text);
         }
 
