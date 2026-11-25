@@ -801,8 +801,6 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         Assert.Contains(nameof(InvalidSecretTypeDevice.Pin), exception.Message);
     }
 
-    // InvalidSecretTypeDevice is registered next to the valid types, as the type of another library would be, so that
-    // every test also shows that it only fails for itself.
     private static bool IsWaiting(Thread? thread) =>
         thread is not null && (thread.ThreadState & ThreadState.WaitSleepJoin) != 0;
 
@@ -826,6 +824,9 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     private (ConfigurableSubjectSerializer Serializer, SecretStore Store) CreateSerializer(bool withStore = true, bool hasRegistry = true)
     {
         var typeProvider = new TypeProvider();
+
+        // InvalidSecretTypeDevice is registered next to the valid types, as the type of another library would be, so that
+        // every test also shows that it only fails for itself.
         typeProvider.AddTypes([typeof(SecretTestDevice), typeof(SecretDefaultDevice), typeof(SecretGatedDevice), typeof(InvalidSecretTypeDevice)]);
 
         var store = new SecretStore(StorePath);

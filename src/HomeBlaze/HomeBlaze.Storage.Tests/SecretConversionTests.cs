@@ -18,58 +18,6 @@ public class SecretConversionTests : StorageTestBase
     private static readonly string TwoSecretDeviceType = typeof(TwoSecretDevice).FullName!;
 
     [Fact]
-    public async Task WhenAJsonFileHoldsAPlaintextSecret_ThenItIsMovedToTheSecretStoreOnLoad()
-    {
-        // Arrange
-        var secretsPath = UseSecretStore();
-        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""");
-
-        // Act
-        var storage = await ConnectAsync();
-
-        // Assert
-        Assert.True(HoldsSecretReferenceOnly("Gateway.json"));
-        Assert.Contains("s3cr3t", File.ReadAllText(secretsPath));
-        Assert.Equal("s3cr3t", Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]).Password);
-    }
-
-    [Fact]
-    public async Task WhenAUtf16JsonFileHoldsAPlaintextSecret_ThenItIsMovedToTheSecretStoreOnLoad()
-    {
-        // Arrange
-        var secretsPath = UseSecretStore();
-        File.WriteAllText(
-            GetFullPath("Gateway.json"),
-            $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""",
-            System.Text.Encoding.Unicode);
-
-        // Act
-        await ConnectAsync();
-
-        // Assert
-        Assert.True(HoldsSecretReferenceOnly("Gateway.json"));
-        Assert.Contains("s3cr3t", File.ReadAllText(secretsPath));
-    }
-
-    [Fact]
-    public async Task WhenAPlaintextSecretIsWrittenIntoAWatchedJsonFile_ThenItIsMovedToTheSecretStoreOnReload()
-    {
-        // Arrange
-        var secretsPath = UseSecretStore();
-        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""");
-        var storage = await ConnectAsync(enableFileWatching: true);
-        var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
-
-        // Act
-        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""");
-
-        // Assert
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => device.Password == "s3cr3t" && HoldsSecretReferenceOnly("Gateway.json"), WatcherTimeout);
-        Assert.Contains("s3cr3t", File.ReadAllText(secretsPath));
-    }
-
-    [Fact]
     public async Task WhenAReloadedPlaintextSecretHasAValueThatCannotBeRead_ThenTheSecretIsMovedAndTheValueIsKept()
     {
         // Arrange
@@ -94,7 +42,7 @@ public class SecretConversionTests : StorageTestBase
     public async Task WhenASecretChangesBetweenTwoSaves_ThenTheFileKeepsItsContentAndTheStoreHoldsOnlyTheLatestValue()
     {
         // Arrange
-        var secretsPath = UseSecretStore();
+        UseSecretStore();
         WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""");
         var storage = await ConnectAsync();
         var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
@@ -109,8 +57,7 @@ public class SecretConversionTests : StorageTestBase
         // Assert
         Assert.Contains("\"password\": \"$secret:", firstContent);
         Assert.Equal(firstContent, File.ReadAllText(GetFullPath("Gateway.json")));
-        var entry = Assert.Single(JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(secretsPath))!);
-        Assert.Equal("second", entry.Value);
+        Assert.Equal("second", Assert.Single(ReadSecrets()).Value);
     }
 
     [Fact]
@@ -345,6 +292,7 @@ public class SecretConversionTests : StorageTestBase
         Assert.Contains("s3cr3t", File.ReadAllText(secretsPath));
         var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
         Assert.Equal("s3cr3t", Assert.IsType<EmbeddedSecretDevice>(page.Children["gateway"]).Password);
+        Assert.Equal(content, page.Content);
     }
 
     [Fact]
@@ -446,20 +394,6 @@ public class SecretConversionTests : StorageTestBase
         Assert.Equal("s3cr3t", Assert.IsType<UnwritableSecretDevice>(page.Children["gateway"]).Password);
     }
 
-    private string UseSecretStore() => SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
-
-    // Through a store of its own, before the storage creates the one it reads.
-    private string SeedSecret(string value)
-    {
-        var key = Guid.NewGuid().ToString("N");
-        new SecretStore(SecretsPath!).Set(key, value);
-        return key;
-    }
-
-    private Dictionary<string, string> ReadSecrets() => File.Exists(SecretsPath)
-        ? JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(SecretsPath))!
-        : [];
-
     [Fact]
     public async Task WhenAParseFailsAfterABlockWasUpdatedInPlace_ThenTheNextParseAppliesItsConfigurationAgain()
     {
@@ -501,6 +435,7 @@ public class SecretConversionTests : StorageTestBase
         Assert.DoesNotContain("s3cr3t", text);
         Assert.Contains("\"password\": \"$secret:", text);
         Assert.Contains("unknownKey", text);
+        Assert.Equal("s3cr3t", Assert.Single(ReadSecrets()).Value);
         Assert.Equal("s3cr3t", Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]).Password);
     }
 
@@ -549,6 +484,7 @@ public class SecretConversionTests : StorageTestBase
         // Assert
         Assert.Equal("s3cr3t", device.Password);
         Assert.True(HoldsSecretReferenceOnly("Gateway.json"));
+        Assert.Equal("s3cr3t", Assert.Single(ReadSecrets()).Value);
     }
 
     [Fact]
@@ -647,6 +583,7 @@ public class SecretConversionTests : StorageTestBase
         var content = File.ReadAllBytes(GetFullPath("Gateway.json"));
         Assert.Equal(System.Text.Encoding.Unicode.GetPreamble(), content[..2]);
         Assert.Contains("\"password\": \"$secret:", System.Text.Encoding.Unicode.GetString(content, 2, content.Length - 2));
+        Assert.Equal("s3cr3t", Assert.Single(ReadSecrets()).Value);
     }
 
     [Fact]
@@ -700,25 +637,6 @@ public class SecretConversionTests : StorageTestBase
         Assert.Equal("10.0.0.2", device.Host);
         Assert.Equal("s3cr3t", device.Password);
         Assert.Contains(messages, message => message.Contains("Gateway.json") && message.Contains("could not be written back"));
-    }
-
-    [Fact]
-    public async Task WhenAPageWithAPlaintextSecretIsLoaded_ThenTheFileIsConvertedAndTheBlockReadsTheSecret()
-    {
-        // Arrange
-        UseSecretStore();
-        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n");
-
-        // Act
-        var storage = await ConnectAsync();
-
-        // Assert: converted synchronously in the load, so no wait is needed
-        var text = TryReadText("Gateway.md")!;
-        Assert.DoesNotContain("s3cr3t", text);
-        Assert.Contains("Password=$secret:", text);
-        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
-        Assert.Equal("s3cr3t", ((EmbeddedSecretDevice)page.Children["gateway"]).Password);
-        Assert.Equal(text, page.Content);
     }
 
     [Fact]
@@ -992,6 +910,20 @@ public class SecretConversionTests : StorageTestBase
         Assert.Equal(json, TryReadText("Gateway.metadata.json"));
     }
 
+    private string UseSecretStore() => SecretsPath = Path.Combine(CreateTemporaryDirectory().FullName, "Secrets.json");
+
+    // Through a store of its own, before the storage creates the one it reads.
+    private string SeedSecret(string value)
+    {
+        var key = Guid.NewGuid().ToString("N");
+        new SecretStore(SecretsPath!).Set(key, value);
+        return key;
+    }
+
+    private Dictionary<string, string> ReadSecrets() => File.Exists(SecretsPath)
+        ? JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(SecretsPath))!
+        : [];
+
     // The conversion writes a block or file it changes indented, so values are compared without the layout.
     private static string WithoutWhitespace(string text) => string.Concat(text.Where(character => !char.IsWhiteSpace(character)));
 
@@ -1028,7 +960,6 @@ public class SecretConversionTests : StorageTestBase
 public partial class UnwritableSecretDevice : IConfigurable
 {
     private readonly EmbeddedSecretDevice _ownChild = new();
-    private int _applyCount;
 
     [Configuration(IsSecret = true)]
     public partial string? Password { get; set; }
@@ -1036,16 +967,9 @@ public partial class UnwritableSecretDevice : IConfigurable
     [Slot(IsDefault = true)]
     public partial IInterceptorSubject? Child { get; set; }
 
-    /// <summary>How often the configuration was applied in place.</summary>
-    public int ApplyCount => Volatile.Read(ref _applyCount);
-
     partial void OnChildChanging(ref IInterceptorSubject? newValue, ref bool cancel) => newValue = _ownChild;
 
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
-    {
-        Interlocked.Increment(ref _applyCount);
-        return Task.CompletedTask;
-    }
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 /// <summary>A device that cancels the parse that applies its configuration in place while <see cref="CancelOnApply"/> is set.</summary>

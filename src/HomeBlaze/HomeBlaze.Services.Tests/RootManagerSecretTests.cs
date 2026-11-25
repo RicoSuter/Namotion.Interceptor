@@ -6,14 +6,13 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Services.Tests;
 
 public class RootManagerSecretTests : IDisposable
 {
-    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
-
     private readonly string _directory = Directory.CreateTempSubdirectory("homeblaze-root-secrets-").FullName;
 
     private string RootPath => Path.Combine(_directory, "Root.json");
@@ -29,7 +28,7 @@ public class RootManagerSecretTests : IDisposable
 
         // Act
         await rootManager.StartAsync(CancellationToken.None);
-        var root = (SecretTestDevice)await rootManager.RootLoaded.WaitAsync(WaitTimeout);
+        var root = (SecretTestDevice)await rootManager.RootLoaded.WaitAsync(TestTimeouts.Default);
 
         // Assert
         var text = await File.ReadAllTextAsync(RootPath);
@@ -49,7 +48,7 @@ public class RootManagerSecretTests : IDisposable
 
         // Act
         await rootManager.StartAsync(CancellationToken.None);
-        await rootManager.RootLoaded.WaitAsync(WaitTimeout);
+        await rootManager.RootLoaded.WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(originalBytes, await File.ReadAllBytesAsync(RootPath));
@@ -66,7 +65,7 @@ public class RootManagerSecretTests : IDisposable
 
         // Act
         await rootManager.StartAsync(CancellationToken.None);
-        var root = (SecretTestDevice)await rootManager.RootLoaded.WaitAsync(WaitTimeout);
+        var root = (SecretTestDevice)await rootManager.RootLoaded.WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(original, await File.ReadAllTextAsync(RootPath));
