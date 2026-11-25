@@ -77,11 +77,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private const string MovedTextRefusal = "The text moved or changed. Select it again.";
     private const string NotInContentRefusal = "The block to insert before is not in this content.";
 
-    // The key in the data of a block subject of the configuration JSON whose plaintext secrets this page last tried to
-    // move. A write that the page refuses reads the page again, which applies the same JSON again and must not try again.
-    // A parse that applies other JSON tries again.
-    private const string SecretRewriteDataKey = "HomeBlaze.Storage.SecretRewrite";
-
     // The write of this page that the flow runs in, so that a write from inside it is refused instead of waiting
     // for _writeLock. Off the worker, the reload after a write, a refused write-back or a refused structure edit applies
     // configuration within the write.
@@ -231,176 +226,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         Content = content;
         Frontmatter = frontmatter;
 
-        // Before Children, whose lifecycle handlers can throw.
-        ScheduleSecretRewrites(result);
-
         // Without the flow of the caller, which is the worker of the storage or a refused write, as for
         // every assignment to the tree: lifecycle handlers run here for a page that is in the tree.
         using (ExecutionContext.SuppressFlow())
         {
             Children = result.Children;
-        }
-    }
-
-    /// <summary>
-    /// Saves each block whose subject holds a secret in plaintext in the configuration that the parse applied, which moves
-    /// the secret to the secret store. Queued behind the parse, because a page cannot write itself from the worker of the
-    /// storage or from within its reload. A block with a value that cannot be read has no subject, so it is not saved.
-    /// </summary>
-    private void ScheduleSecretRewrites(MarkdownParseResult result)
-    {
-        List<IInterceptorSubject>? subjects = null;
-        foreach (var (subject, json) in result.AppliedConfigurations)
-        {
-            AddSecretRewrite(subject, json, ref subjects);
-        }
-
-        if (subjects is null)
-        {
-            return;
-        }
-
-        using var suppressedFlow = ExecutionContext.IsFlowSuppressed() ? (AsyncFlowControl?)null : ExecutionContext.SuppressFlow();
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await RewriteBlocksIfFileUnchangedAsync(subjects);
-            }
-            catch (Exception exception)
-            {
-                _parser.LogFailedSecretRewrite(FullPath, exception);
-            }
-        });
-    }
-
-    // Runs after the parse was published, so a subject whose check throws is only skipped.
-    private void AddSecretRewrite(IInterceptorSubject subject, string json, ref List<IInterceptorSubject>? subjects)
-    {
-        if (GetSecretRewrite(subject)?.Json == json)
-        {
-            return;
-        }
-
-        try
-        {
-            if (!_serializer.HasUnstoredSecrets(subject))
-            {
-                return;
-            }
-        }
-        catch (Exception exception)
-        {
-            _parser.LogFailedSecretRewrite(FullPath, exception);
-            return;
-        }
-
-        MarkForSecretRewrite(subject, json);
-        (subjects ??= []).Add(subject);
-    }
-
-    /// <summary>
-    /// Marks the block subject for <see cref="RewriteBlocksIfFileUnchangedAsync"/>, with the configuration JSON whose
-    /// plaintext secrets it moves.
-    /// </summary>
-    internal void MarkForSecretRewrite(IInterceptorSubject subject, string json) =>
-        subject.Data[(null, SecretRewriteDataKey)] = new SecretRewrite(this, json);
-
-    /// <summary>
-    /// Writes the block of each subject that a parse marked for its plaintext secrets, one after the other, while the
-    /// file is the text the page last read. When the file differs, nothing more is written and the page is read again
-    /// with the configurations of the remaining subjects, which checks them again.
-    /// A refused block write is logged by the write itself.
-    /// </summary>
-    internal async Task RewriteBlocksIfFileUnchangedAsync(IReadOnlyList<IInterceptorSubject> subjects)
-    {
-        EnsureNotWithinWrite();
-        await _writeLock.WaitAsync(CancellationToken.None);
-        var write = BeginWrite();
-        var index = 0;
-        try
-        {
-            for (; index < subjects.Count; index++)
-            {
-                // Whatever removed the mark decides whether it is tried again.
-                if (GetSecretRewrite(subjects[index]) is null)
-                {
-                    continue;
-                }
-
-                // The block text is computed from the snapshot, which lags behind a change of the file until its event
-                // arrives, and an unrequested write must never undo a hand edit.
-                if (_parseResult.Page is not { } page || await ReadSourceUnlockedAsync(CancellationToken.None) != page.Source)
-                {
-                    // The read of the page applies the configurations again, so it checks the remaining subjects.
-                    _parser.LogSecretRewriteOnChangedFile(FullPath);
-                    ForgetSecretRewritesFrom(subjects, index, forgetAppliedConfigurations: true);
-                    await ReloadAfterRefusalAsync(CancellationToken.None);
-                    return;
-                }
-
-                switch (await WriteBlockAsync(subjects[index], CancellationToken.None))
-                {
-                    case BlockWriteResult.Written:
-                        // Unmarked, so that the same plaintext written back later, such as by an undo, is moved again.
-                        ForgetSecretRewrite(subjects[index], forgetAppliedConfiguration: false);
-                        _parser.LogMovedSecrets(FullPath);
-                        break;
-                    case BlockWriteResult.RefusedByPublish:
-                        // A reload published meanwhile and kept the block as it was, so, as for a changed file, the
-                        // page is read again with the configurations of the remaining subjects.
-                        ForgetSecretRewritesFrom(subjects, index, forgetAppliedConfigurations: true);
-                        await ReloadAfterRefusalAsync(CancellationToken.None);
-                        return;
-                    case BlockWriteResult.NotWritten:
-                        // Stays marked: the reload of a refused write must not try again.
-                        break;
-                    case BlockWriteResult.NotABlock:
-                        // The subject left the page.
-                        ForgetSecretRewrite(subjects[index], forgetAppliedConfiguration: false);
-                        break;
-                }
-            }
-        }
-        catch
-        {
-            // Unmarked after the write's own reload, so only a later parse that applies the configuration tries again.
-            ForgetSecretRewritesFrom(subjects, index, forgetAppliedConfigurations: false);
-            throw;
-        }
-        finally
-        {
-            EndWrite(write);
-        }
-    }
-
-    private SecretRewrite? GetSecretRewrite(IInterceptorSubject subject) =>
-        subject.Data.TryGetValue((null, SecretRewriteDataKey), out var data) && data is SecretRewrite rewrite && rewrite.Page == this
-            ? rewrite
-            : null;
-
-    // Holds the page, so that the mark of one page is never taken for that of another.
-    private sealed record SecretRewrite(MarkdownFile Page, string Json);
-
-    private void ForgetSecretRewritesFrom(IReadOnlyList<IInterceptorSubject> subjects, int index, bool forgetAppliedConfigurations)
-    {
-        for (; index < subjects.Count; index++)
-        {
-            ForgetSecretRewrite(subjects[index], forgetAppliedConfigurations);
-        }
-    }
-
-    // Forgetting the applied configuration makes the next parse apply it again, which checks it again.
-    private void ForgetSecretRewrite(IInterceptorSubject subject, bool forgetAppliedConfiguration)
-    {
-        if (GetSecretRewrite(subject) is { } rewrite)
-        {
-            subject.Data.TryRemove(KeyValuePair.Create<(string?, string), object?>((null, SecretRewriteDataKey), rewrite));
-        }
-
-        if (forgetAppliedConfiguration)
-        {
-            _parser.ForgetAppliedConfiguration(subject);
         }
     }
 
@@ -726,7 +556,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         var write = BeginWrite();
         try
         {
-            return await WriteBlockAsync(subject, cancellationToken) == BlockWriteResult.Written;
+            return await WriteBlockAsync(subject, cancellationToken);
         }
         finally
         {
@@ -1311,13 +1141,13 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     // Under _writeLock: no other write of this file runs, so only a reload can change the snapshot meanwhile.
-    private async Task<BlockWriteResult> WriteBlockAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+    private async Task<bool> WriteBlockAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var snapshot = _parseResult;
         var blockIndex = FindBlock(snapshot.BlockSubjects, subject);
         if (snapshot.Page is not { } page || blockIndex < 0)
         {
-            return BlockWriteResult.NotABlock;
+            return false;
         }
 
         // The block spans index into the text the page was parsed from, which is the source of the
@@ -1337,20 +1167,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             ForgetAppliedConfigurations(page.AllBlocks[blockIndex], snapshot.BlockSubjects);
             ForgetAppliedBlocksAround(page, page.AllBlocks[blockIndex], snapshot.BlockSubjects);
             await ReloadAfterRefusalAsync(cancellationToken);
-            return BlockWriteResult.NotWritten;
+            return false;
         }
 
-        return await PublishAndWriteAsync(snapshot, write, page.AllBlocks[blockIndex], ConfigurationChangedRefusal, secretChanges) is null
-            ? BlockWriteResult.Written
-            : BlockWriteResult.RefusedByPublish;
-    }
-
-    private enum BlockWriteResult
-    {
-        Written,
-        NotABlock,
-        RefusedByPublish,
-        NotWritten
+        return await PublishAndWriteAsync(snapshot, write, page.AllBlocks[blockIndex], ConfigurationChangedRefusal, secretChanges) is null;
     }
 
     // Under _writeLock, after a refusal. A failed read is logged, and the next pass of the storage reads the file again.
@@ -1393,8 +1213,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         {
             Page = write.Page,
             BlockSubjects = write.BlockSubjects,
-            TextBlocks = MarkdownParseResult.NoTextBlocks,
-            AppliedConfigurations = []
+            TextBlocks = MarkdownParseResult.NoTextBlocks
         };
         if (!ReferenceEquals(Interlocked.CompareExchange(ref _parseResult, published, snapshot), snapshot))
         {

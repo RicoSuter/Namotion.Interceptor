@@ -159,26 +159,6 @@ public class ConfigurableSubjectSerializer
     }
 
     /// <summary>
-    /// Whether a secret configuration value of the subject, or of a subject in its configuration, has no key in the
-    /// <see cref="SecretStore"/> yet, such as a value that was read as plaintext. Stores nothing. False without a
-    /// <see cref="SecretStore"/> service and for a subject that is not <see cref="IConfigurable"/>.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">
-    /// The type of the subject, or of a value in its configuration, has a secret configuration property that is not a string property of a subject.
-    /// </exception>
-    public bool HasUnstoredSecrets(IInterceptorSubject subject)
-    {
-        if (subject is not IConfigurable || _secrets is not { } secrets)
-        {
-            return false;
-        }
-
-        // The captured changes are dropped, so nothing is stored.
-        secrets.Capture(() => Serialize(subject), out var changes);
-        return !changes.IsEmpty;
-    }
-
-    /// <summary>
     /// Runs <paramref name="serialize"/>, which serializes with this serializer on the calling thread, and returns its
     /// result. A secret value that its key does not hold yet is written as a reference without being stored, and
     /// <paramref name="secretChanges"/> holds it for the writer of the result to store around its write. Serializations

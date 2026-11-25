@@ -53,13 +53,10 @@ internal sealed class FileSubjectFactory
     /// <summary>
     /// Creates the subject of a JSON file from its text: the configurable subject it describes,
     /// or a <see cref="JsonFile"/> when the text is plain or invalid JSON. Logs the values that cannot be read, see
-    /// <see cref="LogSkippedProperties"/>, and tells whether the file holds a secret in plaintext that a save would move
-    /// to the secret store, see <see cref="ShouldMoveSecrets"/>.
+    /// <see cref="LogSkippedProperties"/>.
     /// </summary>
-    public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json, out bool shouldMoveSecrets)
+    public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json)
     {
-        shouldMoveSecrets = false;
-
         // A configurable subject enters the context when it is created, which runs lifecycle handlers as an
         // assignment to the tree does. With the flow of the caller, work that a handler starts would count as
         // part of the work item that creates the subject, and its calls into the storage would be refused.
@@ -73,7 +70,6 @@ internal sealed class FileSubjectFactory
             if (_serializer.Deserialize(json, created: null, skipped.Add) is IInterceptorSubject subject)
             {
                 LogSkippedProperties(path, skipped);
-                shouldMoveSecrets = ShouldMoveSecrets(path, subject, hasSkippedValues: skipped.Count > 0);
                 return subject;
             }
         }
@@ -101,40 +97,6 @@ internal sealed class FileSubjectFactory
                 "The configuration of {Path} has issues that saving it would lose; correct them in the file: {Issues}",
                 path, ConfigurableSubjectSerializer.DescribeSkippedProperties(skipped));
         }
-    }
-
-    /// <summary>
-    /// Checks whether the subject that was read from the file at the path holds a secret in plaintext that a save would
-    /// move to the secret store. False when the file has a value that could not be read, because a save would replace
-    /// that value with its default, and when the check fails; both are logged as a warning.
-    /// </summary>
-    public bool ShouldMoveSecrets(string path, IInterceptorSubject subject, bool hasSkippedValues)
-    {
-        try
-        {
-            if (!_serializer.HasUnstoredSecrets(subject))
-            {
-                return false;
-            }
-        }
-        catch (Exception exception)
-        {
-            _logger?.LogWarning(
-                exception,
-                "The configuration of {Path} could not be checked for secrets in plaintext, which stay in the file until it is saved",
-                path);
-            return false;
-        }
-
-        if (hasSkippedValues)
-        {
-            _logger?.LogWarning(
-                "The configuration of {Path} holds a secret in plaintext, which stays in the file until the issues of the file are corrected",
-                path);
-            return false;
-        }
-
-        return true;
     }
 
     /// <summary>

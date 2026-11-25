@@ -32,7 +32,7 @@ public class FileSubjectFactoryTests : IDisposable
             logger);
 
         // Act
-        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Values.json", json, out _);
+        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Values.json", json);
 
         // Assert
         Assert.IsType<JsonFile>(subject);
@@ -55,62 +55,11 @@ public class FileSubjectFactoryTests : IDisposable
         var json = $$"""{ "$type": "{{typeof(CallbackSubject).FullName}}", "name": [1] }""";
 
         // Act
-        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Callback.json", json, out _);
+        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Callback.json", json);
 
         // Assert
         Assert.IsType<CallbackSubject>(subject);
         Assert.Contains(LogLevel.Warning, logger.Levels);
-    }
-
-    [Theory]
-    [InlineData("\"s3cr3t\"", true)]
-    [InlineData("null", false)]
-    public void WhenAJsonFileIsCreated_ThenItTellsWhetherItHoldsAPlaintextSecret(string password, bool expected)
-    {
-        // Arrange
-        var factory = CreateFactoryWithSecretStore();
-        var json = $$"""{ "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "host": "10.0.0.1", "password": {{password}} }""";
-
-        // Act
-        factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out var shouldMoveSecrets);
-
-        // Assert
-        Assert.Equal(expected, shouldMoveSecrets);
-    }
-
-    [Fact]
-    public void WhenAJsonFileWithAPlaintextSecretHasAValueThatCannotBeRead_ThenItIsNotReportedAndAWarningTellsThatTheSecretStaysInTheFile()
-    {
-        // Arrange
-        var logger = new LevelRecordingLogger();
-        var factory = CreateFactoryWithSecretStore(logger);
-        var json = $$"""{ "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "host": [1], "password": "s3cr3t" }""";
-
-        // Act
-        factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out var shouldMoveSecrets);
-
-        // Assert
-        Assert.False(shouldMoveSecrets);
-        Assert.Contains(logger.Messages, message => message.Contains("/Gateway.json") && message.Contains("plaintext"));
-        Assert.DoesNotContain(logger.Messages, message => message.Contains("s3cr3t"));
-    }
-
-    [Fact]
-    public void WhenCheckingAJsonFileForPlaintextSecretsFails_ThenTheSubjectIsCreatedAndAWarningIsLogged()
-    {
-        // Arrange
-        var logger = new LevelRecordingLogger();
-        var factory = CreateFactoryWithSecretStore(logger);
-        var json = $$"""{ "$type": "{{typeof(UnserializableSecretDevice).FullName}}", "value": {}, "password": "s3cr3t" }""";
-
-        // Act
-        var subject = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out var shouldMoveSecrets);
-
-        // Assert
-        Assert.IsType<UnserializableSecretDevice>(subject);
-        Assert.False(shouldMoveSecrets);
-        Assert.Contains(logger.Messages, message => message.Contains("/Gateway.json") && message.Contains("plaintext"));
-        Assert.DoesNotContain(logger.Messages, message => message.Contains("s3cr3t"));
     }
 
     [Fact]
@@ -129,7 +78,7 @@ public class FileSubjectFactoryTests : IDisposable
         var serializer = new ConfigurableSubjectSerializer(typeProvider, serviceProvider);
         var factory = new FileSubjectFactory(new SubjectTypeRegistry(typeProvider), serializer, serviceProvider, logger: null);
         var json = $$"""{ "$type": "{{typeof(EmbeddedSecretDevice).FullName}}", "password": "$secret:{{key}}" }""";
-        var released = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json, out _);
+        var released = factory.CreateFromJson(Mock.Of<IStorageContainer>(), "/Gateway.json", json);
         var kept = Assert.IsType<EmbeddedSecretDevice>(serializer.Deserialize(json));
         kept.Password = "changed";
 
@@ -146,25 +95,9 @@ public class FileSubjectFactoryTests : IDisposable
 
     public void Dispose() => _secretsDirectory.Delete(recursive: true);
 
-    private FileSubjectFactory CreateFactoryWithSecretStore(ILogger? logger = null)
-    {
-        var services = new ServiceCollection();
-        services.AddSingleton(new SecretStore(Path.Combine(_secretsDirectory.FullName, "Secrets.json")));
-        var serviceProvider = services.BuildServiceProvider();
-        var typeProvider = new TypeProvider();
-        typeProvider.AddTypes([typeof(EmbeddedSecretDevice), typeof(UnserializableSecretDevice)]);
-        return new FileSubjectFactory(
-            new SubjectTypeRegistry(typeProvider),
-            new ConfigurableSubjectSerializer(typeProvider, serviceProvider),
-            serviceProvider,
-            logger);
-    }
-
     private sealed class LevelRecordingLogger : ILogger
     {
         public List<LogLevel> Levels { get; } = [];
-
-        public List<string> Messages { get; } = [];
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -172,9 +105,6 @@ public class FileSubjectFactoryTests : IDisposable
 
         public void Log<TState>(
             LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        {
-            Levels.Add(logLevel);
-            Messages.Add(formatter(state, exception));
-        }
+            => Levels.Add(logLevel);
     }
 }

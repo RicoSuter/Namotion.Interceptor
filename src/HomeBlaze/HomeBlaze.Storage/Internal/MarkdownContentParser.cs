@@ -281,18 +281,6 @@ public sealed partial class MarkdownContentParser
     internal void LogFailedReload(string path, Exception exception) =>
         _logger?.LogWarning(exception, "Failed to reload the page {Path} after a write that was refused or failed", path);
 
-    /// <summary>Logs that the plaintext secrets of blocks are moved once the page, whose file changed, has been read again.</summary>
-    internal void LogSecretRewriteOnChangedFile(string path) =>
-        _logger?.LogDebug("The page {Path} changed since it was read, so its plaintext secrets are moved to the secret store once it has been read again", path);
-
-    /// <summary>Logs that the plaintext secrets of a block were moved to the secret store.</summary>
-    internal void LogMovedSecrets(string path) =>
-        _logger?.LogInformation("Moved the plaintext secrets of a block of the page {Path} to the secret store.", path);
-
-    /// <summary>Logs that the plaintext secrets of a block could not be moved to the secret store.</summary>
-    internal void LogFailedSecretRewrite(string path, Exception exception) =>
-        _logger?.LogWarning(exception, "The plaintext secrets of a block of the page {Path} could not be moved to the secret store and stay in the page until it is saved", path);
-
     /// <summary>
     /// Renders markdown content by replacing each {{ path }} expression that
     /// <see cref="MarkdownSegmentBuilder.FindExpressions"/> finds with its resolved value as the page shows it: also
@@ -399,11 +387,7 @@ public sealed partial class MarkdownContentParser
         try
         {
             var children = await BuildChildrenAsync(segments, existingChildren, state, cancellationToken);
-            return new MarkdownParseResult(children, page, state.BlockSubjects, state.NamedSubjects)
-            {
-                TextBlocks = state.TextBlocks,
-                AppliedConfigurations = state.GetAppliedConfigurationsOfBlocks()
-            };
+            return new MarkdownParseResult(children, page, state.BlockSubjects, state.NamedSubjects) { TextBlocks = state.TextBlocks };
         }
         catch
         {
@@ -411,7 +395,7 @@ public sealed partial class MarkdownContentParser
             ReleaseCreatedSince(state, 0);
 
             // No snapshot lists what it applied to the subjects it updated in place, so the next parse applies it again.
-            foreach (var (subject, _) in state.AppliedConfigurations)
+            foreach (var subject in state.AppliedSubjects)
             {
                 ForgetAppliedConfiguration(subject);
             }
@@ -823,7 +807,7 @@ public sealed partial class MarkdownContentParser
     {
         private readonly List<(int BlockIndex, string? Id, IInterceptorSubject Subject)> _registrations = [];
         private readonly List<IInterceptorSubject> _created = [];
-        private List<(IInterceptorSubject Subject, string Json)>? _appliedConfigurations;
+        private List<IInterceptorSubject>? _appliedSubjects;
         private readonly Dictionary<string, int> _nameOwners = new();
         private readonly string _source;
         private bool? _hasLoneCarriageReturn;
@@ -890,27 +874,11 @@ public sealed partial class MarkdownContentParser
 
         public void AddErrorBox() => ErrorBoxCount++;
 
-        /// <summary>The configuration JSON that this parse applied, by the subject it applied it to.</summary>
-        public IReadOnlyList<(IInterceptorSubject Subject, string Json)> AppliedConfigurations => _appliedConfigurations ?? [];
+        /// <summary>The subjects that this parse applied configuration to.</summary>
+        public IReadOnlyList<IInterceptorSubject> AppliedSubjects => _appliedSubjects ?? [];
 
-        /// <summary>Records that this parse applied the configuration JSON to the subject.</summary>
-        public void AddAppliedConfiguration(IInterceptorSubject subject, string json) =>
-            (_appliedConfigurations ??= []).Add((subject, json));
-
-        /// <summary>
-        /// Gets the applied configurations of the subjects that are block subjects of the parse, without those of blocks
-        /// that ended as an error box.
-        /// </summary>
-        public IReadOnlyList<(IInterceptorSubject Subject, string Json)> GetAppliedConfigurationsOfBlocks()
-        {
-            if (_appliedConfigurations is null)
-            {
-                return [];
-            }
-
-            var blockSubjects = new HashSet<IInterceptorSubject>(BlockSubjects.Values, ReferenceEqualityComparer.Instance);
-            return _appliedConfigurations.FindAll(applied => blockSubjects.Contains(applied.Subject));
-        }
+        /// <summary>Records that this parse applied configuration to the subject.</summary>
+        public void AddAppliedSubject(IInterceptorSubject subject) => (_appliedSubjects ??= []).Add(subject);
 
         /// <summary>The text of the page that this parse reads.</summary>
         public string Source => _source;

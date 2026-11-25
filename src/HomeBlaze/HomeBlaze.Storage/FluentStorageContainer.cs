@@ -538,22 +538,7 @@ public partial class FluentStorageContainer :
     /// </summary>
     /// <returns>False when no file in this storage contains the subject as configuration, such as a subject of a
     /// document or of a file that is no configurable subject, or the storage is not connected.</returns>
-    public Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
-        => WriteConfigurationAsync(subject, expectedHash: null, cancellationToken);
-
-    /// <summary>
-    /// Saves the file of the subject like <see cref="WriteConfigurationAsync(IInterceptorSubject, CancellationToken)"/>,
-    /// but only while the file still has the content of the expected hash, both in the storage and as the storage last
-    /// read or wrote it.
-    /// </summary>
-    /// <param name="subject">The subject whose file is saved.</param>
-    /// <param name="expectedHash">
-    /// The hash of the content the file must still have, or null to save in any case.
-    /// </param>
-    /// <param name="cancellationToken">Cancels the save.</param>
-    /// <returns>False as well when the content of the file is no longer the expected one.</returns>
-    internal async Task<bool> WriteConfigurationAsync(
-        IInterceptorSubject subject, string? expectedHash, CancellationToken cancellationToken)
+    public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var connection = _connection;
         if (connection is null or { IsEnded: true })
@@ -570,18 +555,6 @@ public partial class FluentStorageContainer :
                 // Only configuration is written here. A document, such as a Markdown page, writes itself, under its own rules.
                 if (fileSubject is not IConfigurable || fileSubject is IStorageFile || entry is null)
                     return;
-
-                // The index lags behind a change of the file until a pass processed it, and an unrequested save must
-                // never undo a hand edit.
-                if (expectedHash != null)
-                {
-                    if (entry.Hash != expectedHash)
-                        return;
-
-                    var current = await connection.Reconciler.TryReadAsync(entry.Path, token);
-                    if (current is null || StorageHash.Compute(current) != expectedHash)
-                        return;
-                }
 
                 var json = _serializer.CaptureSecretChanges(() => _serializer.Serialize(fileSubject), out var secretChanges);
 

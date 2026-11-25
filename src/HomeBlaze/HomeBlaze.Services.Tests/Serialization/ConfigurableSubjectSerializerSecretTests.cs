@@ -85,7 +85,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         device.Password = "correct horse";
 
         // Act
-        var hasUnstoredSecrets = serializer.HasUnstoredSecrets(device);
+        var hasUnstoredSecrets = HasUnstoredSecrets(serializer, device);
 
         // Assert
         Assert.True(hasUnstoredSecrets);
@@ -185,7 +185,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         Assert.IsType<IOException>(exception);
         Assert.Equal(new Dictionary<string, string> { [key] = "hunter2" }, ReadStoreFile());
         Assert.Equal("hunter2", Deserialize(serializer, DeviceJson(Prefix + key)).Password);
-        Assert.True(serializer.HasUnstoredSecrets(device));
+        Assert.True(HasUnstoredSecrets(serializer, device));
     }
 
     [Fact]
@@ -200,7 +200,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
 
         // Act
         var secondJson = serializer.CaptureSecretChanges(() => serializer.Serialize(device), out _);
-        var hasUnstoredSecrets = serializer.HasUnstoredSecrets(device);
+        var hasUnstoredSecrets = HasUnstoredSecrets(serializer, device);
 
         // Assert
         Assert.Equal(firstJson, secondJson);
@@ -654,7 +654,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         device.Password = "hunter2";
 
         // Act
-        var hasUnstoredSecrets = serializer.HasUnstoredSecrets(device);
+        var hasUnstoredSecrets = HasUnstoredSecrets(serializer, device);
 
         // Assert
         Assert.True(hasUnstoredSecrets);
@@ -669,7 +669,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
 
         // Act
         var device = Deserialize(serializer, DeviceJson("s3cr3t"));
-        var hasUnstoredSecrets = serializer.HasUnstoredSecrets(device);
+        var hasUnstoredSecrets = HasUnstoredSecrets(serializer, device);
 
         // Assert
         Assert.Equal("s3cr3t", device.Password);
@@ -691,7 +691,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
 
         // Act
         var device = Deserialize(serializer, DeviceJson(value));
-        var hasUnstoredSecrets = serializer.HasUnstoredSecrets(device);
+        var hasUnstoredSecrets = HasUnstoredSecrets(serializer, device);
 
         // Assert
         Assert.Equal(value, device.Password);
@@ -709,7 +709,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
 
         // Assert
         Assert.Equal("s3cr3t", device.Child!.Password);
-        Assert.True(serializer.HasUnstoredSecrets(device));
+        Assert.True(HasUnstoredSecrets(serializer, device));
     }
 
     [Fact]
@@ -720,7 +720,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         var device = Deserialize(serializer, DeviceJson("s3cr3t"));
 
         // Act
-        var hasUnstoredSecrets = serializer.HasUnstoredSecrets(device);
+        var hasUnstoredSecrets = HasUnstoredSecrets(serializer, device);
 
         // Assert
         Assert.False(hasUnstoredSecrets);
@@ -735,7 +735,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         serializer.Serialize(device);
 
         // Act
-        var hasUnstoredSecrets = serializer.HasUnstoredSecrets(device);
+        var hasUnstoredSecrets = HasUnstoredSecrets(serializer, device);
 
         // Assert
         Assert.False(hasUnstoredSecrets);
@@ -788,6 +788,13 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(new TypeProvider(), new ServiceCollection().BuildServiceProvider())
     };
+
+    // Whether a save would store a secret value; the captured changes are dropped, so nothing is stored.
+    private static bool HasUnstoredSecrets(ConfigurableSubjectSerializer serializer, SecretTestDevice device)
+    {
+        serializer.CaptureSecretChanges(() => serializer.Serialize(device), out var secretChanges);
+        return !secretChanges.IsEmpty;
+    }
 
     private static SecretTestDevice Deserialize(ConfigurableSubjectSerializer serializer, string json) =>
         Assert.IsType<SecretTestDevice>(serializer.Deserialize(json));

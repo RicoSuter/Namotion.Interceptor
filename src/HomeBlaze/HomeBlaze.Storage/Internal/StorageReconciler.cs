@@ -658,7 +658,7 @@ internal sealed class StorageReconciler
                 }
 
                 entry.Hash = hash;
-                entry.Subject = CreateFromJson(listed.Path, text, entry.Version, hash);
+                entry.Subject = CreateFromJson(listed.Path, text, entry.Version);
             }
         }
         else
@@ -807,47 +807,15 @@ internal sealed class StorageReconciler
         => (StoragePath.IsJson(path) && !StorageMetadataPath.IsMetadataFile(path)) ||
            StoragePath.IsMarkdown(path);
 
-    private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version, string hash)
+    private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version)
     {
-        var subject = _subjectFactory.CreateFromJson(_storage, StoragePath.ToFullPath(path), json, out var shouldMoveSecrets);
+        var subject = _subjectFactory.CreateFromJson(_storage, StoragePath.ToFullPath(path), json);
         if (subject is JsonFile file)
         {
             SetMetadata(file, version);
         }
-        else if (shouldMoveSecrets)
-        {
-            ScheduleSecretRewrite(path, subject, hash);
-        }
 
         return subject;
-    }
-
-    /// <summary>
-    /// Saves the subject of a file that holds a secret in plaintext, which moves the secret to the secret store.
-    /// Not awaited: the save runs on the worker of the storage, after the work item that calls this. It writes
-    /// nothing when the file no longer has the content of the given hash by then.
-    /// </summary>
-    private void ScheduleSecretRewrite(string path, IInterceptorSubject subject, string hash)
-    {
-        using var suppressedFlow = ExecutionContext.IsFlowSuppressed() ? (AsyncFlowControl?)null : ExecutionContext.SuppressFlow();
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                if (await _storage.WriteConfigurationAsync(subject, hash, _connectionToken))
-                {
-                    _logger?.LogInformation("Moved the plaintext secrets of {Path} to the secret store.", path);
-                }
-            }
-            catch (OperationCanceledException) when (_connectionToken.IsCancellationRequested)
-            {
-                // The connection ended. The next connection reads the file again and moves the secrets then.
-            }
-            catch (Exception exception)
-            {
-                _logger?.LogWarning(exception, "The plaintext secrets of {Path} could not be moved to the secret store and stay in the file until it is saved.", path);
-            }
-        });
     }
 
     /// <summary>
@@ -975,11 +943,6 @@ internal sealed class StorageReconciler
                 // Replaced rather than updated: a key that the file no longer has gets its default, as after a restart.
                 _serializer.ReplaceConfiguration(entry.Subject, json, skipped.Add);
                 _subjectFactory.LogSkippedProperties(entry.Path, skipped);
-
-                if (_subjectFactory.ShouldMoveSecrets(entry.Path, entry.Subject, hasSkippedValues: skipped.Count > 0))
-                {
-                    ScheduleSecretRewrite(entry.Path, entry.Subject, hash);
-                }
             }
 
             await configurable.ApplyConfigurationAsync(cancellationToken);
@@ -994,7 +957,7 @@ internal sealed class StorageReconciler
 
         // The file is something else now: a plain file that became a subject, a subject of another type, or a
         // subject that became a plain file. Only a plain file that stays one keeps its instance.
-        var subject = CreateFromJson(entry.Path, json, version, hash);
+        var subject = CreateFromJson(entry.Path, json, version);
         if (subject is JsonFile && entry.Subject is JsonFile)
         {
             return false;
@@ -1076,11 +1039,8 @@ internal sealed class StorageReconciler
     private async Task<byte[]> ReadAsync(string path, CancellationToken cancellationToken)
         => await TryReadAsync(path, cancellationToken) ?? throw new FileNotFoundException($"'{path}' is not in the storage.", path);
 
-    /// <summary>
-    /// Reads the content of a file from the storage within the timeout of the storage; null for a file that does not exist.
-    /// </summary>
-    // The client returns null for a file that does not exist, although its signature does not say so.
-    public async Task<byte[]?> TryReadAsync(string path, CancellationToken cancellationToken)
+    // Null for a file that does not exist, for which the client returns null although its signature does not say so.
+    private async Task<byte[]?> TryReadAsync(string path, CancellationToken cancellationToken)
     {
         await using var stream = await _client.OpenRead(path, cancellationToken);
         if (stream is null)
