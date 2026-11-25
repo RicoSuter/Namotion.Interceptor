@@ -85,9 +85,9 @@ public partial class FluentStorageContainer :
     /// <summary>Applies and writes the metadata of this storage.</summary>
     internal StorageMetadataStore MetadataStore { get; }
 
-    /// <summary>Converts the plaintext secrets of a page. Created on first use, which needs the <see cref="TypeProvider"/> service.</summary>
+    /// <summary>Converts the plaintext secrets of a page. Created on first use, which needs the <see cref="MarkdownContentParser"/> service.</summary>
     internal SecretPageConverter PageConverter
-        => _pageConverter ??= new SecretPageConverter(_serializer, _serviceProvider.GetRequiredService<TypeProvider>());
+        => _pageConverter ??= new SecretPageConverter(_serializer, _serviceProvider.GetRequiredService<MarkdownContentParser>().FindType);
 
     /// <summary>Wraps the storage client when the storage connects.</summary>
     internal Func<IStore, IStore>? ClientDecorator { get; set; }

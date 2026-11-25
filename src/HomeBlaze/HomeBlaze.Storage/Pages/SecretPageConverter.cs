@@ -11,12 +11,14 @@ namespace HomeBlaze.Storage.Pages;
 internal sealed class SecretPageConverter
 {
     private readonly ConfigurableSubjectSerializer _serializer;
-    private readonly TypeProvider _typeProvider;
+    private readonly Func<string, Type?> _findType;
 
-    public SecretPageConverter(ConfigurableSubjectSerializer serializer, TypeProvider typeProvider)
+    /// <param name="serializer">Converts the configuration of a block.</param>
+    /// <param name="findType">Gets the type that a widget block names with its full name, or null when there is none.</param>
+    public SecretPageConverter(ConfigurableSubjectSerializer serializer, Func<string, Type?> findType)
     {
         _serializer = serializer;
-        _typeProvider = typeProvider;
+        _findType = findType;
     }
 
     /// <summary>
@@ -94,15 +96,7 @@ internal sealed class SecretPageConverter
 
         if (block.Kind == MarkdownBlockKind.Widget)
         {
-            foreach (var type in _typeProvider.Types)
-            {
-                if (type.FullName == head.Name)
-                {
-                    return type;
-                }
-            }
-
-            return null;
+            return _findType(head.Name);
         }
 
         // A slot block configures a value of the slot of its owner; an open slot takes content, not configuration.

@@ -163,7 +163,9 @@ public class SecretPageConverterTests : IDisposable
         typeProvider.AddTypes([typeof(EmbeddedSecretDevice), typeof(SecretSlotHost), typeof(HomeBlaze.Components.Card)]);
         var store = new SecretStore(Path.Combine(_directory.FullName, "Secrets.json"));
         var services = new ServiceCollection().AddSingleton(store).BuildServiceProvider();
-        return new SecretPageConverter(new ConfigurableSubjectSerializer(typeProvider, services), typeProvider);
+        return new SecretPageConverter(
+            new ConfigurableSubjectSerializer(typeProvider, services),
+            typeName => typeProvider.Types.FirstOrDefault(type => type.FullName == typeName));
     }
 
     public void Dispose() => _directory.Delete(recursive: true);
