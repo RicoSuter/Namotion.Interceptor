@@ -94,7 +94,17 @@
 
         // The write stores plaintext secrets and writes references instead, which the editor then shows, so that its next
         // save does not send the plaintext again. Text typed during the write stays in the editor and is not saved.
-        var written = await ReadTextAsync(File);
+        // The file is already written, so a failing read-back must not fail the save; the editor then keeps the typed text.
+        string written;
+        try
+        {
+            written = await ReadTextAsync(File);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            written = content;
+        }
+
         _originalContent = written;
         if (await _editor.GetValue() == content)
         {
