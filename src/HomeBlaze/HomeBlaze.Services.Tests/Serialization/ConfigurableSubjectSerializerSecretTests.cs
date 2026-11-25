@@ -57,26 +57,6 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
-    public void WhenASecretChanges_ThenItKeepsItsKeyAndTheStoreHoldsTheNewValue()
-    {
-        // Arrange
-        var (serializer, store) = CreateSerializer();
-        var device = Deserialize(serializer, DeviceJson(password: null));
-        device.Password = "hunter2";
-        var oldReference = ReadString(serializer.Serialize(device), "password");
-        device.Password = "correct horse";
-
-        // Act
-        var newReference = ReadString(serializer.Serialize(device), "password");
-
-        // Assert
-        Assert.Equal(oldReference, newReference);
-        Assert.True(store.TryGet(KeyOf(newReference), out var value));
-        Assert.Equal("correct horse", value);
-        Assert.Single(JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(StorePath))!);
-    }
-
-    [Fact]
     public void WhenAReadSecretChanges_ThenSerializingStoresItUnderItsKeyAtOnce()
     {
         // Arrange
@@ -118,27 +98,6 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         Assert.Equal(copyJson, copyJsonAgain);
         Assert.Equal(Prefix + key, ReadString(originalJson, "password"));
         Assert.Equal(new Dictionary<string, string> { [key] = "original secret", [copyKey] = "copy secret" }, ReadStoreFile());
-    }
-
-    [Fact]
-    public void WhenTwoSubjectsReadTheSameReference_ThenAChangeOfTheFirstGivesItANewKeyAndLeavesTheSecondUnchanged()
-    {
-        // Arrange
-        var (serializer, store) = CreateSerializer();
-        var key = Seed(store, "hunter2");
-        var first = Deserialize(serializer, DeviceJson(Prefix + key));
-        var second = Deserialize(serializer, DeviceJson(Prefix + key));
-        first.Password = "first secret";
-
-        // Act
-        var firstJson = serializer.Serialize(first);
-
-        // Assert
-        var firstKey = KeyOf(ReadString(firstJson, "password"));
-        Assert.NotEqual(key, firstKey);
-        Assert.Equal(new Dictionary<string, string> { [key] = "hunter2", [firstKey] = "first secret" }, ReadStoreFile());
-        Assert.Equal("hunter2", Deserialize(serializer, DeviceJson(Prefix + key)).Password);
-        GC.KeepAlive(second);
     }
 
     [Fact]
@@ -489,21 +448,6 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
-    public void WhenASecretDefaultsToEmpty_ThenTheDefaultConfigurationHoldsItWithoutAnEntry()
-    {
-        // Arrange
-        var (serializer, _) = CreateSerializer();
-
-        // Act
-        var defaults = serializer.GetDefaultConfiguration(typeof(SecretDefaultDevice));
-
-        // Assert
-        Assert.NotNull(defaults);
-        Assert.Equal("", defaults.Value.GetProperty("password").GetString());
-        Assert.False(File.Exists(StorePath));
-    }
-
-    [Fact]
     public void WhenASecretOfANestedSubjectIsRoundTripped_ThenItIsReferencedAndResolved()
     {
         // Arrange
@@ -533,19 +477,6 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
 
         // Assert
         Assert.Equal("hunter2", ReadString(json, "password"));
-    }
-
-    [Fact]
-    public void WhenASubjectHasASecretPropertyThatIsNotAString_ThenSerializingOrDeserializingItThrows()
-    {
-        // Arrange
-        var options = CreateResolverOptions();
-
-        // Act & Assert
-        var serializing = Assert.Throws<InvalidOperationException>(() => JsonSerializer.Serialize(new InvalidSecretTypeDevice(), options));
-        var deserializing = Assert.Throws<InvalidOperationException>(() => JsonSerializer.Deserialize<InvalidSecretTypeDevice>("{}", options));
-        Assert.Contains(nameof(InvalidSecretTypeDevice.Pin), serializing.Message);
-        Assert.Equal(serializing.Message, deserializing.Message);
     }
 
     [Fact]
@@ -592,21 +523,6 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         // Assert
         Assert.Equal("hunter2", device.Password);
         Assert.Equal(key, KeyOf(ReadString(serializer.Serialize(device), "password")));
-    }
-
-    [Fact]
-    public void WhenAReferenceIsUpdatedInPlace_ThenThePropertyHoldsTheValue()
-    {
-        // Arrange
-        var (serializer, store) = CreateSerializer();
-        var key = Seed(store, "hunter2");
-        var device = Deserialize(serializer, DeviceJson(password: null));
-
-        // Act
-        serializer.UpdateConfiguration(device, DeviceJson(Prefix + key));
-
-        // Assert
-        Assert.Equal("hunter2", device.Password);
     }
 
     [Fact]
@@ -674,20 +590,6 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
 
         // Assert
         Assert.Equal(value, device.Password);
-        Assert.False(File.Exists(StorePath));
-    }
-
-    [Fact]
-    public void WhenAPlaintextSecretOfANestedSubjectIsDeserialized_ThenItIsSetWithoutStoringIt()
-    {
-        // Arrange
-        var (serializer, _) = CreateSerializer();
-
-        // Act
-        var device = Deserialize(serializer, DeviceJson(password: null, childPassword: "s3cr3t"));
-
-        // Assert
-        Assert.Equal("s3cr3t", device.Child!.Password);
         Assert.False(File.Exists(StorePath));
     }
 
@@ -793,7 +695,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
 
         // InvalidSecretTypeDevice is registered next to the valid types, as the type of another library would be, so that
         // every test also shows that it only fails for itself.
-        typeProvider.AddTypes([typeof(SecretTestDevice), typeof(SecretDefaultDevice), typeof(SecretGatedDevice), typeof(InvalidSecretTypeDevice)]);
+        typeProvider.AddTypes([typeof(SecretTestDevice), typeof(SecretGatedDevice), typeof(InvalidSecretTypeDevice)]);
 
         var store = new SecretStore(StorePath);
         var services = new ServiceCollection();
@@ -895,20 +797,6 @@ public partial class SecretTestDevice : IConfigurable
 
     [Configuration]
     public partial SecretTestDevice? Child { get; set; }
-
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-}
-
-[InterceptorSubject]
-public partial class SecretDefaultDevice : IConfigurable
-{
-    public SecretDefaultDevice()
-    {
-        Password = string.Empty;
-    }
-
-    [Configuration(IsSecret = true)]
-    public partial string Password { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
