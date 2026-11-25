@@ -26,8 +26,14 @@ internal sealed class SecretReferences
     // The key of the remembered key of a secret property in the data of its subject.
     private const string RememberedKeyDataKey = "HomeBlaze.Secrets.Key";
 
-    // The lock of a changed write is chosen by subject and property, so that no subject needs a lock of its own.
-    private static readonly Lock[] WriteLocks = CreateWriteLocks(32);
+    // The lock and version of a write are chosen by subject alone, so that no subject needs a lock of its own and an
+    // unchanged write reads its version before the remembered key, which a changed write may replace.
+    private const int WriteStripeCount = 32;
+    private static readonly Lock[] WriteLocks = CreateWriteLocks(WriteStripeCount);
+
+    // Per lock: odd while a changed write is between reading the value and storing it, so that an unchanged write that
+    // overlaps it is not taken for the last one.
+    private static readonly int[] WriteVersions = new int[WriteStripeCount];
 
     private readonly SecretStore _store;
     private readonly ILogger? _logger;
@@ -119,38 +125,57 @@ internal sealed class SecretReferences
     public object? Write(IInterceptorSubject owner, string propertyName, Func<object, object?> get)
     {
         (string? Property, string Key) dataKey = (propertyName, RememberedKeyDataKey);
-        if (TryWriteUnchanged(owner, dataKey, (string?)get(owner), out var result, out _))
+        var stripe = (int)((uint)RuntimeHelpers.GetHashCode(owner) % WriteStripeCount);
+
+        // Lock-free only when no changed write read or stored meanwhile: one that read an older value may store it after
+        // this read, which then is not the last.
+        var version = Volatile.Read(ref WriteVersions[stripe]);
+        if ((version & 1) == 0 && TryWriteUnchanged(owner, dataKey, (string?)get(owner), out var result, out _))
         {
-            return result;
+            // Keeps the reads of the value and the store before the second read of the version.
+            Interlocked.MemoryBarrier();
+            if (Volatile.Read(ref WriteVersions[stripe]) == version)
+            {
+                return result;
+            }
         }
 
         // The value is read again under the lock, so that a write that waited for another one to store its value never
         // replaces it with the value it read before, and a property gets one key when its first writes overlap. Taken
         // before the lock of the store, never the other way round.
-        lock (WriteLocks[(int)((uint)HashCode.Combine(RuntimeHelpers.GetHashCode(owner), propertyName) % WriteLocks.Length)])
+        lock (WriteLocks[stripe])
         {
-            var text = (string?)get(owner);
-            if (TryWriteUnchanged(owner, dataKey, text, out result, out var remembered))
+            // Interlocked, so that the version is odd before the value is read and even only after it is stored.
+            Interlocked.Increment(ref WriteVersions[stripe]);
+            try
             {
-                return result;
-            }
+                var text = (string?)get(owner);
+                if (TryWriteUnchanged(owner, dataKey, text, out result, out var remembered))
+                {
+                    return result;
+                }
 
-            // No key, or one that another subject holds too, such as a copied file and its original: the one that changes
-            // its value gets a new key, and the other keeps the key.
-            var isNew = remembered is null || IsHeldByAnother(remembered.Key, owner);
-            var key = isNew ? SecretStore.CreateKey() : remembered!.Key;
-            var reference = isNew ? Prefix + key : remembered!.Reference;
-            _store.Set(key, text!);
-            if (isNew)
-            {
-                SetRemembered(owner, propertyName, new RememberedKey(key, reference, IsUnresolved: false));
-            }
-            else
-            {
-                MarkResolved(owner, dataKey, remembered!);
-            }
+                // No key, or one that another subject holds too, such as a copied file and its original: the one that
+                // changes its value gets a new key, and the other keeps the key.
+                var isNew = remembered is null || IsHeldByAnother(remembered.Key, owner);
+                var key = isNew ? SecretStore.CreateKey() : remembered!.Key;
+                var reference = isNew ? Prefix + key : remembered!.Reference;
+                _store.Set(key, text!);
+                if (isNew)
+                {
+                    SetRemembered(owner, propertyName, new RememberedKey(key, reference, IsUnresolved: false));
+                }
+                else
+                {
+                    MarkResolved(owner, dataKey, remembered!);
+                }
 
-            return reference;
+                return reference;
+            }
+            finally
+            {
+                Interlocked.Increment(ref WriteVersions[stripe]);
+            }
         }
     }
 

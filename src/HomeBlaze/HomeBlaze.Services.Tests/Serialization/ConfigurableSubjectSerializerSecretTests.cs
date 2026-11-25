@@ -311,10 +311,18 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
 
         // Act
         var olderSerialization = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => serializer.Serialize(device));
-        await olderIsRead.Task.WaitAsync(TestTimeouts.Default);
-        device.Password = "newer";
-        var newerJson = serializer.Serialize(device);
-        releaseOlder.SetResult();
+        string newerJson;
+        try
+        {
+            await olderIsRead.Task.WaitAsync(TestTimeouts.Default);
+            device.Password = "newer";
+            newerJson = serializer.Serialize(device);
+        }
+        finally
+        {
+            releaseOlder.TrySetResult();
+        }
+
         var olderJson = await olderSerialization.WaitAsync(TestTimeouts.Default);
 
         // Assert
@@ -326,28 +334,35 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenTheFirstWritesOfASecretOverlap_ThenBothReferenceOneKey()
+    public async Task WhenAnUnchangedWriteOverlapsAChangedOne_ThenTheStoreKeepsTheValueThatWasReadLast()
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
-        var device = new SecretGatedDevice { Password = "hunter2" };
+        var device = new SecretGatedDevice { Password = "old" };
+        var key = KeyOf(ReadString(serializer.Serialize(device), "password"));
+        device.Password = "new";
 
-        // The first serialization blocks on its second read, under the lock before it stores; the second one reads while
-        // nothing is remembered yet, so it has to wait for the lock.
-        var firstIsInLock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var secondIsRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // The unchanged serialization starts to read first and blocks; the changed one reads "new" and blocks under the
+        // lock before it stores. The value changes back, and the unchanged one resumes with "old", which the store still
+        // holds.
+        var unchangedIsReading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseUnchanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var changedIsInLock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseChanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var isUnchangedResumed = false;
         var reads = 0;
         device.OnRead = value =>
         {
             switch (Interlocked.Increment(ref reads))
             {
-                case 2:
-                    firstIsInLock.SetResult();
-                    releaseFirst.Task.Wait();
-                    break;
+                case 1:
+                    unchangedIsReading.SetResult();
+                    releaseUnchanged.Task.Wait();
+                    Volatile.Write(ref isUnchangedResumed, true);
+                    return "old";
                 case 3:
-                    secondIsRead.SetResult();
+                    changedIsInLock.SetResult();
+                    releaseChanged.Task.Wait();
                     break;
             }
 
@@ -355,11 +370,95 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         };
 
         // Act
+        Thread? unchangedThread = null;
+        var unchanged = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            unchangedThread = Thread.CurrentThread;
+            return serializer.Serialize(device);
+        });
+
+        Task<string>? changed = null;
+        try
+        {
+            await unchangedIsReading.Task.WaitAsync(TestTimeouts.Default);
+            changed = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => serializer.Serialize(device));
+            await Task.WhenAny(changedIsInLock.Task, changed).WaitAsync(TestTimeouts.Default);
+            Assert.True(changedIsInLock.Task.IsCompleted, "The changed write did not read the value again under the lock.");
+
+            device.Password = "old";
+            var contentionBefore = Monitor.LockContentionCount;
+            releaseUnchanged.SetResult();
+            Assert.True(
+                SpinWait.SpinUntil(
+                    () => unchanged.IsCompleted ||
+                          (Volatile.Read(ref isUnchangedResumed) && IsWaiting(unchangedThread) && Monitor.LockContentionCount > contentionBefore),
+                    TestTimeouts.Default),
+                "The unchanged write neither completed nor waited for the lock.");
+        }
+        finally
+        {
+            releaseUnchanged.TrySetResult();
+            releaseChanged.TrySetResult();
+        }
+
+        var unchangedJson = await unchanged.WaitAsync(TestTimeouts.Default);
+        var changedJson = await changed.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(Prefix + key, ReadString(unchangedJson, "password"));
+        Assert.Equal(Prefix + key, ReadString(changedJson, "password"));
+        Assert.True(store.TryGet(key, out var value));
+        Assert.Equal("old", value);
+        Assert.Equal(new Dictionary<string, string> { [key] = "old" }, ReadStoreFile());
+    }
+
+    [Fact]
+    public async Task WhenTheFirstWritesOfASecretOverlap_ThenBothReferenceOneKey()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        var device = new SecretGatedDevice { Password = "hunter2" };
+
+        // The first serialization blocks on its second read, under the lock before it stores, and the second one waits
+        // for the lock.
+        var firstIsInLock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reads = 0;
+        device.OnRead = value =>
+        {
+            if (Interlocked.Increment(ref reads) == 2)
+            {
+                firstIsInLock.SetResult();
+                releaseFirst.Task.Wait();
+            }
+
+            return value;
+        };
+
+        // Act
         var first = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => serializer.Serialize(device));
-        await firstIsInLock.Task.WaitAsync(TestTimeouts.Default);
-        var second = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => serializer.Serialize(device));
-        await secondIsRead.Task.WaitAsync(TestTimeouts.Default);
-        releaseFirst.SetResult();
+        Thread? secondThread = null;
+        Task<string>? second = null;
+        try
+        {
+            await Task.WhenAny(firstIsInLock.Task, first).WaitAsync(TestTimeouts.Default);
+            Assert.True(firstIsInLock.Task.IsCompleted, "The first write did not read the value again under the lock.");
+
+            var contentionBefore = Monitor.LockContentionCount;
+            second = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+            {
+                secondThread = Thread.CurrentThread;
+                return serializer.Serialize(device);
+            });
+            Assert.True(
+                SpinWait.SpinUntil(() => IsWaiting(secondThread) && Monitor.LockContentionCount > contentionBefore, TestTimeouts.Default),
+                "The second write did not wait for the lock.");
+        }
+        finally
+        {
+            releaseFirst.TrySetResult();
+        }
+
         var firstJson = await first.WaitAsync(TestTimeouts.Default);
         var secondJson = await second.WaitAsync(TestTimeouts.Default);
 
@@ -640,6 +739,9 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
 
     // InvalidSecretTypeDevice is registered next to the valid types, as the type of another library would be, so that
     // every test also shows that it only fails for itself.
+    private static bool IsWaiting(Thread? thread) =>
+        thread is not null && (thread.ThreadState & ThreadState.WaitSleepJoin) != 0;
+
     private (ConfigurableSubjectSerializer Serializer, SecretStore Store) CreateSerializer(bool withStore = true, bool hasRegistry = true)
     {
         var typeProvider = new TypeProvider();
