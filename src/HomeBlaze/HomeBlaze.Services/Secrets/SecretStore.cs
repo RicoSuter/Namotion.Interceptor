@@ -40,18 +40,33 @@ public sealed class SecretStore
     /// </summary>
     /// <exception cref="IOException">The file cannot be written. The value is not stored.</exception>
     /// <exception cref="UnauthorizedAccessException">The file cannot be written. The value is not stored.</exception>
-    public void Set(string key, string value)
+    public void Set(string key, string value) => SetMany([new(key, value)]);
+
+    /// <summary>
+    /// Stores all <paramref name="values"/> with one write of the file, and returns once the file is written.
+    /// </summary>
+    /// <exception cref="IOException">The file cannot be written. No value is stored.</exception>
+    /// <exception cref="UnauthorizedAccessException">The file cannot be written. No value is stored.</exception>
+    internal void SetMany(IReadOnlyList<KeyValuePair<string, string>> values)
     {
         lock (_writeLock)
         {
-            var values = new Dictionary<string, string>(_values) { [key] = value };
-            var content = JsonSerializer.SerializeToUtf8Bytes(values, SecretStoreJsonContext.Default.DictionaryStringString);
+            var file = new Dictionary<string, string>(_values);
+            foreach (var (key, value) in values)
+            {
+                file[key] = value;
+            }
+
+            var content = JsonSerializer.SerializeToUtf8Bytes(file, SecretStoreJsonContext.Default.DictionaryStringString);
 
             // Readable by the user HomeBlaze runs as only.
             AtomicFile.WriteAllBytes(Path, content, OperatingSystem.IsWindows() ? null : UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
             // After the write: a value that is not in the file must not be referenced.
-            _values[key] = value;
+            foreach (var (key, value) in values)
+            {
+                _values[key] = value;
+            }
         }
     }
 

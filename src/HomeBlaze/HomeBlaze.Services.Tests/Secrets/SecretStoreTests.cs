@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Text.Json;
 using HomeBlaze.Services.Secrets;
 
 namespace HomeBlaze.Services.Tests.Secrets;
@@ -113,6 +114,38 @@ public class SecretStoreTests : IDisposable
 
         // Assert
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(StorePath));
+    }
+
+    [Fact]
+    public void WhenSeveralValuesAreSetAtOnce_ThenTheFileHoldsAllOfThemAfterOneWrite()
+    {
+        // Arrange
+        var store = new SecretStore(StorePath);
+        var first = SecretStore.CreateKey();
+        var second = SecretStore.CreateKey();
+
+        // Act
+        store.SetMany([new(first, "a"), new(second, "b")]);
+
+        // Assert
+        var file = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(StorePath))!;
+        Assert.Equal("a", file[first]);
+        Assert.Equal("b", file[second]);
+        Assert.True(store.TryGet(second, out var value));
+        Assert.Equal("b", value);
+    }
+
+    [Fact]
+    public void WhenTheFileCannotBeWrittenDuringSetMany_ThenNoValueIsInMemory()
+    {
+        // Arrange
+        var store = new SecretStore(StorePath);
+        Directory.CreateDirectory(StorePath); // a directory where the file should be makes the write fail
+        var key = SecretStore.CreateKey();
+
+        // Act & Assert
+        Assert.ThrowsAny<IOException>(() => store.SetMany([new(key, "a")]));
+        Assert.False(store.TryGet(key, out _));
     }
 
     public void Dispose() => _directory.Delete(recursive: true);
