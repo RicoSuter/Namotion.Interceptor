@@ -745,32 +745,70 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// IStorageContainer - Writes a blob to storage and refreshes the subject of the file.
+    /// IStorageContainer - Writes a blob to storage and refreshes the subject of the file. The plaintext secrets of a JSON
+    /// file or a page are first stored in the secret store and written as references, so the written content can differ
+    /// from the given one.
     /// </summary>
     /// <remarks>
     /// The content is held in memory while it is written. When the subject cannot be refreshed after the write,
     /// the write still succeeds, and the next pass loads the file again.
     /// </remarks>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="InvalidOperationException">A type in the content has a secret configuration property that is
+    /// not a string property of a subject. Nothing is written.</exception>
     public async Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken)
     {
         using var buffer = new MemoryStream();
         await content.CopyToAsync(buffer, cancellationToken);
-        await WriteBlobCoreAsync(path, buffer.ToArray(), cancellationToken);
+        await WriteBlobUnconvertedAsync(path, ConvertSecrets(path, buffer.ToArray()), cancellationToken);
     }
 
     /// <summary>
-    /// IStorageContainer - Writes a blob to storage and refreshes the subject of the file.
+    /// IStorageContainer - Writes a blob to storage and refreshes the subject of the file. The plaintext secrets of a JSON
+    /// file or a page are first stored in the secret store and written as references, so the written content can differ
+    /// from the given one.
     /// </summary>
     /// <remarks>
     /// The content is copied. When the subject cannot be refreshed after the write, the write still succeeds,
     /// and the next pass loads the file again.
     /// </remarks>
-    public Task WriteBlobAsync(string path, ReadOnlyMemory<byte> content, CancellationToken cancellationToken)
-        => WriteBlobCoreAsync(path, content.ToArray(), cancellationToken);
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="InvalidOperationException">A type in the content has a secret configuration property that is
+    /// not a string property of a subject. Nothing is written.</exception>
+    public async Task WriteBlobAsync(string path, ReadOnlyMemory<byte> content, CancellationToken cancellationToken)
+        => await WriteBlobUnconvertedAsync(path, ConvertSecrets(path, content.ToArray()), cancellationToken);
+
+    /// <summary>
+    /// Replaces the plaintext secrets of a JSON file or a page by references, keeping the encoding and byte order mark.
+    /// Returns the given bytes when the file is neither or holds no plaintext secret.
+    /// </summary>
+    /// <exception cref="IOException">The secret store cannot be written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written.</exception>
+    /// <exception cref="InvalidOperationException">A type in the content has a secret configuration property that is
+    /// not a string property of a subject.</exception>
+    internal byte[] ConvertSecrets(string path, byte[] bytes)
+    {
+        if (!StorageReconciler.IsConvertible(path))
+        {
+            return bytes;
+        }
+
+        var text = StorageText.Decode(bytes, out var encoding, out var hasByteOrderMark);
+        var isConverted = StoragePath.IsJson(path)
+            ? _serializer.TryConvertSecrets(text, ConfigurationNaming.JsonProperty, out var converted)
+            : PageConverter.TryConvert(text, out converted);
+        return isConverted ? StorageText.Encode(converted, encoding, hasByteOrderMark) : bytes;
+    }
 
     // The bytes belong to the write and are not changed by anyone else, because a write that was given up still
     // reads them after the caller got its result, see TimeLimitedStore.
-    private async Task WriteBlobCoreAsync(string path, byte[] bytes, CancellationToken cancellationToken)
+    /// <summary>
+    /// Writes a blob as it is and refreshes the subject of the file, for content whose secrets are already references,
+    /// such as a block write of a page.
+    /// </summary>
+    internal async Task WriteBlobUnconvertedAsync(string path, byte[] bytes, CancellationToken cancellationToken)
     {
         var connection = Connection;
         var relativePath = StoragePath.Normalize(path);

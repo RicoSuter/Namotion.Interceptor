@@ -1040,6 +1040,143 @@ public class SecretRewriteTests : StorageTestBase
         Assert.Equal(text, page.Content);
     }
 
+    [Fact]
+    public async Task WhenAJsonFileWithAPlaintextSecretIsWrittenThroughTheStorage_ThenTheFileOnlyEverHoldsAReference()
+    {
+        // Arrange
+        UseSecretStore();
+        var storage = await ConnectAsync();
+        var json = $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""";
+
+        // Act
+        await storage.WriteBlobAsync("Gateway.json", System.Text.Encoding.UTF8.GetBytes(json), CancellationToken.None);
+
+        // Assert
+        Assert.True(HoldsSecretReferenceOnly("Gateway.json"));
+        Assert.Contains("s3cr3t", File.ReadAllText(SecretsPath!));
+    }
+
+    [Fact]
+    public async Task WhenAPageWithAPlaintextSecretIsWrittenThroughTheStorageAsAStream_ThenTheFileOnlyEverHoldsAReference()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", "# Gateway\n");
+        var storage = await ConnectAsync();
+
+        // Act
+        await WriteBlobAsync(storage, "Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Password=s3cr3t\n::\n");
+
+        // Assert
+        var text = TryReadText("Gateway.md")!;
+        Assert.DoesNotContain("s3cr3t", text);
+        Assert.Contains("Password=$secret:", text);
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        Assert.Equal("s3cr3t", ((EmbeddedSecretDevice)page.Children["gateway"]).Password);
+    }
+
+    [Fact]
+    public async Task WhenTheSecretStoreCannotBeWrittenDuringAWrite_ThenTheWriteFailsAndTheFileIsUnchanged()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""");
+        var storage = await ConnectAsync();
+        Directory.CreateDirectory(SecretsPath!);
+        var json = $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""";
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<Exception>(() => storage.WriteBlobAsync("Gateway.json", System.Text.Encoding.UTF8.GetBytes(json), CancellationToken.None));
+        Assert.DoesNotContain("s3cr3t", TryReadText("Gateway.json"));
+    }
+
+    [Fact]
+    public async Task WhenAPageSourceWithAPlaintextSecretIsWritten_ThenTheWrittenTextIsReturnedWithAReference()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", "# Gateway\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+
+        // Act
+        var written = await page.WriteAsync($"# Gateway\n\n:: {DeviceType}#gateway Password=s3cr3t\n::\n", CancellationToken.None);
+
+        // Assert
+        Assert.DoesNotContain("s3cr3t", written);
+        Assert.Contains("Password=$secret:", written);
+        Assert.Equal(written, TryReadText("Gateway.md"));
+        Assert.Equal(written, page.Content);
+        Assert.Equal("s3cr3t", ((EmbeddedSecretDevice)page.Children["gateway"]).Password);
+    }
+
+    [Fact]
+    public async Task WhenAPageSourceWithoutPlaintextIsWritten_ThenTheGivenTextIsReturned()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", "# Gateway\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var content = $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n";
+
+        // Act
+        var written = await page.WriteAsync(content, CancellationToken.None);
+
+        // Assert
+        Assert.Same(content, written);
+        Assert.Equal(content, TryReadText("Gateway.md"));
+    }
+
+    [Fact]
+    public async Task WhenAPageSourceWithAPlaintextSecretIsWrittenAsAStream_ThenTheFileOnlyEverHoldsAReference()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", "# Gateway\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        using var content = new MemoryStream(System.Text.Encoding.UTF8.GetBytes($"# Gateway\n\n:: {DeviceType}#gateway Password=s3cr3t\n::\n"));
+
+        // Act
+        await page.WriteAsync(content, CancellationToken.None);
+
+        // Assert
+        var text = TryReadText("Gateway.md")!;
+        Assert.DoesNotContain("s3cr3t", text);
+        Assert.Contains("Password=$secret:", text);
+    }
+
+    [Fact]
+    public async Task WhenTheSecretStoreCannotBeWrittenDuringAPageSourceWrite_ThenTheWriteFailsAndTheFileIsUnchanged()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", "# Gateway\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        Directory.CreateDirectory(SecretsPath!);
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<Exception>(() => page.WriteAsync($"# Gateway\n\n:: {DeviceType}#gateway Password=s3cr3t\n::\n", CancellationToken.None));
+        Assert.Equal("# Gateway\n", TryReadText("Gateway.md"));
+    }
+
+    [Fact]
+    public async Task WhenAMetadataFileIsWritten_ThenItIsNotConverted()
+    {
+        // Arrange
+        UseSecretStore();
+        var storage = await ConnectAsync();
+        var json = $$"""{ "$type": "{{DeviceType}}", "password": "s3cr3t" }""";
+
+        // Act
+        await storage.WriteBlobAsync("Gateway.metadata.json", System.Text.Encoding.UTF8.GetBytes(json), CancellationToken.None);
+
+        // Assert
+        Assert.Equal(json, TryReadText("Gateway.metadata.json"));
+    }
+
     // Only for a check that something does not happen, which a passing test always waits for in full.
     private static async Task AssertStaysTrueAsync(Func<bool> condition)
     {

@@ -802,7 +802,8 @@ internal sealed class StorageReconciler
         return (converted, convertedText);
     }
 
-    private static bool IsConvertible(string path)
+    /// <summary>Gets whether the plaintext secrets of the file are converted: those of a JSON file other than metadata, and of a page.</summary>
+    internal static bool IsConvertible(string path)
         => (StoragePath.IsJson(path) && !StorageMetadataPath.IsMetadataFile(path)) ||
            StoragePath.IsMarkdown(path);
 

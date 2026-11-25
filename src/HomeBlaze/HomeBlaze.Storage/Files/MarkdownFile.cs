@@ -600,15 +600,26 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     // Not cancelled once the content is decided: a cancelled reload after the write would leave the parse snapshot of
     // the old content, which a later configuration write-back would write back.
-    private Task WriteUnlockedAsync(string content) =>
-        Storage.WriteBlobAsync(FullPath, Encoding.UTF8.GetBytes(content), CancellationToken.None);
+    private Task WriteUnlockedAsync(string content) => WriteUnlockedAsync(Encoding.UTF8.GetBytes(content));
+
+    // Unconverted, because the callers write content whose secrets are already references, or converted it themselves.
+    private Task WriteUnlockedAsync(byte[] content) => Storage is FluentStorageContainer storage
+        ? storage.WriteBlobUnconvertedAsync(FullPath, content, CancellationToken.None)
+        : Storage.WriteBlobAsync(FullPath, content, CancellationToken.None);
 
     public Task<Stream> ReadAsync(CancellationToken cancellationToken)
         => Storage.ReadBlobAsync(FullPath, cancellationToken);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The plaintext secrets of the page are stored in the secret store and written as references, as
+    /// <see cref="WriteAsync(string, CancellationToken)"/> does; the encoding of the content is kept.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
-    /// load of a file, or from within a write of this page.</exception>
+    /// load of a file, or from within a write of this page; or a block type has a secret configuration property that is
+    /// not a string property of a subject, and nothing is written.</exception>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     public async Task WriteAsync(Stream content, CancellationToken cancellationToken)
     {
         EnsureNotWithinWrite();
@@ -616,8 +627,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         var write = BeginWrite();
         try
         {
-            // Not cancelled once the lock is held, for the reason given at WriteUnlockedAsync.
-            await Storage.WriteBlobAsync(FullPath, content, CancellationToken.None);
+            // Read and converted under the lock, so that a write that comes later waits for this one, also while the
+            // content is still being read. Not cancelled once the lock is held, for the reason given at WriteUnlockedAsync.
+            using var buffer = new MemoryStream();
+            await content.CopyToAsync(buffer, CancellationToken.None);
+            var bytes = Storage is FluentStorageContainer storage
+                ? storage.ConvertSecrets(FullPath, buffer.ToArray())
+                : buffer.ToArray();
+            await WriteUnlockedAsync(bytes);
         }
         finally
         {
@@ -626,21 +643,32 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>
-    /// Writes the Markdown source to the file as it is, once no other write of the file is under way. The storage then
+    /// Writes the Markdown source to the file once no other write of the file is under way, with its plaintext secrets
+    /// stored in the secret store and written as references, and returns the text that was written. The storage then
     /// refreshes the page as best effort: a failed refresh is logged, and the next pass reloads the file. The write is
     /// not cancelled once it has begun.
     /// </summary>
+    /// <returns>The written text: the given one, or a new one with references when it held plaintext secrets.</returns>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
-    /// load of a file, or from within a write of this page.</exception>
-    public async Task WriteAsync(string content, CancellationToken cancellationToken)
+    /// load of a file, or from within a write of this page; or a block type has a secret configuration property that is
+    /// not a string property of a subject, and nothing is written.</exception>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
+    public async Task<string> WriteAsync(string content, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(content);
         EnsureNotWithinWrite();
+        if (Storage is FluentStorageContainer storage && storage.PageConverter.TryConvert(content, out var converted))
+        {
+            content = converted;
+        }
+
         await _writeLock.WaitAsync(cancellationToken);
         var write = BeginWrite();
         try
         {
             await WriteUnlockedAsync(content);
+            return content;
         }
         finally
         {
