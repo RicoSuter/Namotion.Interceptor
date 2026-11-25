@@ -41,6 +41,13 @@ public class ConfigurableSubjectSerializer
     private readonly IServiceProvider _serviceProvider;
     private readonly JsonSerializerOptions _jsonPropertyOptions;
     private readonly JsonSerializerOptions _cSharpPropertyOptions;
+
+    // Without the secret hook: a default holds the plaintext default of a secret, so that it is never stored under a key
+    // that a subject filled from it would then change for every other subject. A default is compared and applied, never
+    // written to a file. The same instances as above without a SecretStore service.
+    private readonly JsonSerializerOptions _jsonPropertyDefaultOptions;
+    private readonly JsonSerializerOptions _cSharpPropertyDefaultOptions;
+
     // Null without a SecretStore service, which leaves secret values as they are.
     private readonly SecretReferences? _secrets;
 
@@ -63,6 +70,12 @@ public class ConfigurableSubjectSerializer
         _secretConverter = store is not null ? new SecretConverter(store) : null;
         _jsonPropertyOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.JsonProperty, _secrets);
         _cSharpPropertyOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.CSharpProperty, _secrets);
+        _jsonPropertyDefaultOptions = _secrets is null
+            ? _jsonPropertyOptions
+            : CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.JsonProperty, secrets: null);
+        _cSharpPropertyDefaultOptions = _secrets is null
+            ? _cSharpPropertyOptions
+            : CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.CSharpProperty, secrets: null);
     }
 
     private static JsonSerializerOptions CreateOptions(
@@ -166,8 +179,9 @@ public class ConfigurableSubjectSerializer
 
     /// <summary>
     /// Gets the configuration of a new subject of <paramref name="type"/> as
-    /// <see cref="Serialize(IInterceptorSubject, ConfigurationNaming)"/> writes it: the values that
-    /// <see cref="Deserialize(string, ConfigurationNaming)"/> gives a property that the JSON does not have.
+    /// <see cref="Serialize(IInterceptorSubject, ConfigurationNaming)"/> writes it, apart from a secret, which holds its
+    /// value and not a reference: the values that <see cref="Deserialize(string, ConfigurationNaming)"/> gives a property
+    /// that the JSON does not have.
     /// Null when <see cref="Deserialize(string, ConfigurationNaming)"/> does not create the type, or when creating or
     /// serializing the subject throws, which is logged.
     /// </summary>
@@ -213,7 +227,8 @@ public class ConfigurableSubjectSerializer
                 return null;
             }
 
-            using var document = JsonDocument.Parse(Serialize(subject, naming));
+            var options = naming == ConfigurationNaming.JsonProperty ? _jsonPropertyDefaultOptions : _cSharpPropertyDefaultOptions;
+            using var document = JsonDocument.Parse(JsonSerializer.Serialize(GetConfigurable(subject), typeof(IConfigurable), options));
             return document.RootElement.Clone();
         }
         catch (Exception exception)

@@ -222,6 +222,40 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
+    public void WhenASubjectFilledFromTheDefaultsChangesItsSecret_ThenAnotherSubjectFilledFromThemGetsTheDefault()
+    {
+        // Arrange
+        var (serializer, _) = CreateSerializer();
+        var first = FillFromDefaults(serializer, "10.0.0.1");
+        first.Password = "changed";
+        serializer.Serialize(first);
+
+        // Act
+        var second = FillFromDefaults(serializer, "10.0.0.2");
+
+        // Assert
+        Assert.Equal(SecretDefaultDevice.DefaultPassword, second.Password);
+    }
+
+    [Fact]
+    public void WhenASubjectFilledFromTheDefaultsKeepsTheSecretDefault_ThenItsSecretDiffersFromTheDefaultsAndOnlyItIsStored()
+    {
+        // Arrange
+        var (serializer, _) = CreateSerializer();
+        var device = FillFromDefaults(serializer, "10.0.0.1");
+
+        // Act
+        var json = serializer.Serialize(device);
+
+        // Assert: a block omits a value that equals the default, so the secret would rely on a default that is not stored.
+        var defaults = serializer.GetDefaultConfiguration(typeof(SecretDefaultDevice))!.Value;
+        Assert.NotEqual(defaults.GetProperty("password").GetString(), ReadString(json, "password"));
+        Assert.Equal(
+            new Dictionary<string, string> { [KeyOf(ReadString(json, "password"))] = SecretDefaultDevice.DefaultPassword },
+            ReadStoreFile());
+    }
+
+    [Fact]
     public void WhenTheSecretIsNull_ThenItIsLeftOutWithoutAnEntry()
     {
         // Arrange
@@ -695,7 +729,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
 
         // InvalidSecretTypeDevice is registered next to the valid types, as the type of another library would be, so that
         // every test also shows that it only fails for itself.
-        typeProvider.AddTypes([typeof(SecretTestDevice), typeof(SecretGatedDevice), typeof(InvalidSecretTypeDevice)]);
+        typeProvider.AddTypes([typeof(SecretTestDevice), typeof(SecretGatedDevice), typeof(SecretDefaultDevice), typeof(InvalidSecretTypeDevice)]);
 
         var store = new SecretStore(StorePath);
         var services = new ServiceCollection();
@@ -725,6 +759,15 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(new TypeProvider(), new ServiceCollection().BuildServiceProvider())
     };
+
+    // As a reload of a file without the secret key fills it from the defaults.
+    private static SecretDefaultDevice FillFromDefaults(ConfigurableSubjectSerializer serializer, string host)
+    {
+        var json = $$"""{ "$type": "{{typeof(SecretDefaultDevice).FullName}}", "host": "{{host}}" }""";
+        var device = Assert.IsType<SecretDefaultDevice>(serializer.Deserialize(json));
+        serializer.ReplaceConfiguration(device, json, skipped: null);
+        return device;
+    }
 
     private static SecretTestDevice Deserialize(ConfigurableSubjectSerializer serializer, string json) =>
         Assert.IsType<SecretTestDevice>(serializer.Deserialize(json));
@@ -815,6 +858,25 @@ public partial class SecretGatedDevice : IConfigurable
         get => OnRead(_password);
         set => _password = value;
     }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class SecretDefaultDevice : IConfigurable
+{
+    public const string DefaultPassword = "admin";
+
+    public SecretDefaultDevice()
+    {
+        Password = DefaultPassword;
+    }
+
+    [Configuration]
+    public partial string? Host { get; set; }
+
+    [Configuration(IsSecret = true)]
+    public partial string? Password { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
