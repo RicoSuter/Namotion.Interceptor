@@ -26,14 +26,9 @@ internal sealed class SecretReferences
     // The key of the remembered key of a secret property in the data of its subject.
     private const string RememberedKeyDataKey = "HomeBlaze.Secrets.Key";
 
-    // The lock and version of a write are chosen by subject alone, so that no subject needs a lock of its own and an
-    // unchanged write reads its version before the remembered key, which a changed write or a read may replace.
+    // The lock of a read or write is chosen by subject alone, so that no subject needs a lock of its own.
     private const int WriteStripeCount = 32;
     private static readonly Lock[] WriteLocks = CreateWriteLocks(WriteStripeCount);
-
-    // Per lock: odd while a changed write is between reading the value and storing it, or a read between remembering
-    // the key and setting the value, so that an unchanged write that overlaps it is not taken for the last one.
-    private static readonly int[] WriteVersions = new int[WriteStripeCount];
 
     private readonly SecretStore _store;
     private readonly ILogger? _logger;
@@ -96,21 +91,11 @@ internal sealed class SecretReferences
     public void Read<TState>(
         IInterceptorSubject owner, string propertyName, object? value, TState state, Action<IInterceptorSubject, TState, object?> set)
     {
-        var stripe = GetStripe(owner);
-
-        // The same lock as a changed write, so that a write never reads a value that is older than the key it stores it
-        // under. The setter runs under the lock, so it must not take the lock of another subject.
-        lock (WriteLocks[stripe])
+        // The same lock as a write, so that a write never reads a value that is older than the key it stores it under.
+        // The setter runs under the lock, so it must not take the lock of another subject.
+        lock (WriteLocks[GetStripe(owner)])
         {
-            Interlocked.Increment(ref WriteVersions[stripe]);
-            try
-            {
-                set(owner, state, Resolve(owner, propertyName, value));
-            }
-            finally
-            {
-                Interlocked.Increment(ref WriteVersions[stripe]);
-            }
+            set(owner, state, Resolve(owner, propertyName, value));
         }
     }
 
@@ -149,89 +134,46 @@ internal sealed class SecretReferences
     /// <exception cref="IOException">The store cannot be written.</exception>
     public object? Write(IInterceptorSubject owner, string propertyName, Func<object, object?> get)
     {
-        (string? Property, string Key) dataKey = (propertyName, RememberedKeyDataKey);
-        var stripe = GetStripe(owner);
-
-        // Lock-free only when no changed write or read ran meanwhile: one that read an older value may store it after
-        // this read, which then is not the last.
-        var version = Volatile.Read(ref WriteVersions[stripe]);
-        if ((version & 1) == 0 && TryWriteUnchanged(owner, dataKey, (string?)get(owner), out var result, out _))
+        // The value is read under the lock, so that a write that waited for another one to store its value never replaces
+        // it with an older value, and a property gets one key when its first writes overlap. Taken before the lock of the
+        // store, never the other way round.
+        lock (WriteLocks[GetStripe(owner)])
         {
-            // Keeps the reads of the value and the store before the second read of the version.
-            Interlocked.MemoryBarrier();
-            if (Volatile.Read(ref WriteVersions[stripe]) == version)
+            var text = (string?)get(owner);
+            var remembered = owner.Data.TryGetValue((propertyName, RememberedKeyDataKey), out var data) ? data as RememberedKey : null;
+            if (string.IsNullOrEmpty(text))
             {
-                return result;
+                return text is null && remembered is { IsUnresolved: true } unresolved ? unresolved.Reference : text;
             }
-        }
 
-        // The value is read again under the lock, so that a write that waited for another one to store its value never
-        // replaces it with the value it read before, and a property gets one key when its first writes overlap. Taken
-        // before the lock of the store, never the other way round.
-        lock (WriteLocks[stripe])
-        {
-            // Interlocked, so that the version is odd before the value is read and even only after it is stored.
-            Interlocked.Increment(ref WriteVersions[stripe]);
-            try
+            if (remembered is not null && _store.TryGet(remembered.Key, out var stored) && stored == text)
             {
-                var text = (string?)get(owner);
-                if (TryWriteUnchanged(owner, dataKey, text, out result, out var remembered))
-                {
-                    return result;
-                }
+                MarkResolved(owner, propertyName, remembered);
+                return remembered.Reference;
+            }
 
-                // No key, or one that another property holds too, such as of a copied file and its original: the one
-                // that changes its value gets a new key, and the other keeps the key.
-                var isNew = remembered is null || IsHeldByAnother(remembered.Key, owner, propertyName);
-                var key = isNew ? SecretStore.CreateKey() : remembered!.Key;
-                var reference = isNew ? Prefix + key : remembered!.Reference;
-                _store.Set(key, text!);
-                if (isNew)
-                {
-                    SetRemembered(owner, propertyName, new RememberedKey(key, reference, IsUnresolved: false));
-                }
-                else
-                {
-                    MarkResolved(owner, dataKey, remembered!);
-                }
-
+            // No key, or one that another property holds too, such as of a copied file and its original: the one that
+            // changes its value gets a new key, and the other keeps the key.
+            if (remembered is null || IsHeldByAnother(remembered.Key, owner, propertyName))
+            {
+                var key = SecretStore.CreateKey();
+                var reference = Prefix + key;
+                _store.Set(key, text);
+                SetRemembered(owner, propertyName, new RememberedKey(key, reference, IsUnresolved: false));
                 return reference;
             }
-            finally
-            {
-                Interlocked.Increment(ref WriteVersions[stripe]);
-            }
+
+            _store.Set(remembered.Key, text);
+            MarkResolved(owner, propertyName, remembered);
+            return remembered.Reference;
         }
     }
 
-    // Gives the JSON value for null or empty, or for a value that the remembered key holds already.
-    private bool TryWriteUnchanged(
-        IInterceptorSubject owner, (string?, string) dataKey, string? text, out object? result, out RememberedKey? remembered)
-    {
-        remembered = owner.Data.TryGetValue(dataKey, out var data) ? data as RememberedKey : null;
-        if (string.IsNullOrEmpty(text))
-        {
-            result = text is null && remembered is { IsUnresolved: true } unresolved ? unresolved.Reference : text;
-            return true;
-        }
-
-        if (remembered is { } known && _store.TryGet(known.Key, out var stored) && stored == text)
-        {
-            MarkResolved(owner, dataKey, known);
-            result = known.Reference;
-            return true;
-        }
-
-        result = null;
-        return false;
-    }
-
-    // Only when unchanged: a concurrent read may have remembered another key since.
-    private static void MarkResolved(IInterceptorSubject owner, (string?, string) dataKey, RememberedKey remembered)
+    private static void MarkResolved(IInterceptorSubject owner, string propertyName, RememberedKey remembered)
     {
         if (remembered.IsUnresolved)
         {
-            owner.Data.TryUpdate(dataKey, remembered with { IsUnresolved = false }, remembered);
+            owner.Data[(propertyName, RememberedKeyDataKey)] = remembered with { IsUnresolved = false };
         }
     }
 
@@ -247,36 +189,25 @@ internal sealed class SecretReferences
         }
     }
 
-    // In the data of the subject, so it lives as long as the subject. Null forgets the key.
+    // In the data of the subject, so it lives as long as the subject. Null forgets the key. Under the lock of the subject.
     private void SetRemembered(IInterceptorSubject owner, string propertyName, RememberedKey? remembered)
     {
-        if (remembered is not null)
+        (string? Property, string Key) dataKey = (propertyName, RememberedKeyDataKey);
+        object? previous;
+        if (remembered is null)
+        {
+            owner.Data.TryRemove(dataKey, out previous);
+        }
+        else
         {
             Hold(remembered.Key, owner, propertyName);
+            owner.Data.TryGetValue(dataKey, out previous);
+            owner.Data[dataKey] = remembered;
         }
 
-        (string? Property, string Key) dataKey = (propertyName, RememberedKeyDataKey);
-        while (true)
+        if (previous is RememberedKey previousKey && previousKey.Key != remembered?.Key)
         {
-            if (owner.Data.TryGetValue(dataKey, out var data))
-            {
-                var isReplaced = remembered is null
-                    ? owner.Data.TryRemove(KeyValuePair.Create(dataKey, data))
-                    : owner.Data.TryUpdate(dataKey, remembered, data);
-                if (isReplaced)
-                {
-                    if (data is RememberedKey previous && previous.Key != remembered?.Key)
-                    {
-                        LetGo(previous.Key, owner, propertyName);
-                    }
-
-                    return;
-                }
-            }
-            else if (remembered is null || owner.Data.TryAdd(dataKey, remembered))
-            {
-                return;
-            }
+            LetGo(previousKey.Key, owner, propertyName);
         }
     }
 

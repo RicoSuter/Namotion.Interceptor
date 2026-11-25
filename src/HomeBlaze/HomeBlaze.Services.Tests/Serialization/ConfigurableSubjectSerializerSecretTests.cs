@@ -318,40 +318,33 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         var device = new SecretGatedDevice { Password = "old" };
         var key = KeyOf(ReadString(serializer.Serialize(device), "password"));
         device.Password = "older";
-
-        var olderIsRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseOlder = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var reads = 0;
+        var gate = new FirstReadGate();
         device.OnRead = value =>
         {
-            if (Interlocked.Increment(ref reads) == 1)
-            {
-                olderIsRead.SetResult();
-                releaseOlder.Task.Wait();
-            }
-
+            gate.OnRead();
             return value;
         };
 
-        // Act
-        var olderSerialization = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => serializer.Serialize(device));
-        string newerJson;
+        // Act: the older write blocks after it read "older", and the newer one waits for the lock.
+        Task<string>? older = null;
+        Task<string>? newer = null;
         try
         {
-            await olderIsRead.Task.WaitAsync(TestTimeouts.Default);
+            older = await gate.StartBlockedAsync(() => serializer.Serialize(device));
             device.Password = "newer";
-            newerJson = serializer.Serialize(device);
+            newer = StartWaitingForTheLock(() => serializer.Serialize(device));
         }
         finally
         {
-            releaseOlder.TrySetResult();
+            gate.Release();
         }
 
-        var olderJson = await olderSerialization.WaitAsync(TestTimeouts.Default);
+        var olderJson = await older!.WaitAsync(TestTimeouts.Default);
+        var newerJson = await newer!.WaitAsync(TestTimeouts.Default);
 
         // Assert
-        Assert.Equal(Prefix + key, ReadString(newerJson, "password"));
         Assert.Equal(Prefix + key, ReadString(olderJson, "password"));
+        Assert.Equal(Prefix + key, ReadString(newerJson, "password"));
         Assert.True(store.TryGet(key, out var value));
         Assert.Equal("newer", value);
         Assert.Equal(new Dictionary<string, string> { [key] = "newer" }, ReadStoreFile());
@@ -365,72 +358,34 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         var device = new SecretGatedDevice { Password = "old" };
         var key = KeyOf(ReadString(serializer.Serialize(device), "password"));
         device.Password = "new";
-
-        // The unchanged serialization starts to read first and blocks; the changed one reads "new" and blocks under the
-        // lock before it stores. The value changes back, and the unchanged one resumes with "old", which the store still
-        // holds.
-        var unchangedIsReading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseUnchanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var changedIsInLock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseChanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var isUnchangedResumed = false;
-        var reads = 0;
+        var gate = new FirstReadGate();
         device.OnRead = value =>
         {
-            switch (Interlocked.Increment(ref reads))
-            {
-                case 1:
-                    unchangedIsReading.SetResult();
-                    releaseUnchanged.Task.Wait();
-                    Volatile.Write(ref isUnchangedResumed, true);
-                    return "old";
-                case 3:
-                    changedIsInLock.SetResult();
-                    releaseChanged.Task.Wait();
-                    break;
-            }
-
+            gate.OnRead();
             return value;
         };
 
-        // Act
-        Thread? unchangedThread = null;
-        var unchanged = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
-        {
-            unchangedThread = Thread.CurrentThread;
-            return serializer.Serialize(device);
-        });
-
+        // Act: the changed write blocks after it read "new", before it stores it. The value changes back to "old", which
+        // the store still holds, and the unchanged write waits for the lock.
         Task<string>? changed = null;
+        Task<string>? unchanged = null;
         try
         {
-            await unchangedIsReading.Task.WaitAsync(TestTimeouts.Default);
-            changed = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => serializer.Serialize(device));
-            await Task.WhenAny(changedIsInLock.Task, changed).WaitAsync(TestTimeouts.Default);
-            Assert.True(changedIsInLock.Task.IsCompleted, "The changed write did not read the value again under the lock.");
-
+            changed = await gate.StartBlockedAsync(() => serializer.Serialize(device));
             device.Password = "old";
-            var contentionBefore = Monitor.LockContentionCount;
-            releaseUnchanged.SetResult();
-            Assert.True(
-                SpinWait.SpinUntil(
-                    () => unchanged.IsCompleted ||
-                          (Volatile.Read(ref isUnchangedResumed) && IsWaiting(unchangedThread) && Monitor.LockContentionCount > contentionBefore),
-                    TestTimeouts.Default),
-                "The unchanged write neither completed nor waited for the lock.");
+            unchanged = StartWaitingForTheLock(() => serializer.Serialize(device));
         }
         finally
         {
-            releaseUnchanged.TrySetResult();
-            releaseChanged.TrySetResult();
+            gate.Release();
         }
 
-        var unchangedJson = await unchanged.WaitAsync(TestTimeouts.Default);
-        var changedJson = await changed.WaitAsync(TestTimeouts.Default);
+        var changedJson = await changed!.WaitAsync(TestTimeouts.Default);
+        var unchangedJson = await unchanged!.WaitAsync(TestTimeouts.Default);
 
         // Assert
-        Assert.Equal(Prefix + key, ReadString(unchangedJson, "password"));
         Assert.Equal(Prefix + key, ReadString(changedJson, "password"));
+        Assert.Equal(Prefix + key, ReadString(unchangedJson, "password"));
         Assert.True(store.TryGet(key, out var value));
         Assert.Equal("old", value);
         Assert.Equal(new Dictionary<string, string> { [key] = "old" }, ReadStoreFile());
@@ -442,49 +397,28 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         // Arrange
         var (serializer, store) = CreateSerializer();
         var device = new SecretGatedDevice { Password = "hunter2" };
-
-        // The first serialization blocks on its second read, under the lock before it stores, and the second one waits
-        // for the lock.
-        var firstIsInLock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var reads = 0;
+        var gate = new FirstReadGate();
         device.OnRead = value =>
         {
-            if (Interlocked.Increment(ref reads) == 2)
-            {
-                firstIsInLock.SetResult();
-                releaseFirst.Task.Wait();
-            }
-
+            gate.OnRead();
             return value;
         };
 
-        // Act
-        var first = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => serializer.Serialize(device));
-        Thread? secondThread = null;
+        // Act: the first write blocks after it read the value, before it stores it, and the second one waits for the lock.
+        Task<string>? first = null;
         Task<string>? second = null;
         try
         {
-            await Task.WhenAny(firstIsInLock.Task, first).WaitAsync(TestTimeouts.Default);
-            Assert.True(firstIsInLock.Task.IsCompleted, "The first write did not read the value again under the lock.");
-
-            var contentionBefore = Monitor.LockContentionCount;
-            second = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
-            {
-                secondThread = Thread.CurrentThread;
-                return serializer.Serialize(device);
-            });
-            Assert.True(
-                SpinWait.SpinUntil(() => IsWaiting(secondThread) && Monitor.LockContentionCount > contentionBefore, TestTimeouts.Default),
-                "The second write did not wait for the lock.");
+            first = await gate.StartBlockedAsync(() => serializer.Serialize(device));
+            second = StartWaitingForTheLock(() => serializer.Serialize(device));
         }
         finally
         {
-            releaseFirst.TrySetResult();
+            gate.Release();
         }
 
-        var firstJson = await first.WaitAsync(TestTimeouts.Default);
-        var secondJson = await second.WaitAsync(TestTimeouts.Default);
+        var firstJson = await first!.WaitAsync(TestTimeouts.Default);
+        var secondJson = await second!.WaitAsync(TestTimeouts.Default);
 
         // Assert
         var key = KeyOf(ReadString(firstJson, "password"));
@@ -498,55 +432,35 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     public async Task WhenAReferenceIsReadWhileAChangedWriteStores_ThenTheReadWaitsAndTheStoreKeepsTheReadValue()
     {
         // Arrange
-        var gate = new PasswordReadGate();
-        var context = CreateContext().WithService(() => gate, _ => false);
+        var gate = new FirstReadGate();
+        var readInterceptor = new PasswordReadInterceptor();
+        var context = CreateContext().WithService(() => readInterceptor, _ => false);
         var (serializer, store) = CreateSerializer();
         var device = new SecretTestDevice(context) { Password = "old" };
         serializer.Serialize(device);
         device.Password = "written";
         var readKey = Seed(store, "read");
+        readInterceptor.OnRead = gate.OnRead;
 
-        // The serialization blocks on its second read, under the lock before it stores "written", while a reload reads
-        // a reference to another key into the same subject.
-        var writeIsInLock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var reads = 0;
-        gate.OnRead = () =>
-        {
-            if (Interlocked.Increment(ref reads) == 2)
-            {
-                writeIsInLock.SetResult();
-                releaseWrite.Task.Wait();
-            }
-        };
-
-        // Act
-        var write = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => serializer.Serialize(device));
-        Thread? readThread = null;
-        Task? read = null;
+        // Act: the write blocks after it read "written", before it stores it, while a reload reads a reference to
+        // another key into the same subject and waits for the lock.
+        Task<string>? write = null;
+        Task<bool>? read = null;
         try
         {
-            await Task.WhenAny(writeIsInLock.Task, write).WaitAsync(TestTimeouts.Default);
-            Assert.True(writeIsInLock.Task.IsCompleted, "The write did not read the value again under the lock.");
-
-            var contentionBefore = Monitor.LockContentionCount;
-            read = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+            write = await gate.StartBlockedAsync(() => serializer.Serialize(device));
+            read = StartWaitingForTheLock(() =>
             {
-                readThread = Thread.CurrentThread;
                 serializer.UpdateConfiguration(device, JsonSerializer.Serialize(new { password = Prefix + readKey }));
+                return true;
             });
-            Assert.True(
-                SpinWait.SpinUntil(
-                    () => read.IsCompleted || (IsWaiting(readThread) && Monitor.LockContentionCount > contentionBefore),
-                    TestTimeouts.Default),
-                "The read neither completed nor waited for the lock.");
         }
         finally
         {
-            releaseWrite.TrySetResult();
+            gate.Release();
         }
 
-        await write.WaitAsync(TestTimeouts.Default);
+        await write!.WaitAsync(TestTimeouts.Default);
         await read!.WaitAsync(TestTimeouts.Default);
 
         // Assert
@@ -806,11 +720,58 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         Assert.Contains(nameof(InvalidSecretTypeDevice.Pin), exception.Message);
     }
 
-    private static bool IsWaiting(Thread? thread) =>
-        thread is not null && (thread.ThreadState & ThreadState.WaitSleepJoin) != 0;
+    // Starts the action on a dedicated thread and asserts that it waits for the lock that a blocked write holds.
+    private static Task<T> StartWaitingForTheLock<T>(Func<T> action)
+    {
+        Thread? thread = null;
+        var contentionBefore = Monitor.LockContentionCount;
+        var task = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            Volatile.Write(ref thread, Thread.CurrentThread);
+            return action();
+        });
+
+        Assert.True(
+            SpinWait.SpinUntil(
+                () => Volatile.Read(ref thread) is { } running &&
+                      (running.ThreadState & ThreadState.WaitSleepJoin) != 0 &&
+                      Monitor.LockContentionCount > contentionBefore,
+                TestTimeouts.Default),
+            "The operation did not wait for the lock.");
+        return task;
+    }
+
+    // Blocks the first read of a secret until released. A write reads its secret under the lock of the subject, so the
+    // blocked write holds that lock.
+    private sealed class FirstReadGate
+    {
+        private readonly TaskCompletionSource _isReached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _reads;
+
+        public void OnRead()
+        {
+            if (Interlocked.Increment(ref _reads) == 1)
+            {
+                _isReached.SetResult();
+                _release.Task.Wait();
+            }
+        }
+
+        // Starts the write on a dedicated thread and waits until it blocks in the first read.
+        public async Task<Task<string>> StartBlockedAsync(Func<string> write)
+        {
+            var task = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(write);
+            await Task.WhenAny(_isReached.Task, task).WaitAsync(TestTimeouts.Default);
+            Assert.True(_isReached.Task.IsCompleted, "The write did not read the secret.");
+            return task;
+        }
+
+        public void Release() => _release.TrySetResult();
+    }
 
     // Calls back after each read of a password, with the value already read, so that a test can block it.
-    private sealed class PasswordReadGate : IReadInterceptor
+    private sealed class PasswordReadInterceptor : IReadInterceptor
     {
         public Action? OnRead { get; set; }
 
