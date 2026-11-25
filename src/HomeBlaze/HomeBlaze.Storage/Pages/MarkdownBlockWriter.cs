@@ -607,7 +607,7 @@ public static class MarkdownBlockWriter
 
     private static bool HasLineBreak(string value) => value.AsSpan().IndexOfAny('\r', '\n') >= 0;
 
-    private static string FormatFence(JsonObject remainder, string lineEnding)
+    internal static string FormatFence(JsonObject remainder, string lineEnding)
     {
         var options = lineEnding == WindowsLineEnding ? WindowsIndentedOptions : UnixIndentedOptions;
         return $"```json{lineEnding}{remainder.ToJsonString(options)}{lineEnding}```";
