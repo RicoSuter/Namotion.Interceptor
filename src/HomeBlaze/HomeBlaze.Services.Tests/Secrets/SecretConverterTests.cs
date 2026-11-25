@@ -174,6 +174,17 @@ public class SecretConverterTests : IDisposable
     }
 
     [Fact]
+    public void WhenATypeHasASecretThatIsNotAStringAndTheJsonHasNoValueForIt_ThenConvertingThrows()
+    {
+        // Arrange
+        var (serializer, _) = Create();
+        var json = $$"""{ "$type": "{{typeof(ConverterInvalidDevice).FullName}}" }""";
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => serializer.TryConvertSecrets(json, ConfigurationNaming.JsonProperty, out _));
+    }
+
+    [Fact]
     public void WhenATypeHasASecretThatIsNotAString_ThenConvertingThrows()
     {
         // Arrange
@@ -192,8 +203,16 @@ public class SecretConverterTests : IDisposable
         Directory.CreateDirectory(StorePath);
         var json = $$"""{ "$type": "{{typeof(ConverterDevice).FullName}}", "password": "s3cr3t" }""";
 
-        // Act & Assert
-        Assert.ThrowsAny<Exception>(() => serializer.TryConvertSecrets(json, ConfigurationNaming.JsonProperty, out _));
+        // Act
+        var exception = Assert.ThrowsAny<Exception>(() => serializer.TryConvertSecrets(json, ConfigurationNaming.JsonProperty, out _));
+
+        // Assert
+        Assert.True(exception is IOException or UnauthorizedAccessException, exception.ToString());
+
+        // A leaked entry of the failed write would be persisted along with the next one.
+        Directory.Delete(StorePath);
+        Assert.True(serializer.TryConvertSecrets(json, ConfigurationNaming.JsonProperty, out _));
+        Assert.Single(JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(StorePath))!);
     }
 
     private (ConfigurableSubjectSerializer Serializer, SecretStore Store) Create(bool withStore = true)

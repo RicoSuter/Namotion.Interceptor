@@ -34,6 +34,8 @@ public class ConfigurableSubjectSerializer
     /// </summary>
     public const string TypeDiscriminatorPropertyName = "$type";
 
+    private static readonly JsonSerializerOptions IndentedOptions = new() { WriteIndented = true };
+
     private readonly TypeProvider _typeProvider;
     private readonly IServiceProvider _serviceProvider;
     private readonly JsonSerializerOptions _jsonPropertyOptions;
@@ -53,10 +55,11 @@ public class ConfigurableSubjectSerializer
         _serviceProvider = serviceProvider;
 
         // One instance for both namings, so a key read with one naming is kept when written with the other.
-        _secrets = serviceProvider.GetService<SecretStore>() is { } store
+        var store = serviceProvider.GetService<SecretStore>();
+        _secrets = store is not null
             ? new SecretReferences(store, serviceProvider.GetService<ILogger<ConfigurableSubjectSerializer>>())
             : null;
-        _secretConverter = serviceProvider.GetService<SecretStore>() is { } converterStore ? new SecretConverter(converterStore) : null;
+        _secretConverter = store is not null ? new SecretConverter(store) : null;
         _jsonPropertyOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.JsonProperty, _secrets);
         _cSharpPropertyOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.CSharpProperty, _secrets);
     }
@@ -397,8 +400,6 @@ public class ConfigurableSubjectSerializer
             }
         }
     }
-
-    private static readonly JsonSerializerOptions IndentedOptions = new() { WriteIndented = true };
 
     /// <summary>
     /// Replaces each plaintext secret in configuration JSON, whose root names its type with <c>$type</c>, by a reference

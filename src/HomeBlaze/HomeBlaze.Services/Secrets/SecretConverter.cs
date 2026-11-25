@@ -104,14 +104,19 @@ internal sealed class SecretConverter
                 ? naming == ConfigurationNaming.JsonProperty ? JsonNamingPolicy.CamelCase.ConvertName(propertyInfo.Name) : propertyInfo.Name
                 : property.Name;
 
+            var isSecret = SecretReferences.IsSecret(propertyInfo);
+            if (isSecret)
+            {
+                SecretReferences.EnsureSupported(type, propertyInfo.Name, propertyInfo.PropertyType);
+            }
+
             if (!value.TryGetPropertyValue(name, out var propertyValue) || propertyValue is null)
             {
                 continue;
             }
 
-            if (SecretReferences.IsSecret(propertyInfo))
+            if (isSecret)
             {
-                SecretReferences.EnsureSupported(type, propertyInfo.Name, propertyInfo.PropertyType);
                 if (propertyValue is JsonValue text &&
                     text.TryGetValue<string>(out var plaintext) &&
                     plaintext.Length > 0 &&
