@@ -437,14 +437,16 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     // Not cancelled once the content is decided: a cancelled reload after the write would leave the parse snapshot of
     // the old content, which a later configuration write-back would write back.
-    private Task WriteUnlockedAsync(string content) => WriteUnlockedAsync(Encoding.UTF8.GetBytes(content));
-
     // Unconverted: the other callers convert the content themselves, and a block write writes the text of the last
     // parsed page, which the storage converted when it read the file, around a configuration that the serializer wrote
     // with references. A block write leaves any plaintext that the parsed page still has as it is.
-    private Task WriteUnlockedAsync(byte[] content) => Storage is FluentStorageContainer storage
-        ? storage.WriteBlobUnconvertedAsync(FullPath, content, CancellationToken.None)
-        : Storage.WriteBlobAsync(FullPath, content, CancellationToken.None);
+    private Task WriteUnlockedAsync(string content)
+    {
+        var bytes = Encoding.UTF8.GetBytes(content);
+        return Storage is FluentStorageContainer storage
+            ? storage.WriteBlobUnconvertedAsync(FullPath, bytes, CancellationToken.None)
+            : Storage.WriteBlobAsync(FullPath, bytes, CancellationToken.None);
+    }
 
     public Task<Stream> ReadAsync(CancellationToken cancellationToken)
         => Storage.ReadBlobAsync(FullPath, cancellationToken);
@@ -466,14 +468,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         var write = BeginWrite();
         try
         {
-            // Read and converted under the lock, so that a write that comes later waits for this one, also while the
-            // content is still being read. Not cancelled once the lock is held, for the reason given at WriteUnlockedAsync.
-            using var buffer = new MemoryStream();
-            await content.CopyToAsync(buffer, CancellationToken.None);
-            var bytes = Storage is FluentStorageContainer storage
-                ? storage.ConvertSecrets(FullPath, buffer.ToArray())
-                : buffer.ToArray();
-            await WriteUnlockedAsync(bytes);
+            // The storage converts the plaintext secrets. Not cancelled once the lock is held, for the reason given at
+            // WriteUnlockedAsync.
+            await Storage.WriteBlobAsync(FullPath, content, CancellationToken.None);
         }
         finally
         {

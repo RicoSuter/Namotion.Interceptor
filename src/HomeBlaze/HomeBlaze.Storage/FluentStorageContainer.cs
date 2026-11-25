@@ -758,7 +758,7 @@ public partial class FluentStorageContainer :
     /// <exception cref="UnauthorizedAccessException">The secret store cannot be written.</exception>
     /// <exception cref="InvalidOperationException">A type in the content has a secret configuration property that is
     /// not a string property of a subject.</exception>
-    internal byte[] ConvertSecrets(string path, byte[] bytes)
+    private byte[] ConvertSecrets(string path, byte[] bytes)
     {
         if (!StorageReconciler.IsConvertible(path))
         {
