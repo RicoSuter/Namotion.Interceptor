@@ -68,9 +68,7 @@ public class SecretConversionTests : StorageTestBase
         var key = SeedSecret("old-password");
         WriteFile("Gateway.json", $$"""{ "$type": "{{TwoSecretDeviceType}}", "password": "$secret:{{key}}" }""");
         PausableStore? client = null;
-        var storage = CreateStorage();
-        storage.ClientDecorator = inner => client = new PausableStore(inner);
-        await storage.ConnectAsync(CancellationToken.None);
+        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner));
         var device = Assert.IsType<TwoSecretDevice>(storage.Children["Gateway"]);
         device.Password = "new-password";
         device.Token = "new-token";
@@ -101,9 +99,7 @@ public class SecretConversionTests : StorageTestBase
         var content = $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "$secret:{{key}}" }""";
         WriteFile("Gateway.json", content);
         PausableStore? client = null;
-        var storage = CreateStorage();
-        storage.ClientDecorator = inner => client = new PausableStore(inner);
-        await storage.ConnectAsync(CancellationToken.None);
+        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner));
         var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
         device.Password = "new-password";
         var writeReached = client!.PauseNext(nameof(FluentStorage.Storage.IStore.SetObject));
@@ -158,9 +154,7 @@ public class SecretConversionTests : StorageTestBase
         var content = $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=$secret:{key}\n::\n";
         WriteFile("Gateway.md", content);
         PausableStore? client = null;
-        var storage = CreateStorage();
-        storage.ClientDecorator = inner => client = new PausableStore(inner);
-        await storage.ConnectAsync(CancellationToken.None);
+        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner));
         var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
         var device = Assert.IsType<EmbeddedSecretDevice>(page.Children["gateway"]);
         device.Host = "10.0.0.2";
@@ -629,9 +623,7 @@ public class SecretConversionTests : StorageTestBase
         UseSecretStore();
         WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""");
         PausableStore? client = null;
-        var storage = CreateStorage();
-        storage.ClientDecorator = inner => client = new PausableStore(inner);
-        await storage.ConnectAsync(CancellationToken.None);
+        var storage = await ConnectAsync(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner));
         var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
         WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""");
         var handEdit = $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.9" }""";
@@ -656,8 +648,7 @@ public class SecretConversionTests : StorageTestBase
         WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""");
         PausableStore? client = null;
         var messages = new ConcurrentQueue<string>();
-        var storage = CreateStorage(logger: new RecordingLogger(messages));
-        storage.ClientDecorator = inner => client = new PausableStore(inner);
+        var storage = CreateStorage(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner), logger: new RecordingLogger(messages));
         await storage.ConnectAsync(CancellationToken.None);
         var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
         WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.2", "password": "s3cr3t" }""");
@@ -742,8 +733,7 @@ public class SecretConversionTests : StorageTestBase
         var original = $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n";
         WriteFile("Gateway.md", original);
         PausableStore? client = null;
-        var storage = CreateStorage();
-        storage.ClientDecorator = inner => client = new PausableStore(inner);
+        var storage = CreateStorage(configure: container => container.ClientDecorator = inner => client = new PausableStore(inner));
 
         // Act
         await storage.ConnectAsync(CancellationToken.None);
