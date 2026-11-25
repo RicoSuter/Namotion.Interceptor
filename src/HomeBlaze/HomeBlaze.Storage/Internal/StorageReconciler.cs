@@ -668,6 +668,21 @@ internal sealed class StorageReconciler
             {
                 SetMetadata(genericFile, listed.Version);
             }
+            else if (subject is MarkdownFile page && IsConvertible(listed.Path))
+            {
+                // Read and converted here, so that the page parses the text whose hash is recorded.
+                var content = await ReadAsync(listed.Path, cancellationToken);
+                var (converted, text) = await ConvertSecretsAsync(listed.Path, content, cancellationToken);
+                if (!ReferenceEquals(converted, content))
+                {
+                    // Recorded without a version, as for a converted JSON file.
+                    entry.Version = default;
+                }
+
+                entry.Hash = StorageHash.Compute(converted);
+                SetMetadata(page, listed.Version);
+                await page.OnFileChangedAsync(text, cancellationToken);
+            }
             else
             {
                 // Hashed before the subject reads the file, so the hash is never of a later content than the subject has.
@@ -857,7 +872,37 @@ internal sealed class StorageReconciler
         }
 
         string hash;
-        if (entry.Subject is IStorageFile file and not JsonFile)
+        if (entry.Subject is MarkdownFile page && (content != null || IsConvertible(entry.Path)))
+        {
+            var isReadHere = content == null;
+            content ??= await ReadAsync(entry.Path, cancellationToken);
+            hash = StorageHash.Compute(content);
+            SetMetadata(page, version);
+
+            // Only for content read here that changed: the page parses what a write through the storage wrote.
+            string? text = null;
+            if (isReadHere && hash != entry.Hash)
+            {
+                (var converted, text) = await ConvertSecretsAsync(entry.Path, content, cancellationToken);
+                if (!ReferenceEquals(converted, content))
+                {
+                    // Recorded without a version, as for a file converted when it is added.
+                    content = converted;
+                    hash = StorageHash.Compute(converted);
+                    version = default;
+                }
+            }
+
+            if (hash != entry.Hash)
+            {
+                // A load that fails half way has changed the subject, which then holds neither content.
+                entry.Hash = null;
+
+                await page.OnFileChangedAsync(text ?? DecodeText(content), cancellationToken);
+                _logger?.LogInformation("Reloaded: {Path}", entry.Path);
+            }
+        }
+        else if (entry.Subject is IStorageFile file and not JsonFile)
         {
             // The subject reads the file itself, so its bytes are only hashed here.
             hash = content != null ? StorageHash.Compute(content) : await ComputeHashAsync(entry.Path, cancellationToken);

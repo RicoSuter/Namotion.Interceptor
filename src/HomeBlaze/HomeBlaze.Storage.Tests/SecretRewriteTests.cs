@@ -916,6 +916,110 @@ public class SecretRewriteTests : StorageTestBase
         Assert.Contains(messages, message => message.Contains("Gateway.json") && message.Contains("could not be written back"));
     }
 
+    [Fact]
+    public async Task WhenAPageWithAPlaintextSecretIsLoaded_ThenTheFileIsConvertedAndTheBlockReadsTheSecret()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n");
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert: converted synchronously in the load, so no wait is needed
+        var text = TryReadText("Gateway.md")!;
+        Assert.DoesNotContain("s3cr3t", text);
+        Assert.Contains("Password=$secret:", text);
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        Assert.Equal("s3cr3t", ((EmbeddedSecretDevice)page.Children["gateway"]).Password);
+        Assert.Equal(text, page.Content);
+    }
+
+    [Fact]
+    public async Task WhenAPageChangesToHoldAPlaintextSecret_ThenTheChangeIsConverted()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n");
+        var storage = await ConnectAsync();
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n");
+
+        // Act
+        await storage.ReconcileAsync(Named("Gateway.md"));
+
+        // Assert
+        var text = TryReadText("Gateway.md")!;
+        Assert.DoesNotContain("s3cr3t", text);
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        Assert.Equal("s3cr3t", ((EmbeddedSecretDevice)page.Children["gateway"]).Password);
+        Assert.Equal(text, page.Content);
+    }
+
+    [Fact]
+    public async Task WhenAConvertedPageIsReconciledAgain_ThenItsBlockIsNotAppliedAgain()
+    {
+        // Arrange
+        UseSecretStore();
+        var deviceType = typeof(CountingSecretDevice).FullName;
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {deviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var device = Assert.IsType<CountingSecretDevice>(page.Children["gateway"]);
+        var applyCount = device.ApplyCount;
+
+        // Act: the event of the write-back names the file
+        await storage.ReconcileAsync(Named("Gateway.md"));
+
+        // Assert
+        Assert.DoesNotContain("s3cr3t", TryReadText("Gateway.md"));
+        Assert.Same(device, page.Children["gateway"]);
+        Assert.Equal(applyCount, device.ApplyCount);
+    }
+
+    [Fact]
+    public async Task WhenAPageWithoutPlaintextIsLoaded_ThenItIsNotWritten()
+    {
+        // Arrange
+        UseSecretStore();
+        var original = $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1\n::\n";
+        WriteFile("Gateway.md", original);
+        var lastWrite = File.GetLastWriteTimeUtc(GetFullPath("Gateway.md"));
+
+        // Act
+        await ConnectAsync();
+
+        // Assert
+        Assert.Equal(original, TryReadText("Gateway.md"));
+        Assert.Equal(lastWrite, File.GetLastWriteTimeUtc(GetFullPath("Gateway.md")));
+    }
+
+    [Fact]
+    public async Task WhenAPageHasMalformedBlocks_ThenItIsLoadedAndItsValidBlockIsConverted()
+    {
+        // Arrange
+        UseSecretStore();
+        var malformedBlocks =
+            $":: {DeviceType}#invalidJson\n```json\n{{ \"Password\": \"first\", \n```\n::\n\n" +
+            $":: {DeviceType}#duplicateKey\n```json\n{{ \"Password\": \"second\", \"Password\": \"third\" }}\n```\n::\n\n" +
+            $":: {DeviceType}#array\n```json\n[ {{ \"Password\": \"fourth\" }} ]\n```\n::\n\n" +
+            $":: {DeviceType}#openQuote Password=\"fifth\n::\n\n" +
+            ":: Unknown.Type#unknown Password=sixth\n::\n\n" +
+            ":: notAType Password=seventh\n::\n\n" +
+            ":: \n::\n\n";
+        WriteFile("Gateway.md", $"# Gateway\n\n{malformedBlocks}:: {DeviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n");
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        var text = TryReadText("Gateway.md")!;
+        Assert.StartsWith($"# Gateway\n\n{malformedBlocks}:: {DeviceType}#gateway Host=10.0.0.1 Password=$secret:", text);
+        Assert.DoesNotContain("s3cr3t", text);
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        Assert.Equal("s3cr3t", ((EmbeddedSecretDevice)page.Children["gateway"]).Password);
+        Assert.Equal(text, page.Content);
+    }
+
     // Only for a check that something does not happen, which a passing test always waits for in full.
     private static async Task AssertStaysTrueAsync(Func<bool> condition)
     {

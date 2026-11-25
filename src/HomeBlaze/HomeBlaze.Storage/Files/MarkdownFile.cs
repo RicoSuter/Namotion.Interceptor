@@ -172,51 +172,73 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             // in the middle of the file would otherwise hold.
             var reading = reader.ReadToEndAsync(cancellationToken);
             await reading.WithStorageTimeoutAsync("reading", FullPath, StorageTimeProvider, cancellationToken);
-            var content = await reading;
-            var frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
-
-            // A full fence, because a volatile write lets later writes pass it. With the fence before the read of
-            // the flag in WriteConfigurationAsync, a write-back that sees a slot value this parse changed also sees
-            // the flag.
-            _isGraphAheadOfSnapshot = true;
-            Thread.MemoryBarrier();
-
-            // A read of the text that the snapshot describes, such as the read inside the write of a structure edit, takes the
-            // subjects of the snapshot: the edit has put them where their blocks went, which their keys may not tell. The
-            // reload lock keeps any other reload from publishing meanwhile. A write-back that publishes after this read
-            // leaves these subjects matched to the text read here, and the next reload, whose text then differs from the
-            // snapshot, finds them by their keys again.
-            var described = _parseResult;
-            var reusableSubjects = described.Page is { } describedPage && describedPage.Source == content
-                ? described.BlockSubjects
-                : null;
-            var result = await _parser.ParseAsync(content, this, Children, reusableSubjects, cancellationToken);
-
-            // The page itself is assigned only after the parse succeeded, so a failed reload leaves its content,
-            // its top-level children and the snapshot as they were. Subjects that the parse reused were already
-            // updated in place, with their slots and the children of their fragments.
-            //
-            // The snapshot must be assigned before Children: the write to Children makes the library compute
-            // the derived values again that looked a name up (see TryGetNamedSubject), and they must find
-            // the new names then.
-            _parseResult = result;
-            _isGraphAheadOfSnapshot = false;
-            Content = content;
-            Frontmatter = frontmatter;
-
-            // Before Children, whose lifecycle handlers can throw.
-            ScheduleSecretRewrites(result);
-
-            // Without the flow of the caller, which is the worker of the storage or a refused write, as for
-            // every assignment to the tree: lifecycle handlers run here for a page that is in the tree.
-            using (ExecutionContext.SuppressFlow())
-            {
-                Children = result.Children;
-            }
+            await ApplySourceUnlockedAsync(await reading, cancellationToken);
         }
         finally
         {
             _reloadLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Parses <paramref name="content"/> as the current text of the file, as <see cref="OnFileChangedAsync(CancellationToken)"/>
+    /// does with the text it reads. For the storage, which passes the text it has read, and converted, itself.
+    /// </summary>
+    internal async Task OnFileChangedAsync(string content, CancellationToken cancellationToken)
+    {
+        await _reloadLock.WaitAsync(cancellationToken);
+        try
+        {
+            await ApplySourceUnlockedAsync(content, cancellationToken);
+        }
+        finally
+        {
+            _reloadLock.Release();
+        }
+    }
+
+    // Under _reloadLock.
+    private async Task ApplySourceUnlockedAsync(string content, CancellationToken cancellationToken)
+    {
+        var frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
+
+        // A full fence, because a volatile write lets later writes pass it. With the fence before the read of
+        // the flag in WriteConfigurationAsync, a write-back that sees a slot value this parse changed also sees
+        // the flag.
+        _isGraphAheadOfSnapshot = true;
+        Thread.MemoryBarrier();
+
+        // A read of the text that the snapshot describes, such as the read inside the write of a structure edit, takes the
+        // subjects of the snapshot: the edit has put them where their blocks went, which their keys may not tell. The
+        // reload lock keeps any other reload from publishing meanwhile. A write-back that publishes after this read
+        // leaves these subjects matched to the text read here, and the next reload, whose text then differs from the
+        // snapshot, finds them by their keys again.
+        var described = _parseResult;
+        var reusableSubjects = described.Page is { } describedPage && describedPage.Source == content
+            ? described.BlockSubjects
+            : null;
+        var result = await _parser.ParseAsync(content, this, Children, reusableSubjects, cancellationToken);
+
+        // The page itself is assigned only after the parse succeeded, so a failed reload leaves its content,
+        // its top-level children and the snapshot as they were. Subjects that the parse reused were already
+        // updated in place, with their slots and the children of their fragments.
+        //
+        // The snapshot must be assigned before Children: the write to Children makes the library compute
+        // the derived values again that looked a name up (see TryGetNamedSubject), and they must find
+        // the new names then.
+        _parseResult = result;
+        _isGraphAheadOfSnapshot = false;
+        Content = content;
+        Frontmatter = frontmatter;
+
+        // Before Children, whose lifecycle handlers can throw.
+        ScheduleSecretRewrites(result);
+
+        // Without the flow of the caller, which is the worker of the storage or a refused write, as for
+        // every assignment to the tree: lifecycle handlers run here for a page that is in the tree.
+        using (ExecutionContext.SuppressFlow())
+        {
+            Children = result.Children;
         }
     }
 
