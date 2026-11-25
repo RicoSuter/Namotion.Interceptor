@@ -103,15 +103,16 @@ public sealed class WorkspaceResolver
         var normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folderPath));
 
         // Windows and macOS default to case-insensitive filesystems, so two spellings of one path must map to
-        // one workspace there. Linux paths are case sensitive and must not be folded together.
-        var hashInput = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+        // one workspace there, which means the name part as well as the hash. Linux paths are case sensitive
+        // and must not be folded together.
+        var identity = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
             ? normalized.ToLowerInvariant()
             : normalized;
 
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(hashInput));
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(identity));
         var shortHash = Convert.ToHexStringLower(hash.AsSpan(0, 4));
 
-        var leafName = Path.GetFileName(normalized);
+        var leafName = Path.GetFileName(identity);
         var sanitized = string.Concat(leafName.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
         if (sanitized.Length == 0)
         {
