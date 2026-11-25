@@ -19,6 +19,13 @@ internal static class StorageText
         return text;
     }
 
+    /// <summary>
+    /// Gets whether <see cref="Encode"/> gives the decoded content back, which is false when the content has bytes that
+    /// are not valid in its encoding, since <see cref="Decode"/> replaces them with U+FFFD.
+    /// </summary>
+    public static bool IsExact(string text, byte[] content, Encoding encoding, bool hasByteOrderMark)
+        => !text.Contains('\uFFFD') || Encode(text, encoding, hasByteOrderMark).AsSpan().SequenceEqual(content);
+
     /// <summary>Encodes the text in the encoding, with its byte order mark when the original had one.</summary>
     public static byte[] Encode(string text, Encoding encoding, bool hasByteOrderMark)
     {

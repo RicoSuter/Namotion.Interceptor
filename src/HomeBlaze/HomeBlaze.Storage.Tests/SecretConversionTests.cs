@@ -587,6 +587,42 @@ public class SecretConversionTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAPageIsNotValidUtf8_ThenItIsNotConvertedAndKeepsItsBytes()
+    {
+        // Arrange: "Küche" in Windows-1252, whose 0xFC is not valid UTF-8.
+        UseSecretStore();
+        var content = System.Text.Encoding.Latin1.GetBytes($"# Küche\n\n:: {DeviceType}#gateway Password=s3cr3t\n::\n");
+        File.WriteAllBytes(GetFullPath("Kitchen.md"), content);
+        var messages = new ConcurrentQueue<string>();
+        var storage = CreateStorage(logger: new RecordingLogger(messages));
+
+        // Act
+        await storage.ConnectAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(content, File.ReadAllBytes(GetFullPath("Kitchen.md")));
+        Assert.Empty(ReadSecrets());
+        Assert.Contains(messages, message => message.Contains("Kitchen.md") && message.Contains("not valid"));
+    }
+
+    [Fact]
+    public async Task WhenAJsonFileThatIsNotValidUtf8IsWrittenThroughTheStorage_ThenItIsWrittenAsItIs()
+    {
+        // Arrange
+        UseSecretStore();
+        var storage = await ConnectAsync();
+        var content = System.Text.Encoding.Latin1.GetBytes(
+            $$"""{ "$type": "{{DeviceType}}", "host": "Küche", "password": "s3cr3t" }""");
+
+        // Act
+        await storage.WriteBlobAsync("Gateway.json", content, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(content, File.ReadAllBytes(GetFullPath("Gateway.json")));
+        Assert.Empty(ReadSecrets());
+    }
+
+    [Fact]
     public async Task WhenAJsonFileChangesWhileItIsConverted_ThenTheEditIsKeptAndReadByAnotherPass()
     {
         // Arrange

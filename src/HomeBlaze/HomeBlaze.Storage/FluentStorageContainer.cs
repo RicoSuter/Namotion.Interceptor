@@ -752,7 +752,7 @@ public partial class FluentStorageContainer :
 
     /// <summary>
     /// Replaces the plaintext secrets of a JSON file or a page by references, keeping the encoding and byte order mark.
-    /// Returns the given bytes when the file is neither or holds no plaintext secret.
+    /// Returns the given bytes when the file is neither, holds no plaintext secret or is not valid text in its encoding.
     /// </summary>
     /// <exception cref="IOException">The secret store cannot be written.</exception>
     /// <exception cref="UnauthorizedAccessException">The secret store cannot be written.</exception>
@@ -766,6 +766,12 @@ public partial class FluentStorageContainer :
         }
 
         var text = StorageText.Decode(bytes, out var encoding, out var hasByteOrderMark);
+        if (!StorageText.IsExact(text, bytes, encoding, hasByteOrderMark))
+        {
+            _logger?.LogWarning("{Path} is not valid text in its encoding, so its plaintext secrets are not moved to the secret store; save it as UTF-8.", path);
+            return bytes;
+        }
+
         return TryConvertSecrets(path, text, out var converted) ? StorageText.Encode(converted, encoding, hasByteOrderMark) : bytes;
     }
 

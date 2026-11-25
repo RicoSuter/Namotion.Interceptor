@@ -745,6 +745,12 @@ internal sealed class StorageReconciler
     {
         var text = StorageText.Decode(content, out var encoding, out var hasByteOrderMark);
         var unchanged = new ConvertedContent(content, text, hash, version);
+        if (!StorageText.IsExact(text, content, encoding, hasByteOrderMark))
+        {
+            _logger?.LogWarning("{Path} is not valid text in its encoding, so its plaintext secrets are not moved to the secret store; save it as UTF-8.", path);
+            return unchanged;
+        }
+
         string convertedText;
         try
         {
