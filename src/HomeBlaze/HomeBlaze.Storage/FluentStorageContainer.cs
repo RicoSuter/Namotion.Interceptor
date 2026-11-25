@@ -14,6 +14,7 @@ using HomeBlaze.Storage.Abstractions.Metadata;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Metadata;
+using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -71,6 +72,9 @@ public partial class FluentStorageContainer :
     // only what it read, so its item never touches the index or the client of a later connection.
     private volatile StorageConnection? _connection;
 
+    // Stateless, so a race of two first uses only creates an equal second instance.
+    private SecretPageConverter? _pageConverter;
+
     internal StorageConnection Connection => _connection is { IsEnded: false } connection
         ? connection
         : throw new StorageRefusedException("Storage not connected");
@@ -80,6 +84,10 @@ public partial class FluentStorageContainer :
 
     /// <summary>Applies and writes the metadata of this storage.</summary>
     internal StorageMetadataStore MetadataStore { get; }
+
+    /// <summary>Converts the plaintext secrets of a page. Created on first use, which needs the <see cref="TypeProvider"/> service.</summary>
+    internal SecretPageConverter PageConverter
+        => _pageConverter ??= new SecretPageConverter(_serializer, _serviceProvider.GetRequiredService<TypeProvider>());
 
     /// <summary>Wraps the storage client when the storage connects.</summary>
     internal Func<IStore, IStore>? ClientDecorator { get; set; }

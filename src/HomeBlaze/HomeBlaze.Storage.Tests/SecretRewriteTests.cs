@@ -700,6 +700,222 @@ public class SecretRewriteTests : StorageTestBase
         Assert.Equal(movedContent, File.ReadAllText(GetFullPath("Gateway.md")));
     }
 
+    [Fact]
+    public async Task WhenAJsonFileWithAPlaintextSecretIsLoaded_ThenTheFileIsConvertedBeforeTheSubjectIsCreated()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "s3cr3t", "unknownKey": 1 }""");
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert: converted synchronously in the load, so no wait is needed
+        var text = TryReadText("Gateway.json")!;
+        Assert.DoesNotContain("s3cr3t", text);
+        Assert.Contains("\"password\": \"$secret:", text);
+        Assert.Contains("unknownKey", text);
+        Assert.Equal("s3cr3t", Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]).Password);
+    }
+
+    [Fact]
+    public async Task WhenAJsonFileWithoutPlaintextIsLoaded_ThenItIsNotWritten()
+    {
+        // Arrange
+        UseSecretStore();
+        var original = $$"""{"$type":"{{DeviceType}}","host":"10.0.0.1"}""";
+        WriteFile("Gateway.json", original);
+
+        // Act
+        await ConnectAsync();
+
+        // Assert
+        Assert.Equal(original, TryReadText("Gateway.json"));
+    }
+
+    [Fact]
+    public async Task WhenAJsonFileWithADuplicateKeyIsLoaded_ThenItsSubjectIsCreated()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "host": "10.0.0.2", "password": "s3cr3t" }""");
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        Assert.Equal("10.0.0.2", Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]).Host);
+    }
+
+    [Fact]
+    public async Task WhenAJsonFileChangesToHoldAPlaintextSecret_ThenTheChangeIsConverted()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""");
+        var storage = await ConnectAsync();
+        var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""");
+
+        // Act
+        await storage.ReconcileAsync(Named("Gateway.json"));
+
+        // Assert
+        Assert.Equal("s3cr3t", device.Password);
+        Assert.True(HoldsSecretReferenceOnly("Gateway.json"));
+    }
+
+    [Fact]
+    public async Task WhenAJsonFileWithAPlaintextSecretIsMoved_ThenItIsStillDetectedAsAMove()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("A/Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""");
+        var storage = await ConnectAsync();
+        var device = Assert.IsType<VirtualFolder>(storage.Children["A"]).Children["Gateway"];
+        Directory.CreateDirectory(GetFullPath("B"));
+        File.Move(GetFullPath("A/Gateway.json"), GetFullPath("B/Gateway.json"));
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Same(device, Assert.IsType<VirtualFolder>(storage.Children["B"]).Children["Gateway"]);
+    }
+
+    [Fact]
+    public async Task WhenAConvertedJsonFileIsReconciledAgain_ThenItsSubjectIsNotReloaded()
+    {
+        // Arrange
+        UseSecretStore();
+        var deviceType = typeof(CountingSecretDevice).FullName;
+        WriteFile("Gateway.json", $$"""{ "$type": "{{deviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""");
+        var storage = await ConnectAsync();
+        var device = Assert.IsType<CountingSecretDevice>(storage.Children["Gateway"]);
+        var applyCount = device.ApplyCount;
+
+        // Act: the event of the write-back names the file
+        await storage.ReconcileAsync(Named("Gateway.json"));
+
+        // Assert
+        Assert.True(HoldsSecretReferenceOnly("Gateway.json"));
+        Assert.Same(device, storage.Children["Gateway"]);
+        Assert.Equal(applyCount, device.ApplyCount);
+    }
+
+    [Fact]
+    public async Task WhenAConvertedJsonFileIsEditedLater_ThenItsSubjectIsReloaded()
+    {
+        // Arrange
+        UseSecretStore();
+        var deviceType = typeof(CountingSecretDevice).FullName;
+        WriteFile("Gateway.json", $$"""{ "$type": "{{deviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""");
+        var storage = await ConnectAsync();
+        var device = Assert.IsType<CountingSecretDevice>(storage.Children["Gateway"]);
+        var applyCount = device.ApplyCount;
+        WriteFile("Gateway.json", TryReadText("Gateway.json")!.Replace("10.0.0.1", "10.0.0.2"));
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal("10.0.0.2", device.Host);
+        Assert.Equal("s3cr3t", device.Password);
+        Assert.Equal(applyCount + 1, device.ApplyCount);
+    }
+
+    [Fact]
+    public async Task WhenAUtf8JsonFileWithAByteOrderMarkIsConverted_ThenItKeepsTheByteOrderMark()
+    {
+        // Arrange
+        UseSecretStore();
+        File.WriteAllText(
+            GetFullPath("Gateway.json"),
+            $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""",
+            new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+        // Act
+        await ConnectAsync();
+
+        // Assert
+        var content = File.ReadAllBytes(GetFullPath("Gateway.json"));
+        Assert.Equal(new byte[] { 0xEF, 0xBB, 0xBF }, content[..3]);
+        Assert.NotEqual(0xEF, content[3]);
+        Assert.True(HoldsSecretReferenceOnly("Gateway.json"));
+    }
+
+    [Fact]
+    public async Task WhenAUtf16JsonFileIsConverted_ThenItStaysUtf16()
+    {
+        // Arrange
+        UseSecretStore();
+        File.WriteAllText(
+            GetFullPath("Gateway.json"),
+            $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""",
+            System.Text.Encoding.Unicode);
+
+        // Act
+        await ConnectAsync();
+
+        // Assert
+        var content = File.ReadAllBytes(GetFullPath("Gateway.json"));
+        Assert.Equal(System.Text.Encoding.Unicode.GetPreamble(), content[..2]);
+        Assert.Contains("\"password\": \"$secret:", System.Text.Encoding.Unicode.GetString(content, 2, content.Length - 2));
+    }
+
+    [Fact]
+    public async Task WhenAJsonFileChangesWhileItIsConverted_ThenTheEditIsKeptAndReadByAnotherPass()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""");
+        PausableStore? client = null;
+        var storage = CreateStorage();
+        storage.ClientDecorator = inner => client = new PausableStore(inner);
+        await storage.ConnectAsync(CancellationToken.None);
+        var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1", "password": "s3cr3t" }""");
+        var handEdit = $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.9" }""";
+
+        // The second read is the one that checks the file before the converted content is written back.
+        client!.RunBeforeOpenRead(2, () => WriteFile("Gateway.json", handEdit));
+
+        // Act
+        await storage.ReconcileAsync(Named("Gateway.json"));
+
+        // Assert
+        Assert.Equal(handEdit, TryReadText("Gateway.json"));
+        await AsyncTestHelpers.WaitUntilAsync(() => device.Host == "10.0.0.9");
+        Assert.Equal(handEdit, TryReadText("Gateway.json"));
+    }
+
+    [Fact]
+    public async Task WhenTheWriteBackOfAConvertedJsonFileFails_ThenTheReadContentIsAppliedAndAWarningIsLogged()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.1" }""");
+        PausableStore? client = null;
+        var messages = new ConcurrentQueue<string>();
+        var storage = CreateStorage(logger: new RecordingLogger(messages));
+        storage.ClientDecorator = inner => client = new PausableStore(inner);
+        await storage.ConnectAsync(CancellationToken.None);
+        var device = Assert.IsType<EmbeddedSecretDevice>(storage.Children["Gateway"]);
+        WriteFile("Gateway.json", $$"""{ "$type": "{{DeviceType}}", "host": "10.0.0.2", "password": "s3cr3t" }""");
+        var writeReached = client!.PauseNext(nameof(FluentStorage.Storage.IStore.SetObject));
+
+        // Act
+        var reconcile = storage.ReconcileAsync(Named("Gateway.json"));
+        await writeReached;
+        client.FailHangingCall(new IOException("The share is gone."));
+        await reconcile;
+
+        // Assert
+        Assert.Equal("10.0.0.2", device.Host);
+        Assert.Equal("s3cr3t", device.Password);
+        Assert.Contains(messages, message => message.Contains("Gateway.json") && message.Contains("could not be written back"));
+    }
+
     // Only for a check that something does not happen, which a passing test always waits for in full.
     private static async Task AssertStaysTrueAsync(Func<bool> condition)
     {
@@ -822,6 +1038,28 @@ public partial class CancelingDevice : IConfigurable
             cancellationToken.ThrowIfCancellationRequested();
         }
 
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>A device with a secret that counts how often its configuration was applied in place.</summary>
+[InterceptorSubject]
+public partial class CountingSecretDevice : IConfigurable
+{
+    private int _applyCount;
+
+    [Configuration]
+    public partial string? Host { get; set; }
+
+    [Configuration(IsSecret = true)]
+    public partial string? Password { get; set; }
+
+    /// <summary>How often the configuration was applied in place.</summary>
+    public int ApplyCount => Volatile.Read(ref _applyCount);
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _applyCount);
         return Task.CompletedTask;
     }
 }

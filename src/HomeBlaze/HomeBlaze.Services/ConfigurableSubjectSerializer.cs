@@ -35,6 +35,7 @@ public class ConfigurableSubjectSerializer
     public const string TypeDiscriminatorPropertyName = "$type";
 
     private static readonly JsonSerializerOptions IndentedOptions = new() { WriteIndented = true };
+    private static readonly JsonDocumentOptions NoDuplicatePropertiesOptions = new() { AllowDuplicateProperties = false };
 
     private readonly TypeProvider _typeProvider;
     private readonly IServiceProvider _serviceProvider;
@@ -456,7 +457,8 @@ public class ConfigurableSubjectSerializer
     {
         try
         {
-            return JsonNode.Parse(json) as JsonObject;
+            // Rejected here: a JsonObject would throw an ArgumentException for a duplicate property on first access.
+            return JsonNode.Parse(json, documentOptions: NoDuplicatePropertiesOptions) as JsonObject;
         }
         catch (JsonException)
         {
