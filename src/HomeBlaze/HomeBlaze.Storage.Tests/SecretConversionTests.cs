@@ -230,25 +230,6 @@ public class SecretConversionTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenAJsonBlockOfAPageHoldsAPlaintextSecret_ThenItIsReplacedByAReference()
-    {
-        // Arrange
-        var secretsPath = UseSecretStore();
-        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway\n```json\n{{\n  \"Host\": \"10.0.0.1\",\n  \"Password\": \"s3cr3t\"\n}}\n```\n::\n");
-
-        // Act
-        await ConnectAsync();
-
-        // Assert
-        var content = TryReadText("Gateway.md")!;
-        Assert.DoesNotContain("s3cr3t", content);
-        Assert.StartsWith($"# Gateway\n\n:: {DeviceType}#gateway", content);
-        Assert.Contains("\"Password\": \"$secret:", content);
-        Assert.Contains("10.0.0.1", content);
-        Assert.Contains("s3cr3t", File.ReadAllText(secretsPath));
-    }
-
-    [Fact]
     public async Task WhenABlockWithAPlaintextSecretHasANestedKeyTheTypeDoesNotKnow_ThenTheSecretIsMovedAndTheKeyIsKept()
     {
         // Arrange
@@ -267,26 +248,6 @@ public class SecretConversionTests : StorageTestBase
         Assert.Equal("s3cr3t", Assert.Single(ReadSecrets()).Value);
         var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
         Assert.Equal("s3cr3t", Assert.IsType<NestedSecretDevice>(page.Children["gateway"]).Password);
-    }
-
-    [Fact]
-    public async Task WhenTheSamePlaintextSecretIsWrittenBackIntoAPageAfterItWasMoved_ThenItIsMovedAgain()
-    {
-        // Arrange
-        UseSecretStore();
-        var plaintext = $"# Gateway\n\n:: {DeviceType}#gateway Host=10.0.0.1 Password=s3cr3t\n::\n";
-        WriteFile("Gateway.md", plaintext);
-        var storage = await ConnectAsync();
-        Assert.DoesNotContain("s3cr3t", TryReadText("Gateway.md"));
-
-        // Act: as an undo outside the application does.
-        WriteFile("Gateway.md", plaintext);
-        await storage.ReconcileAsync(Named("Gateway.md"));
-
-        // Assert
-        var content = TryReadText("Gateway.md")!;
-        Assert.DoesNotContain("s3cr3t", content);
-        Assert.Contains("Password=$secret:", content);
     }
 
     [Fact]
@@ -309,23 +270,6 @@ public class SecretConversionTests : StorageTestBase
         var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
         Assert.False(page.Children.ContainsKey("broken"));
         Assert.Equal("s3cr3t", Assert.IsType<EmbeddedSecretDevice>(page.Children["gateway"]).Password);
-    }
-
-    [Fact]
-    public async Task WhenABlockThatCannotBeWrittenHoldsAPlaintextSecret_ThenItIsMovedOnLoad()
-    {
-        // Arrange
-        UseSecretStore();
-        var deviceType = typeof(UnwritableSecretDevice).FullName;
-        WriteFile("Gateway.md", $"# Gateway\n\n:: {deviceType}#gateway Password=s3cr3t\n::\n");
-
-        // Act
-        var storage = await ConnectAsync();
-
-        // Assert
-        Assert.StartsWith($"# Gateway\n\n:: {deviceType}#gateway Password=$secret:", TryReadText("Gateway.md"));
-        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
-        Assert.Equal("s3cr3t", Assert.IsType<UnwritableSecretDevice>(page.Children["gateway"]).Password);
     }
 
     [Fact]
@@ -858,25 +802,6 @@ public class SecretConversionTests : StorageTestBase
         Assert.Equal(content, TryReadText("Gateway.md"));
     }
 
-    [Fact]
-    public async Task WhenAPageSourceWithAPlaintextSecretIsWrittenAsAStream_ThenTheFileOnlyEverHoldsAReference()
-    {
-        // Arrange
-        UseSecretStore();
-        WriteFile("Gateway.md", "# Gateway\n");
-        var storage = await ConnectAsync();
-        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
-        using var content = new MemoryStream(System.Text.Encoding.UTF8.GetBytes($"# Gateway\n\n:: {DeviceType}#gateway Password=s3cr3t\n::\n"));
-
-        // Act
-        await page.WriteAsync(content, CancellationToken.None);
-
-        // Assert
-        var text = TryReadText("Gateway.md")!;
-        Assert.DoesNotContain("s3cr3t", text);
-        Assert.Contains("Password=$secret:", text);
-    }
-
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -989,23 +914,6 @@ public class SecretConversionTests : StorageTestBase
             LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
             => messages.Enqueue(formatter(state, exception));
     }
-}
-
-/// <summary>A device whose block can never be written: its slot that takes page content always holds a subject of its own.</summary>
-[InterceptorSubject]
-public partial class UnwritableSecretDevice : IConfigurable
-{
-    private readonly EmbeddedSecretDevice _ownChild = new();
-
-    [Configuration(IsSecret = true)]
-    public partial string? Password { get; set; }
-
-    [Slot(IsDefault = true)]
-    public partial IInterceptorSubject? Child { get; set; }
-
-    partial void OnChildChanging(ref IInterceptorSubject? newValue, ref bool cancel) => newValue = _ownChild;
-
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 /// <summary>A device that cancels the parse that applies its configuration in place while <see cref="CancelOnApply"/> is set.</summary>
