@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Internal;
@@ -152,16 +151,7 @@ internal sealed class SecretPageConverter
             return;
         }
 
-        try
-        {
-            // Strict, as the parser reads it: a fence with a duplicate key is an error block and is left alone.
-            using var _ = JsonDocument.Parse(json, MarkdownContentParser.StrictJsonOptions);
-        }
-        catch (JsonException)
-        {
-            return;
-        }
-
+        // Also false for a fence with a duplicate key, which the parser reads as an error block.
         if (!_serializer.TryConvertSecrets(json, type, ConfigurationNaming.CSharpProperty, out var converted))
         {
             return;
