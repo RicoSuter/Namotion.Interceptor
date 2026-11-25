@@ -312,11 +312,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         var key = KeyOf(ReadString(serializer.Serialize(device), "password"));
         device.Password = "older";
         var gate = new FirstReadGate();
-        device.OnRead = value =>
-        {
-            gate.OnRead();
-            return value;
-        };
+        device.OnRead = gate.OnRead;
 
         // Act: the older write blocks after it read "older", and the newer one waits for the lock.
         Task<string>? older = null;
@@ -352,11 +348,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         var key = KeyOf(ReadString(serializer.Serialize(device), "password"));
         device.Password = "new";
         var gate = new FirstReadGate();
-        device.OnRead = value =>
-        {
-            gate.OnRead();
-            return value;
-        };
+        device.OnRead = gate.OnRead;
 
         // Act: the changed write blocks after it read "new", before it stores it. The value changes back to "old", which
         // the store still holds, and the unchanged write waits for the lock.
@@ -391,11 +383,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         var (serializer, store) = CreateSerializer();
         var device = new SecretGatedDevice { Password = "hunter2" };
         var gate = new FirstReadGate();
-        device.OnRead = value =>
-        {
-            gate.OnRead();
-            return value;
-        };
+        device.OnRead = gate.OnRead;
 
         // Act: the first write blocks after it read the value, before it stores it, and the second one waits for the lock.
         Task<string>? first = null;
@@ -850,12 +838,18 @@ public partial class SecretGatedDevice : IConfigurable
 {
     private volatile string? _password;
 
-    public Func<string?, string?> OnRead { get; set; } = static value => value;
+    // Called after the value is read, so that a blocked write keeps the value it read when the test changes it.
+    public Action? OnRead { get; set; }
 
     [Configuration(IsSecret = true)]
     public string? Password
     {
-        get => OnRead(_password);
+        get
+        {
+            var value = _password;
+            OnRead?.Invoke();
+            return value;
+        }
         set => _password = value;
     }
 
