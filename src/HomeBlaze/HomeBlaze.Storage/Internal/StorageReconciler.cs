@@ -743,11 +743,10 @@ internal sealed class StorageReconciler
     private async Task<ConvertedContent> ConvertSecretsAsync(
         string path, byte[] content, string hash, StorageVersion version, CancellationToken cancellationToken)
     {
-        var text = StorageText.Decode(content, out var encoding, out var hasByteOrderMark);
+        var isExact = _storage.TryDecodeExact(path, content, out var text, out var encoding, out var hasByteOrderMark);
         var unchanged = new ConvertedContent(content, text, hash, version);
-        if (!StorageText.IsExact(text, content, encoding, hasByteOrderMark))
+        if (!isExact)
         {
-            _logger?.LogWarning("{Path} is not valid text in its encoding, so its plaintext secrets are not moved to the secret store; save it as UTF-8.", path);
             return unchanged;
         }
 

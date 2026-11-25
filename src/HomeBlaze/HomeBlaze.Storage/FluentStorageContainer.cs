@@ -760,19 +760,29 @@ public partial class FluentStorageContainer :
     /// not a string property of a subject.</exception>
     private byte[] ConvertSecrets(string path, byte[] bytes)
     {
-        if (!StorageReconciler.IsConvertible(path))
+        if (!StorageReconciler.IsConvertible(path) ||
+            !TryDecodeExact(path, bytes, out var text, out var encoding, out var hasByteOrderMark))
         {
-            return bytes;
-        }
-
-        var text = StorageText.Decode(bytes, out var encoding, out var hasByteOrderMark);
-        if (!StorageText.IsExact(text, bytes, encoding, hasByteOrderMark))
-        {
-            _logger?.LogWarning("{Path} is not valid text in its encoding, so its plaintext secrets are not moved to the secret store; save it as UTF-8.", path);
             return bytes;
         }
 
         return TryConvertSecrets(path, text, out var converted) ? StorageText.Encode(converted, encoding, hasByteOrderMark) : bytes;
+    }
+
+    /// <summary>
+    /// Decodes the content of a file whose plaintext secrets are converted, and returns whether encoding the text gives
+    /// the content back, which a converted write needs. Logs a warning when it does not.
+    /// </summary>
+    internal bool TryDecodeExact(string path, byte[] content, out string text, out Encoding encoding, out bool hasByteOrderMark)
+    {
+        text = StorageText.Decode(content, out encoding, out hasByteOrderMark);
+        if (StorageText.IsExact(text, content, encoding, hasByteOrderMark))
+        {
+            return true;
+        }
+
+        _logger?.LogWarning("{Path} is not valid text in its encoding, so its plaintext secrets are not moved to the secret store; save it as UTF-8.", path);
+        return false;
     }
 
     /// <summary>
