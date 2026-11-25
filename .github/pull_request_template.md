@@ -18,6 +18,15 @@
 
 <!-- The problem this solves, when the summary does not already make it obvious. Drop this heading if it does. -->
 
+## How
+
+<!-- How the change works, for a reviewer who has not opened the diff: the types and methods that
+     carry it, and the ordering or locking the Contract depends on. Prefer a ```mermaid diagram to
+     prose for more than two steps or parts (sequenceDiagram for call order, flowchart for structure).
+     Then one bullet per decision a reviewer would question: the option taken, the alternative
+     rejected, and why. No file-by-file changelog; link docs/design/ when the design outlives the PR.
+     Drop this heading when the summary says it all. -->
+
 ## Contract
 
 <!-- Optional. What a caller can now rely on: the invariants this change establishes or alters.
