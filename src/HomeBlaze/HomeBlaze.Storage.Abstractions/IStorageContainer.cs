@@ -46,19 +46,23 @@ public interface IStorageContainer
     /// Implementations must ensure atomic writes: either the full content is written successfully,
     /// or the previous content remains intact (e.g., write to a temporary location, then rename).
     /// A crash or failure during write must not leave the blob in a corrupted partial state.
+    /// The plaintext secrets of a JSON file or a page are stored in the secret store and written as references,
+    /// so the written content can differ from the given one.
     /// </summary>
     /// <param name="path">The relative path to the blob.</param>
     /// <param name="content">The content to write.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
     Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Writes content to a blob at the specified path, atomically as
-    /// <see cref="WriteBlobAsync(string, Stream, CancellationToken)"/> does.
+    /// Writes content to a blob at the specified path, atomically and with the plaintext secrets of a JSON file or a
+    /// page written as references, as <see cref="WriteBlobAsync(string, Stream, CancellationToken)"/> does.
     /// </summary>
     /// <param name="path">The relative path to the blob.</param>
     /// <param name="content">The content to write. The caller may change it once the returned task has completed.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
     Task WriteBlobAsync(string path, ReadOnlyMemory<byte> content, CancellationToken cancellationToken);
 
     /// <summary>
