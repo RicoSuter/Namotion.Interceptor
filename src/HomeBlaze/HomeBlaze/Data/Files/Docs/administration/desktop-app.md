@@ -38,7 +38,7 @@ Running HomeBlaze locally needs a folder to keep its data in. The key difference
 
 ## Settings
 
-The app's settings, including which kind of folder to use, live on one screen. Open it with `Ctrl+Comma` (`Cmd+Comma` on macOS) while the window has focus. The shortcut needs the HomeBlaze instance shown in the window to support it, so it is not available when connecting to an older remote instance; start the app with the `--settings` command-line option instead in that case.
+The app's settings, including which kind of folder to use, live on one screen. Open it with **Switch folder or instance** in the menu at the right end of the app bar, or with `Ctrl+Comma` (`Cmd+Comma` on macOS) while the window has focus. The folder or instance that is open keeps running behind the screen: **Back** or `Esc` returns to it as it was, and it closes only when another one is opened or it is removed from the list. The menu entry and the shortcut need the HomeBlaze instance shown in the window to support them, so they are not available when connecting to an older remote instance; start the app with the `--settings` command-line option instead in that case.
 
 ---
 

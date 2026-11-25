@@ -70,7 +70,7 @@ internal static class Program
         }
 
         _shell = new PhotinoDesktopShell(_window);
-        _bootstrap = new BootstrapScreen(_store, _shell, OpenConnectionAsync);
+        _bootstrap = new BootstrapScreen(_store, _shell, OpenConnectionAsync, CloseConnectionAsync);
 
         _window.RegisterCustomSchemeHandler(BootstrapScreen.Scheme, HandleBootstrapRequest);
         _window.RegisterWebMessageReceivedHandler(OnWebMessageReceived);
@@ -136,18 +136,10 @@ internal static class Program
                 return;
             }
 
+            // The instance keeps running behind the settings screen, so going back to it is instant and keeps
+            // its state. It stops only when the screen opens another connection or removes this one.
             if (message == "shell:settings")
             {
-                await ConnectionGate.WaitAsync();
-                try
-                {
-                    await StopHostAsync();
-                }
-                finally
-                {
-                    ConnectionGate.Release();
-                }
-
                 _shell.Navigate(BootstrapScreen.Address);
                 return;
             }
@@ -171,6 +163,7 @@ internal static class Program
         try
         {
             await StopHostAsync();
+            _bootstrap.ClearActiveConnection();
 
             string address;
             if (connection.Kind == ConnectionKind.Remote)
@@ -214,6 +207,7 @@ internal static class Program
             _store.Save(settings with { LastConnectionId = connection.Id });
 
             _bootstrap.SetError(null);
+            _bootstrap.SetActiveConnection(connection.Id, address);
             _shell.Navigate(address);
         }
         catch (Exception exception)
@@ -224,6 +218,20 @@ internal static class Program
             // that is always reachable.
             _bootstrap.SetError($"Could not open '{connection.Name}': {exception.Message}");
             _shell.Navigate(BootstrapScreen.Address);
+        }
+        finally
+        {
+            ConnectionGate.Release();
+        }
+    }
+
+    private static async Task CloseConnectionAsync()
+    {
+        await ConnectionGate.WaitAsync();
+        try
+        {
+            await StopHostAsync();
+            _bootstrap.ClearActiveConnection();
         }
         finally
         {

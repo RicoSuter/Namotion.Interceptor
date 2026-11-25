@@ -5,12 +5,27 @@
         return;
     }
 
+    // Reveals the page's desktop-only entries (app.css) and picks the shortcut they show.
+    document.documentElement.classList.add('desktop-shell');
+    if (/Mac/.test(navigator.platform)) {
+        document.documentElement.classList.add('desktop-shell-mac');
+    }
+
     // Sends the desktop shell back to its settings screen. The shell cannot observe key presses itself,
     // because Photino exposes no accelerator API, so the page has to report them.
+    const openSettings = () => window.external.sendMessage('shell:settings');
+
     window.addEventListener('keydown', event => {
         if (event.key === ',' && (event.ctrlKey || event.metaKey)) {
             event.preventDefault();
-            window.external.sendMessage('shell:settings');
+            openSettings();
+        }
+    });
+
+    // The menu entry carries no click handler of its own, because a browser has no shell to send it to.
+    window.addEventListener('click', event => {
+        if (event.button === 0 && event.composedPath().some(node => node instanceof Element && node.matches('[data-desktop-shell-action="settings"]'))) {
+            openSettings();
         }
     });
 

@@ -21,10 +21,16 @@
         .error { background: #4a1f24; border: 1px solid #8a3a44; border-radius: 6px; padding: 0.75rem; margin-bottom: 1.5rem; }
         .hint { font-size: 0.8rem; color: #9a9aa4; margin-top: 0.5rem; }
         .empty { color: #9a9aa4; font-size: 0.9rem; }
+        .header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
+        .header h1 { margin: 0; }
+        .badge { font-size: 0.75rem; color: #7ee2a8; border: 1px solid #2f6a48; border-radius: 999px; padding: 0.1rem 0.5rem; margin-left: 0.5rem; font-weight: 400; }
     </style>
 </head>
 <body>
-<h1>HomeBlaze</h1>
+<div class="header">
+    <h1>HomeBlaze</h1>
+    <button id="back" style="display: none" title="Esc">Back</button>
+</div>
 <div id="error" class="error" style="display: none"></div>
 
 <h2>Saved connections</h2>
@@ -51,7 +57,13 @@
 <script>
     const send = message => window.external.sendMessage(JSON.stringify(message));
 
+    const goBack = () => send({ type: 'back' });
+    let isActive = false;
+
     function render(state) {
+        isActive = state.activeId != null;
+        document.getElementById('back').style.display = isActive ? 'inline-block' : 'none';
+
         const list = document.getElementById('connections');
         list.textContent = '';
         document.getElementById('empty').style.display = state.connections.length ? 'none' : 'block';
@@ -64,6 +76,13 @@
             const name = document.createElement('div');
             name.className = 'name';
             name.textContent = connection.name;
+            const isOpen = connection.id === state.activeId;
+            if (isOpen) {
+                const badge = document.createElement('span');
+                badge.className = 'badge';
+                badge.textContent = 'Open';
+                name.append(badge);
+            }
             const detail = document.createElement('div');
             detail.className = 'detail';
             detail.textContent = connection.detail;
@@ -71,7 +90,7 @@
 
             const open = document.createElement('button');
             open.className = 'primary';
-            open.textContent = 'Open';
+            open.textContent = isOpen ? 'Back' : 'Open';
             open.onclick = () => send({ type: 'open', id: connection.id });
 
             const remove = document.createElement('button');
@@ -86,6 +105,14 @@
         error.style.display = state.error ? 'block' : 'none';
         error.textContent = state.error ?? '';
     }
+
+    document.getElementById('back').onclick = goBack;
+    window.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && isActive) {
+            event.preventDefault();
+            goBack();
+        }
+    });
 
     document.getElementById('add-url').onclick = () => {
         const url = document.getElementById('url').value.trim();

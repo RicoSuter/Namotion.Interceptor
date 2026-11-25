@@ -6,6 +6,7 @@ public class BootstrapScreenTests : IDisposable
 {
     private readonly string _directory = Directory.CreateTempSubdirectory("bootstrap-screen").FullName;
     private readonly List<ShellConnection> _opened = [];
+    private int _closeCount;
 
     private string FilePath => Path.Combine(_directory, "app-settings.json");
 
@@ -18,7 +19,18 @@ public class BootstrapScreenTests : IDisposable
         {
             _opened.Add(connection);
             return Task.CompletedTask;
+        },
+        () =>
+        {
+            _closeCount++;
+            return Task.CompletedTask;
         });
+
+    private static async Task<string> AddRemoteAsync(BootstrapScreen screen)
+    {
+        var state = await screen.HandleMessageAsync("""{"type":"add-remote","url":"http://pi:8080/"}""");
+        return JsonDocument.Parse(state!).RootElement.GetProperty("connections")[0].GetProperty("id").GetString()!;
+    }
 
     [Fact]
     public void WhenThePageIsOpened_ThenTheEmbeddedResourceIsFound()
@@ -142,13 +154,128 @@ public class BootstrapScreenTests : IDisposable
         Assert.Equal(0, connections.GetArrayLength());
     }
 
+    [Fact]
+    public async Task WhenAConnectionIsActive_ThenTheStateNamesIt()
+    {
+        // Arrange
+        var screen = CreateScreen();
+        var id = await AddRemoteAsync(screen);
+        screen.SetActiveConnection(id, "http://pi:8080/");
+
+        // Act
+        var state = await screen.HandleMessageAsync("""{"type":"ready"}""");
+
+        // Assert
+        Assert.Equal(id, JsonDocument.Parse(state!).RootElement.GetProperty("activeId").GetString());
+    }
+
+    [Fact]
+    public async Task WhenBackArrives_ThenTheWindowReturnsToTheActiveConnection()
+    {
+        // Arrange
+        var shell = new FakeDesktopShell(null);
+        var screen = CreateScreen(shell);
+        var id = await AddRemoteAsync(screen);
+        screen.SetActiveConnection(id, "http://127.0.0.1:5000/");
+
+        // Act
+        await screen.HandleMessageAsync("""{"type":"back"}""");
+
+        // Assert
+        Assert.Equal(["http://127.0.0.1:5000/"], shell.Navigations);
+    }
+
+    [Fact]
+    public async Task WhenBackArrivesWithNoActiveConnection_ThenTheWindowStays()
+    {
+        // Arrange
+        var shell = new FakeDesktopShell(null);
+        var screen = CreateScreen(shell);
+        var id = await AddRemoteAsync(screen);
+        screen.SetActiveConnection(id, "http://127.0.0.1:5000/");
+        screen.ClearActiveConnection();
+
+        // Act
+        await screen.HandleMessageAsync("""{"type":"back"}""");
+
+        // Assert
+        Assert.Empty(shell.Navigations);
+    }
+
+    [Fact]
+    public async Task WhenTheActiveConnectionIsOpened_ThenTheWindowReturnsWithoutReopeningIt()
+    {
+        // Arrange
+        var shell = new FakeDesktopShell(null);
+        var screen = CreateScreen(shell);
+        var id = await AddRemoteAsync(screen);
+        screen.SetActiveConnection(id, "http://127.0.0.1:5000/");
+
+        // Act
+        await screen.HandleMessageAsync($$"""{"type":"open","id":"{{id}}"}""");
+
+        // Assert
+        Assert.Empty(_opened);
+        Assert.Equal(["http://127.0.0.1:5000/"], shell.Navigations);
+    }
+
+    [Fact]
+    public async Task WhenAnotherConnectionIsOpened_ThenItIsOpened()
+    {
+        // Arrange
+        var screen = CreateScreen();
+        var activeId = await AddRemoteAsync(screen);
+        var otherState = await screen.HandleMessageAsync("""{"type":"add-remote","url":"http://other:8080/"}""");
+        var otherId = JsonDocument.Parse(otherState!).RootElement.GetProperty("connections")[1].GetProperty("id").GetString();
+        screen.SetActiveConnection(activeId, "http://pi:8080/");
+
+        // Act
+        await screen.HandleMessageAsync($$"""{"type":"open","id":"{{otherId}}"}""");
+
+        // Assert
+        Assert.Equal(otherId, Assert.Single(_opened).Id);
+    }
+
+    [Fact]
+    public async Task WhenTheActiveConnectionIsRemoved_ThenItIsClosed()
+    {
+        // Arrange
+        var screen = CreateScreen();
+        var id = await AddRemoteAsync(screen);
+        screen.SetActiveConnection(id, "http://pi:8080/");
+
+        // Act
+        await screen.HandleMessageAsync($$"""{"type":"remove","id":"{{id}}"}""");
+
+        // Assert
+        Assert.Equal(1, _closeCount);
+    }
+
+    [Fact]
+    public async Task WhenAnInactiveConnectionIsRemoved_ThenTheActiveOneStaysOpen()
+    {
+        // Arrange
+        var screen = CreateScreen();
+        var activeId = await AddRemoteAsync(screen);
+        var otherState = await screen.HandleMessageAsync("""{"type":"add-remote","url":"http://other:8080/"}""");
+        var otherId = JsonDocument.Parse(otherState!).RootElement.GetProperty("connections")[1].GetProperty("id").GetString();
+        screen.SetActiveConnection(activeId, "http://pi:8080/");
+
+        // Act
+        var state = await screen.HandleMessageAsync($$"""{"type":"remove","id":"{{otherId}}"}""");
+
+        // Assert
+        Assert.Equal(0, _closeCount);
+        Assert.Equal(activeId, JsonDocument.Parse(state!).RootElement.GetProperty("activeId").GetString());
+    }
+
     private sealed class FakeDesktopShell(string? folderToReturn) : IDesktopShell
     {
+        public List<string> Navigations { get; } = [];
+
         public Task<string?> PickFolderAsync(string title) => Task.FromResult(folderToReturn);
 
-        public void Navigate(string address)
-        {
-        }
+        public void Navigate(string address) => Navigations.Add(address);
 
         public ShellWindowState GetWindowState() => new();
     }

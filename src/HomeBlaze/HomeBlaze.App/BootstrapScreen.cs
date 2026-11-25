@@ -9,7 +9,8 @@ namespace HomeBlaze.App;
 /// </summary>
 /// <remarks>
 /// It is deliberately independent of any HomeBlaze instance. In remote mode the instance is on another
-/// machine and cannot host this, and in embedded mode no instance is running yet when this screen is shown.
+/// machine and cannot host this, and in embedded mode no instance may be running when this screen is shown.
+/// An instance that is running stays open behind the screen until another connection replaces it.
 /// </remarks>
 public sealed class BootstrapScreen
 {
@@ -22,17 +23,28 @@ public sealed class BootstrapScreen
     private readonly ShellSettingsStore _store;
     private readonly IDesktopShell _shell;
     private readonly Func<ShellConnection, Task> _open;
+    private readonly Func<Task> _close;
 
     private string? _error;
 
+    // Replaced as a whole, because the shell sets it from the continuation of a host start while the page
+    // reads it on the window's message-loop thread.
+    private volatile ActiveConnection? _active;
+
+    /// <param name="store">Saved connections.</param>
+    /// <param name="shell">Window the screen navigates and opens dialogs in.</param>
+    /// <param name="open">Opens a connection, replacing the active one.</param>
+    /// <param name="close">Closes the active connection.</param>
     public BootstrapScreen(
         ShellSettingsStore store,
         IDesktopShell shell,
-        Func<ShellConnection, Task> open)
+        Func<ShellConnection, Task> open,
+        Func<Task> close)
     {
         _store = store;
         _shell = shell;
         _open = open;
+        _close = close;
     }
 
     /// <summary>Reads the page out of the assembly.</summary>
@@ -45,6 +57,12 @@ public sealed class BootstrapScreen
 
     /// <summary>Shows a message on the screen the next time it renders.</summary>
     public void SetError(string? error) => _error = error;
+
+    /// <summary>Records the connection the window shows, which the screen can return to without reopening it.</summary>
+    public void SetActiveConnection(string connectionId, string address) => _active = new ActiveConnection(connectionId, address);
+
+    /// <summary>Records that no connection is open.</summary>
+    public void ClearActiveConnection() => _active = null;
 
     /// <summary>Handles one message from the page. Returns the JSON state to send back, or null.</summary>
     public async Task<string?> HandleMessageAsync(string rawMessage)
@@ -74,11 +92,15 @@ public sealed class BootstrapScreen
                 break;
 
             case "remove":
-                Remove(message!["id"]!.GetValue<string>());
+                await RemoveAsync(message!["id"]!.GetValue<string>());
                 break;
 
             case "open":
                 await OpenAsync(message!["id"]!.GetValue<string>());
+                return null;
+
+            case "back":
+                GoBack();
                 return null;
 
             default:
@@ -138,8 +160,13 @@ public sealed class BootstrapScreen
         _error = null;
     }
 
-    private void Remove(string id)
+    private async Task RemoveAsync(string id)
     {
+        if (_active?.ConnectionId == id)
+        {
+            await _close();
+        }
+
         var settings = _store.Load();
         _store.Save(settings with
         {
@@ -156,7 +183,21 @@ public sealed class BootstrapScreen
             return;
         }
 
+        if (_active is { } active && active.ConnectionId == id)
+        {
+            _shell.Navigate(active.Address);
+            return;
+        }
+
         await _open(connection);
+    }
+
+    private void GoBack()
+    {
+        if (_active is { } active)
+        {
+            _shell.Navigate(active.Address);
+        }
     }
 
     private string BuildState()
@@ -179,6 +220,13 @@ public sealed class BootstrapScreen
             });
         }
 
-        return new JsonObject { ["connections"] = connections, ["error"] = _error }.ToJsonString();
+        return new JsonObject
+        {
+            ["connections"] = connections,
+            ["activeId"] = _active?.ConnectionId,
+            ["error"] = _error
+        }.ToJsonString();
     }
+
+    private sealed record ActiveConnection(string ConnectionId, string Address);
 }
