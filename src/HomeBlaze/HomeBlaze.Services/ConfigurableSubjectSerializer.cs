@@ -40,6 +40,10 @@ public class ConfigurableSubjectSerializer
     private readonly JsonSerializerOptions _cSharpPropertyOptions;
     // Null without a SecretStore service, which leaves secret values as they are.
     private readonly SecretReferences? _secrets;
+
+    // Null without a SecretStore service, which leaves configuration text as it is.
+    private readonly SecretConverter? _secretConverter;
+
     // Never cleared: holds its Type keys, and with them their assemblies, as long as the serializer lives, like TypeProvider.
     private readonly ConcurrentDictionary<(Type Type, ConfigurationNaming Naming), JsonElement?> _defaultConfigurations = new();
 
@@ -52,6 +56,7 @@ public class ConfigurableSubjectSerializer
         _secrets = serviceProvider.GetService<SecretStore>() is { } store
             ? new SecretReferences(store, serviceProvider.GetService<ILogger<ConfigurableSubjectSerializer>>())
             : null;
+        _secretConverter = serviceProvider.GetService<SecretStore>() is { } converterStore ? new SecretConverter(converterStore) : null;
         _jsonPropertyOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.JsonProperty, _secrets);
         _cSharpPropertyOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.CSharpProperty, _secrets);
     }
@@ -316,7 +321,7 @@ public class ConfigurableSubjectSerializer
         }
 
         // Find the type in registered types
-        var type = _typeProvider.Types.FirstOrDefault(t => t.FullName == typeName);
+        var type = FindType(typeName);
         if (type == null)
         {
             return null;
@@ -391,6 +396,84 @@ public class ConfigurableSubjectSerializer
                 }
             }
         }
+    }
+
+    private static readonly JsonSerializerOptions IndentedOptions = new() { WriteIndented = true };
+
+    /// <summary>
+    /// Replaces each plaintext secret in configuration JSON, whose root names its type with <c>$type</c>, by a reference
+    /// to a new key of the <see cref="SecretStore"/>, and stores the values with one write. Returns false, with
+    /// <paramref name="converted"/> being <paramref name="json"/>, when there is nothing to replace, when the text is not
+    /// a JSON object of a known type, or without a <see cref="SecretStore"/> service.
+    /// </summary>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is stored.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is stored.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A type in the configuration has a secret configuration property that is not a string property of a subject.
+    /// </exception>
+    public bool TryConvertSecrets(string json, ConfigurationNaming naming, out string converted)
+    {
+        converted = json;
+        if (_secretConverter is null || ParseObject(json) is not { } root ||
+            root[TypeDiscriminatorPropertyName] is not JsonValue discriminator ||
+            !discriminator.TryGetValue<string>(out var typeName) ||
+            FindType(typeName) is not { } type)
+        {
+            return false;
+        }
+
+        return TryConvert(root, type, naming, ref converted);
+    }
+
+    /// <summary>
+    /// Replaces each plaintext secret in configuration JSON of <paramref name="type"/>, such as a block configuration whose
+    /// type is given elsewhere, like <see cref="TryConvertSecrets(string, ConfigurationNaming, out string)"/>.
+    /// </summary>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is stored.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is stored.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A type in the configuration has a secret configuration property that is not a string property of a subject.
+    /// </exception>
+    public bool TryConvertSecrets(string json, Type type, ConfigurationNaming naming, out string converted)
+    {
+        converted = json;
+        return _secretConverter is not null && ParseObject(json) is { } root && TryConvert(root, type, naming, ref converted);
+    }
+
+    private bool TryConvert(JsonObject root, Type type, ConfigurationNaming naming, ref string converted)
+    {
+        if (!_secretConverter!.TryConvert(root, type, GetOptions(naming), naming))
+        {
+            return false;
+        }
+
+        converted = root.ToJsonString(IndentedOptions);
+        return true;
+    }
+
+    private static JsonObject? ParseObject(string json)
+    {
+        try
+        {
+            return JsonNode.Parse(json) as JsonObject;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private Type? FindType(string fullName)
+    {
+        foreach (var type in _typeProvider.Types)
+        {
+            if (type.FullName == fullName)
+            {
+                return type;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

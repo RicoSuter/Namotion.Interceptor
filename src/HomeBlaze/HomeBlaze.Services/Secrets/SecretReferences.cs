@@ -400,7 +400,7 @@ internal sealed class SecretReferences
         return index;
     }
 
-    private static bool IsReference(string text) =>
+    internal static bool IsReference(string text) =>
         text.Length == Prefix.Length + KeyLength &&
         text.StartsWith(Prefix, StringComparison.Ordinal) &&
         !text.AsSpan(Prefix.Length).ContainsAnyExcept(KeyCharacters);
