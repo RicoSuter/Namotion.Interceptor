@@ -53,6 +53,9 @@ public interface IStorageContainer
     /// <param name="content">The content to write.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="InvalidOperationException">A type in the content has a secret configuration property that is
+    /// not a string property of a subject. Nothing is written.</exception>
     Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken);
 
     /// <summary>
@@ -63,6 +66,9 @@ public interface IStorageContainer
     /// <param name="content">The content to write. The caller may change it once the returned task has completed.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="InvalidOperationException">A type in the content has a secret configuration property that is
+    /// not a string property of a subject. Nothing is written.</exception>
     Task WriteBlobAsync(string path, ReadOnlyMemory<byte> content, CancellationToken cancellationToken);
 
     /// <summary>
