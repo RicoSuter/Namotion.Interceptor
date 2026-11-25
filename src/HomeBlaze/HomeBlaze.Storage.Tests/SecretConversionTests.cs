@@ -114,7 +114,7 @@ public class SecretConversionTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenAJsonFileIsSaved_ThenANewSecretIsStoredBeforeTheWriteAndAChangedOneAfterIt()
+    public async Task WhenAJsonFileIsSaved_ThenItsSecretsAreStoredBeforeTheWrite()
     {
         // Arrange
         UseSecretStore();
@@ -138,16 +138,15 @@ public class SecretConversionTests : StorageTestBase
 
         // Assert
         Assert.True(isWritten);
-        Assert.Equal("old-password", secretsDuringWrite[key]);
+        Assert.Equal(2, secretsDuringWrite.Count);
+        Assert.Equal("new-password", secretsDuringWrite[key]);
         Assert.Contains("new-token", secretsDuringWrite.Values);
-        var secrets = ReadSecrets();
-        Assert.Equal(2, secrets.Count);
-        Assert.Equal("new-password", secrets[key]);
+        Assert.Equal(secretsDuringWrite, ReadSecrets());
         Assert.Contains($"\"password\": \"$secret:{key}\"", File.ReadAllText(GetFullPath("Gateway.json")));
     }
 
     [Fact]
-    public async Task WhenTheWriteOfAJsonFileFails_ThenTheChangedSecretIsNotStored()
+    public async Task WhenTheWriteOfAJsonFileFails_ThenTheChangedSecretIsStored()
     {
         // Arrange
         UseSecretStore();
@@ -170,12 +169,12 @@ public class SecretConversionTests : StorageTestBase
 
         // Assert
         Assert.IsType<IOException>(failure);
-        Assert.Equal(new Dictionary<string, string> { [key] = "old-password" }, ReadSecrets());
+        Assert.Equal(new Dictionary<string, string> { [key] = "new-password" }, ReadSecrets());
         Assert.Equal(content, File.ReadAllText(GetFullPath("Gateway.json")));
     }
 
     [Fact]
-    public async Task WhenAPageBlockWriteIsRefused_ThenTheSecretStoreIsUnchangedAndTheBlockTakesItsOldValuesAgain()
+    public async Task WhenAPageBlockWriteIsRefusedAfterSerialization_ThenTheChangedSecretStaysInEffect()
     {
         // Arrange
         UseSecretStore();
@@ -198,13 +197,13 @@ public class SecretConversionTests : StorageTestBase
         // Assert
         Assert.False(isWritten);
         Assert.Equal("10.0.0.1", device.Host);
-        Assert.Equal("old-password", device.Password);
-        Assert.Equal(new Dictionary<string, string> { [key] = "old-password" }, ReadSecrets());
+        Assert.Equal("new-password", device.Password);
+        Assert.Equal(new Dictionary<string, string> { [key] = "new-password" }, ReadSecrets());
         Assert.Equal(content, File.ReadAllText(GetFullPath("Gateway.md")));
     }
 
     [Fact]
-    public async Task WhenTheWriteOfAPageFails_ThenTheChangedSecretIsNotStored()
+    public async Task WhenTheWriteOfAPageFails_ThenTheChangedSecretIsStored()
     {
         // Arrange
         UseSecretStore();
@@ -229,9 +228,9 @@ public class SecretConversionTests : StorageTestBase
 
         // Assert
         Assert.IsType<IOException>(failure);
-        Assert.Equal(new Dictionary<string, string> { [key] = "old-password" }, ReadSecrets());
+        Assert.Equal(new Dictionary<string, string> { [key] = "new-password" }, ReadSecrets());
         Assert.Equal("10.0.0.1", device.Host);
-        Assert.Equal("old-password", device.Password);
+        Assert.Equal("new-password", device.Password);
     }
 
     [Fact]

@@ -556,9 +556,7 @@ public partial class FluentStorageContainer :
                 if (fileSubject is not IConfigurable || fileSubject is IStorageFile || entry is null)
                     return;
 
-                var json = _serializer.CaptureSecretChanges(() => _serializer.Serialize(fileSubject), out var secretChanges);
-
-                await secretChanges.StoreAroundAsync(() => WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(json), token));
+                await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(fileSubject)), token);
                 isWritten = true;
 
                 _logger?.LogDebug("Saved subject to storage: {Path}", entry.Path);
@@ -606,8 +604,7 @@ public partial class FluentStorageContainer :
             }
 
             var entry = new StorageEntry { Path = relativePath, IsFolder = false, Subject = subject };
-            var json = _serializer.CaptureSecretChanges(() => _serializer.Serialize(subject), out var secretChanges);
-            await secretChanges.StoreAroundAsync(() => WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(json), token));
+            await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(subject)), token);
 
             connection.Index.EnsureFolders(relativePath);
             connection.Index.Set(entry);

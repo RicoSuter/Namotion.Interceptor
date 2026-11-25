@@ -3,7 +3,6 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Services;
-using HomeBlaze.Services.Secrets;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Abstractions.Attributes;
 using HomeBlaze.Storage.Internal;
@@ -624,15 +623,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         IInterceptorSubject content, IInterceptorSubject? before, IInterceptorSubject widget, string? name, CancellationToken cancellationToken)
     {
         var typeName = widget.GetType().FullName!;
-        var configurationJson = SerializeNewBlock(widget, out var secretChanges);
+        var configurationJson = MarkdownBlockConfiguration.Serialize(_serializer, widget, block: null);
         return EditStructureAsync(
             (snapshot, page) => TryGetInsertPoint(snapshot, page, content, before, out var owner, out var line, out var refusal)
                 ? (MarkdownPageOperations.TryInsertWidget(
                     page, snapshot.BlockSubjects, owner, line, typeName, name, configurationJson, out refusal), refusal)
                 : (null, refusal),
             GetChangedPageRefusal(before),
-            cancellationToken,
-            secretChanges);
+            cancellationToken);
     }
 
     /// <summary>
@@ -813,7 +811,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         IInterceptorSubject owner, string slotName, IInterceptorSubject item, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(item);
-        var configurationJson = SerializeNewBlock(item, out var secretChanges);
+        var configurationJson = MarkdownBlockConfiguration.Serialize(_serializer, item, block: null);
         return EditStructureAsync(
             (snapshot, page) =>
             {
@@ -832,8 +830,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 return (MarkdownPageOperations.TryAppendSlotBlock(page, subjects, block, slotName, configurationJson, out var refusal), refusal);
             },
             StructureChangedRefusal,
-            cancellationToken,
-            secretChanges);
+            cancellationToken);
     }
 
     /// <summary>
@@ -852,14 +849,13 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         IInterceptorSubject owner, string? slotName, IInterceptorSubject widget, string? name, CancellationToken cancellationToken)
     {
         var typeName = widget.GetType().FullName!;
-        var configurationJson = SerializeNewBlock(widget, out var secretChanges);
+        var configurationJson = MarkdownBlockConfiguration.Serialize(_serializer, widget, block: null);
         return AddToSlotAsync(
             owner,
             slotName,
             (MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> subjects, MarkdownBlock container, int line, out string? refusal) =>
                 MarkdownPageOperations.TryInsertWidget(page, subjects, container, line, typeName, name, configurationJson, out refusal),
-            cancellationToken,
-            secretChanges);
+            cancellationToken);
     }
 
     /// <summary>
@@ -885,11 +881,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     private Task<MarkdownEditResult> AddToSlotAsync(
-        IInterceptorSubject owner,
-        string? slotName,
-        MarkdownContentInsert insert,
-        CancellationToken cancellationToken,
-        SecretChanges? secretChanges = null) =>
+        IInterceptorSubject owner, string? slotName, MarkdownContentInsert insert, CancellationToken cancellationToken) =>
         EditStructureAsync(
             (snapshot, page) =>
             {
@@ -909,8 +901,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 return (MarkdownPageOperations.TryAddToSlot(page, snapshot.BlockSubjects, block, slots, slot, insert, out var refusal), refusal);
             },
             StructureChangedRefusal,
-            cancellationToken,
-            secretChanges);
+            cancellationToken);
 
     // The default slot when the name is null, and only a slot that takes page content: a slot of configured items takes none.
     private static SlotDefinition? FindContentSlot(SlotMap slots, string? slotName)
@@ -1020,16 +1011,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                (snapshot.Page is { } page && MarkdownPageOperations.FindContentBlock(page, snapshot.BlockSubjects, content) is not null);
     }
 
-    private string SerializeNewBlock(IInterceptorSubject subject, out SecretChanges secretChanges) =>
-        _serializer.CaptureSecretChanges(() => MarkdownBlockConfiguration.Serialize(_serializer, subject, block: null), out secretChanges);
-
-    // changedPageRefusal is the refusal when the file or the snapshot changed meanwhile. secretChanges are those of the
-    // configuration that the operation writes.
+    // changedPageRefusal is the refusal when the file or the snapshot changed meanwhile.
     private async Task<MarkdownEditResult> EditStructureAsync(
         Func<MarkdownParseResult, MarkdownPage, (MarkdownStructureChange? Change, string? Refusal)> operation,
         string changedPageRefusal,
-        CancellationToken cancellationToken,
-        SecretChanges? secretChanges = null)
+        CancellationToken cancellationToken)
     {
         EnsureNotWithinWrite();
         await _writeLock.WaitAsync(cancellationToken);
@@ -1082,7 +1068,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 return MarkdownEditResult.Refused(sizeRefusal);
             }
 
-            var publishRefusal = await PublishAndWriteAsync(snapshot, change.Write, change.ChangedBlock, changedPageRefusal, secretChanges);
+            var publishRefusal = await PublishAndWriteAsync(snapshot, change.Write, change.ChangedBlock, changedPageRefusal);
             return publishRefusal is null
                 ? MarkdownEditResult.WrittenFor(FindResultSubject(change))
                 : MarkdownEditResult.Refused(publishRefusal);
@@ -1152,10 +1138,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
         // The block spans index into the text the page was parsed from, which is the source of the
         // page and not necessarily Content.
-        string? refusal = null;
-        var write = _serializer.CaptureSecretChanges(
-            () => MarkdownBlockReconciler.TryWrite(page, snapshot.BlockSubjects, blockIndex, _serializer, out refusal),
-            out var secretChanges);
+        var write = MarkdownBlockReconciler.TryWrite(page, snapshot.BlockSubjects, blockIndex, _serializer, out var refusal);
         if (write is null)
         {
             _parser.LogRefusedWrite(FullPath, refusal!);
@@ -1170,7 +1153,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return false;
         }
 
-        return await PublishAndWriteAsync(snapshot, write, page.AllBlocks[blockIndex], ConfigurationChangedRefusal, secretChanges) is null;
+        return await PublishAndWriteAsync(snapshot, write, page.AllBlocks[blockIndex], ConfigurationChangedRefusal) is null;
     }
 
     // Under _writeLock, after a refusal. A failed read is logged, and the next pass of the storage reads the file again.
@@ -1188,13 +1171,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     // Under _writeLock: publishes the write as the snapshot that follows `snapshot` and writes its text. Returns why
     // nothing was written, or null. `changedBlock` is the block of the snapshot whose text changed, null for the page.
-    // `secretChanges` are stored only when the text is written.
     private async Task<string?> PublishAndWriteAsync(
-        MarkdownParseResult snapshot,
-        MarkdownBlockWrite write,
-        MarkdownBlock? changedBlock,
-        string changedPageRefusal,
-        SecretChanges? secretChanges)
+        MarkdownParseResult snapshot, MarkdownBlockWrite write, MarkdownBlock? changedBlock, string changedPageRefusal)
     {
         // After the graph was read and before anything is published: the blocks were compared with slot values
         // that a reload may have changed since the snapshot was parsed. A reload that published since then fails
@@ -1242,7 +1220,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
         try
         {
-            await (secretChanges is null ? WriteUnlockedAsync(content) : secretChanges.StoreAroundAsync(() => WriteUnlockedAsync(content)));
+            await WriteUnlockedAsync(content);
         }
         catch
         {

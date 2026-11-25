@@ -108,7 +108,7 @@ public class RootManagerWriteConfigurationTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenTheRootFileCannotBeWritten_ThenAChangedSecretIsNotStored()
+    public async Task WhenTheRootFileCannotBeWritten_ThenTheChangedSecretIsStored()
     {
         // Arrange
         var secretsPath = Path.Combine(Path.GetTempPath(), $"homeblaze-secrets-{Guid.NewGuid():N}.json");
@@ -138,7 +138,7 @@ public class RootManagerWriteConfigurationTests : IDisposable
 
             // Assert
             Assert.True(exception is IOException or UnauthorizedAccessException);
-            Assert.Equal("old-password", new SecretStore(secretsPath).TryGet(key, out var value) ? value : null);
+            Assert.Equal("new-password", new SecretStore(secretsPath).TryGet(key, out var value) ? value : null);
         }
         finally
         {

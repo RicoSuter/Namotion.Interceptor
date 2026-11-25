@@ -75,49 +75,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
-    public void WhenASecretChanges_ThenItIsReportedAsUnstoredWithoutStoringIt()
-    {
-        // Arrange
-        var (serializer, store) = CreateSerializer();
-        var device = Deserialize(serializer, DeviceJson(password: null));
-        device.Password = "hunter2";
-        var key = KeyOf(ReadString(serializer.Serialize(device), "password"));
-        device.Password = "correct horse";
-
-        // Act
-        var hasUnstoredSecrets = HasUnstoredSecrets(serializer, device);
-
-        // Assert
-        Assert.True(hasUnstoredSecrets);
-        Assert.True(store.TryGet(key, out var value));
-        Assert.Equal("hunter2", value);
-    }
-
-    [Fact]
-    public async Task WhenANewSecretIsSerializedWithCapturedChanges_ThenItIsStoredBeforeTheFileIsWritten()
-    {
-        // Arrange
-        var (serializer, store) = CreateSerializer();
-        var device = Deserialize(serializer, DeviceJson(password: null));
-        device.Password = "hunter2";
-
-        // Act
-        var json = serializer.CaptureSecretChanges(() => serializer.Serialize(device), out var secretChanges);
-        var wasStoredBeforeTheWrite = File.Exists(StorePath);
-        string? valueDuringWrite = null;
-        await secretChanges.StoreAroundAsync(() =>
-        {
-            store.TryGet(KeyOf(ReadString(json, "password")), out valueDuringWrite);
-            return Task.CompletedTask;
-        });
-
-        // Assert
-        Assert.False(wasStoredBeforeTheWrite);
-        Assert.Equal("hunter2", valueDuringWrite);
-    }
-
-    [Fact]
-    public async Task WhenAChangedSecretIsSerializedWithCapturedChanges_ThenItsKeyGetsTheValueAfterTheFileIsWritten()
+    public void WhenAReadSecretChanges_ThenSerializingStoresItUnderItsKeyAtOnce()
     {
         // Arrange
         var (serializer, store) = CreateSerializer();
@@ -126,113 +84,12 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         device.Password = "correct horse";
 
         // Act
-        var json = serializer.CaptureSecretChanges(() => serializer.Serialize(device), out var secretChanges);
-        string? storedDuringWrite = null;
-        string? readDuringWrite = null;
-        await secretChanges.StoreAroundAsync(() =>
-        {
-            store.TryGet(key, out storedDuringWrite);
-            readDuringWrite = Deserialize(serializer, json).Password;
-            return Task.CompletedTask;
-        });
+        var json = serializer.Serialize(device);
 
         // Assert
         Assert.Equal(Prefix + key, ReadString(json, "password"));
-        Assert.Equal("hunter2", storedDuringWrite);
-        Assert.Equal("correct horse", readDuringWrite);
-        Assert.True(store.TryGet(key, out var value));
-        Assert.Equal("correct horse", value);
-    }
-
-    [Fact]
-    public async Task WhenCapturedChangesAreDropped_ThenTheStoreIsUnchangedAndTheNextSaveCapturesThemAgain()
-    {
-        // Arrange
-        var (serializer, store) = CreateSerializer();
-        var key = Seed(store, "hunter2");
-        var device = Deserialize(serializer, DeviceJson(Prefix + key, childPassword: "inner"));
-        device.Password = "correct horse";
-        serializer.CaptureSecretChanges(() => serializer.Serialize(device), out _);
-        var entriesAfterDrop = ReadStoreFile();
-
-        // Act
-        serializer.CaptureSecretChanges(() => serializer.Serialize(device), out var secretChanges);
-        await secretChanges.StoreAroundAsync(() => Task.CompletedTask);
-
-        // Assert
-        Assert.Equal([key], entriesAfterDrop.Keys);
-        Assert.Equal("hunter2", entriesAfterDrop[key]);
-        var entries = ReadStoreFile();
-        Assert.Equal(2, entries.Count);
-        Assert.Equal("correct horse", entries[key]);
-        Assert.Contains("inner", entries.Values);
-    }
-
-    [Fact]
-    public async Task WhenTheFileWriteFails_ThenTheChangedSecretIsNotStoredAndItsKeyReadsTheOldValue()
-    {
-        // Arrange
-        var (serializer, store) = CreateSerializer();
-        var key = Seed(store, "hunter2");
-        var device = Deserialize(serializer, DeviceJson(Prefix + key));
-        device.Password = "correct horse";
-        serializer.CaptureSecretChanges(() => serializer.Serialize(device), out var secretChanges);
-
-        // Act
-        var exception = await Record.ExceptionAsync(() => secretChanges.StoreAroundAsync(() => throw new IOException("The disk is full.")));
-
-        // Assert
-        Assert.IsType<IOException>(exception);
-        Assert.Equal(new Dictionary<string, string> { [key] = "hunter2" }, ReadStoreFile());
-        Assert.Equal("hunter2", Deserialize(serializer, DeviceJson(Prefix + key)).Password);
-        Assert.True(HasUnstoredSecrets(serializer, device));
-    }
-
-    [Fact]
-    public async Task WhenCommittedSecretsAreSerializedAgain_ThenTheyKeepTheirKeysWithoutAChange()
-    {
-        // Arrange
-        var (serializer, _) = CreateSerializer();
-        var device = Deserialize(serializer, DeviceJson(password: null));
-        device.Password = "hunter2";
-        var firstJson = serializer.CaptureSecretChanges(() => serializer.Serialize(device), out var firstChanges);
-        await firstChanges.StoreAroundAsync(() => Task.CompletedTask);
-
-        // Act
-        var secondJson = serializer.CaptureSecretChanges(() => serializer.Serialize(device), out _);
-        var hasUnstoredSecrets = HasUnstoredSecrets(serializer, device);
-
-        // Assert
-        Assert.Equal(firstJson, secondJson);
-        Assert.False(hasUnstoredSecrets);
-        Assert.Single(ReadStoreFile());
-    }
-
-    [Fact]
-    public async Task WhenStoringAChangedSecretFailsAfterTheFileWrite_ThenTheSaveFailsAndTheNextSaveStoresIt()
-    {
-        // Arrange
-        var (serializer, store) = CreateSerializer();
-        var key = Seed(store, "hunter2");
-        var device = Deserialize(serializer, DeviceJson(Prefix + key));
-        device.Password = "correct horse";
-        serializer.CaptureSecretChanges(() => serializer.Serialize(device), out var secretChanges);
-
-        // Act: the store cannot replace its file while a directory has its name.
-        var exception = await Record.ExceptionAsync(() => secretChanges.StoreAroundAsync(() =>
-        {
-            File.Delete(StorePath);
-            Directory.CreateDirectory(StorePath);
-            return Task.CompletedTask;
-        }));
-        Directory.Delete(StorePath);
-        serializer.CaptureSecretChanges(() => serializer.Serialize(device), out var retriedChanges);
-        await retriedChanges.StoreAroundAsync(() => Task.CompletedTask);
-
-        // Assert
-        Assert.True(exception is IOException or UnauthorizedAccessException);
-        Assert.True(store.TryGet(key, out var value));
-        Assert.Equal("correct horse", value);
+        Assert.Equal(new Dictionary<string, string> { [key] = "correct horse" }, ReadStoreFile());
+        Assert.Equal("correct horse", Deserialize(serializer, json).Password);
     }
 
     [Fact]
@@ -378,33 +235,6 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
         Assert.Equal(reference, ReadString(json, "password"));
         Assert.Equal(new Dictionary<string, string> { [KeyOf(reference)] = "changed" }, ReadStoreFile());
         GC.KeepAlive(discarded);
-    }
-
-    [Fact]
-    public async Task WhenASubjectThatSharesAKeyChangesItsSecretWithCapturedChanges_ThenTheNewKeyIsStoredBeforeTheFileIsWritten()
-    {
-        // Arrange
-        var (serializer, store) = CreateSerializer();
-        var key = Seed(store, "hunter2");
-        var original = Deserialize(serializer, DeviceJson(Prefix + key));
-        var copy = Deserialize(serializer, DeviceJson(Prefix + key));
-        copy.Password = "copy secret";
-
-        // Act
-        var json = serializer.CaptureSecretChanges(() => serializer.Serialize(copy), out var secretChanges);
-        string? storedDuringWrite = null;
-        await secretChanges.StoreAroundAsync(() =>
-        {
-            store.TryGet(KeyOf(ReadString(json, "password")), out storedDuringWrite);
-            return Task.CompletedTask;
-        });
-
-        // Assert
-        Assert.NotEqual(Prefix + key, ReadString(json, "password"));
-        Assert.Equal("copy secret", storedDuringWrite);
-        Assert.True(store.TryGet(key, out var originalValue));
-        Assert.Equal("hunter2", originalValue);
-        Assert.Equal("hunter2", original.Password);
     }
 
     [Fact]
@@ -646,34 +476,16 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
-    public void WhenAMissingReferenceIsEnteredAgain_ThenItIsReportedAsUnstored()
-    {
-        // Arrange
-        var (serializer, _) = CreateSerializer();
-        var device = Deserialize(serializer, DeviceJson(Prefix + "0123456789abcdef0123456789abcdef"));
-        device.Password = "hunter2";
-
-        // Act
-        var hasUnstoredSecrets = HasUnstoredSecrets(serializer, device);
-
-        // Assert
-        Assert.True(hasUnstoredSecrets);
-        Assert.False(File.Exists(StorePath));
-    }
-
-    [Fact]
-    public void WhenAPlaintextSecretIsDeserialized_ThenItIsSetAndReportedAsUnstoredWithoutStoringIt()
+    public void WhenAPlaintextSecretIsDeserialized_ThenItIsSetWithoutStoringIt()
     {
         // Arrange
         var (serializer, _) = CreateSerializer();
 
         // Act
         var device = Deserialize(serializer, DeviceJson("s3cr3t"));
-        var hasUnstoredSecrets = HasUnstoredSecrets(serializer, device);
 
         // Assert
         Assert.Equal("s3cr3t", device.Password);
-        Assert.True(hasUnstoredSecrets);
         Assert.False(File.Exists(StorePath));
     }
 
@@ -684,22 +496,21 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     [InlineData("$secret:0123456789abcdef0123456789abcdef0")]
     [InlineData("$secret:0123456789abcdef0123456789abcdeg")]
     [InlineData(" $secret:0123456789abcdef0123456789abcdef")]
-    public void WhenAValueIsNotTheSecretPrefixWithThirtyTwoLowercaseHexDigits_ThenItIsReadAsPlaintextAndReportedAsUnstored(string value)
+    public void WhenAValueIsNotTheSecretPrefixWithThirtyTwoLowercaseHexDigits_ThenItIsReadAsPlaintext(string value)
     {
         // Arrange
         var (serializer, _) = CreateSerializer();
 
         // Act
         var device = Deserialize(serializer, DeviceJson(value));
-        var hasUnstoredSecrets = HasUnstoredSecrets(serializer, device);
 
         // Assert
         Assert.Equal(value, device.Password);
-        Assert.True(hasUnstoredSecrets);
+        Assert.False(File.Exists(StorePath));
     }
 
     [Fact]
-    public void WhenAPlaintextSecretOfANestedSubjectIsDeserialized_ThenItIsReportedAsUnstored()
+    public void WhenAPlaintextSecretOfANestedSubjectIsDeserialized_ThenItIsSetWithoutStoringIt()
     {
         // Arrange
         var (serializer, _) = CreateSerializer();
@@ -709,36 +520,24 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
 
         // Assert
         Assert.Equal("s3cr3t", device.Child!.Password);
-        Assert.True(HasUnstoredSecrets(serializer, device));
+        Assert.False(File.Exists(StorePath));
     }
 
     [Fact]
-    public void WhenNoSecretStoreIsRegistered_ThenAPlaintextSecretIsNotReportedAsUnstored()
-    {
-        // Arrange
-        var (serializer, _) = CreateSerializer(withStore: false);
-        var device = Deserialize(serializer, DeviceJson("s3cr3t"));
-
-        // Act
-        var hasUnstoredSecrets = HasUnstoredSecrets(serializer, device);
-
-        // Assert
-        Assert.False(hasUnstoredSecrets);
-    }
-
-    [Fact]
-    public void WhenAPlaintextSecretWasSerialized_ThenNoSecretIsReportedAsUnstored()
+    public void WhenAReadPlaintextSecretIsSerialized_ThenItIsStoredAndWrittenAsAReference()
     {
         // Arrange
         var (serializer, _) = CreateSerializer();
         var device = Deserialize(serializer, DeviceJson("s3cr3t", childPassword: "inner"));
-        serializer.Serialize(device);
 
         // Act
-        var hasUnstoredSecrets = HasUnstoredSecrets(serializer, device);
+        var json = serializer.Serialize(device);
 
         // Assert
-        Assert.False(hasUnstoredSecrets);
+        var entries = ReadStoreFile();
+        Assert.Equal("s3cr3t", entries[KeyOf(ReadString(json, "password"))]);
+        Assert.Equal("inner", entries[KeyOf(ReadString(json, "child", "password"))]);
+        Assert.Equal(2, entries.Count);
     }
 
     [Fact]
@@ -788,13 +587,6 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     {
         TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(new TypeProvider(), new ServiceCollection().BuildServiceProvider())
     };
-
-    // Whether a save would store a secret value; the captured changes are dropped, so nothing is stored.
-    private static bool HasUnstoredSecrets(ConfigurableSubjectSerializer serializer, SecretTestDevice device)
-    {
-        serializer.CaptureSecretChanges(() => serializer.Serialize(device), out var secretChanges);
-        return !secretChanges.IsEmpty;
-    }
 
     private static SecretTestDevice Deserialize(ConfigurableSubjectSerializer serializer, string json) =>
         Assert.IsType<SecretTestDevice>(serializer.Deserialize(json));

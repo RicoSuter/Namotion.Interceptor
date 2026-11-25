@@ -230,19 +230,12 @@ else
 
         // Writes the head line and the json block only. When the graph has drifted from the text, the write-back
         // can also have inserted or removed blocks, and writing the editor text below overwrites that.
-        var configurationJson = Serializer.CaptureSecretChanges(
-            () => MarkdownBlockConfiguration.Serialize(Serializer, subject, block), out var secretChanges);
-        var content = MarkdownBlockWriter.WriteConfiguration(_currentContent, block, configurationJson);
+        SetCurrentContent(MarkdownBlockWriter.WriteConfiguration(
+            _currentContent, block, MarkdownBlockConfiguration.Serialize(Serializer, subject, block)));
 
-        // Inside, so that the editor never shows a reference whose key is not stored, which its next save would write.
-        await secretChanges.StoreAroundAsync(async () =>
-        {
-            SetCurrentContent(content);
-
-            // The reload inside the write keeps the edited subject and applies its configuration.
-            await _sourceEditor.SetTextAsync(content);
-            await WriteShownTextAsync(content);
-        });
+        // The reload inside the write keeps the edited subject and applies its configuration.
+        await _sourceEditor.SetTextAsync(_currentContent);
+        await WriteShownTextAsync(_currentContent);
     }
 
     private async Task OnEditExpressionClick(DecorationRegion region)

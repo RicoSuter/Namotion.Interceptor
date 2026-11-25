@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Logging;
@@ -26,14 +25,8 @@ internal sealed class SecretReferences
     // The key of the remembered key of a secret property in the data of its subject.
     private const string RememberedKeyDataKey = "HomeBlaze.Secrets.Key";
 
-    // Set by Capture for the serialization it runs, which is synchronous and runs on the calling thread.
-    [ThreadStatic] private static SecretChanges? t_changes;
-
     private readonly SecretStore _store;
     private readonly ILogger? _logger;
-
-    // The changed values of the files being written, by key. A page reads its own file while it writes it.
-    private readonly ConcurrentDictionary<string, string> _pendingValues = new();
 
     // The secret properties that hold each key, by subject, weak so that a collected subject does not count. A property
     // lets go of a key when it moves to another key or its subject is released, and collected holders are dropped when the key is used again. A list stays
@@ -97,7 +90,7 @@ internal sealed class SecretReferences
         }
 
         var key = text[Prefix.Length..];
-        if (TryGetValue(key, out var stored))
+        if (_store.TryGet(key, out var stored))
         {
             SetRemembered(owner, propertyName, new RememberedKey(key, text, IsUnresolved: false));
             return stored;
@@ -114,8 +107,8 @@ internal sealed class SecretReferences
     /// <summary>
     /// Gives the JSON value to write for the value of a secret property: a reference for a value other than null or
     /// empty. The value is stored under the remembered key of the property, or under a new key when there is none or
-    /// another live subject holds the key too, unless that key holds it already. Inside <see cref="Capture{TResult}"/> it is
-    /// recorded in the captured changes instead.
+    /// another live subject holds the key too, unless that key holds it already. A changed value is stored when it is
+    /// written, before the file that references it.
     /// </summary>
     /// <exception cref="IOException">The store cannot be written.</exception>
     public object? Write(IInterceptorSubject owner, string propertyName, object? value)
@@ -129,15 +122,7 @@ internal sealed class SecretReferences
             return text is null && remembered is { IsUnresolved: true } unresolved ? unresolved.Reference : text;
         }
 
-        var changes = t_changes;
-        if (changes?.Find(owner, propertyName) is { } captured)
-        {
-            // The same property serialized again for the same write.
-            captured.Value = text;
-            return captured.Reference;
-        }
-
-        if (remembered is { } known && TryGetValue(known.Key, out var stored) && stored == text)
+        if (remembered is { } known && _store.TryGet(known.Key, out var stored) && stored == text)
         {
             MarkResolved(owner, dataKey, known);
             return known.Reference;
@@ -148,16 +133,10 @@ internal sealed class SecretReferences
         var isNew = remembered is null || IsHeldByAnother(remembered.Key, owner);
         var key = isNew ? SecretStore.CreateKey() : remembered!.Key;
         var reference = isNew ? Prefix + key : remembered!.Reference;
-        if (changes is not null)
-        {
-            changes.Changes.Add(new Change(owner, propertyName, key, reference, isNew) { Value = text });
-            return reference;
-        }
-
         _store.Set(key, text);
         if (isNew)
         {
-            Remember(owner, propertyName, key, reference);
+            SetRemembered(owner, propertyName, new RememberedKey(key, reference, IsUnresolved: false));
         }
         else
         {
@@ -175,118 +154,6 @@ internal sealed class SecretReferences
             owner.Data.TryUpdate(dataKey, remembered with { IsUnresolved = false }, remembered);
         }
     }
-
-    /// <summary>
-    /// Runs <paramref name="serialize"/> and records the secret values it would store in <paramref name="changes"/>
-    /// instead of storing them.
-    /// </summary>
-    public TResult Capture<TResult>(Func<TResult> serialize, out SecretChanges changes)
-    {
-        // Restored afterwards, so that a nested capture does not end the one around it.
-        var previous = t_changes;
-        var current = new SecretChanges(this);
-        t_changes = current;
-        try
-        {
-            var result = serialize();
-            changes = current;
-            return result;
-        }
-        finally
-        {
-            t_changes = previous;
-        }
-    }
-
-    /// <summary>Ends the capture of the calling thread until <see cref="ResumeCapture"/>, so that values are stored at once.</summary>
-    public static SecretChanges? SuspendCapture()
-    {
-        var changes = t_changes;
-        t_changes = null;
-        return changes;
-    }
-
-    /// <summary>Resumes the capture that <see cref="SuspendCapture"/> ended.</summary>
-    public static void ResumeCapture(SecretChanges? changes) => t_changes = changes;
-
-    internal async Task StoreAroundAsync(List<Change> changes, Func<Task> writeFile)
-    {
-        foreach (var change in changes)
-        {
-            if (change.IsNew)
-            {
-                _store.Set(change.Key, change.Value);
-            }
-        }
-
-        // After the new values, whose store write can throw: the finally below removes these.
-        foreach (var change in changes)
-        {
-            if (!change.IsNew)
-            {
-                _pendingValues[change.Key] = change.Value;
-            }
-        }
-
-        try
-        {
-            await writeFile();
-
-            // The new keys first: the file references them, whatever happens to the changed values.
-            foreach (var change in changes)
-            {
-                if (change.IsNew)
-                {
-                    Remember(change);
-                }
-            }
-
-            foreach (var change in changes)
-            {
-                if (!change.IsNew)
-                {
-                    StoreChangedValue(change);
-                    Remember(change);
-                }
-            }
-        }
-        finally
-        {
-            foreach (var change in changes)
-            {
-                if (!change.IsNew)
-                {
-                    // Only its own value: a later write of the same key may have replaced it.
-                    _pendingValues.TryRemove(KeyValuePair.Create(change.Key, change.Value));
-                }
-            }
-        }
-    }
-
-    private void StoreChangedValue(Change change)
-    {
-        try
-        {
-            _store.Set(change.Key, change.Value);
-        }
-        catch (Exception exception)
-        {
-            _logger?.LogError(
-                exception,
-                "The changed secret {Key} of {Property} of {Type} could not be stored after its file was written, so the previous value stays in the secret store {Path} until it is saved again.",
-                change.Key, change.PropertyName, change.Owner.GetType().FullName, _store.Path);
-            throw;
-        }
-    }
-
-    // A changed value whose file is being written, which the file holds once written, before the store does.
-    private bool TryGetValue(string key, [NotNullWhen(true)] out string? value) =>
-        _pendingValues.TryGetValue(key, out value) || _store.TryGet(key, out value);
-
-    private void Remember(Change change) => Remember(change.Owner, change.PropertyName, change.Key, change.Reference);
-
-    private void Remember(IInterceptorSubject owner, string propertyName, string key, string reference) =>
-        SetRemembered(owner, propertyName, new RememberedKey(key, reference, IsUnresolved: false));
 
     /// <summary>Lets go of the keys that the secret properties of the subject hold, for a subject that is released.</summary>
     public void Release(IInterceptorSubject subject)
@@ -409,10 +276,4 @@ internal sealed class SecretReferences
 
     // Reference is the key with the prefix, kept so that writing an unchanged secret allocates no string.
     private sealed record RememberedKey(string Key, string Reference, bool IsUnresolved);
-
-    /// <summary>A secret value that a captured serialization wrote as a reference without storing it.</summary>
-    internal sealed record Change(IInterceptorSubject Owner, string PropertyName, string Key, string Reference, bool IsNew)
-    {
-        public required string Value { get; set; }
-    }
 }
