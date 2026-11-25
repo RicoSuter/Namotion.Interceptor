@@ -781,12 +781,14 @@ public partial class FluentStorageContainer :
         ? _serializer.TryConvertSecrets(text, ConfigurationNaming.JsonProperty, out converted)
         : PageConverter.TryConvert(text, out converted);
 
-    // The bytes belong to the write and are not changed by anyone else, because a write that was given up still
-    // reads them after the caller got its result, see TimeLimitedStore.
     /// <summary>
     /// Writes a blob as it is and refreshes the subject of the file, for content whose secrets are already references,
     /// such as a block write of a page.
     /// </summary>
+    /// <param name="path">The path of the blob.</param>
+    /// <param name="bytes">The content, which nobody may change afterward: a write that was given up still reads it
+    /// after the caller got its result, see TimeLimitedStore.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
     internal async Task WriteBlobUnconvertedAsync(string path, byte[] bytes, CancellationToken cancellationToken)
     {
         var connection = Connection;
