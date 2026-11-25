@@ -99,10 +99,8 @@ internal sealed class SecretConverter
                 continue;
             }
 
-            // The serializer matches the properties of the root by their declared name, see GetJsonName.
-            var name = isRoot
-                ? naming == ConfigurationNaming.JsonProperty ? JsonNamingPolicy.CamelCase.ConvertName(propertyInfo.Name) : propertyInfo.Name
-                : property.Name;
+            // The serializer matches the properties of the root by their declared name.
+            var name = isRoot ? ConfigurableSubjectSerializer.GetJsonName(propertyInfo.Name, naming) : property.Name;
 
             var isSecret = SecretReferences.IsSecret(propertyInfo);
             if (isSecret)
