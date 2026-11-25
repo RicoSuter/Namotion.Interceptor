@@ -44,7 +44,7 @@ internal static class StoragePath
         => path.EndsWith(FileExtensions.Json, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Checks whether the path is a page, a file with an extension that <c>MarkdownFile</c> is registered for.</summary>
-    public static bool IsMarkdown(string path)
+    public static bool IsMarkdown(ReadOnlySpan<char> path)
         => path.EndsWith(FileExtensions.Markdown, StringComparison.OrdinalIgnoreCase) ||
            path.EndsWith(FileExtensions.MarkdownLong, StringComparison.OrdinalIgnoreCase);
 }

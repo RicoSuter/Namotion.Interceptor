@@ -95,8 +95,7 @@ public sealed partial class MarkdownContentParser
         }
 
         var path = url.AsSpan(0, pathEnd);
-        if (path.IsEmpty || path.EndsWith(FileExtensions.Markdown, StringComparison.OrdinalIgnoreCase) ||
-            path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase))
+        if (path.IsEmpty || StoragePath.IsMarkdown(path))
         {
             return LinkKind.Page;
         }

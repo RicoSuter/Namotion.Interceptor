@@ -1079,10 +1079,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
-    // After the write: the text the storage handed over inside it has created the subject of a new block and the segments
-    // of the text, when the storage handed it over. Without that read, the published snapshot still names a moved subject, because the edit
-    // carried it, but has no text blocks. A new block without a subject, such as one of an unknown type, falls back to the
-    // text that the change wrote.
+    // After the write: the storage handed the new text over inside the write, which created the subject of a new block and
+    // the text segments. Without that, the published snapshot still names a moved subject but has no text blocks. A new
+    // block without a subject, such as one of an unknown type, falls back to the text that the change wrote.
     private IInterceptorSubject? FindResultSubject(MarkdownStructureChange change)
     {
         var snapshot = _parseResult;
