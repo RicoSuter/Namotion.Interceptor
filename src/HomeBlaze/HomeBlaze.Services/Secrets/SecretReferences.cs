@@ -27,8 +27,8 @@ internal sealed class SecretReferences
     private const string RememberedKeyDataKey = "HomeBlaze.Secrets.Key";
 
     // The lock of a read or write is chosen by subject alone, so that no subject needs a lock of its own.
-    private const int WriteStripeCount = 32;
-    private static readonly Lock[] WriteLocks = CreateWriteLocks(WriteStripeCount);
+    private const int LockStripeCount = 32;
+    private static readonly Lock[] SubjectLocks = CreateLocks(LockStripeCount);
 
     private readonly SecretStore _store;
     private readonly ILogger? _logger;
@@ -93,7 +93,7 @@ internal sealed class SecretReferences
     {
         // The same lock as a write, so that a write never reads a value that is older than the key it stores it under.
         // The setter runs under the lock, so it must not take the lock of another subject.
-        lock (WriteLocks[GetStripe(owner)])
+        lock (SubjectLocks[GetStripe(owner)])
         {
             set(owner, state, Resolve(owner, propertyName, value));
         }
@@ -136,7 +136,7 @@ internal sealed class SecretReferences
         // The value is read under the lock, so that a write that waited for another one to store its value never replaces
         // it with an older value, and a property gets one key when its first writes overlap. Taken before the lock of the
         // store, never the other way round.
-        lock (WriteLocks[GetStripe(owner)])
+        lock (SubjectLocks[GetStripe(owner)])
         {
             var text = (string?)get(owner);
             var remembered = owner.Data.TryGetValue((propertyName, RememberedKeyDataKey), out var data) ? data as RememberedKey : null;
@@ -279,9 +279,9 @@ internal sealed class SecretReferences
     }
 
     private static int GetStripe(IInterceptorSubject owner) =>
-        (int)((uint)RuntimeHelpers.GetHashCode(owner) % WriteStripeCount);
+        (int)((uint)RuntimeHelpers.GetHashCode(owner) % LockStripeCount);
 
-    private static Lock[] CreateWriteLocks(int count)
+    private static Lock[] CreateLocks(int count)
     {
         var locks = new Lock[count];
         for (var index = 0; index < count; index++)
