@@ -186,6 +186,29 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
+    public void WhenTwoPropertiesOfOneSubjectReadTheSameReference_ThenAChangeOfOneGivesItANewKeyAndLeavesTheOtherUnchanged()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        var key = Seed(store, "hunter2");
+        var device = Assert.IsType<SecretTestDevice>(serializer.Deserialize(
+            $$"""{ "$type": "{{typeof(SecretTestDevice).FullName}}", "password": "{{Prefix + key}}", "token": "{{Prefix + key}}" }"""));
+        device.Password = "changed";
+
+        // Act
+        var json = serializer.Serialize(device);
+
+        // Assert
+        var passwordKey = KeyOf(ReadString(json, "password"));
+        Assert.NotEqual(key, passwordKey);
+        Assert.Equal(Prefix + key, ReadString(json, "token"));
+        Assert.Equal(new Dictionary<string, string> { [key] = "hunter2", [passwordKey] = "changed" }, ReadStoreFile());
+        var reloaded = Assert.IsType<SecretTestDevice>(serializer.Deserialize(json));
+        Assert.Equal("changed", reloaded.Password);
+        Assert.Equal("hunter2", reloaded.Token);
+    }
+
+    [Fact]
     public void WhenASubjectThatHoldsAKeyIsReleased_ThenTheOtherSubjectsKeepTheKeysOnChange()
     {
         // Arrange

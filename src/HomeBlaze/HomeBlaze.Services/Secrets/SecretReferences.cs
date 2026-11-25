@@ -140,9 +140,10 @@ internal sealed class SecretReferences
     /// <summary>
     /// Gives the JSON value to write for the value of a secret property, which <paramref name="get"/> reads from
     /// <paramref name="owner"/>: a reference for a value other than null or empty. The value is stored under the
-    /// remembered key of the property, or under a new key when there is none or another live subject holds the key too,
-    /// unless that key holds it already. A changed value is stored when it is written, before the file that references
-    /// it, and concurrent writes of the same property leave the store with the value that the last of them read.
+    /// remembered key of the property, or under a new key when there is none or another property of a live subject
+    /// holds the key too, unless that key holds it already. A changed value is stored when it is written, before the
+    /// file that references it, and concurrent writes of the same property leave the store with the value that the last
+    /// of them read.
     /// </summary>
     /// <exception cref="IOException">The store cannot be written.</exception>
     public object? Write(IInterceptorSubject owner, string propertyName, Func<object, object?> get)
@@ -178,9 +179,9 @@ internal sealed class SecretReferences
                     return result;
                 }
 
-                // No key, or one that another subject holds too, such as a copied file and its original: the one that
-                // changes its value gets a new key, and the other keeps the key.
-                var isNew = remembered is null || IsHeldByAnother(remembered.Key, owner);
+                // No key, or one that another property holds too, such as of a copied file and its original: the one
+                // that changes its value gets a new key, and the other keeps the key.
+                var isNew = remembered is null || IsHeldByAnother(remembered.Key, owner, propertyName);
                 var key = isNew ? SecretStore.CreateKey() : remembered!.Key;
                 var reference = isNew ? Prefix + key : remembered!.Reference;
                 _store.Set(key, text!);
@@ -306,7 +307,7 @@ internal sealed class SecretReferences
 
     // A subject that is no longer used, but was neither released nor collected yet, still counts, which costs the other
     // subject a new key on its next change.
-    private bool IsHeldByAnother(string key, IInterceptorSubject subject)
+    private bool IsHeldByAnother(string key, IInterceptorSubject subject, string propertyName)
     {
         if (!_holders.TryGetValue(key, out var holders))
         {
@@ -317,7 +318,8 @@ internal sealed class SecretReferences
         {
             foreach (var holder in holders)
             {
-                if (holder.Subject.TryGetTarget(out var target) && !ReferenceEquals(target, subject))
+                if (holder.Subject.TryGetTarget(out var target) &&
+                    (!ReferenceEquals(target, subject) || holder.PropertyName != propertyName))
                 {
                     return true;
                 }
