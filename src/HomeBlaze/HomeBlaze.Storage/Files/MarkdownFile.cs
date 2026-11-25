@@ -290,7 +290,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <exception cref="ArgumentException">The content is larger than <see cref="MaxContentSize"/> bytes, adds, changes,
     /// removes or moves a block, or adds such content.</exception>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
-    /// load of a file, or from within a write of this page.</exception>
+    /// load of a file, or from within a write of this page; or a block type has a secret configuration property that is
+    /// not a string property of a subject, and nothing is written.</exception>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     [Operation(Title = "Replace Content", Description = "Replaces the whole markdown source of this file.", Icon = "EditNote")]
     public async Task ReplaceContentAsync(string content, CancellationToken cancellationToken)
     {
@@ -303,7 +306,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         {
             var source = await ReadSourceUnlockedAsync(cancellationToken);
             var redactedSource = RedactSource(source, out var redactions);
-            await WriteUnlockedAsync(MarkdownWriteRules.RestoreBlocks(source, redactedSource, redactions, content, nameof(content), GetPageLayoutRules()));
+            var restored = MarkdownWriteRules.RestoreBlocks(source, redactedSource, redactions, content, nameof(content), GetPageLayoutRules());
+            await WriteUnlockedAsync(ConvertSecrets(restored));
         }
         finally
         {
@@ -319,7 +323,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <exception cref="ArgumentException">The text is empty, not found, found more than once, the result is larger than
     /// <see cref="MaxContentSize"/> bytes, or it adds, changes, removes or moves a block or adds such content.</exception>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
-    /// load of a file, or from within a write of this page.</exception>
+    /// load of a file, or from within a write of this page; or a block type has a secret configuration property that is
+    /// not a string property of a subject, and nothing is written.</exception>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     [Operation(Title = "Replace Text", Description = "Replaces one exact, unique passage of the markdown source.", Icon = "FindReplace")]
     public async Task ReplaceTextAsync(string oldText, string newText, CancellationToken cancellationToken)
     {
@@ -342,7 +349,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
             var updated = string.Concat(redactedSource.AsSpan(0, index), newText, redactedSource.AsSpan(index + oldText.Length));
             MarkdownWriteRules.EnsureContentSize(updated, nameof(newText));
-            await WriteUnlockedAsync(MarkdownWriteRules.RestoreBlocks(source, redactedSource, redactions, updated, nameof(newText), GetPageLayoutRules()));
+            var restored = MarkdownWriteRules.RestoreBlocks(source, redactedSource, redactions, updated, nameof(newText), GetPageLayoutRules());
+            await WriteUnlockedAsync(ConvertSecrets(restored));
         }
         finally
         {
@@ -431,7 +439,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // the old content, which a later configuration write-back would write back.
     private Task WriteUnlockedAsync(string content) => WriteUnlockedAsync(Encoding.UTF8.GetBytes(content));
 
-    // Unconverted, because the callers write content whose secrets are already references, or converted it themselves.
+    // Unconverted: the other callers convert the content themselves, and a block write writes the text of the last
+    // parsed page, which the storage converted when it read the file, around a configuration that the serializer wrote
+    // with references. A block write leaves any plaintext that the parsed page still has as it is.
     private Task WriteUnlockedAsync(byte[] content) => Storage is FluentStorageContainer storage
         ? storage.WriteBlobUnconvertedAsync(FullPath, content, CancellationToken.None)
         : Storage.WriteBlobAsync(FullPath, content, CancellationToken.None);
@@ -487,10 +497,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     {
         ArgumentNullException.ThrowIfNull(content);
         EnsureNotWithinWrite();
-        if (Storage is FluentStorageContainer storage && storage.PageConverter.TryConvert(content, out var converted))
-        {
-            content = converted;
-        }
+        content = ConvertSecrets(content);
 
         await _writeLock.WaitAsync(cancellationToken);
         var write = BeginWrite();
@@ -504,6 +511,13 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             EndWrite(write);
         }
     }
+
+    // Stores the plaintext secrets of the source in the secret store and gives it with references, as the storage does for
+    // a raw write. Content read from the file may still hold plaintext from an external edit that was not converted yet.
+    private string ConvertSecrets(string content) =>
+        Storage is FluentStorageContainer storage && storage.PageConverter.TryConvert(content, out var converted)
+            ? converted
+            : content;
 
     // From work on the worker or within a write of this page, such as the configuration that the reload inside a
     // write applies, the call would wait for the lock that the write holds while it waits for that work. The worker

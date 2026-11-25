@@ -933,6 +933,35 @@ public class SecretConversionTests : StorageTestBase
         Assert.Contains("Password=$secret:", text);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTextIsReplacedInAPageThatAnExternalEditGaveAPlaintextSecret_ThenTheFileHoldsAReference(bool replacesAll)
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", "# Gateway\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Password=s3cr3t\n::\n");
+
+        // Act
+        if (replacesAll)
+        {
+            await page.ReplaceContentAsync($"# Gate\n\n:: {DeviceType}#gateway Password=***\n::\n", CancellationToken.None);
+        }
+        else
+        {
+            await page.ReplaceTextAsync("# Gateway", "# Gate", CancellationToken.None);
+        }
+
+        // Assert
+        var text = TryReadText("Gateway.md")!;
+        Assert.StartsWith("# Gate\n", text);
+        Assert.DoesNotContain("s3cr3t", text);
+        Assert.Contains("Password=$secret:", text);
+    }
+
     [Fact]
     public async Task WhenTheSecretStoreCannotBeWrittenDuringAPageSourceWrite_ThenTheWriteFailsAndTheFileIsUnchanged()
     {
