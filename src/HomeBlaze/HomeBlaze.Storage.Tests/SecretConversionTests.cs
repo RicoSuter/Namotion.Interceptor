@@ -851,6 +851,66 @@ public class SecretConversionTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenATextBlockIsReplacedWithAWidgetWithAPlaintextSecret_ThenTheFileOnlyEverHoldsAReference()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", "# Gateway\n\nOld text.\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var segment = page.Children.Values.OfType<HtmlSegment>()
+            .Single(candidate => candidate.Start == HtmlSegmentStart.Text && candidate.Html.Contains("Old text."));
+
+        // Act
+        var result = await page.ReplaceTextBlockAsync(
+            segment, "Old text.", $"New text.\n\n:: {DeviceType}#gateway Password=s3cr3t\n::", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        AssertPageHoldsSecretReferenceOnly(page, "Gateway.md");
+    }
+
+    [Fact]
+    public async Task WhenTextWithAWidgetWithAPlaintextSecretIsInserted_ThenTheFileOnlyEverHoldsAReference()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", "# Gateway\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+
+        // Act
+        var result = await page.InsertTextAsync(
+            page, null, $"Text.\n\n:: {DeviceType}#gateway Password=s3cr3t\n::", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        AssertPageHoldsSecretReferenceOnly(page, "Gateway.md");
+    }
+
+    [Fact]
+    public async Task WhenTextWithAWidgetWithAPlaintextSecretIsAddedToASlot_ThenTheFileOnlyEverHoldsAReference()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {typeof(Pages.TestPanel).FullName}#panel Title=P\n::\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var panel = page.Children["panel"];
+
+        // Act
+        var result = await page.AddTextToSlotAsync(
+            panel, null, $"Text.\n\n:: {DeviceType}#gateway Password=s3cr3t\n::", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        var text = TryReadText("Gateway.md")!;
+        Assert.Contains($"::: {DeviceType}#gateway Password=$secret:", text);
+        Assert.DoesNotContain("s3cr3t", text);
+        Assert.Equal("s3cr3t", Assert.Single(ReadSecrets()).Value);
+    }
+
+    [Fact]
     public async Task WhenAPageSourceWithoutPlaintextIsWritten_ThenTheGivenTextIsReturned()
     {
         // Arrange
@@ -974,6 +1034,16 @@ public class SecretConversionTests : StorageTestBase
         {
             return null;
         }
+    }
+
+    private void AssertPageHoldsSecretReferenceOnly(MarkdownFile page, string relativePath)
+    {
+        var text = TryReadText(relativePath)!;
+        Assert.Contains($":: {DeviceType}#gateway Password=$secret:", text);
+        Assert.DoesNotContain("s3cr3t", text);
+        Assert.Equal(text, page.Content);
+        Assert.Equal("s3cr3t", ((EmbeddedSecretDevice)page.Children["gateway"]).Password);
+        Assert.Equal("s3cr3t", Assert.Single(ReadSecrets()).Value);
     }
 
     private bool HoldsSecretReferenceOnly(string relativePath) =>

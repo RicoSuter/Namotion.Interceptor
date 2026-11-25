@@ -437,9 +437,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     // Not cancelled once the content is decided: a cancelled reload after the write would leave the parse snapshot of
     // the old content, which a later configuration write-back would write back.
-    // Unconverted: the other callers convert the content themselves, and a block write writes the text of the last
-    // parsed page, which the storage converted when it read the file, around a configuration that the serializer wrote
-    // with references. A block write leaves any plaintext that the parsed page still has as it is.
+    // Unconverted: the other callers convert the content or the text they add themselves, and a block write writes the
+    // text of the last parsed page, which the storage converted when it read the file, around a configuration that the
+    // serializer wrote with references. A block write leaves any plaintext that the parsed page still has as it is.
     private Task WriteUnlockedAsync(string content)
     {
         var bytes = Encoding.UTF8.GetBytes(content);
@@ -671,7 +671,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Replaces the text block that <paramref name="segment"/> starts with <paramref name="newText"/>, or removes it when that
     /// is empty or white space, and saves the page. A removal names in its result what <see cref="DeleteBlockAsync"/> names.
     /// Complete widget blocks at the top level of the new text become blocks of
-    /// the content, and the page creates their subjects. Such a block with fewer fence characters than a widget block needs
+    /// the content, with their plaintext secrets stored in the secret store and written as references, and the page creates
+    /// their subjects. Such a block with fewer fence characters than a widget block needs
     /// in the content of the text block, two on the page and one more than the block whose content it is otherwise, gets that
     /// many, and the blocks inside it as many more.
     /// </summary>
@@ -683,7 +684,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// block of the text already has, or when the text is Markdown nested beyond the depth limit of Markdig, and as
     /// <see cref="DeleteBlockAsync"/> is.
     /// </remarks>
-    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of
+    /// this page; or a block type of the new text has a secret configuration property that is not a string property of a
+    /// subject, and nothing is written.</exception>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     public Task<MarkdownEditResult> ReplaceTextBlockAsync(
         HtmlSegment segment, string expectedText, string newText, CancellationToken cancellationToken)
     {
@@ -700,7 +705,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                     return (null, TextChangedRefusal);
                 }
 
-                return (MarkdownPageOperations.TryReplaceText(page, snapshot.BlockSubjects, textBlock, newText, out var refusal), refusal);
+                return (MarkdownPageOperations.TryReplaceText(page, snapshot.BlockSubjects, textBlock, ConvertSecrets(newText), out var refusal), refusal);
             },
             // The page read again after the refusal keeps a segment while nothing before it changed, and then a second save
             // of the same text succeeds.
@@ -711,7 +716,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <summary>
     /// Inserts <paramref name="text"/> into <paramref name="content"/> before <paramref name="before"/>, as
     /// <see cref="InsertWidgetAsync"/> places a widget, and saves the page. Complete widget blocks at the top level of the text
-    /// become blocks of the content, and the page creates their subjects. Such a block with fewer fence characters than a
+    /// become blocks of the content, with their plaintext secrets stored in the secret store and written as references, and
+    /// the page creates their subjects. Such a block with fewer fence characters than a
     /// widget block needs in the content, two on the page and one more than the block whose content it is otherwise, gets that
     /// many, and the blocks inside it as many more.
     /// </summary>
@@ -721,14 +727,18 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// the page or another block of the text already has, or when the text is Markdown nested beyond the depth limit of
     /// Markdig, and as <see cref="DeleteBlockAsync"/> is.
     /// </remarks>
-    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of
+    /// this page; or a block type of the text has a secret configuration property that is not a string property of a
+    /// subject, and nothing is written.</exception>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     public Task<MarkdownEditResult> InsertTextAsync(
         IInterceptorSubject content, IInterceptorSubject? before, string text, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(text);
         return EditStructureAsync(
             (snapshot, page) => TryGetInsertPoint(snapshot, page, content, before, out var owner, out var line, out var refusal)
-                ? (MarkdownPageOperations.TryInsertText(page, snapshot.BlockSubjects, owner, line, text, out refusal), refusal)
+                ? (MarkdownPageOperations.TryInsertText(page, snapshot.BlockSubjects, owner, line, ConvertSecrets(text), out refusal), refusal)
                 : (null, refusal),
             GetChangedPageRefusal(before),
             cancellationToken);
@@ -878,7 +888,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <remarks>
     /// Refused as <see cref="AddWidgetToSlotAsync"/> and <see cref="InsertTextAsync"/> are.
     /// </remarks>
-    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of
+    /// this page; or a block type of the text has a secret configuration property that is not a string property of a
+    /// subject, and nothing is written.</exception>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     public Task<MarkdownEditResult> AddTextToSlotAsync(
         IInterceptorSubject owner, string? slotName, string text, CancellationToken cancellationToken)
     {
@@ -887,7 +901,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             owner,
             slotName,
             (MarkdownPage page, IReadOnlyDictionary<int, IInterceptorSubject> subjects, MarkdownBlock container, int line, out string? refusal) =>
-                MarkdownPageOperations.TryInsertText(page, subjects, container, line, text, out refusal),
+                MarkdownPageOperations.TryInsertText(page, subjects, container, line, ConvertSecrets(text), out refusal),
             cancellationToken);
     }
 
