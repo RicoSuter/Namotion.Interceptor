@@ -16,17 +16,17 @@ namespace HomeBlaze.Services
         public const string TypeDiscriminatorPropertyName = "$type";
         public ConfigurableSubjectSerializer(HomeBlaze.Services.TypeProvider typeProvider, System.IServiceProvider serviceProvider) { }
         public bool CanDeserialize(string json, System.Type propertyType, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
-        public TResult CaptureSecretChanges<TResult>(System.Func<TResult> serialize, out HomeBlaze.Services.Secrets.SecretChanges secretChanges) { }
         public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, System.Action<Namotion.Interceptor.IInterceptorSubject>? created, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public HomeBlaze.Abstractions.IConfigurable? Deserialize(string json, System.Action<Namotion.Interceptor.IInterceptorSubject>? created, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public System.Text.Json.JsonElement? GetDefaultConfiguration(System.Type type, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
-        public bool HasUnstoredSecrets(Namotion.Interceptor.IInterceptorSubject subject) { }
         public void Release(Namotion.Interceptor.IInterceptorSubject subject) { }
         public void ReleaseSecrets(Namotion.Interceptor.IInterceptorSubject subject) { }
         public void ReplaceConfiguration(Namotion.Interceptor.IInterceptorSubject subject, string json, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public string Serialize(Namotion.Interceptor.IInterceptorSubject subject, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool> isExcluded, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
+        public bool TryConvertSecrets(string json, HomeBlaze.Services.ConfigurationNaming naming, out string converted) { }
+        public bool TryConvertSecrets(string json, System.Type type, HomeBlaze.Services.ConfigurationNaming naming, out string converted) { }
         public void UpdateConfiguration(Namotion.Interceptor.IInterceptorSubject subject, string json, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public void UpdateConfiguration(Namotion.Interceptor.IInterceptorSubject subject, string json, System.Action<HomeBlaze.Services.SkippedConfigurationProperty>? skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
         public static string DescribeSkippedProperties(System.Collections.Generic.IEnumerable<HomeBlaze.Services.SkippedConfigurationProperty> skipped, HomeBlaze.Services.ConfigurationNaming naming = 0) { }
@@ -147,7 +147,7 @@ namespace HomeBlaze.Services
     }
     public class SubjectFactory
     {
-        public SubjectFactory(System.IServiceProvider serviceProvider) { }
+        public SubjectFactory(System.IServiceProvider serviceProvider, HomeBlaze.Services.ConfigurableSubjectSerializer serializer) { }
         public Namotion.Interceptor.IInterceptorSubject CreateSubject(System.Type type) { }
         public T CreateSubject<T>()
             where T : Namotion.Interceptor.IInterceptorSubject { }
@@ -705,10 +705,6 @@ namespace HomeBlaze.Services.Navigation
 }
 namespace HomeBlaze.Services.Secrets
 {
-    public sealed class SecretChanges
-    {
-        public System.Threading.Tasks.Task StoreAroundAsync(System.Func<System.Threading.Tasks.Task> writeFile) { }
-    }
     public sealed class SecretStore
     {
         public SecretStore(string path) { }
