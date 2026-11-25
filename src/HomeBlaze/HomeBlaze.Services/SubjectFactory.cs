@@ -9,10 +9,12 @@ namespace HomeBlaze.Services;
 public class SubjectFactory
 {
     private readonly IServiceProvider _serviceProvider;
+    private readonly ConfigurableSubjectSerializer _serializer;
 
-    public SubjectFactory(IServiceProvider serviceProvider)
+    public SubjectFactory(IServiceProvider serviceProvider, ConfigurableSubjectSerializer serializer)
     {
         _serviceProvider = serviceProvider;
+        _serializer = serializer;
     }
 
     /// <summary>
@@ -49,7 +51,7 @@ public class SubjectFactory
     /// </summary>
     public void DiscardSubject(IInterceptorSubject subject)
     {
-        _serviceProvider.GetService<ConfigurableSubjectSerializer>()?.ReleaseSecrets(subject);
+        _serializer.ReleaseSecrets(subject);
         if (_serviceProvider.GetService<IInterceptorSubjectContext>() is { } rootContext)
         {
             subject.Context.RemoveFallbackContext(rootContext);
