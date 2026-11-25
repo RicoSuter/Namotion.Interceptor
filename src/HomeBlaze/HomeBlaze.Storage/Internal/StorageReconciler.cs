@@ -766,7 +766,8 @@ internal sealed class StorageReconciler
         }
         catch (InvalidOperationException exception)
         {
-            _logger?.LogWarning(exception, "A type in {Path} has a secret configuration property that is not a string property of a subject, so the file is not converted.", path);
+            // Also a secret configuration property that is not a string property of a subject, which the message names.
+            _logger?.LogWarning(exception, "The plaintext secrets of {Path} could not be converted and stay in the file.", path);
             return unchanged;
         }
 

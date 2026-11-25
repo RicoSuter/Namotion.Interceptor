@@ -151,7 +151,7 @@ internal sealed class SecretPageConverter
             return;
         }
 
-        var lineEnding = MarkdownBlockWriter.GetLineEnding(source, block.HeadSpan.Start + block.HeadSpan.Length);
+        var lineEnding = MarkdownBlockWriter.GetLineEnding(source, block.HeadSpan.End);
         (edits ??= []).Add((span, MarkdownBlockWriter.FormatFence(JsonNode.Parse(converted)!.AsObject(), lineEnding)));
     }
 }

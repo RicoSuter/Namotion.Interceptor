@@ -39,8 +39,9 @@ internal sealed class SecretReferences
     private readonly ILogger? _logger;
 
     // The secret properties that hold each key, by subject, weak so that a collected subject does not count. A property
-    // lets go of a key when it moves to another key or its subject is released, and collected holders are dropped when the key is used again. A list stays
-    // once created, so there are as many as keys were read or written. Each list is locked while it is used.
+    // lets go of a key when it moves to another key or its subject is released, and collected holders are dropped when
+    // the key is used again. A list stays once created, so there are as many as keys were read or written. Each list is
+    // locked while it is used.
     private readonly ConcurrentDictionary<string, List<Holder>> _holders = new();
 
     public SecretReferences(SecretStore store, ILogger? logger)
