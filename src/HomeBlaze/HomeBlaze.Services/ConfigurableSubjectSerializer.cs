@@ -110,6 +110,7 @@ public class ConfigurableSubjectSerializer
     /// The type of the subject, or of a value in its configuration, has a secret configuration property that is not a string property of a subject.
     /// </exception>
     /// <exception cref="IOException">The secret store cannot be written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written.</exception>
     /// <remarks>
     /// A secret value is written as a reference to the <see cref="SecretStore"/>, and a changed one is stored when it is
     /// serialized, before the file that references it is written. A write of the result that is refused or fails leaves
@@ -131,6 +132,7 @@ public class ConfigurableSubjectSerializer
     /// The subject is not registered, or its type, or that of a value in its configuration, has a secret configuration property that is not a string property of a subject.
     /// </exception>
     /// <exception cref="IOException">The secret store cannot be written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written.</exception>
     /// <remarks>
     /// The value of an excluded property is not read. A subject that is nested in another property is written
     /// in full, also when it has a property that would be excluded. Secret values are stored as by
