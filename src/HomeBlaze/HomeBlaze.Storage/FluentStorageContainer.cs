@@ -714,19 +714,11 @@ public partial class FluentStorageContainer :
         return await Connection.Client.OpenRead(path, cancellationToken);
     }
 
-    /// <summary>
-    /// IStorageContainer - Writes a blob to storage and refreshes the subject of the file. The plaintext secrets of a JSON
-    /// file or a page are first stored in the secret store and written as references, so the written content can differ
-    /// from the given one.
-    /// </summary>
+    /// <inheritdoc />
     /// <remarks>
-    /// The content is held in memory while it is written. When the subject cannot be refreshed after the write,
-    /// the write still succeeds, and the next pass loads the file again.
+    /// Refreshes the subject of the file after the write. The content is held in memory while it is written. When the
+    /// subject cannot be refreshed after the write, the write still succeeds, and the next pass loads the file again.
     /// </remarks>
-    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
-    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
-    /// <exception cref="InvalidOperationException">A type in the content has a secret configuration property that is
-    /// not a string property of a subject. Nothing is written.</exception>
     public async Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken)
     {
         using var buffer = new MemoryStream();
@@ -734,19 +726,11 @@ public partial class FluentStorageContainer :
         await WriteBlobUnconvertedAsync(path, ConvertSecrets(path, buffer.ToArray()), cancellationToken);
     }
 
-    /// <summary>
-    /// IStorageContainer - Writes a blob to storage and refreshes the subject of the file. The plaintext secrets of a JSON
-    /// file or a page are first stored in the secret store and written as references, so the written content can differ
-    /// from the given one.
-    /// </summary>
+    /// <inheritdoc />
     /// <remarks>
-    /// The content is copied. When the subject cannot be refreshed after the write, the write still succeeds,
-    /// and the next pass loads the file again.
+    /// Refreshes the subject of the file after the write. The content is copied. When the subject cannot be refreshed
+    /// after the write, the write still succeeds, and the next pass loads the file again.
     /// </remarks>
-    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
-    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
-    /// <exception cref="InvalidOperationException">A type in the content has a secret configuration property that is
-    /// not a string property of a subject. Nothing is written.</exception>
     public async Task WriteBlobAsync(string path, ReadOnlyMemory<byte> content, CancellationToken cancellationToken)
         => await WriteBlobUnconvertedAsync(path, ConvertSecrets(path, content.ToArray()), cancellationToken);
 
@@ -754,10 +738,6 @@ public partial class FluentStorageContainer :
     /// Replaces the plaintext secrets of a JSON file or a page by references, keeping the encoding and byte order mark.
     /// Returns the given bytes when the file is neither, holds no plaintext secret or is not valid text in its encoding.
     /// </summary>
-    /// <exception cref="IOException">The secret store cannot be written.</exception>
-    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written.</exception>
-    /// <exception cref="InvalidOperationException">A type in the content has a secret configuration property that is
-    /// not a string property of a subject.</exception>
     private byte[] ConvertSecrets(string path, byte[] bytes)
     {
         if (!StorageReconciler.IsConvertible(path) ||
@@ -789,10 +769,6 @@ public partial class FluentStorageContainer :
     /// Replaces the plaintext secrets of the text of a JSON file or, for any other path, a page by references. Returns
     /// false, with <paramref name="converted"/> being <paramref name="text"/>, when it holds no plaintext secret.
     /// </summary>
-    /// <exception cref="IOException">The secret store cannot be written.</exception>
-    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written.</exception>
-    /// <exception cref="InvalidOperationException">A type in the text has a secret configuration property that is
-    /// not a string property of a subject.</exception>
     internal bool TryConvertSecrets(string path, string text, out string converted) => StoragePath.IsJson(path)
         ? _serializer.TryConvertSecrets(text, ConfigurationNaming.JsonProperty, out converted)
         : PageConverter.TryConvert(text, out converted);

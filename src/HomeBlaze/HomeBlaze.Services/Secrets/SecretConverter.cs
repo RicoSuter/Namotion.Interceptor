@@ -22,9 +22,6 @@ internal sealed class SecretConverter
     /// Replaces the plaintext secrets in <paramref name="root"/>, an object of <paramref name="type"/>, and stores them
     /// with one write. Returns false and changes nothing when there is none.
     /// </summary>
-    /// <exception cref="IOException">The store cannot be written. Nothing is stored.</exception>
-    /// <exception cref="UnauthorizedAccessException">The store cannot be written. Nothing is stored.</exception>
-    /// <exception cref="InvalidOperationException">A secret property is not a string property of a subject.</exception>
     public bool TryConvert(JsonObject root, Type type, JsonSerializerOptions options, ConfigurationNaming naming)
     {
         List<KeyValuePair<string, string>>? values = null;

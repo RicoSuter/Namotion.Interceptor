@@ -26,10 +26,6 @@ internal sealed class SecretPageConverter
     /// when no block holds a plaintext secret or the source cannot be parsed. Text outside the changed head lines and
     /// fences stays as it is.
     /// </summary>
-    /// <exception cref="IOException">The secret store cannot be written.</exception>
-    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written.</exception>
-    /// <exception cref="InvalidOperationException">A block type has a secret configuration property that is not a string
-    /// property of a subject.</exception>
     public bool TryConvert(string source, out string converted)
     {
         converted = source;

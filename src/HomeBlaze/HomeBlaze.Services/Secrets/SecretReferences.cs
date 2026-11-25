@@ -131,7 +131,6 @@ internal sealed class SecretReferences
     /// file that references it, and concurrent writes of the same property leave the store with the value that the last
     /// of them read.
     /// </summary>
-    /// <exception cref="IOException">The store cannot be written.</exception>
     public object? Write(IInterceptorSubject owner, string propertyName, Func<object, object?> get)
     {
         // The value is read under the lock, so that a write that waited for another one to store its value never replaces
