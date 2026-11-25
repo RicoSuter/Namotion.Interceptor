@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -24,6 +25,9 @@ internal sealed class SecretReferences
 
     // The key of the remembered key of a secret property in the data of its subject.
     private const string RememberedKeyDataKey = "HomeBlaze.Secrets.Key";
+
+    // The lock of a changed write is chosen by subject and property, so that no subject needs a lock of its own.
+    private static readonly Lock[] WriteLocks = CreateWriteLocks(32);
 
     private readonly SecretStore _store;
     private readonly ILogger? _logger;
@@ -105,45 +109,71 @@ internal sealed class SecretReferences
     }
 
     /// <summary>
-    /// Gives the JSON value to write for the value of a secret property: a reference for a value other than null or
-    /// empty. The value is stored under the remembered key of the property, or under a new key when there is none or
-    /// another live subject holds the key too, unless that key holds it already. A changed value is stored when it is
-    /// written, before the file that references it.
+    /// Gives the JSON value to write for the value of a secret property, which <paramref name="get"/> reads from
+    /// <paramref name="owner"/>: a reference for a value other than null or empty. The value is stored under the
+    /// remembered key of the property, or under a new key when there is none or another live subject holds the key too,
+    /// unless that key holds it already. A changed value is stored when it is written, before the file that references
+    /// it, and concurrent writes of the same property leave the store with the value that the last of them read.
     /// </summary>
     /// <exception cref="IOException">The store cannot be written.</exception>
-    public object? Write(IInterceptorSubject owner, string propertyName, object? value)
+    public object? Write(IInterceptorSubject owner, string propertyName, Func<object, object?> get)
     {
-        var text = (string?)value;
         (string? Property, string Key) dataKey = (propertyName, RememberedKeyDataKey);
-        var remembered = owner.Data.TryGetValue(dataKey, out var data) ? data as RememberedKey : null;
+        if (TryWriteUnchanged(owner, dataKey, (string?)get(owner), out var result, out _))
+        {
+            return result;
+        }
 
+        // The value is read again under the lock, so that a write that waited for another one to store its value never
+        // replaces it with the value it read before, and a property gets one key when its first writes overlap. Taken
+        // before the lock of the store, never the other way round.
+        lock (WriteLocks[(int)((uint)HashCode.Combine(RuntimeHelpers.GetHashCode(owner), propertyName) % WriteLocks.Length)])
+        {
+            var text = (string?)get(owner);
+            if (TryWriteUnchanged(owner, dataKey, text, out result, out var remembered))
+            {
+                return result;
+            }
+
+            // No key, or one that another subject holds too, such as a copied file and its original: the one that changes
+            // its value gets a new key, and the other keeps the key.
+            var isNew = remembered is null || IsHeldByAnother(remembered.Key, owner);
+            var key = isNew ? SecretStore.CreateKey() : remembered!.Key;
+            var reference = isNew ? Prefix + key : remembered!.Reference;
+            _store.Set(key, text!);
+            if (isNew)
+            {
+                SetRemembered(owner, propertyName, new RememberedKey(key, reference, IsUnresolved: false));
+            }
+            else
+            {
+                MarkResolved(owner, dataKey, remembered!);
+            }
+
+            return reference;
+        }
+    }
+
+    // Gives the JSON value for null or empty, or for a value that the remembered key holds already.
+    private bool TryWriteUnchanged(
+        IInterceptorSubject owner, (string?, string) dataKey, string? text, out object? result, out RememberedKey? remembered)
+    {
+        remembered = owner.Data.TryGetValue(dataKey, out var data) ? data as RememberedKey : null;
         if (string.IsNullOrEmpty(text))
         {
-            return text is null && remembered is { IsUnresolved: true } unresolved ? unresolved.Reference : text;
+            result = text is null && remembered is { IsUnresolved: true } unresolved ? unresolved.Reference : text;
+            return true;
         }
 
         if (remembered is { } known && _store.TryGet(known.Key, out var stored) && stored == text)
         {
             MarkResolved(owner, dataKey, known);
-            return known.Reference;
+            result = known.Reference;
+            return true;
         }
 
-        // No key, or one that another subject holds too, such as a copied file and its original: the one that changes its
-        // value gets a new key, and the other keeps the key.
-        var isNew = remembered is null || IsHeldByAnother(remembered.Key, owner);
-        var key = isNew ? SecretStore.CreateKey() : remembered!.Key;
-        var reference = isNew ? Prefix + key : remembered!.Reference;
-        _store.Set(key, text);
-        if (isNew)
-        {
-            SetRemembered(owner, propertyName, new RememberedKey(key, reference, IsUnresolved: false));
-        }
-        else
-        {
-            MarkResolved(owner, dataKey, remembered!);
-        }
-
-        return reference;
+        result = null;
+        return false;
     }
 
     // Only when unchanged: a concurrent read may have remembered another key since.
@@ -265,6 +295,17 @@ internal sealed class SecretReferences
 
         holders.RemoveRange(count, holders.Count - count);
         return index;
+    }
+
+    private static Lock[] CreateWriteLocks(int count)
+    {
+        var locks = new Lock[count];
+        for (var index = 0; index < count; index++)
+        {
+            locks[index] = new Lock();
+        }
+
+        return locks;
     }
 
     internal static bool IsReference(string text) =>

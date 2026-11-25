@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -286,6 +287,91 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAnOlderValueIsStoredAfterANewerOne_ThenTheStoreKeepsTheNewerValue()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        var device = new SecretGatedDevice { Password = "old" };
+        var key = KeyOf(ReadString(serializer.Serialize(device), "password"));
+        device.Password = "older";
+
+        var olderIsRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseOlder = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reads = 0;
+        device.OnRead = value =>
+        {
+            if (Interlocked.Increment(ref reads) == 1)
+            {
+                olderIsRead.SetResult();
+                releaseOlder.Task.Wait();
+            }
+
+            return value;
+        };
+
+        // Act
+        var olderSerialization = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => serializer.Serialize(device));
+        await olderIsRead.Task.WaitAsync(TestTimeouts.Default);
+        device.Password = "newer";
+        var newerJson = serializer.Serialize(device);
+        releaseOlder.SetResult();
+        var olderJson = await olderSerialization.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(Prefix + key, ReadString(newerJson, "password"));
+        Assert.Equal(Prefix + key, ReadString(olderJson, "password"));
+        Assert.True(store.TryGet(key, out var value));
+        Assert.Equal("newer", value);
+        Assert.Equal(new Dictionary<string, string> { [key] = "newer" }, ReadStoreFile());
+    }
+
+    [Fact]
+    public async Task WhenTheFirstWritesOfASecretOverlap_ThenBothReferenceOneKey()
+    {
+        // Arrange
+        var (serializer, store) = CreateSerializer();
+        var device = new SecretGatedDevice { Password = "hunter2" };
+
+        // The first serialization blocks on its second read, under the lock before it stores; the second one reads while
+        // nothing is remembered yet, so it has to wait for the lock.
+        var firstIsInLock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondIsRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reads = 0;
+        device.OnRead = value =>
+        {
+            switch (Interlocked.Increment(ref reads))
+            {
+                case 2:
+                    firstIsInLock.SetResult();
+                    releaseFirst.Task.Wait();
+                    break;
+                case 3:
+                    secondIsRead.SetResult();
+                    break;
+            }
+
+            return value;
+        };
+
+        // Act
+        var first = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => serializer.Serialize(device));
+        await firstIsInLock.Task.WaitAsync(TestTimeouts.Default);
+        var second = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => serializer.Serialize(device));
+        await secondIsRead.Task.WaitAsync(TestTimeouts.Default);
+        releaseFirst.SetResult();
+        var firstJson = await first.WaitAsync(TestTimeouts.Default);
+        var secondJson = await second.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        var key = KeyOf(ReadString(firstJson, "password"));
+        Assert.Equal(Prefix + key, ReadString(secondJson, "password"));
+        Assert.Equal(new Dictionary<string, string> { [key] = "hunter2" }, ReadStoreFile());
+        Assert.True(store.TryGet(key, out var value));
+        Assert.Equal("hunter2", value);
+    }
+
+    [Fact]
     public void WhenAKeyIsReadWithTheCSharpNaming_ThenItIsKeptWhenWrittenWithTheJsonNaming()
     {
         // Arrange
@@ -557,7 +643,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     private (ConfigurableSubjectSerializer Serializer, SecretStore Store) CreateSerializer(bool withStore = true, bool hasRegistry = true)
     {
         var typeProvider = new TypeProvider();
-        typeProvider.AddTypes([typeof(SecretTestDevice), typeof(SecretDefaultDevice), typeof(InvalidSecretTypeDevice)]);
+        typeProvider.AddTypes([typeof(SecretTestDevice), typeof(SecretDefaultDevice), typeof(SecretGatedDevice), typeof(InvalidSecretTypeDevice)]);
 
         var store = new SecretStore(StorePath);
         var services = new ServiceCollection();
@@ -673,6 +759,24 @@ public partial class SecretDefaultDevice : IConfigurable
 
     [Configuration(IsSecret = true)]
     public partial string Password { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+// A secret without interception, whose reads the test can block to order concurrent serializations.
+[InterceptorSubject]
+public partial class SecretGatedDevice : IConfigurable
+{
+    private volatile string? _password;
+
+    public Func<string?, string?> OnRead { get; set; } = static value => value;
+
+    [Configuration(IsSecret = true)]
+    public string? Password
+    {
+        get => OnRead(_password);
+        set => _password = value;
+    }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

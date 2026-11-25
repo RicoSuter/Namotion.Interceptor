@@ -167,7 +167,7 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
     {
         if (property.Get is { } get)
         {
-            property.Get = owner => secrets.Write((IInterceptorSubject)owner, propertyName, get(owner));
+            property.Get = owner => secrets.Write((IInterceptorSubject)owner, propertyName, get);
         }
 
         if (property.Set is { } set)
