@@ -481,10 +481,14 @@ public class ConfigurableSubjectSerializer
                     if (isSecret && _secrets is not null)
                     {
                         // A subject: EnsureSupported threw for any other type.
-                        value = _secrets.Read((IInterceptorSubject)subject, property.Name, value);
+                        _secrets.Read(
+                            (IInterceptorSubject)subject, property.Name, value, property,
+                            static (owner, propertyInfo, resolved) => propertyInfo.SetValue(owner, resolved));
                     }
-
-                    property.SetValue(subject, value);
+                    else
+                    {
+                        property.SetValue(subject, value);
+                    }
                 }
             }
         }
@@ -531,10 +535,14 @@ public class ConfigurableSubjectSerializer
             {
                 if (isSecret && _secrets is not null)
                 {
-                    value = _secrets.Read(subject, property.Name, value);
+                    _secrets.Read(
+                        subject, property.Name, value, property,
+                        static (_, registeredProperty, resolved) => registeredProperty.SetValue(resolved));
                 }
-
-                property.SetValue(value);
+                else
+                {
+                    property.SetValue(value);
+                }
             }
         }
     }

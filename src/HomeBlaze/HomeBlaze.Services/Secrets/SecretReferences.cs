@@ -27,12 +27,12 @@ internal sealed class SecretReferences
     private const string RememberedKeyDataKey = "HomeBlaze.Secrets.Key";
 
     // The lock and version of a write are chosen by subject alone, so that no subject needs a lock of its own and an
-    // unchanged write reads its version before the remembered key, which a changed write may replace.
+    // unchanged write reads its version before the remembered key, which a changed write or a read may replace.
     private const int WriteStripeCount = 32;
     private static readonly Lock[] WriteLocks = CreateWriteLocks(WriteStripeCount);
 
-    // Per lock: odd while a changed write is between reading the value and storing it, so that an unchanged write that
-    // overlaps it is not taken for the last one.
+    // Per lock: odd while a changed write is between reading the value and storing it, or a read between remembering
+    // the key and setting the value, so that an unchanged write that overlaps it is not taken for the last one.
     private static readonly int[] WriteVersions = new int[WriteStripeCount];
 
     private readonly SecretStore _store;
@@ -87,11 +87,34 @@ internal sealed class SecretReferences
     }
 
     /// <summary>
-    /// Gives the value to set for the JSON value of a secret property: the stored value of a reference, null for a
-    /// reference to a missing key, and any other value as it is. Only <see cref="Prefix"/> followed by 32 lowercase
-    /// hexadecimal digits is a reference.
+    /// Sets the value for the JSON value of a secret property of <paramref name="owner"/> through <paramref name="set"/>:
+    /// the stored value of a reference, null for a reference to a missing key, and any other value as it is. Only
+    /// <see cref="Prefix"/> followed by 32 lowercase hexadecimal digits is a reference. The key of the property and its
+    /// value change together for a concurrent <see cref="Write"/> of the same subject.
     /// </summary>
-    public object? Read(IInterceptorSubject owner, string propertyName, object? value)
+    public void Read<TState>(
+        IInterceptorSubject owner, string propertyName, object? value, TState state, Action<IInterceptorSubject, TState, object?> set)
+    {
+        var stripe = GetStripe(owner);
+
+        // The same lock as a changed write, so that a write never reads a value that is older than the key it stores it
+        // under. The setter runs under the lock, so it must not take the lock of another subject.
+        lock (WriteLocks[stripe])
+        {
+            Interlocked.Increment(ref WriteVersions[stripe]);
+            try
+            {
+                set(owner, state, Resolve(owner, propertyName, value));
+            }
+            finally
+            {
+                Interlocked.Increment(ref WriteVersions[stripe]);
+            }
+        }
+    }
+
+    // Remembers the key of a reference, or forgets it for any other value, and gives the value to set.
+    private object? Resolve(IInterceptorSubject owner, string propertyName, object? value)
     {
         if (value is not string text || !IsReference(text))
         {
@@ -125,9 +148,9 @@ internal sealed class SecretReferences
     public object? Write(IInterceptorSubject owner, string propertyName, Func<object, object?> get)
     {
         (string? Property, string Key) dataKey = (propertyName, RememberedKeyDataKey);
-        var stripe = (int)((uint)RuntimeHelpers.GetHashCode(owner) % WriteStripeCount);
+        var stripe = GetStripe(owner);
 
-        // Lock-free only when no changed write read or stored meanwhile: one that read an older value may store it after
+        // Lock-free only when no changed write or read ran meanwhile: one that read an older value may store it after
         // this read, which then is not the last.
         var version = Volatile.Read(ref WriteVersions[stripe]);
         if ((version & 1) == 0 && TryWriteUnchanged(owner, dataKey, (string?)get(owner), out var result, out _))
@@ -321,6 +344,9 @@ internal sealed class SecretReferences
         holders.RemoveRange(count, holders.Count - count);
         return index;
     }
+
+    private static int GetStripe(IInterceptorSubject owner) =>
+        (int)((uint)RuntimeHelpers.GetHashCode(owner) % WriteStripeCount);
 
     private static Lock[] CreateWriteLocks(int count)
     {

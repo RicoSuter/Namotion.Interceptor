@@ -7,6 +7,7 @@ using HomeBlaze.Services.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
@@ -471,6 +472,69 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenAReferenceIsReadWhileAChangedWriteStores_ThenTheReadWaitsAndTheStoreKeepsTheReadValue()
+    {
+        // Arrange
+        var gate = new PasswordReadGate();
+        var context = CreateContext().WithService(() => gate, _ => false);
+        var (serializer, store) = CreateSerializer();
+        var device = new SecretTestDevice(context) { Password = "old" };
+        serializer.Serialize(device);
+        device.Password = "written";
+        var readKey = Seed(store, "read");
+
+        // The serialization blocks on its second read, under the lock before it stores "written", while a reload reads
+        // a reference to another key into the same subject.
+        var writeIsInLock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reads = 0;
+        gate.OnRead = () =>
+        {
+            if (Interlocked.Increment(ref reads) == 2)
+            {
+                writeIsInLock.SetResult();
+                releaseWrite.Task.Wait();
+            }
+        };
+
+        // Act
+        var write = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => serializer.Serialize(device));
+        Thread? readThread = null;
+        Task? read = null;
+        try
+        {
+            await Task.WhenAny(writeIsInLock.Task, write).WaitAsync(TestTimeouts.Default);
+            Assert.True(writeIsInLock.Task.IsCompleted, "The write did not read the value again under the lock.");
+
+            var contentionBefore = Monitor.LockContentionCount;
+            read = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+            {
+                readThread = Thread.CurrentThread;
+                serializer.UpdateConfiguration(device, JsonSerializer.Serialize(new { password = Prefix + readKey }));
+            });
+            Assert.True(
+                SpinWait.SpinUntil(
+                    () => read.IsCompleted || (IsWaiting(readThread) && Monitor.LockContentionCount > contentionBefore),
+                    TestTimeouts.Default),
+                "The read neither completed nor waited for the lock.");
+        }
+        finally
+        {
+            releaseWrite.TrySetResult();
+        }
+
+        await write.WaitAsync(TestTimeouts.Default);
+        await read!.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal("read", device.Password);
+        Assert.True(store.TryGet(readKey, out var value));
+        Assert.Equal("read", value);
+        Assert.Equal(Prefix + readKey, ReadString(serializer.Serialize(device), "password"));
+        Assert.Equal("read", ReadStoreFile()[readKey]);
+    }
+
+    [Fact]
     public void WhenAKeyIsReadWithTheCSharpNaming_ThenItIsKeptWhenWrittenWithTheJsonNaming()
     {
         // Arrange
@@ -741,6 +805,23 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
     // every test also shows that it only fails for itself.
     private static bool IsWaiting(Thread? thread) =>
         thread is not null && (thread.ThreadState & ThreadState.WaitSleepJoin) != 0;
+
+    // Calls back after each read of a password, with the value already read, so that a test can block it.
+    private sealed class PasswordReadGate : IReadInterceptor
+    {
+        public Action? OnRead { get; set; }
+
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
+        {
+            var value = next(ref context);
+            if (context.Property.Name == nameof(SecretTestDevice.Password))
+            {
+                OnRead?.Invoke();
+            }
+
+            return value;
+        }
+    }
 
     private (ConfigurableSubjectSerializer Serializer, SecretStore Store) CreateSerializer(bool withStore = true, bool hasRegistry = true)
     {
