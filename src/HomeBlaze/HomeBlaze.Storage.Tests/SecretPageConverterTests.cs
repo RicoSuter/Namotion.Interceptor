@@ -142,6 +142,21 @@ public class SecretPageConverterTests : IDisposable
         Assert.Same(source, converted);
     }
 
+    [Fact]
+    public void WhenThePageIsNestedBeyondTheDepthLimit_ThenNothingIsConverted()
+    {
+        // Arrange
+        var converter = Create();
+        var source = $":: {DeviceType}#gateway Password=s3cr3t\n::\n\n" + new string('>', 4096);
+
+        // Act
+        var isConverted = converter.TryConvert(source, out var converted);
+
+        // Assert
+        Assert.False(isConverted);
+        Assert.Same(source, converted);
+    }
+
     private SecretPageConverter Create()
     {
         var typeProvider = new TypeProvider();
