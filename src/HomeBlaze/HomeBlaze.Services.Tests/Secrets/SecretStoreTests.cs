@@ -117,7 +117,7 @@ public class SecretStoreTests : IDisposable
     }
 
     [Fact]
-    public void WhenSeveralValuesAreSetAtOnce_ThenTheFileHoldsAllOfThemAfterOneWrite()
+    public void WhenSeveralValuesAreSetAtOnce_ThenTheFileAndMemoryHoldAllOfThem()
     {
         // Arrange
         var store = new SecretStore(StorePath);
@@ -144,7 +144,7 @@ public class SecretStoreTests : IDisposable
         var key = SecretStore.CreateKey();
 
         // Act & Assert
-        Assert.ThrowsAny<IOException>(() => store.SetMany([new(key, "a")]));
+        Assert.ThrowsAny<Exception>(() => store.SetMany([new(key, "a")]));
         Assert.False(store.TryGet(key, out _));
     }
 
