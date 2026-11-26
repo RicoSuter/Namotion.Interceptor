@@ -31,8 +31,17 @@ public sealed class SecretStore
     /// <summary>Gets the value stored under <paramref name="key"/>.</summary>
     public bool TryGet(string key, [NotNullWhen(true)] out string? value) => _values.TryGetValue(key, out value);
 
-    /// <summary>Creates a new random key, 32 lowercase hexadecimal digits, without storing anything.</summary>
-    internal static string CreateKey() => Guid.NewGuid().ToString("N");
+    /// <summary>Creates a random key, 32 lowercase hexadecimal digits, that the store does not hold yet, without storing anything.</summary>
+    internal string CreateKey()
+    {
+        var key = Guid.NewGuid().ToString("N");
+        while (_values.ContainsKey(key))
+        {
+            key = Guid.NewGuid().ToString("N");
+        }
+
+        return key;
+    }
 
     /// <summary>
     /// Stores <paramref name="value"/> under <paramref name="key"/>, replacing its value or adding the key when it is

@@ -791,7 +791,7 @@ public class ConfigurableSubjectSerializerSecretTests : IDisposable
 
     private static string Seed(SecretStore store, string value)
     {
-        var key = SecretStore.CreateKey();
+        var key = store.CreateKey();
         store.Set(key, value);
         return key;
     }

@@ -155,7 +155,7 @@ internal sealed class SecretReferences
             // changes its value gets a new key, and the other keeps the key.
             if (remembered is null || IsHeldByAnother(remembered.Key, owner, propertyName))
             {
-                var key = SecretStore.CreateKey();
+                var key = _store.CreateKey();
                 var reference = Prefix + key;
                 _store.Set(key, text);
                 SetRemembered(owner, propertyName, new RememberedKey(key, reference, IsUnresolved: false));

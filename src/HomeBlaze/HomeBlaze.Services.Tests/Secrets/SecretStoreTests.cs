@@ -13,9 +13,12 @@ public class SecretStoreTests : IDisposable
     [Fact]
     public void WhenKeysAreCreated_ThenEachIsItsOwnThirtyTwoLowercaseHexDigits()
     {
+        // Arrange
+        var store = new SecretStore(StorePath);
+
         // Act
-        var first = SecretStore.CreateKey();
-        var second = SecretStore.CreateKey();
+        var first = store.CreateKey();
+        var second = store.CreateKey();
 
         // Assert
         Assert.Matches("^[0-9a-f]{32}$", first);
@@ -106,8 +109,8 @@ public class SecretStoreTests : IDisposable
     {
         // Arrange
         var store = new SecretStore(StorePath);
-        var first = SecretStore.CreateKey();
-        var second = SecretStore.CreateKey();
+        var first = store.CreateKey();
+        var second = store.CreateKey();
 
         // Act
         store.SetMany([new(first, "a"), new(second, "b")]);
@@ -126,7 +129,7 @@ public class SecretStoreTests : IDisposable
         // Arrange
         var store = new SecretStore(StorePath);
         Directory.CreateDirectory(StorePath); // a directory where the file should be makes the write fail
-        var key = SecretStore.CreateKey();
+        var key = store.CreateKey();
 
         // Act & Assert
         Assert.ThrowsAny<Exception>(() => store.SetMany([new(key, "a")]));

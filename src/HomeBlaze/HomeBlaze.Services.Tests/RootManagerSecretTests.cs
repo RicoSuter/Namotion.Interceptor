@@ -68,10 +68,11 @@ public class RootManagerSecretTests : IDisposable
     public async Task WhenRootJsonHoldsNoPlaintextSecret_ThenItIsNotRewritten()
     {
         // Arrange
-        var original = RootJson("$secret:" + SecretStore.CreateKey());
+        var store = new SecretStore(SecretsPath);
+        var original = RootJson("$secret:" + store.CreateKey());
         await File.WriteAllTextAsync(RootPath, original);
         var originalBytes = await File.ReadAllBytesAsync(RootPath);
-        var (rootManager, _) = CreateRootManager(new SecretStore(SecretsPath));
+        var (rootManager, _) = CreateRootManager(store);
 
         // Act
         await rootManager.StartAsync(CancellationToken.None);

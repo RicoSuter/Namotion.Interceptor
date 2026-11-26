@@ -35,7 +35,7 @@ internal sealed class SecretConverter
         return true;
     }
 
-    private static void VisitValue(
+    private void VisitValue(
         JsonNode? node, Type type, JsonSerializerOptions options, ConfigurationNaming naming,
         ref List<KeyValuePair<string, string>>? values)
     {
@@ -84,7 +84,7 @@ internal sealed class SecretConverter
         }
     }
 
-    private static void VisitProperties(
+    private void VisitProperties(
         JsonObject value, JsonTypeInfo typeInfo, JsonSerializerOptions options, bool isRoot,
         ConfigurationNaming naming, ref List<KeyValuePair<string, string>>? values)
     {
@@ -116,7 +116,7 @@ internal sealed class SecretConverter
                     plaintext.Length > 0 &&
                     !SecretReferences.IsReference(plaintext))
                 {
-                    var key = SecretStore.CreateKey();
+                    var key = _store.CreateKey();
                     (values ??= []).Add(new(key, plaintext));
                     value[name] = SecretReferences.Prefix + key;
                 }
