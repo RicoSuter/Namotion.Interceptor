@@ -550,8 +550,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// blocks would be inserted or removed while a reload runs or after one that failed, until the page has been
     /// read again, or when a reload changed the page while this one ran. When the page cannot keep the change, it is
     /// read again from its file before this returns, so the graph matches the text again unless that read fails.
-    /// When the storage or the secret store fails the write, the page is read again in the same way and the exception
-    /// propagates.
+    /// When the write fails before or while it is written, such as when the storage or the secret store cannot be
+    /// written, the page is read again in the same way and the exception propagates.
     /// Saves of one page run one after the other.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
@@ -1208,7 +1208,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
         catch
         {
-            // The secret store failed the write before anything was published.
+            // Nothing was published, whatever failed, such as the secret store: the graph is ahead of the file, as after
+            // a refusal.
             await ReadBlockAgainAsync(page, blockIndex, snapshot.BlockSubjects, CancellationToken.None);
             throw;
         }
