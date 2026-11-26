@@ -1120,9 +1120,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 return MarkdownEditResult.Refused(ReloadRefusal);
             }
 
-            var publishRefusal = await PublishAndWriteAsync(snapshot, ConvertSecrets(change.Write), change.ChangedBlock, changedPageRefusal);
+            // The result subject is looked up by the converted text, which the page publishes.
+            var converted = change with { Write = ConvertSecrets(change.Write) };
+            var publishRefusal = await PublishAndWriteAsync(snapshot, converted.Write, converted.ChangedBlock, changedPageRefusal);
             return publishRefusal is null
-                ? MarkdownEditResult.WrittenFor(FindResultSubject(change))
+                ? MarkdownEditResult.WrittenFor(FindResultSubject(converted))
                 : MarkdownEditResult.Refused(publishRefusal);
         }
         finally

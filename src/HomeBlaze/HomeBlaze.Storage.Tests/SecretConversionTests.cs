@@ -952,6 +952,31 @@ public class SecretConversionTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenABlockIsInsertedIntoAPageThatHoldsAPlaintextSecret_ThenTheResultNamesTheSubjectOfTheNewBlock()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", "# Gateway\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Password=s3cr3t\n::\n");
+
+        // The read after the refusal takes the plaintext in, which only the storage converts.
+        var refused = await page.InsertTextAsync(page, null, "Text.", CancellationToken.None);
+        Assert.False(refused.IsWritten);
+
+        // Act
+        var result = await page.InsertWidgetAsync(
+            page, null, new EmbeddedSecretDevice { Host = "10.0.0.2" }, "added", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsWritten);
+        Assert.NotNull(result.Subject);
+        Assert.Same(page.Children["added"], result.Subject);
+        AssertPageHoldsSecretReferenceOnly(page, "Gateway.md");
+    }
+
+    [Fact]
     public async Task WhenAMetadataFileIsWritten_ThenItIsNotConverted()
     {
         // Arrange
