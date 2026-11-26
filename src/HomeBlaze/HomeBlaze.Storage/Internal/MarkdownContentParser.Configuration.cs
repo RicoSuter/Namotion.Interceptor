@@ -102,6 +102,7 @@ public sealed partial class MarkdownContentParser
         {
             _appliedConfigurationKeys.AddOrUpdate(subject, configuration.Keys);
             _appliedConfigurationJson.AddOrUpdate(subject, configuration.Json);
+            state.AddAppliedSubject(subject);
         }
 
         return (subject, null);

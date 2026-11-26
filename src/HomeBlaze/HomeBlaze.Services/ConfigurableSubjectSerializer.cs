@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Services.Secrets;
 using HomeBlaze.Services.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -33,10 +34,26 @@ public class ConfigurableSubjectSerializer
     /// </summary>
     public const string TypeDiscriminatorPropertyName = "$type";
 
+    private static readonly JsonSerializerOptions IndentedOptions = new() { WriteIndented = true };
+    private static readonly JsonDocumentOptions NoDuplicatePropertiesOptions = new() { AllowDuplicateProperties = false };
+
     private readonly TypeProvider _typeProvider;
     private readonly IServiceProvider _serviceProvider;
     private readonly JsonSerializerOptions _jsonPropertyOptions;
     private readonly JsonSerializerOptions _cSharpPropertyOptions;
+
+    // Without the secret hook: a default holds the plaintext default of a secret, so that it is never stored under a key
+    // that a subject filled from it would then change for every other subject. A default is compared and applied, never
+    // written to a file. The same instances as above without a SecretStore service.
+    private readonly JsonSerializerOptions _jsonPropertyDefaultOptions;
+    private readonly JsonSerializerOptions _cSharpPropertyDefaultOptions;
+
+    // Null without a SecretStore service, which leaves secret values as they are.
+    private readonly SecretReferences? _secrets;
+
+    // Null without a SecretStore service, which leaves configuration text as it is.
+    private readonly SecretConverter? _secretConverter;
+
     // Never cleared: holds its Type keys, and with them their assemblies, as long as the serializer lives, like TypeProvider.
     private readonly ConcurrentDictionary<(Type Type, ConfigurationNaming Naming), JsonElement?> _defaultConfigurations = new();
 
@@ -44,15 +61,28 @@ public class ConfigurableSubjectSerializer
     {
         _typeProvider = typeProvider;
         _serviceProvider = serviceProvider;
-        _jsonPropertyOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.JsonProperty);
-        _cSharpPropertyOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.CSharpProperty);
+
+        // One instance for both namings, so a key read with one naming is kept when written with the other.
+        var store = serviceProvider.GetService<SecretStore>();
+        _secrets = store is not null
+            ? new SecretReferences(store, serviceProvider.GetService<ILogger<ConfigurableSubjectSerializer>>())
+            : null;
+        _secretConverter = store is not null ? new SecretConverter(store) : null;
+        _jsonPropertyOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.JsonProperty, _secrets);
+        _cSharpPropertyOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.CSharpProperty, _secrets);
+        _jsonPropertyDefaultOptions = _secrets is null
+            ? _jsonPropertyOptions
+            : CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.JsonProperty, secrets: null);
+        _cSharpPropertyDefaultOptions = _secrets is null
+            ? _cSharpPropertyOptions
+            : CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.CSharpProperty, secrets: null);
     }
 
     private static JsonSerializerOptions CreateOptions(
-        TypeProvider typeProvider, IServiceProvider serviceProvider, ConfigurationNaming naming) =>
+        TypeProvider typeProvider, IServiceProvider serviceProvider, ConfigurationNaming naming, SecretReferences? secrets) =>
         new()
         {
-            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider, serviceProvider, naming),
+            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider, serviceProvider, naming) { Secrets = secrets },
             PropertyNamingPolicy = naming == ConfigurationNaming.JsonProperty ? JsonNamingPolicy.CamelCase : null,
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -70,12 +100,22 @@ public class ConfigurableSubjectSerializer
     }
 
     // The configuration properties of the subject itself are matched by this name and not by the options.
-    private static string GetJsonName(string propertyName, ConfigurationNaming naming) =>
+    internal static string GetJsonName(string propertyName, ConfigurationNaming naming) =>
         naming == ConfigurationNaming.JsonProperty ? JsonNamingPolicy.CamelCase.ConvertName(propertyName) : propertyName;
 
     /// <summary>
     /// Serializes an IConfigurable to JSON with $type discriminator.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The type of the subject, or of a value in its configuration, has a secret configuration property that is not a string property of a subject.
+    /// </exception>
+    /// <exception cref="IOException">The secret store cannot be written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written.</exception>
+    /// <remarks>
+    /// A secret value is written as a reference to the <see cref="SecretStore"/>, and a changed one is stored when it is
+    /// serialized, before the file that references it is written. A write of the result that is refused or fails leaves
+    /// the changed secret in effect, under the key the file references already.
+    /// </remarks>
     public string Serialize(IInterceptorSubject subject, ConfigurationNaming naming = ConfigurationNaming.JsonProperty)
     {
         return JsonSerializer.Serialize(GetConfigurable(subject), typeof(IConfigurable), GetOptions(naming));
@@ -88,10 +128,15 @@ public class ConfigurableSubjectSerializer
     /// <param name="subject">The subject to serialize. It must be registered.</param>
     /// <param name="isExcluded">Receives a registered property of the subject and returns true to leave it out.</param>
     /// <param name="naming">The naming of the JSON.</param>
-    /// <exception cref="InvalidOperationException">The subject is not registered.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The subject is not registered, or its type, or that of a value in its configuration, has a secret configuration property that is not a string property of a subject.
+    /// </exception>
+    /// <exception cref="IOException">The secret store cannot be written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written.</exception>
     /// <remarks>
     /// The value of an excluded property is not read. A subject that is nested in another property is written
-    /// in full, also when it has a property that would be excluded.
+    /// in full, also when it has a property that would be excluded. Secret values are stored as by
+    /// <see cref="Serialize(IInterceptorSubject, ConfigurationNaming)"/>.
     /// </remarks>
     public string Serialize(
         IInterceptorSubject subject,
@@ -106,9 +151,11 @@ public class ConfigurableSubjectSerializer
             $"Subject must be registered to exclude its properties. Type: {type.FullName}");
         var result = new JsonObject { [TypeDiscriminatorPropertyName] = type.FullName };
 
-        // The properties, their names and their filter are those of the serializer, so that the result
-        // equals Serialize apart from what is excluded.
-        foreach (var property in options.GetTypeInfo(type).Properties)
+        // The properties, their names, their filter and the callback of the type are those of the serializer, so that
+        // the result equals Serialize apart from what is excluded.
+        var typeInfo = options.GetTypeInfo(type);
+        typeInfo.OnSerializing?.Invoke(subject);
+        foreach (var property in typeInfo.Properties)
         {
             // The resolver creates every property from a member of the type and adds none of its own. A property
             // without a registered counterpart is skipped, as the filter of the serializer skips it.
@@ -134,8 +181,9 @@ public class ConfigurableSubjectSerializer
 
     /// <summary>
     /// Gets the configuration of a new subject of <paramref name="type"/> as
-    /// <see cref="Serialize(IInterceptorSubject, ConfigurationNaming)"/> writes it: the values that
-    /// <see cref="Deserialize(string, ConfigurationNaming)"/> gives a property that the JSON does not have.
+    /// <see cref="Serialize(IInterceptorSubject, ConfigurationNaming)"/> writes it, apart from a secret, which holds its
+    /// value and not a reference: the values that <see cref="Deserialize(string, ConfigurationNaming)"/> gives a property
+    /// that the JSON does not have.
     /// Null when <see cref="Deserialize(string, ConfigurationNaming)"/> does not create the type, or when creating or
     /// serializing the subject throws, which is logged.
     /// </summary>
@@ -181,7 +229,8 @@ public class ConfigurableSubjectSerializer
                 return null;
             }
 
-            using var document = JsonDocument.Parse(Serialize(subject, naming));
+            var options = naming == ConfigurationNaming.JsonProperty ? _jsonPropertyDefaultOptions : _cSharpPropertyDefaultOptions;
+            using var document = JsonDocument.Parse(JsonSerializer.Serialize(GetConfigurable(subject), typeof(IConfigurable), options));
             return document.RootElement.Clone();
         }
         catch (Exception exception)
@@ -255,7 +304,7 @@ public class ConfigurableSubjectSerializer
         }
 
         // Find the type in registered types
-        var type = _typeProvider.Types.FirstOrDefault(t => t.FullName == typeName);
+        var type = FindType(typeName);
         if (type == null)
         {
             return null;
@@ -281,7 +330,8 @@ public class ConfigurableSubjectSerializer
     /// <summary>
     /// Releases a subject that <see cref="Deserialize(string, ConfigurationNaming)"/> created and that is not used
     /// after all: detaches it and the subjects in its properties from the context, which stops their hosted
-    /// services. A hosted service that was not started yet is stopped without having been started.
+    /// services, and removes them from the holders of their secret keys, see <see cref="ReleaseSecrets"/>. A hosted service that was not
+    /// started yet is stopped without having been started.
     /// </summary>
     /// <remarks>
     /// Does nothing for a subject that a property references. Such a subject is in the graph and leaves the
@@ -294,12 +344,118 @@ public class ConfigurableSubjectSerializer
             return;
         }
 
+        ReleaseSecrets(subject);
+
         // The context the constructor got from the service provider is a fallback context of the subject.
         // Removing it is what detaches a subject that no property holds.
         if (_serviceProvider.GetService<IInterceptorSubjectContext>() is { } context)
         {
             subject.Context.RemoveFallbackContext(context);
         }
+    }
+
+    /// <summary>
+    /// Removes the subject and the subjects in its configuration from the holders of their secret keys, for a subject that
+    /// is no longer used, so that another subject that holds one of them keeps it when it changes its value. A subject in
+    /// its configuration that something else references keeps its keys. The stored secrets are not removed.
+    /// </summary>
+    /// <remarks>Call it before the subject is detached from the context.</remarks>
+    public void ReleaseSecrets(IInterceptorSubject subject)
+    {
+        if (_secrets is null)
+        {
+            return;
+        }
+
+        _secrets.Release(subject);
+        foreach (var property in subject.GetConfigurationProperties())
+        {
+            foreach (var child in property.Children)
+            {
+                // Before the subject is detached, so its own property is the one reference of a child released with it.
+                if (child.Subject.GetReferenceCount() <= 1)
+                {
+                    ReleaseSecrets(child.Subject);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Replaces each plaintext secret in configuration JSON, whose root names its type with <c>$type</c>, by a reference
+    /// to a new key of the <see cref="SecretStore"/>, and stores the values with one write. Returns false, with
+    /// <paramref name="converted"/> being <paramref name="json"/>, when there is nothing to replace, when the text is not
+    /// a JSON object of a known type, or without a <see cref="SecretStore"/> service.
+    /// </summary>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is stored.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is stored.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A type in the configuration has a secret configuration property that is not a string property of a subject.
+    /// </exception>
+    public bool TryConvertSecrets(string json, ConfigurationNaming naming, out string converted)
+    {
+        converted = json;
+        if (_secretConverter is null || ParseObject(json) is not { } root ||
+            root[TypeDiscriminatorPropertyName] is not JsonValue discriminator ||
+            !discriminator.TryGetValue<string>(out var typeName) ||
+            FindType(typeName) is not { } type)
+        {
+            return false;
+        }
+
+        return TryConvertSecrets(root, type, naming, ref converted);
+    }
+
+    /// <summary>
+    /// Replaces each plaintext secret in configuration JSON of <paramref name="type"/>, such as a block configuration whose
+    /// type is given elsewhere, like <see cref="TryConvertSecrets(string, ConfigurationNaming, out string)"/>.
+    /// </summary>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is stored.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is stored.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A type in the configuration has a secret configuration property that is not a string property of a subject.
+    /// </exception>
+    public bool TryConvertSecrets(string json, Type type, ConfigurationNaming naming, out string converted)
+    {
+        converted = json;
+        return _secretConverter is not null && ParseObject(json) is { } root && TryConvertSecrets(root, type, naming, ref converted);
+    }
+
+    private bool TryConvertSecrets(JsonObject root, Type type, ConfigurationNaming naming, ref string converted)
+    {
+        if (!_secretConverter!.TryConvert(root, type, GetOptions(naming), naming))
+        {
+            return false;
+        }
+
+        converted = root.ToJsonString(IndentedOptions);
+        return true;
+    }
+
+    private static JsonObject? ParseObject(string json)
+    {
+        try
+        {
+            // Rejected here: a JsonObject would throw an ArgumentException for a duplicate property on first access.
+            return JsonNode.Parse(json, documentOptions: NoDuplicatePropertiesOptions) as JsonObject;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private Type? FindType(string fullName)
+    {
+        foreach (var type in _typeProvider.Types)
+        {
+            if (type.FullName == fullName)
+            {
+                return type;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -327,13 +483,29 @@ public class ConfigurableSubjectSerializer
             if (!hasConfigAttribute || !property.CanWrite)
                 continue;
 
+            var isSecret = SecretReferences.IsSecret(property);
+            if (isSecret)
+            {
+                SecretReferences.EnsureSupported(type, property.Name, property.PropertyType);
+            }
+
             var jsonName = GetJsonName(property.Name, naming);
             if (root.TryGetProperty(jsonName, out var jsonValue))
             {
                 var valueJson = jsonValue.GetRawText();
                 if (TryConvert(valueJson, property.Name, property.PropertyType, options, skipped, out var value))
                 {
-                    property.SetValue(subject, value);
+                    if (isSecret && _secrets is not null)
+                    {
+                        // A subject: EnsureSupported threw for any other type.
+                        _secrets.Read(
+                            (IInterceptorSubject)subject, property.Name, value, property,
+                            static (owner, propertyInfo, resolved) => propertyInfo.SetValue(owner, resolved));
+                    }
+                    else
+                    {
+                        property.SetValue(subject, value);
+                    }
                 }
             }
         }
@@ -353,6 +525,13 @@ public class ConfigurableSubjectSerializer
         var options = GetOptions(naming);
         foreach (var property in subject.GetConfigurationProperties())
         {
+            // Checked before the value is looked up, so a type with an unsupported secret fails for every file.
+            var isSecret = SecretReferences.IsSecret(property);
+            if (isSecret)
+            {
+                SecretReferences.EnsureSupported(subject.GetType(), property.Name, property.Type);
+            }
+
             var jsonName = GetJsonName(property.Name, naming);
             string valueJson;
             if (root.TryGetProperty(jsonName, out var jsonValue))
@@ -371,7 +550,16 @@ public class ConfigurableSubjectSerializer
 
             if (TryConvert(valueJson, property.Name, property.Type, options, skipped, out var value))
             {
-                property.SetValue(value);
+                if (isSecret && _secrets is not null)
+                {
+                    _secrets.Read(
+                        subject, property.Name, value, property,
+                        static (_, registeredProperty, resolved) => registeredProperty.SetValue(resolved));
+                }
+                else
+                {
+                    property.SetValue(value);
+                }
             }
         }
     }

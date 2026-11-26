@@ -20,6 +20,8 @@ internal sealed class PausableStore(IStore inner) : StoreBase
     private string? _pausedOperation;
     private string? _blockedOperation;
     private Action? _afterNextListing;
+    private Action? _beforeOpenRead;
+    private int _beforeOpenReadCallCount;
     private Exception? _deleteFailure;
     private Exception? _deleteDirectoryFailure;
     private int _pausedStreamNumber;
@@ -62,6 +64,18 @@ internal sealed class PausableStore(IStore inner) : StoreBase
     /// Runs the action once, when the next listing has been read from the storage and before its caller has it.
     /// </summary>
     public void RunAfterNextListing(Action action) => Volatile.Write(ref _afterNextListing, action);
+
+    /// <summary>
+    /// Runs the action once, when one of the calls of <see cref="OpenRead"/> from now on has arrived and before it opens
+    /// the file.
+    /// </summary>
+    /// <param name="callNumber">Which of the calls from now on, starting at one.</param>
+    /// <param name="action">The action to run.</param>
+    public void RunBeforeOpenRead(int callNumber, Action action)
+    {
+        _beforeOpenReadCallCount = GetCallCount(nameof(OpenRead)) + callNumber;
+        Volatile.Write(ref _beforeOpenRead, action);
+    }
 
     /// <summary>
     /// Makes the first read from one of the streams that <see cref="OpenRead"/> returns from now on hang.
@@ -123,6 +137,11 @@ internal sealed class PausableStore(IStore inner) : StoreBase
     public override async Task<Stream> OpenRead(string objectPath, CancellationToken cancellationToken = default)
     {
         await ArriveAsync(nameof(OpenRead));
+        if (Volatile.Read(ref _beforeOpenRead) is not null && GetCallCount(nameof(OpenRead)) == _beforeOpenReadCallCount)
+        {
+            Interlocked.Exchange(ref _beforeOpenRead, null)?.Invoke();
+        }
+
         var stream = await inner.OpenRead(objectPath, cancellationToken);
 
         // Null for a file that does not exist, although the signature does not say so.

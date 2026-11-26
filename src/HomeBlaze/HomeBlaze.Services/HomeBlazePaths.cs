@@ -34,6 +34,9 @@ public static class HomeBlazePaths
     /// <summary>Folder of the checkpoint files of automations, relative to the data directory.</summary>
     public const string AutomationStateDirectory = "AutomationState";
 
+    /// <summary>File of the values of secret configuration properties, relative to the data directory.</summary>
+    public const string SecretsFile = "Secrets.json";
+
     /// <summary>
     /// Resolves the full path of the root configuration file. A relative setting resolves against the working directory.
     /// </summary>
@@ -60,6 +63,15 @@ public static class HomeBlazePaths
     {
         var dataDirectory = Path.GetDirectoryName(GetRootConfigurationPath(configuration))!;
         return Path.Combine(dataDirectory, DataProtectionKeysDirectory);
+    }
+
+    /// <summary>
+    /// Resolves the full path of the file that keeps the values of secret configuration properties, in the data directory next to the root configuration file.
+    /// </summary>
+    public static string GetSecretsPath(IConfiguration? configuration)
+    {
+        var dataDirectory = Path.GetDirectoryName(GetRootConfigurationPath(configuration))!;
+        return Path.Combine(dataDirectory, SecretsFile);
     }
 
     /// <summary>

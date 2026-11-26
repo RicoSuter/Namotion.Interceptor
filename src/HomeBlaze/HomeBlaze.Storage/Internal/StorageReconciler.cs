@@ -1,4 +1,3 @@
-using System.Text;
 using FluentStorage.Storage;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
@@ -30,6 +29,7 @@ internal sealed class StorageReconciler
     private readonly TimeProvider _timeProvider;
     private readonly ILogger? _logger;
     private readonly bool _isOnDisk;
+    private readonly Action<string> _notifyChanged;
 
     // Cancelled when the connection ends. Nothing is assigned to the tree after that.
     private readonly CancellationToken _connectionToken;
@@ -51,6 +51,7 @@ internal sealed class StorageReconciler
         TimeProvider timeProvider,
         ILogger? logger,
         bool isOnDisk,
+        Action<string> notifyChanged,
         CancellationToken connectionToken)
     {
         _client = client;
@@ -61,6 +62,7 @@ internal sealed class StorageReconciler
         _timeProvider = timeProvider;
         _logger = logger;
         _isOnDisk = isOnDisk;
+        _notifyChanged = notifyChanged;
         _connectionToken = connectionToken;
     }
 
@@ -629,19 +631,24 @@ internal sealed class StorageReconciler
         if (StoragePath.IsJson(listed.Path))
         {
             var content = await ReadAsync(listed.Path, cancellationToken);
-            entry.Hash = StorageHash.Compute(content);
+            var hash = StorageHash.Compute(content);
 
             // More than one candidate cannot be told apart, so none of them is moved.
             // Only into another folder: the registry keeps the old key of a subject that is re-keyed within one dictionary.
-            if (movableEntries.Remove(entry.Hash, out var candidates) && candidates.Count == 1 &&
+            // On the hash of the content as read: a moved file has the content of its entry.
+            if (movableEntries.Remove(hash, out var candidates) && candidates.Count == 1 &&
                 candidates[0].Parent != entry.Parent)
             {
+                entry.Hash = hash;
                 entry.Subject = candidates[0].Subject;
                 _hasUnappliedMove = true;
             }
             else
             {
-                entry.Subject = CreateFromJson(listed.Path, DecodeText(content), listed.Version);
+                var converted = await ConvertSecretsAsync(listed.Path, content, hash, entry.Version, cancellationToken);
+                entry.Hash = converted.Hash;
+                entry.Version = converted.Version;
+                entry.Subject = CreateFromJson(listed.Path, converted.Text, entry.Version);
             }
         }
         else
@@ -650,6 +657,16 @@ internal sealed class StorageReconciler
             if (subject is GenericFile genericFile)
             {
                 SetMetadata(genericFile, listed.Version);
+            }
+            else if (subject is MarkdownFile page && IsConvertible(listed.Path))
+            {
+                // Read and converted here, so that the page parses the text whose hash is recorded.
+                var content = await ReadAsync(listed.Path, cancellationToken);
+                var converted = await ConvertSecretsAsync(listed.Path, content, StorageHash.Compute(content), entry.Version, cancellationToken);
+                entry.Hash = converted.Hash;
+                entry.Version = converted.Version;
+                SetMetadata(page, listed.Version);
+                await page.OnFileChangedAsync(converted.Text, cancellationToken);
             }
             else
             {
@@ -714,6 +731,78 @@ internal sealed class StorageReconciler
         });
     }
 
+    /// <summary>
+    /// Replaces the plaintext secrets of a JSON file or page by references and writes the converted content back, while
+    /// the file still has the content that was converted.
+    /// </summary>
+    /// <returns>
+    /// The content to continue with, its text, hash and version: the converted content once it is written, without a
+    /// version, else the given content with its hash and version. Without a version the next pass compares the file by
+    /// its hash, which also finds an edit made right after the write-back.
+    /// </returns>
+    private async Task<ConvertedContent> ConvertSecretsAsync(
+        string path, byte[] content, string hash, StorageVersion version, CancellationToken cancellationToken)
+    {
+        var isExact = _storage.TryDecodeExact(path, content, out var text, out var encoding, out var hasByteOrderMark);
+        var unchanged = new ConvertedContent(content, text, hash, version);
+        if (!isExact)
+        {
+            return unchanged;
+        }
+
+        string convertedText;
+        try
+        {
+            if (!_storage.TryConvertSecrets(path, text, out convertedText))
+            {
+                return unchanged;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger?.LogWarning(exception, "The plaintext secrets of {Path} could not be moved to the secret store and stay in the file.", path);
+            return unchanged;
+        }
+        catch (InvalidOperationException exception)
+        {
+            // Also a secret configuration property that is not a string property of a subject, which the message names.
+            _logger?.LogWarning(exception, "The plaintext secrets of {Path} could not be converted and stay in the file.", path);
+            return unchanged;
+        }
+
+        var converted = StorageText.Encode(convertedText, encoding, hasByteOrderMark);
+        try
+        {
+            // Narrows the window for an edit made since the read; the store client has no conditional write to close it.
+            var current = await TryReadAsync(path, cancellationToken);
+            if (current is null || !current.AsSpan().SequenceEqual(content))
+            {
+                _notifyChanged(path);
+                return unchanged;
+            }
+
+            // Not disposed when the write fails, see TimeLimitedStore.
+            var stream = new MemoryStream(converted);
+            await _client.SetObject(path, stream, append: false, cancellationToken: cancellationToken);
+            await stream.DisposeAsync();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // The write can have reached the storage, so a pass reads the file again.
+            _logger?.LogWarning(exception, "The converted secrets of {Path} could not be written back; the file keeps its plaintext until it changes again.", path);
+            _notifyChanged(path);
+            return unchanged;
+        }
+
+        _logger?.LogInformation("Moved the plaintext secrets of {Path} to the secret store.", path);
+        return new ConvertedContent(converted, convertedText, StorageHash.Compute(converted), default);
+    }
+
+    /// <summary>Gets whether the plaintext secrets of the file are converted: those of a JSON file other than metadata, and of a page.</summary>
+    internal static bool IsConvertible(string path)
+        => (StoragePath.IsJson(path) && !StorageMetadataPath.IsMetadataFile(path)) ||
+           StoragePath.IsMarkdown(path);
+
     private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version)
     {
         var subject = _subjectFactory.CreateFromJson(_storage, StoragePath.ToFullPath(path), json);
@@ -748,7 +837,30 @@ internal sealed class StorageReconciler
         }
 
         string hash;
-        if (entry.Subject is IStorageFile file and not JsonFile)
+        if (entry.Subject is MarkdownFile page && (content != null || IsConvertible(entry.Path)))
+        {
+            var isReadHere = content == null;
+            content ??= await ReadAsync(entry.Path, cancellationToken);
+            hash = StorageHash.Compute(content);
+            SetMetadata(page, version);
+
+            // Only for content read here that changed: the page parses what a write through the storage wrote.
+            string? text = null;
+            if (isReadHere && hash != entry.Hash)
+            {
+                (content, text, hash, version) = await ConvertSecretsAsync(entry.Path, content, hash, version, cancellationToken);
+            }
+
+            if (hash != entry.Hash)
+            {
+                // A load that fails half way has changed the subject, which then holds neither content.
+                entry.Hash = null;
+
+                await page.OnFileChangedAsync(text ?? DecodeText(content), cancellationToken);
+                _logger?.LogInformation("Reloaded: {Path}", entry.Path);
+            }
+        }
+        else if (entry.Subject is IStorageFile file and not JsonFile)
         {
             // The subject reads the file itself, so its bytes are only hashed here.
             hash = content != null ? StorageHash.Compute(content) : await ComputeHashAsync(entry.Path, cancellationToken);
@@ -764,9 +876,18 @@ internal sealed class StorageReconciler
         }
         else
         {
+            var isReadHere = content == null;
             content ??= await ReadAsync(entry.Path, cancellationToken);
             hash = StorageHash.Compute(content);
-            if (hash != entry.Hash && await ApplyContentAsync(entry, version, hash, content, cancellationToken))
+
+            // Only for content read here that changed: a write through the storage was converted before it was written.
+            string? text = null;
+            if (isReadHere && hash != entry.Hash && IsConvertible(entry.Path))
+            {
+                (content, text, hash, version) = await ConvertSecretsAsync(entry.Path, content, hash, version, cancellationToken);
+            }
+
+            if (hash != entry.Hash && await ApplyContentAsync(entry, version, hash, text ?? DecodeText(content), cancellationToken))
             {
                 return true;
             }
@@ -787,10 +908,8 @@ internal sealed class StorageReconciler
     /// </summary>
     /// <returns>True when a new entry with another subject replaced the given one.</returns>
     private async Task<bool> ApplyContentAsync(
-        StorageEntry entry, StorageVersion version, string hash, byte[] content, CancellationToken cancellationToken)
+        StorageEntry entry, StorageVersion version, string hash, string json, CancellationToken cancellationToken)
     {
-        var json = DecodeText(content);
-
         // Text that is not valid JSON fails here for a configurable subject, which then keeps what it has:
         // a file that is being written is no reason to stop a device.
         if (entry.Subject is IConfigurable configurable && (!StoragePath.IsJson(entry.Path) || FileSubjectFactory.DescribesTypeOf(entry.Subject, json)))
@@ -917,12 +1036,10 @@ internal sealed class StorageReconciler
         return buffer.ToArray();
     }
 
-    private static string DecodeText(byte[] content)
-    {
-        // A reader, not Encoding.GetString: it drops a byte order mark, which the JSON parser rejects.
-        using var reader = new StreamReader(new MemoryStream(content), Encoding.UTF8);
-        return reader.ReadToEnd();
-    }
+    /// <summary>Decodes the content of a file as text, in the encoding its byte order mark names, else UTF-8.</summary>
+    private static string DecodeText(byte[] content) => StorageText.Decode(content, out _, out _);
 
     private readonly record struct StorageListing(string Path, bool IsFolder, StorageVersion Version);
+
+    private readonly record struct ConvertedContent(byte[] Content, string Text, string Hash, StorageVersion Version);
 }

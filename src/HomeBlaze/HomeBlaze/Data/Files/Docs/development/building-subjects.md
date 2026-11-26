@@ -71,7 +71,8 @@ public partial string? AppKey { get; set; }
 ```
 
 Secret configuration properties:
-- Are **persisted** to JSON like regular configuration
+- Must be `string` properties of a subject: any other type, or a secret property of a plain object, throws when the type is read or written
+- Are **persisted** to `Secrets.json` in the data folder; the file in `Files/` holds a `$secret:` reference instead (see [Configuration](../administration/configuration.md#data-folder))
 - Are **hidden** in the browser property panel
 - Show as **masked password fields** in the edit dialog (empty by default, only overwritten when the user enters a new value)
 - **Cannot** be combined with `[State]`: the app throws at startup to prevent accidental exposure
@@ -160,7 +161,7 @@ Values are auto-scaled for display within unit families (e.g., 1500 W displays a
 
 A property with `IsCumulative = true` is a counter that only grows and is named `Total<Modifier><Quantity>`, with the modifier (such as a direction) before the quantity like in plain English: `TotalConsumedEnergy`, `TotalImportedEnergy`, `TotalExportedEnergy`, `TotalProducedThermalEnergy`, `TotalRain`, `TotalOperatingHours`. The `Total` prefix is reserved for such counters. A value that sums parts at one instant, such as the power or current of all phases of a meter, takes no prefix (`MeasuredPower`, `ElectricalCurrent`), and a value that covers a period, such as a charging session or a day, is not cumulative and does not start with `Total`.
 
-The subject keeps the value from decreasing: if the API reports periodic buckets (daily, monthly) that reset, the subject accumulates them into a true counter and persists the offset via `[Configuration]`. Only a reset of the device or service that owns the counter (for example a reboot that clears it) may restart the value at 0 or step it back once, and a change of the counter's source passes through `null`. A consumer that computes deltas treats a decrease as such a reset and restarts after `null`, counting no change for that interval.
+The subject keeps the value from decreasing: if the API reports periodic buckets (daily, monthly) that reset, the subject accumulates them into a true counter and persists the offset via `[Configuration]`. Only a reset of the device or service that owns the counter (for example a reboot that clears it) may restart the value at 0 or step it back once. A consumer that computes deltas, such as the history `Delta` aggregation, counts a drop below half of the previous value as a restart from 0 and a smaller drop as no change. It skips `null` and steps from the last value before it to the first one after it, because the counter keeps counting while its source is offline, so a change of the counter's source to one with another value counts as one such step; see [Query semantics](../architecture/design/history.md#query-semantics).
 
 ### Readings Are Null Until Observed
 
@@ -891,7 +892,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | Attribute | Purpose | Persisted | Displayed |
 |-----------|---------|-----------|-----------|
 | `[Configuration]` | User-editable settings | Yes | No (unless also `[State]`) |
-| `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes | Never (masked in editor) |
+| `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes, in Secrets.json | Never (masked in editor) |
 | `[State]` | Live values for display | No | Yes |
 | `[Configuration] + [State]` | Editable and displayed, but not writable through MCP's `set_property`, see [AI Agents](../administration/ai-agents.md#tools-and-permissions); expose a write through an operation instead | Yes | Yes |
 | `[Configuration] + [SubjectPath]` | Path with a picker, see [Path Properties](#path-properties) | Yes | No (unless also `[State]`) |
