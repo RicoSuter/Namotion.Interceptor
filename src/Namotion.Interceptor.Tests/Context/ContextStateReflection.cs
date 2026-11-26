@@ -39,6 +39,10 @@ internal static class ContextStateReflection
         .GetMethod("GetOrSetMethodInvocationFunction", BindingFlags.Instance | BindingFlags.NonPublic)
         ?? throw new InvalidOperationException("ContextState.GetOrSetMethodInvocationFunction was renamed, the context tests need updating.");
 
+    private static readonly FieldInfo UsedByContextsField = typeof(InterceptorSubjectContext)
+        .GetField("_usedByContexts", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("InterceptorSubjectContext._usedByContexts was renamed, the context tests need updating.");
+
     private static readonly Type PropertyTypeIndexType = typeof(InterceptorSubjectContext)
         .GetNestedType("PropertyTypeIndex`1", BindingFlags.NonPublic)
         ?? throw new InvalidOperationException("InterceptorSubjectContext.PropertyTypeIndex was renamed, the context tests need updating.");
@@ -62,6 +66,16 @@ internal static class ContextStateReflection
     internal static object? GetResolvedTerminal(InterceptorSubjectContext context)
     {
         return ResolvedTerminalField.GetValue(GetState(context));
+    }
+
+    /// <summary>
+    /// Returns the set of contexts that resolve through the given one. The set is also the lock the
+    /// invalidation walk takes on it, so holding it parks a walk at that context.
+    /// </summary>
+    internal static HashSet<InterceptorSubjectContext> GetUsedByContexts(InterceptorSubjectContext context)
+    {
+        return (HashSet<InterceptorSubjectContext>?)UsedByContextsField.GetValue(context)
+            ?? throw new InvalidOperationException("No context resolves through this one, so it has no using set.");
     }
 
     /// <summary>Returns the read-function array owned by the context's installed state.</summary>
