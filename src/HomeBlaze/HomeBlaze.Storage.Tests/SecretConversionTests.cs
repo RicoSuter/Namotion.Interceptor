@@ -935,6 +935,7 @@ public class SecretConversionTests : StorageTestBase
 
         // The read after the refusal takes the plaintext in, which only the storage converts.
         var refused = await page.InsertTextAsync(page, null, "Text.", CancellationToken.None);
+        Assert.False(refused.IsWritten);
         Directory.CreateDirectory(SecretsPath!);
         var other = Assert.IsType<EmbeddedSecretDevice>(page.Children["other"]);
         other.Host = "10.0.0.2";
@@ -944,11 +945,11 @@ public class SecretConversionTests : StorageTestBase
             ? page.InsertTextAsync(page, null, "Text.", CancellationToken.None)
             : page.WriteConfigurationAsync(other, CancellationToken.None));
 
-        // Assert
-        Assert.False(refused.IsWritten);
+        // Assert: a block write reads the page again, and a structure edit leaves the graph as it was.
         Assert.True(failure is IOException or UnauthorizedAccessException, failure?.ToString());
         Assert.Equal(content, TryReadText("Gateway.md"));
         Assert.Equal(content, page.Content);
+        Assert.Equal(isStructureEdit ? "10.0.0.2" : "10.0.0.1", other.Host);
     }
 
     [Fact]
