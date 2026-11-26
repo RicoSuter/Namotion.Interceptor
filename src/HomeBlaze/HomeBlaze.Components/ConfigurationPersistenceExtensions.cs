@@ -12,7 +12,8 @@ internal static class ConfigurationPersistenceExtensions
     /// <summary>
     /// Writes the configuration that contains the subject through its configuration writer, see
     /// <see cref="RootManagerExtensions.GetConfigurationWriter"/>, and warns when the writer wrote nothing, in
-    /// which case the change is applied but not saved.
+    /// which case the change is applied but not saved. A write that fails is shown as an error and leaves the change
+    /// applied but not saved; nothing is thrown.
     /// </summary>
     /// <returns>true if the configuration was written.</returns>
     public static async Task<bool> WriteConfigurationOrWarnAsync(
@@ -21,14 +22,33 @@ internal static class ConfigurationPersistenceExtensions
         ISnackbar snackbar,
         CancellationToken cancellationToken)
     {
-        var configurationWriter = rootManager.GetConfigurationWriter(subject);
-        var isWritten = await configurationWriter.WriteConfigurationAsync(subject, cancellationToken);
+        bool isWritten;
+        try
+        {
+            var configurationWriter = rootManager.GetConfigurationWriter(subject);
+            isWritten = await configurationWriter.WriteConfigurationAsync(subject, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            // Called from event handlers of the UI, which a failure would end together with the circuit.
+            snackbar.AddConfigurationSaveError(exception.Message);
+            return false;
+        }
+
         if (!isWritten)
         {
             snackbar.AddConfigurationNotSavedWarning();
         }
 
         return isWritten;
+    }
+
+    /// <summary>
+    /// Shows that a configuration could not be saved, with the reason.
+    /// </summary>
+    public static void AddConfigurationSaveError(this ISnackbar snackbar, string message)
+    {
+        snackbar.Add($"Error saving configuration: {message}", Severity.Error);
     }
 
     /// <summary>

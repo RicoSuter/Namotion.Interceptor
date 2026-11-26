@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Services.Secrets;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
@@ -15,6 +16,9 @@ namespace HomeBlaze.Services.Serialization;
 /// - Sets up polymorphism for IConfigurable with $type discriminator
 /// - Filters properties to only [Configuration] for IConfigurable types
 /// - Allows all properties for plain value objects
+/// - Writes a [JsonExtensionData] property, which holds the keys a type read without a property of its own, back unfiltered
+/// - Reads a key that names a property without [Configuration] into the [JsonExtensionData] property of an IConfigurable
+///   type that has one, instead of reading it without effect
 /// - Creates IConfigurable types that have no parameterless constructor through the service provider
 /// - Names every property by its declared name when the naming is <see cref="ConfigurationNaming.CSharpProperty"/>
 /// </summary>
@@ -23,6 +27,11 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
     private readonly TypeProvider _typeProvider;
     private readonly IServiceProvider _serviceProvider;
     private readonly ConfigurationNaming _naming;
+
+    /// <summary>
+    /// Turns secret values into references and back. Null leaves secret values as they are.
+    /// </summary>
+    internal SecretReferences? Secrets { get; init; }
 
     /// <param name="typeProvider">The types that a <c>$type</c> discriminator can name.</param>
     /// <param name="serviceProvider">Creates the configurable types that have no parameterless constructor.</param>
@@ -77,9 +86,16 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
             typeInfo.CreateObject = () => ActivatorUtilities.CreateInstance(_serviceProvider, type);
         }
 
+        if (typeInfo.Kind == JsonTypeInfoKind.Object && typeof(IConfigurable).IsAssignableFrom(type) &&
+            typeInfo.Properties.Any(property => property.IsExtensionData))
+        {
+            RemovePropertiesWithoutConfiguration(typeInfo);
+        }
+
         // Filter [Configuration] properties for all object types
         if (typeInfo.Kind == JsonTypeInfoKind.Object)
         {
+            string? unsupportedSecretMessage = null;
             foreach (var property in typeInfo.Properties)
             {
                 var propertyName = (property.AttributeProvider as MemberInfo)?.Name ?? property.Name;
@@ -88,6 +104,24 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                 if (_naming == ConfigurationNaming.CSharpProperty)
                 {
                     property.Name = propertyName;
+                }
+
+                if (property.IsExtensionData)
+                {
+                    continue;
+                }
+
+                if (property.AttributeProvider is PropertyInfo propertyInfo && SecretReferences.IsSecret(propertyInfo))
+                {
+                    // Also without a store, so that the same type fails whether or not secrets are stored.
+                    if (SecretReferences.GetUnsupportedMessage(type, propertyInfo.Name, propertyInfo.PropertyType) is { } message)
+                    {
+                        unsupportedSecretMessage ??= message;
+                    }
+                    else if (Secrets is { } secrets)
+                    {
+                        WrapSecret(property, propertyInfo.Name, secrets);
+                    }
                 }
 
                 var ignoreNulls = options.DefaultIgnoreCondition == JsonIgnoreCondition.WhenWritingNull;
@@ -108,17 +142,55 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                     }
 
                     // For non-subject types (value objects) or subjects without registry, fall back to reflection
-                    var hasConfigurationAttribute = property.AttributeProvider?
-                        .GetCustomAttributes(typeof(ConfigurationAttribute), true)
-                        .Any() ?? false;
-
-                    return hasConfigurationAttribute;
+                    return HasConfigurationAttribute(property);
                 };
+            }
+
+            if (unsupportedSecretMessage is not null)
+            {
+                // Thrown when the type is used, not here: the type info of IConfigurable builds that of every registered
+                // type, so throwing here would fail every type.
+                Action<object> fail = _ => throw new InvalidOperationException(unsupportedSecretMessage);
+                typeInfo.OnSerializing = fail;
+                typeInfo.OnDeserializing = fail;
             }
         }
 
         return typeInfo;
     }
+
+    // Only wrapped for a property of a subject, see SecretReferences.EnsureSupported. The getter serves every write, also
+    // of the overload of the serializer that excludes properties. The setter only serves subjects nested in a
+    // configuration: the serializer sets the properties of the subject it reads itself.
+    // The getter runs before ShouldSerialize, so a value that ShouldSerialize drops still leaves an unused store entry.
+    private static void WrapSecret(JsonPropertyInfo property, string propertyName, SecretReferences secrets)
+    {
+        if (property.Get is { } get)
+        {
+            property.Get = owner => secrets.Write((IInterceptorSubject)owner, propertyName, get);
+        }
+
+        if (property.Set is { } set)
+        {
+            property.Set = (owner, value) => secrets.Read(
+                (IInterceptorSubject)owner, propertyName, value, set, static (subject, setValue, resolved) => setValue(subject, resolved));
+        }
+    }
+
+    private static void RemovePropertiesWithoutConfiguration(JsonTypeInfo typeInfo)
+    {
+        for (var index = typeInfo.Properties.Count - 1; index >= 0; index--)
+        {
+            var property = typeInfo.Properties[index];
+            if (!property.IsExtensionData && !HasConfigurationAttribute(property))
+            {
+                typeInfo.Properties.RemoveAt(index);
+            }
+        }
+    }
+
+    private static bool HasConfigurationAttribute(JsonPropertyInfo property) =>
+        property.AttributeProvider?.GetCustomAttributes(typeof(ConfigurationAttribute), true).Length > 0;
 
     private static bool IsAbstractConfigurableClass(Type type) =>
         type is { IsClass: true, IsAbstract: true } && typeof(IConfigurable).IsAssignableFrom(type);

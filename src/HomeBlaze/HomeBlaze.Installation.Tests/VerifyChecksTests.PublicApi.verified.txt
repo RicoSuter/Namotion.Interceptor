@@ -115,12 +115,23 @@ namespace HomeBlaze.Installation
         public string? IconColor { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string IconName { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("InstallUpdate", "IsEnabled")]
+        public bool InstallUpdate_IsEnabled { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=421)]
         [System.ComponentModel.Category("Environment")]
         public bool IsDeveloperMode { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool IsInstallingUpdate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=468)]
+        [System.ComponentModel.Category("Update")]
+        public bool IsUpdaterAvailable { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=466)]
         [System.ComponentModel.Category("Update")]
         public System.DateTimeOffset? LastUpdateCheck { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=471)]
+        [System.ComponentModel.Category("Update")]
+        public System.DateTimeOffset? LastUpdateInstall { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=950)]
         public System.DateTimeOffset? LastUpdated { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=462)]
@@ -173,6 +184,12 @@ namespace HomeBlaze.Installation
         [HomeBlaze.Abstractions.Attributes.State(Position=467)]
         [System.ComponentModel.Category("Update")]
         public string? UpdateCheckStatus { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=469)]
+        [System.ComponentModel.Category("Update")]
+        public HomeBlaze.Installation.UpdateInstallState UpdateInstallState { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=470)]
+        [System.ComponentModel.Category("Update")]
+        public string? UpdateInstallStatus { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=400)]
         [System.ComponentModel.Category("Build")]
         public string Version { get; }
@@ -187,6 +204,8 @@ namespace HomeBlaze.Installation
         protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Pulls the image of the configured tag and restarts HomeBlaze on it.", Icon="SystemUpdateAlt", RequiresConfirmation=true, Title="Install update")]
+        public void InstallUpdate() { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
@@ -196,5 +215,14 @@ namespace HomeBlaze.Installation
         Release = 0,
         Edge = 1,
         Development = 2,
+    }
+    public enum UpdateInstallState
+    {
+        None = 0,
+        Requested = 1,
+        Installing = 2,
+        Succeeded = 3,
+        UpToDate = 4,
+        Failed = 5,
     }
 }

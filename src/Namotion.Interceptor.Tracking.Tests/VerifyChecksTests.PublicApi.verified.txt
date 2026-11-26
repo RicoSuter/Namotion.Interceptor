@@ -6,24 +6,6 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Namotion.Interceptor.Tracking.Change
 {
-    [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
-            typeof(Namotion.Interceptor.Tracking.Change.PropertyChangeInterceptor)})]
-    [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
-            typeof(Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor)})]
-    public class DerivedPropertyChangeHandler : Namotion.Interceptor.Interceptors.IReadInterceptor, Namotion.Interceptor.Interceptors.IWriteInterceptor, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
-    {
-        public DerivedPropertyChangeHandler() { }
-        public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
-        public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
-        public TProperty ReadProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context, Namotion.Interceptor.Interceptors.ReadInterceptionDelegate<TProperty> next) { }
-        public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
-    }
-    public static class DerivedPropertyChangeHandlerExtensions
-    {
-        public static System.ReadOnlySpan<Namotion.Interceptor.PropertyReference> GetRequiredProperties(this Namotion.Interceptor.PropertyReference property) { }
-        public static Namotion.Interceptor.Tracking.Change.PropertyReferenceCollection GetUsedByProperties(this Namotion.Interceptor.PropertyReference property) { }
-        public static void RecalculateDerivedProperty(this Namotion.Interceptor.PropertyReference property) { }
-    }
     public interface IPropertyChangeObserver
     {
         void OnChange(in Namotion.Interceptor.Tracking.Change.SubjectPropertyChange change);
@@ -61,11 +43,6 @@ namespace Namotion.Interceptor.Tracking.Change
         public static System.IDisposable SubscribeToPropertyInline<TSubject, TValue>(this TSubject subject, System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> propertySelector, Namotion.Interceptor.Tracking.Change.PropertyChangeCallback callback)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
     }
-    public sealed class PropertyReferenceCollection
-    {
-        public int Count { get; }
-        public System.ReadOnlySpan<Namotion.Interceptor.PropertyReference> Items { get; }
-    }
     public sealed class ScheduledPropertySubscription : System.IDisposable
     {
         public bool IsFaulted { get; }
@@ -100,6 +77,32 @@ namespace Namotion.Interceptor.Tracking.Change
         public static Namotion.Interceptor.Tracking.Change.SubjectPropertyChange Create<TValue>(Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.ChangeOrigin origin, System.DateTimeOffset changedTimestamp, System.DateTimeOffset? receivedTimestamp, TValue oldValue, TValue newValue, long revision = 0) { }
         public static bool operator !=(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange left, Namotion.Interceptor.Tracking.Change.SubjectPropertyChange right) { }
         public static bool operator ==(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange left, Namotion.Interceptor.Tracking.Change.SubjectPropertyChange right) { }
+    }
+}
+namespace Namotion.Interceptor.Tracking.Derived
+{
+    public static class DerivedGraphDependencies
+    {
+        public static void Changed(Namotion.Interceptor.IInterceptorSubject subject, bool hasFailed = false) { }
+        public static void RecordChildrenRead(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static void RecordRead(Namotion.Interceptor.IInterceptorSubject subject) { }
+    }
+    public class DerivedPropertyChangeHandler : Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
+    {
+        public DerivedPropertyChangeHandler() { }
+        public void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
+        public void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change) { }
+    }
+    public static class DerivedPropertyChangeHandlerExtensions
+    {
+        public static System.ReadOnlySpan<Namotion.Interceptor.PropertyReference> GetRequiredProperties(this Namotion.Interceptor.PropertyReference property) { }
+        public static Namotion.Interceptor.Tracking.Derived.PropertyReferenceCollection GetUsedByProperties(this Namotion.Interceptor.PropertyReference property) { }
+        public static void RecalculateDerivedProperty(this Namotion.Interceptor.PropertyReference property) { }
+    }
+    public sealed class PropertyReferenceCollection
+    {
+        public int Count { get; }
+        public System.ReadOnlySpan<Namotion.Interceptor.PropertyReference> Items { get; }
     }
 }
 namespace Namotion.Interceptor.Tracking
@@ -270,32 +273,34 @@ namespace Namotion.Interceptor.Tracking.Recorder
         public void Dispose() { }
     }
 }
-namespace Namotion.Interceptor.Tracking.Transactions
+namespace Namotion.Interceptor.Tracking.Transactions.Handlers
 {
     public interface ITransactionHandler
     {
-        void OnCapturing<TProperty>(in Namotion.Interceptor.Tracking.Transactions.TransactionCaptureContext<TProperty> context);
-        void OnCommitting(in Namotion.Interceptor.Tracking.Transactions.TransactionCheckContext context);
+        void OnCapturing<TProperty>(in Namotion.Interceptor.Tracking.Transactions.Handlers.TransactionCaptureContext<TProperty> context);
+        void OnCommitting(in Namotion.Interceptor.Tracking.Transactions.Handlers.TransactionCheckContext context);
     }
-    public interface ITransactionWriter
+    public readonly ref struct TransactionCaptureContext<TProperty>
     {
-        System.Threading.Tasks.ValueTask<Namotion.Interceptor.Tracking.Transactions.SourceRevertResult> RevertSourceWritesAsync(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> written, object? revertState, System.Threading.CancellationToken cancellationToken);
-        System.Threading.Tasks.ValueTask<Namotion.Interceptor.Tracking.Transactions.SourceWriteResult> WriteToSourcesAsync(System.Memory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, Namotion.Interceptor.Tracking.Transactions.TransactionRequirement requirement, System.Threading.CancellationToken cancellationToken);
+        public TProperty NewValue { get; }
+        public Namotion.Interceptor.ChangeOrigin Origin { get; }
+        public Namotion.Interceptor.PropertyReference Property { get; }
+        public Namotion.Interceptor.Tracking.Transactions.SubjectTransaction Transaction { get; }
     }
-    public readonly struct SourceRevertResult : System.IEquatable<Namotion.Interceptor.Tracking.Transactions.SourceRevertResult>
+    public readonly ref struct TransactionCheckContext
     {
-        public SourceRevertResult(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Failed, System.Collections.Generic.IReadOnlyList<System.Exception> Errors) { }
-        public System.Collections.Generic.IReadOnlyList<System.Exception> Errors { get; init; }
-        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Failed { get; init; }
+        public System.ReadOnlySpan<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Changes { get; }
+        public Namotion.Interceptor.Tracking.Transactions.Handlers.TransactionCheckStage Stage { get; }
+        public Namotion.Interceptor.Tracking.Transactions.SubjectTransaction Transaction { get; }
     }
-    public readonly struct SourceWriteResult : System.IEquatable<Namotion.Interceptor.Tracking.Transactions.SourceWriteResult>
+    public enum TransactionCheckStage
     {
-        public SourceWriteResult(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Written, System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Failed, System.Collections.Generic.IReadOnlyList<System.Exception> Errors, object? RevertState) { }
-        public System.Collections.Generic.IReadOnlyList<System.Exception> Errors { get; init; }
-        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Failed { get; init; }
-        public object? RevertState { get; init; }
-        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Written { get; init; }
+        Commit = 0,
+        PreApply = 1,
     }
+}
+namespace Namotion.Interceptor.Tracking.Transactions
+{
     public sealed class SubjectTransaction : System.IDisposable
     {
         public Namotion.Interceptor.Tracking.Transactions.TransactionCheckMode CheckMode { get; }
@@ -307,7 +312,7 @@ namespace Namotion.Interceptor.Tracking.Transactions
         public System.Threading.Tasks.ValueTask CommitAsync(System.Threading.CancellationToken cancellationToken) { }
         public void Dispose() { }
         public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> GetPendingChanges() { }
-        public static bool TryConsumeCommitWrite<TProperty>(Namotion.Interceptor.Tracking.Transactions.ITransactionHandler handler, Namotion.Interceptor.PropertyReference property, TProperty value) { }
+        public static bool TryConsumeCommitWrite<TProperty>(Namotion.Interceptor.Tracking.Transactions.Handlers.ITransactionHandler handler, Namotion.Interceptor.PropertyReference property, TProperty value) { }
     }
     public sealed class SubjectTransactionConflictException : Namotion.Interceptor.Tracking.Transactions.SubjectTransactionException
     {
@@ -328,7 +333,8 @@ namespace Namotion.Interceptor.Tracking.Transactions
         public static Namotion.Interceptor.Tracking.Transactions.TransactionAwaitable BeginTransactionAsync(this Namotion.Interceptor.IInterceptorSubjectContext context, Namotion.Interceptor.Tracking.Transactions.TransactionFailureHandling failureHandling, Namotion.Interceptor.Tracking.Transactions.TransactionLocking locking = 0, Namotion.Interceptor.Tracking.Transactions.TransactionRequirement requirement = 0, Namotion.Interceptor.Tracking.Transactions.TransactionConflictBehavior conflictBehavior = 0, Namotion.Interceptor.Tracking.Transactions.TransactionCheckMode checkMode = 0, System.TimeSpan? commitTimeout = default, System.Threading.CancellationToken cancellationToken = default) { }
     }
     [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
-            typeof(Namotion.Interceptor.Tracking.Change.DerivedPropertyChangeHandler)})]
+            typeof(Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor),
+            typeof(Namotion.Interceptor.Tracking.Change.PropertyChangeInterceptor)})]
     public sealed class SubjectTransactionInterceptor : Namotion.Interceptor.Interceptors.IReadInterceptor, Namotion.Interceptor.Interceptors.IWriteInterceptor
     {
         public SubjectTransactionInterceptor() { }
@@ -347,28 +353,10 @@ namespace Namotion.Interceptor.Tracking.Transactions
         public void OnCompleted(System.Action continuation) { }
         public void UnsafeOnCompleted(System.Action continuation) { }
     }
-    public readonly ref struct TransactionCaptureContext<TProperty>
-    {
-        public TProperty NewValue { get; }
-        public Namotion.Interceptor.ChangeOrigin Origin { get; }
-        public Namotion.Interceptor.PropertyReference Property { get; }
-        public Namotion.Interceptor.Tracking.Transactions.SubjectTransaction Transaction { get; }
-    }
-    public readonly ref struct TransactionCheckContext
-    {
-        public System.ReadOnlySpan<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Changes { get; }
-        public Namotion.Interceptor.Tracking.Transactions.TransactionCheckStage Stage { get; }
-        public Namotion.Interceptor.Tracking.Transactions.SubjectTransaction Transaction { get; }
-    }
     public enum TransactionCheckMode
     {
         Immediate = 0,
         Deferred = 1,
-    }
-    public enum TransactionCheckStage
-    {
-        Commit = 0,
-        PreApply = 1,
     }
     public enum TransactionConflictBehavior
     {
@@ -389,5 +377,27 @@ namespace Namotion.Interceptor.Tracking.Transactions
     {
         None = 0,
         SingleWrite = 1,
+    }
+}
+namespace Namotion.Interceptor.Tracking.Transactions.Writers
+{
+    public interface ITransactionWriter
+    {
+        System.Threading.Tasks.ValueTask<Namotion.Interceptor.Tracking.Transactions.Writers.SourceRevertResult> RevertSourceWritesAsync(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> written, object? revertState, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.ValueTask<Namotion.Interceptor.Tracking.Transactions.Writers.SourceWriteResult> WriteToSourcesAsync(System.Memory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, Namotion.Interceptor.Tracking.Transactions.TransactionRequirement requirement, System.Threading.CancellationToken cancellationToken);
+    }
+    public readonly struct SourceRevertResult : System.IEquatable<Namotion.Interceptor.Tracking.Transactions.Writers.SourceRevertResult>
+    {
+        public SourceRevertResult(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Failed, System.Collections.Generic.IReadOnlyList<System.Exception> Errors) { }
+        public System.Collections.Generic.IReadOnlyList<System.Exception> Errors { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Failed { get; init; }
+    }
+    public readonly struct SourceWriteResult : System.IEquatable<Namotion.Interceptor.Tracking.Transactions.Writers.SourceWriteResult>
+    {
+        public SourceWriteResult(System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Written, System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Failed, System.Collections.Generic.IReadOnlyList<System.Exception> Errors, object? RevertState) { }
+        public System.Collections.Generic.IReadOnlyList<System.Exception> Errors { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Failed { get; init; }
+        public object? RevertState { get; init; }
+        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> Written { get; init; }
     }
 }

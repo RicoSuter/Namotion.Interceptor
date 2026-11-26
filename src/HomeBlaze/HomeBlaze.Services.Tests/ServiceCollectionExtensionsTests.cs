@@ -1,4 +1,6 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Services.Secrets;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -51,5 +53,28 @@ public class ServiceCollectionExtensionsTests
         // Assert
         Assert.Contains(resolver, lifecycleHandlers);
         Assert.Single(lifecycleHandlers.OfType<SubjectPathResolver>());
+    }
+
+    [Fact]
+    public void WhenHomeBlazeServicesAreAdded_ThenTheSecretStoreIsInTheDataDirectory()
+    {
+        // Arrange
+        var dataDirectory = Path.Combine(Path.GetTempPath(), "homeblaze-instance-" + Guid.NewGuid().ToString("N"));
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [HomeBlazePaths.RootConfigurationFileKey] = Path.Combine(dataDirectory, "Root.json")
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddHomeBlazeServices();
+
+        // Act
+        using var serviceProvider = services.BuildServiceProvider();
+        var store = serviceProvider.GetRequiredService<SecretStore>();
+
+        // Assert
+        Assert.Equal(Path.Combine(dataDirectory, "Secrets.json"), store.Path);
     }
 }

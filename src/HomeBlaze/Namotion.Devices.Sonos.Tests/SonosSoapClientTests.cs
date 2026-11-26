@@ -4,6 +4,7 @@ using System.Xml;
 using System.Xml.Linq;
 using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace Namotion.Devices.Sonos.Tests;
@@ -245,7 +246,7 @@ public class SonosSoapClientTests
         // Act
         var exception = await Assert.ThrowsAsync<SonosFaultException>(
                 () => client.InvokeAsync(SonosService.AvTransport, "Next", [("InstanceID", "0")], CancellationToken.None))
-            .WaitAsync(TimeSpan.FromSeconds(10));
+            .WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(401, exception.UpnpErrorCode);

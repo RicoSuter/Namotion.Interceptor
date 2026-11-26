@@ -131,10 +131,10 @@ public class GpioPinTests
     }
 
     [Fact]
-    public async Task TurnOnAsync_ChangesValueToTrue()
+    public async Task WhenDetachedOutputIsTurnedOn_ThenValueIsTrue()
     {
         // Arrange
-        var pin = new GpioPin();
+        var pin = new GpioPin { Mode = GpioPinMode.Output };
         Assert.False(pin.Value);
 
         // Act
@@ -145,11 +145,10 @@ public class GpioPinTests
     }
 
     [Fact]
-    public async Task TurnOffAsync_ChangesValueToFalse()
+    public async Task WhenDetachedOutputIsTurnedOff_ThenValueIsFalse()
     {
         // Arrange
-        var pin = new GpioPin { Value = true };
-        Assert.True(pin.Value);
+        var pin = new GpioPin { Mode = GpioPinMode.Output, Value = true };
 
         // Act
         await pin.TurnOffAsync(CancellationToken.None);

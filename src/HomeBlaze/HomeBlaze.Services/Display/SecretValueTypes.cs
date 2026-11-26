@@ -8,7 +8,7 @@ namespace HomeBlaze.Services.Display;
 /// <summary>
 /// Tells the values whose text must not be shown because it can contain a secret configuration value.
 /// </summary>
-internal static class SecretValueTypes
+public static class SecretValueTypes
 {
     // Weak, so that the types of an unloaded plugin are not kept alive; the two shared boxes avoid an allocation per type.
     private static readonly ConditionalWeakTable<Type, StrongBox<bool>> HoldsSecretByType = new();
@@ -17,7 +17,8 @@ internal static class SecretValueTypes
 
     /// <summary>
     /// Whether the value is no subject and its type, or the declared type of one of its public properties at any depth,
-    /// has a public property marked with <see cref="ConfigurationAttribute.IsSecret"/>, which the text of a record shows.
+    /// has a public property marked with <see cref="ConfigurationAttribute.IsSecret"/> or with
+    /// <see cref="ExcludeFromExpressionsAttribute"/>, also on the property it overrides, which the text of a record shows.
     /// </summary>
     /// <remarks>
     /// Only declared property types are followed: a property typed as <see cref="object"/>, an interface or a base type
@@ -43,7 +44,7 @@ internal static class SecretValueTypes
                 continue;
             }
 
-            if (property.GetCustomAttribute<ConfigurationAttribute>(true) is { IsSecret: true } ||
+            if (IsSecret(property) ||
                 HasSecretMember(Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType, visited))
             {
                 return true;
@@ -52,4 +53,13 @@ internal static class SecretValueTypes
 
         return false;
     }
+
+    /// <summary>
+    /// Whether the property is marked with <see cref="ConfigurationAttribute.IsSecret"/> or with
+    /// <see cref="ExcludeFromExpressionsAttribute"/>, also on the property it overrides.
+    /// </summary>
+    public static bool IsSecret(PropertyInfo property) =>
+        property.GetCustomAttribute<ConfigurationAttribute>(true) is { IsSecret: true } ||
+        // MemberInfo.IsDefined ignores the inherit flag for a property; Attribute.IsDefined follows overrides.
+        Attribute.IsDefined(property, typeof(ExcludeFromExpressionsAttribute), true);
 }

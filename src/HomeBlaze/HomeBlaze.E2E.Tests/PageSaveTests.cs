@@ -1,4 +1,5 @@
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.E2E.Tests.Models;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Files;
@@ -20,6 +21,10 @@ public class PageSaveTests
 
     // Far enough in the past that any write of the file moves it, whatever the resolution of the file system.
     private static readonly DateTime UntouchedTime = new(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    // A beforeunload that is canceled is the prompt of the browser, which Blazor gives while the page has unsaved text.
+    private const string AsksBeforeUnload =
+        "() => { const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; }";
 
     private readonly PlaywrightFixture _fixture;
 
@@ -133,6 +138,105 @@ public class PageSaveTests
         // Assert
         await Assertions.Expect(page.Locator("[data-testid='save-button'] button"))
             .ToHaveTextAsync(isApplePlatform ? "Save (Cmd+S)" : "Save (Ctrl+S)", new() { Timeout = 30000 });
+    }
+
+    [Fact]
+    public async Task WhenAPageWithAPlaintextSecretIsSavedInTheSourceEditor_ThenTheEditorShowsTheWrittenReference()
+    {
+        // Arrange
+        var rootManager = _fixture.ServerServices.GetRequiredService<RootManager>();
+        var pageFilePath = GetPageFilePath(rootManager);
+        var originalContent = await _fixture.ReadFileAsync(pageFilePath);
+        var originalConfigurationTime = File.GetLastWriteTimeUtc(rootManager.ConfigurationPath);
+        var secret = $"s3cr3t{Guid.NewGuid():N}";
+        var block = $"\n\n:: {typeof(SecretConfigurableSubject).FullName}#vault Password={secret}\n::\n";
+
+        try
+        {
+            var page = await _fixture.CreatePageAsync();
+            await page.GotoAsync($"{_fixture.ServerAddress}pages/{PagePath}");
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            await page.WaitUntilInteractiveAsync();
+
+            await page.SelectEditModeAsync("Source");
+
+            var editorContent = page.Locator(".monaco-editor .view-lines");
+            await Assertions.Expect(editorContent).ToBeVisibleAsync(new() { Timeout = 30000 });
+            await page.EvaluateAsync(
+                "text => { const editor = monaco.editor.getEditors()[0]; const model = editor.getModel(); const line = model.getLineCount(); const column = model.getLineMaxColumn(line); editor.executeEdits('test', [{ range: new monaco.Range(line, column, line, column), text }]); }",
+                block);
+            await Assertions.Expect(editorContent).ToContainTextAsync(secret, new() { Timeout = 30000 });
+
+            // Act
+            await page.Locator("[data-testid='save-button'] button").ClickAsync();
+
+            // Assert: the editor shows the written text, which is saved, so leaving the page asks nothing.
+            await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = 30000 });
+            await page.WaitForFunctionAsync(
+                "secret => { const text = monaco.editor.getEditors()[0].getValue(); return text.includes('Password=$secret:') && !text.includes(secret); }",
+                secret,
+                new() { Timeout = 30000 });
+            await page.WaitForFunctionAsync($"() => !({AsksBeforeUnload})()", null, new() { Timeout = 30000 });
+
+            var editorText = await page.EvaluateAsync<string>("() => monaco.editor.getEditors()[0].getValue()");
+            var savedContent = await _fixture.ReadFileAsync(pageFilePath);
+            Assert.Multiple(
+                () => Assert.DoesNotContain(secret, savedContent),
+                () => Assert.Equal(savedContent.ReplaceLineEndings("\n"), editorText.ReplaceLineEndings("\n")));
+        }
+        finally
+        {
+            await RestoreAsync(rootManager, originalContent, originalConfigurationTime);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAJsonFileWithAPlaintextSecretIsSavedInTheSourceEditor_ThenTheEditorShowsTheWrittenReference()
+    {
+        // Arrange
+        var rootManager = _fixture.ServerServices.GetRequiredService<RootManager>();
+        var root = (FluentStorageContainer)rootManager.Root!;
+        var fileName = $"Plain{Guid.NewGuid():N}.json";
+        var secret = $"s3cr3t{Guid.NewGuid():N}";
+        var json = $$"""{ "$type": "{{typeof(SecretConfigurableSubject).FullName}}", "password": "{{secret}}" }""";
+
+        try
+        {
+            await root.WriteBlobAsync(fileName, "{ \"Note\": \"plain\" }"u8.ToArray(), CancellationToken.None);
+            await _fixture.ReconcileStorageAsync();
+            var name = root.Children.Single(pair => pair.Value is JsonFile file && file.Name == fileName).Key;
+
+            var page = await _fixture.OpenSubjectPageAsync(name);
+            await page.SelectEditModeAsync("Source");
+
+            var editorContent = page.Locator(".monaco-editor .view-lines");
+            await Assertions.Expect(editorContent).ToBeVisibleAsync(new() { Timeout = 30000 });
+            await page.EvaluateAsync(
+                "text => { const editor = monaco.editor.getEditors()[0]; editor.executeEdits('test', [{ range: editor.getModel().getFullModelRange(), text }]); }",
+                json);
+            await Assertions.Expect(editorContent).ToContainTextAsync(secret, new() { Timeout = 30000 });
+
+            // Act
+            await page.Locator("[data-testid='save-button'] button").ClickAsync();
+
+            // Assert: the editor shows the written text, which is saved, so leaving the page asks nothing.
+            await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = 30000 });
+            await page.WaitForFunctionAsync(
+                "secret => { const text = monaco.editor.getEditors()[0].getValue(); return text.includes('$secret:') && !text.includes(secret); }",
+                secret,
+                new() { Timeout = 30000 });
+            await page.WaitForFunctionAsync($"() => !({AsksBeforeUnload})()", null, new() { Timeout = 30000 });
+
+            var editorText = await page.EvaluateAsync<string>("() => monaco.editor.getEditors()[0].getValue()");
+            var savedContent = await _fixture.ReadFileAsync(_fixture.GetPagePath(fileName));
+            Assert.Multiple(
+                () => Assert.DoesNotContain(secret, savedContent),
+                () => Assert.Equal(savedContent.ReplaceLineEndings("\n"), editorText.ReplaceLineEndings("\n")));
+        }
+        finally
+        {
+            await root.DeleteBlobAsync(fileName, CancellationToken.None);
+        }
     }
 
     [Fact]

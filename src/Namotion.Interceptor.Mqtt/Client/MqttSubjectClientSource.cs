@@ -22,6 +22,10 @@ namespace Namotion.Interceptor.Mqtt.Client;
 /// </summary>
 internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjectable, IAsyncDisposable
 {
+    // A broker matches each filter of a SUBSCRIBE against every retained message before it answers the packet, and
+    // answers keep-alive pings only between packets.
+    private const int SubscriptionBatchSize = 1000;
+
     // Pool for UserProperties lists to avoid allocations on hot path
     private static readonly ObjectPool<List<MqttUserProperty>> UserPropertiesPool
         = new(() => new List<MqttUserProperty>(1));
@@ -32,8 +36,12 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     private readonly MqttClientFactory _factory;
 
-    private readonly ConcurrentDictionary<string, PropertyReference?> _topicToProperty = new();
-    private readonly ConcurrentDictionary<PropertyReference, (string? Topic, MqttPropertyMapping? Mapping)> _propertyToTopic = new();
+    private readonly ISubjectRegistry? _registry;
+
+    // Entries carry the structure and mapper versions read before they were computed and are served only while both are
+    // current, so an entry computed during a change is never served after it.
+    private readonly ConcurrentDictionary<string, (PropertyReference Property, long StructureVersion, long MapperVersion)> _topicToProperty = new();
+    private readonly ConcurrentDictionary<PropertyReference, (string? Topic, MqttPropertyMapping? Mapping, long StructureVersion, long MapperVersion)> _propertyToTopic = new();
 
     private readonly SourceOwnershipManager _ownership;
 
@@ -60,6 +68,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         ArgumentNullException.ThrowIfNull(logger);
 
         _subject = subject;
+        _registry = subject.Context.TryGetService<ISubjectRegistry>();
         _configuration = configuration;
         _logger = logger;
 
@@ -77,24 +86,10 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     private void CleanupTopicCachesForSubject(IInterceptorSubject subject)
     {
-        // Clean up topic caches for the detached subject
-        // TODO(perf): O(n) scan over all cached entries per detached subject.
-        // Consider adding a reverse index for O(1) cleanup if profiling shows this as a bottleneck.
-        foreach (var kvp in _propertyToTopic)
-        {
-            if (kvp.Key.Subject == subject)
-            {
-                _propertyToTopic.TryRemove(kvp.Key, out _);
-            }
-        }
-
-        foreach (var kvp in _topicToProperty)
-        {
-            if (kvp.Value?.Subject == subject)
-            {
-                _topicToProperty.TryRemove(kvp.Key, out _);
-            }
-        }
+        // Every detach raises the registry's structure version, so every entry is stale anyway. Clearing lets the
+        // detached subject be collected without an O(n) scan.
+        _propertyToTopic.Clear();
+        _topicToProperty.Clear();
     }
 
     /// <inheritdoc />
@@ -426,7 +421,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                         continue;
                     }
 
-                    var (topic, mapping) = TryGetTopicForProperty(change.Property, property);
+                    var (topic, mapping) = TryGetTopicForProperty(change.Property);
                     if (topic is null) continue;
 
                     byte[] payload;
@@ -548,6 +543,11 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             return;
         }
 
+        // Read before the topics are computed, so that an entry computed during a change carries versions from before
+        // the change ended, which no lookup after it matches.
+        var structureVersion = _registry?.StructureVersion ?? 0;
+        var mapperVersion = _configuration.Mapper.Version;
+
         var properties = registeredSubject
             .GetAllProperties()
             .Where(p => !p.CanContainSubjects && _configuration.Mapper.TryGetMapping(p, _subject, out _))
@@ -560,10 +560,12 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         }
 
         var subscribeOptionsBuilder = _factory.CreateSubscribeOptionsBuilder();
+        var batchCount = 0;
+        var subscribedCount = 0;
 
         foreach (var property in properties)
         {
-            var (topic, mapping) = TryGetTopicForProperty(property.Reference, property);
+            var (topic, mapping) = TryGetTopicForProperty(property.Reference);
             if (topic is null) continue;
 
             if (!_ownership.ClaimSource(property.Reference))
@@ -580,49 +582,96 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 continue;
             }
 
-            _topicToProperty[topic] = property.Reference;
+            // Add first, then validate: a detach that cleared the caches before this insert would otherwise leave
+            // the entry and the claim behind.
+            var entry = (property.Reference, structureVersion, mapperVersion);
+            _topicToProperty[topic] = entry;
+            if (!IsRetainable(property.Subject))
+            {
+                _topicToProperty.TryRemove(KeyValuePair.Create(topic, entry));
+                _ownership.ReleaseSource(property.Reference);
+                continue;
+            }
+
             var qos = mapping?.QualityOfService ?? _configuration.DefaultQualityOfService;
             subscribeOptionsBuilder.WithTopicFilter(f => f
                 .WithTopic(topic)
                 .WithQualityOfServiceLevel(qos));
+            batchCount++;
+            subscribedCount++;
+
+            if (batchCount == SubscriptionBatchSize)
+            {
+                await _client!.SubscribeAsync(subscribeOptionsBuilder.Build(), cancellationToken).ConfigureAwait(false);
+                subscribeOptionsBuilder = _factory.CreateSubscribeOptionsBuilder();
+                batchCount = 0;
+            }
         }
 
-        await _client!.SubscribeAsync(subscribeOptionsBuilder.Build(), cancellationToken).ConfigureAwait(false);
+        if (batchCount > 0)
+        {
+            await _client!.SubscribeAsync(subscribeOptionsBuilder.Build(), cancellationToken).ConfigureAwait(false);
+        }
 
-        _logger.LogInformation("Subscribed to {Count} MQTT topics.", properties.Count);
+        _logger.LogInformation("Subscribed to {Count} MQTT topics.", subscribedCount);
     }
 
-    internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
+    internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference)
     {
-        if (_propertyToTopic.TryGetValue(propertyReference, out var cached))
+        var structureVersion = _registry?.StructureVersion ?? 0;
+        var mapperVersion = _configuration.Mapper.Version;
+        if (_propertyToTopic.TryGetValue(propertyReference, out var cached) &&
+            cached.StructureVersion == structureVersion &&
+            cached.MapperVersion == mapperVersion)
         {
-            return cached;
+            return (cached.Topic, cached.Mapping);
+        }
+
+        // The caller's registration may predate the versions just read. One discarded by a detach and attach since
+        // has no path, so its missing topic would be cached at the current versions and served until the next change.
+        var currentProperty = propertyReference.TryGetRegisteredProperty();
+        if (currentProperty is null)
+        {
+            return (null, null);
         }
 
         string? topic = null;
         MqttPropertyMapping? resolvedMapping = null;
-        if (_configuration.Mapper.TryGetMapping(property, _subject, out var mapping) && mapping.Topic is not null)
+        if (_configuration.Mapper.TryGetMapping(currentProperty, _subject, out var mapping) && mapping.Topic is not null)
         {
             topic = MqttHelper.BuildTopic(mapping.Topic, _configuration.TopicPrefix);
             resolvedMapping = mapping;
         }
 
-        var entry = (topic, resolvedMapping);
-
         // Add first, then validate (guarantees no memory leak)
-        if (_propertyToTopic.TryAdd(propertyReference, entry) && !IsRetainable(propertyReference.Subject))
+        var entry = (topic, resolvedMapping, structureVersion, mapperVersion);
+        _propertyToTopic[propertyReference] = entry;
+        if (!IsRetainable(propertyReference.Subject))
         {
-            _propertyToTopic.TryRemove(propertyReference, out _);
+            _propertyToTopic.TryRemove(KeyValuePair.Create(propertyReference, entry));
         }
 
-        return entry;
+        return (topic, resolvedMapping);
     }
+
+    /// <summary>
+    /// Whether the topic cache holds an entry for the property.
+    /// </summary>
+    internal bool HasCachedTopic(PropertyReference property) => _propertyToTopic.ContainsKey(property);
+
+    /// <summary>
+    /// Whether the property cache holds an entry for the topic.
+    /// </summary>
+    internal bool HasCachedProperty(string topic) => _topicToProperty.ContainsKey(topic);
 
     internal async ValueTask<PropertyReference?> TryGetPropertyForTopicAsync(string topic)
     {
-        if (_topicToProperty.TryGetValue(topic, out var cachedProperty))
+        var structureVersion = _registry?.StructureVersion ?? 0;
+        var mapperVersion = _configuration.Mapper.Version;
+        var hasCached = _topicToProperty.TryGetValue(topic, out var cached);
+        if (hasCached && cached.StructureVersion == structureVersion && cached.MapperVersion == mapperVersion)
         {
-            return cachedProperty;
+            return cached.Property;
         }
 
         var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
@@ -633,19 +682,40 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         var propertyReference = property?.Reference;
 
         // A missing path can become reachable after a structural change; only cache resolved properties.
-        if (propertyReference is { } resolvedProperty &&
-            _topicToProperty.TryAdd(topic, propertyReference) &&
-            !IsRetainable(resolvedProperty.Subject))
+        if (propertyReference is { } resolvedProperty)
         {
-            _topicToProperty.TryRemove(topic, out _);
+            var entry = (resolvedProperty, structureVersion, mapperVersion);
+            _topicToProperty[topic] = entry;
+            if (!IsRetainable(resolvedProperty.Subject))
+            {
+                _topicToProperty.TryRemove(KeyValuePair.Create(topic, entry));
+            }
+        }
+        else if (hasCached)
+        {
+            // Removes only the stale entry, not one a concurrent lookup added since.
+            _topicToProperty.TryRemove(KeyValuePair.Create(topic, cached));
         }
 
         return propertyReference;
     }
 
     /// <summary>
+    /// Resolves the topic like <see cref="TryGetPropertyForTopicAsync"/>, and returns the property only when this source owns it.
+    /// </summary>
+    internal async ValueTask<PropertyReference?> TryGetOwnedPropertyForTopicAsync(string topic)
+    {
+        // After a structural change a topic can resolve to a property this client never claimed, and the client writes only properties it claimed.
+        return await TryGetPropertyForTopicAsync(topic).ConfigureAwait(false) is { } property &&
+            property.TryGetSource(out var owner) &&
+            ReferenceEquals(owner, this)
+            ? property
+            : null;
+    }
+
+    /// <summary>
     /// Whether a cache entry for a property of <paramref name="subject"/> may stay. The reference count
-    /// drops before LifecycleInterceptor.SubjectDetaching fires, where the eviction scan runs, and the registry
+    /// drops before LifecycleInterceptor.SubjectDetaching fires, where the caches are cleared, and the registry
     /// deregisters only after that. Only the count catches a lookup that inserts in between. The connector root is
     /// exempt: it is anchored to the context rather than to a property, so its count is zero for its whole life.
     /// </summary>
@@ -667,7 +737,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         // down the subscription. No cancellation token flows in, so every failure is logged and skipped.
         try
         {
-            if (await TryGetPropertyForTopicAsync(topic).ConfigureAwait(false) is not { } propertyReference)
+            if (await TryGetOwnedPropertyForTopicAsync(topic).ConfigureAwait(false) is not { } propertyReference)
             {
                 return;
             }

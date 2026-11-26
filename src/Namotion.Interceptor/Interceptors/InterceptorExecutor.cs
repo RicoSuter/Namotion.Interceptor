@@ -63,9 +63,10 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
         var context = new PropertyReadContext<TProperty>(new PropertyReference(_subject, propertyName));
+        PropertyAccessObservation.ReadObserver?.OnPropertyRead(new PropertyReadObservation(context.Property));
         return ExecuteInterceptedRead(ref context, readValue);
     }
-    
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
     {
@@ -75,30 +76,105 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             currentValue,
             newValue);
 
-        ExecuteInterceptedWrite(ref context, writeValue);
+        ExecuteObservedWrite(ref context, writeValue);
         return context.IsWritten;
     }
 
     /// <summary>
-    /// Cascade re-entry path: skips the lazy-resolve machinery by pre-populating the new write
-    /// context's timestamp cache. Lets the cascade share the trigger's captured time without
-    /// pushing a <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope.
-    /// The new value is already the stabilized getter output on this path, so publishing reuses it
-    /// instead of invoking the getter again (see
-    /// <see cref="PropertyWriteContext{TProperty}.FinalValueIsNewValue"/>).
+    /// Publishes a derived property's calculated value through the write chain without storing anything, with
+    /// <see cref="PropertyWriteContext{TProperty}.IsDerivedRecalculation"/> set. A nonzero
+    /// <paramref name="rawTimestamp"/> pre-populates the new write context's timestamp cache, which lets a
+    /// recalculation cascade share the trigger's captured time without pushing a
+    /// <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope. With
+    /// <paramref name="finalValueIsNewValue"/> set, publishing reuses the new value instead of invoking the
+    /// getter again (see <see cref="PropertyWriteContext{TProperty}.FinalValueIsNewValue"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, long rawTimestamp)
+    internal void PublishDerivedPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, long rawTimestamp, bool finalValueIsNewValue)
     {
         var context = new PropertyWriteContext<TProperty>(
             this,
             new PropertyReference(_subject, propertyName),
             currentValue,
             newValue,
-            rawTimestamp);
+            rawTimestamp,
+            finalValueIsNewValue);
 
-        ExecuteInterceptedWrite(ref context, writeValue);
-        return context.IsWritten;
+        ExecuteObservedWrite(ref context, static (_, _) => { });
+    }
+
+    /// <summary>
+    /// Runs the chain and reports the write to the write observer afterwards, also when the chain threw.
+    /// </summary>
+    private void ExecuteObservedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
+    {
+        var depth = PropertyAccessObservation.EnterWrite();
+        var hasFailed = true;
+        try
+        {
+            ExecuteInterceptedWrite(ref context, writeValue);
+            hasFailed = false;
+        }
+        finally
+        {
+            // An observer exception replaces the chain's; observers must not throw when the chain has failed.
+            PropertyAccessObservation.ExitWrite(depth);
+            PropertyAccessObservation.WriteObserver?.OnPropertyWritten(new PropertyWriteObservation(
+                context.Property,
+                context.IsWritten,
+                context.IsWritten ? context.WriteTimestampRaw : 0,
+                context.IsDerivedRecalculation,
+                depth,
+                hasFailed));
+        }
+    }
+
+    /// <summary>
+    /// Reads a property of a subject that has no context, so that a derived property that reads it follows it
+    /// before the subject is attached. Generated code calls it; a hand-written subject calls it instead of reading
+    /// its field while its context is null (see "Hand-written base classes and subclasses" in docs/generator.md).
+    /// </summary>
+    public static TProperty GetPropertyValueWithoutContext<TProperty>(IInterceptorSubject subject, string propertyName, Func<IInterceptorSubject, TProperty> readValue)
+    {
+        PropertyAccessObservation.ReadObserver?.OnPropertyRead(new PropertyReadObservation(new PropertyReference(subject, propertyName)));
+        return readValue(subject);
+    }
+
+    /// <summary>
+    /// Writes a property of a subject that has no context, so that derived properties that read it are recalculated
+    /// before the subject is attached. Generated code calls it; a hand-written subject calls it instead of writing
+    /// its field while its context is null (see "Hand-written base classes and subclasses" in docs/generator.md).
+    /// </summary>
+    public static bool SetPropertyValueWithoutContext<TProperty>(IInterceptorSubject subject, string propertyName, TProperty newValue, Action<IInterceptorSubject, TProperty> setValue)
+    {
+        var observer = PropertyAccessObservation.WriteObserver;
+        if (observer is null)
+        {
+            setValue(subject, newValue);
+
+            // Reports the write to an observer installed during it, see "Observer installation" in
+            // docs/design/tracking-derived-properties.md.
+            PropertyAccessObservation.WriteObserver?.OnPropertyWritten(new PropertyWriteObservation(
+                new PropertyReference(subject, propertyName), true, 0, false, PropertyAccessObservation.WriteDepth + 1, false));
+            return true;
+        }
+
+        var depth = PropertyAccessObservation.EnterWrite();
+        var hasFailed = true;
+        try
+        {
+            setValue(subject, newValue);
+            hasFailed = false;
+        }
+        finally
+        {
+            // An observer exception replaces the write's; observers must not throw when the write has failed.
+            PropertyAccessObservation.ExitWrite(depth);
+            observer.OnPropertyWritten(new PropertyWriteObservation(
+                new PropertyReference(subject, propertyName), !hasFailed, 0, false, depth, hasFailed));
+        }
+
+        return true;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

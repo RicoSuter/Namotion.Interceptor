@@ -1,0 +1,36 @@
+@implements IDisposable
+
+@* An ExpressionField that tells the editor while a row holds an unfinished or invalid edit, and stops doing so when it goes away. *@
+<ExpressionField Value="@Value" ValueChanged="ValueChanged" Label="@Label" Lead="@Lead" Validate="@Validate" Preview="@Preview" Hints="@Hints"
+                 Fields="@Fields" Variables="@AutomationValidator.Variables" TestId="@TestId" OnPendingRowChanged="@ReportPending"
+                 PendingRowDiscarded="@(() => _tracker?.Discard())" />
+
+@code {
+    private PendingRowTracker? _tracker;
+
+    [CascadingParameter] private UnappliedInputs? Inputs { get; set; }
+
+    [Parameter] public string? Value { get; set; }
+
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    [Parameter] public string Label { get; set; } = "Condition";
+
+    [Parameter] public string Lead { get; set; } = "When";
+
+    [Parameter] public Func<string, string?>? Validate { get; set; }
+
+    [Parameter] public Func<string, Func<ExpressionPreview>?>? Preview { get; set; }
+
+    [Parameter] public Func<string, ImmutableArray<string>>? Hints { get; set; }
+
+    [Parameter] public ImmutableArray<string> Fields { get; set; }
+
+    [Parameter] public string TestId { get; set; } = "expression-field";
+
+    protected override void OnInitialized() => _tracker = new PendingRowTracker(Inputs, Guid.NewGuid().ToString("N"));
+
+    private void ReportPending(bool hasPendingRow) => _tracker?.Report(hasPendingRow);
+
+    public void Dispose() => _tracker?.Dispose();
+}

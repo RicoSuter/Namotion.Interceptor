@@ -373,7 +373,7 @@ public class NavigationMetadataTests
 
         // Assert
         await Assertions.Expect(pane.GetByTestId("reorder-children-button")).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-        await Assertions.Expect(pane.GetByTestId("edit-metadata-button")).ToHaveCountAsync(0);
+        await Assertions.Expect(pane.GetByTestId("edit-metadata-button")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -389,7 +389,7 @@ public class NavigationMetadataTests
         // Assert
         await Assertions.Expect(pane.Locator(".subject-pane-child-name"))
             .ToHaveCountAsync(folder.Children.Count, new() { Timeout = PageLoadTimeout });
-        await Assertions.Expect(pane).Not.ToContainTextAsync("HomeBlaze:Metadata");
+        await Assertions.Expect(pane).Not.ToContainTextAsync("HomeBlaze:Metadata", new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -433,7 +433,7 @@ public class NavigationMetadataTests
             var (_, pane) = await OpenPaneAsync("Agents/TestAgent");
             var button = pane.GetByTestId("edit-metadata-button");
             await Assertions.Expect(button).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-            await Assertions.Expect(button).Not.ToHaveClassAsync(new Regex(@"\bmud-primary-text\b"));
+            await Assertions.Expect(button).Not.ToHaveClassAsync(new Regex(@"\bmud-primary-text\b"), new() { Timeout = AssertionTimeouts.Absence });
 
             // Act - the method that agents call, while the pane is open.
             await root.SetMetadataAsync("Agents/TestAgent", null, JsonElement.Parse("""{ "tags": ["e2e-button-color"] }"""), CancellationToken.None);
@@ -505,8 +505,8 @@ public class NavigationMetadataTests
             var statusRow = pane.GetByTestId("subject-pane-value")
                 .Filter(new() { Has = page.GetByTestId("subject-pane-value-name").Filter(new() { HasTextRegex = new Regex("^Status$") }) });
             await Assertions.Expect(statusRow).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-            await Assertions.Expect(statusRow.GetByTestId("subject-pane-value-expand")).ToHaveCountAsync(0);
-            await Assertions.Expect(pane).Not.ToContainTextAsync("ImmutableDictionary");
+            await Assertions.Expect(statusRow.GetByTestId("subject-pane-value-expand")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+            await Assertions.Expect(pane).Not.ToContainTextAsync("ImmutableDictionary", new() { Timeout = AssertionTimeouts.Absence });
         }
         finally
         {

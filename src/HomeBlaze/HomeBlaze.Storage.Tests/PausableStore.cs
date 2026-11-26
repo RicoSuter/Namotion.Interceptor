@@ -20,7 +20,10 @@ internal sealed class PausableStore(IStore inner) : StoreBase
     private string? _pausedOperation;
     private string? _blockedOperation;
     private Action? _afterNextListing;
+    private Action? _beforeOpenRead;
+    private int _beforeOpenReadCallCount;
     private Exception? _deleteFailure;
+    private Exception? _deleteDirectoryFailure;
     private int _pausedStreamNumber;
     private int _callCount;
     private int _openedStreamCount;
@@ -63,6 +66,18 @@ internal sealed class PausableStore(IStore inner) : StoreBase
     public void RunAfterNextListing(Action action) => Volatile.Write(ref _afterNextListing, action);
 
     /// <summary>
+    /// Runs the action once, when one of the calls of <see cref="OpenRead"/> from now on has arrived and before it opens
+    /// the file.
+    /// </summary>
+    /// <param name="callNumber">Which of the calls from now on, starting at one.</param>
+    /// <param name="action">The action to run.</param>
+    public void RunBeforeOpenRead(int callNumber, Action action)
+    {
+        _beforeOpenReadCallCount = GetCallCount(nameof(OpenRead)) + callNumber;
+        Volatile.Write(ref _beforeOpenRead, action);
+    }
+
+    /// <summary>
     /// Makes the first read from one of the streams that <see cref="OpenRead"/> returns from now on hang.
     /// The returned task completes when that read has arrived.
     /// </summary>
@@ -100,6 +115,11 @@ internal sealed class PausableStore(IStore inner) : StoreBase
     /// </summary>
     public void FailNextDeleteAfterItRan(Exception exception) => Volatile.Write(ref _deleteFailure, exception);
 
+    /// <summary>
+    /// Makes the next delete of a directory fail without deleting it.
+    /// </summary>
+    public void FailNextDeleteDirectory(Exception exception) => Volatile.Write(ref _deleteDirectoryFailure, exception);
+
     public override async Task<List<StoreObject>> ListObjects(StorageListOptions? options = null, CancellationToken cancellationToken = default)
     {
         await ArriveAsync(nameof(ListObjects));
@@ -117,6 +137,11 @@ internal sealed class PausableStore(IStore inner) : StoreBase
     public override async Task<Stream> OpenRead(string objectPath, CancellationToken cancellationToken = default)
     {
         await ArriveAsync(nameof(OpenRead));
+        if (Volatile.Read(ref _beforeOpenRead) is not null && GetCallCount(nameof(OpenRead)) == _beforeOpenReadCallCount)
+        {
+            Interlocked.Exchange(ref _beforeOpenRead, null)?.Invoke();
+        }
+
         var stream = await inner.OpenRead(objectPath, cancellationToken);
 
         // Null for a file that does not exist, although the signature does not say so.
@@ -136,6 +161,17 @@ internal sealed class PausableStore(IStore inner) : StoreBase
         {
             throw failure;
         }
+    }
+
+    public override async Task DeleteDirectory(string folderPath, bool recursive, CancellationToken cancellationToken = default)
+    {
+        await ArriveAsync(nameof(DeleteDirectory));
+        if (Interlocked.Exchange(ref _deleteDirectoryFailure, null) is { } failure)
+        {
+            throw failure;
+        }
+
+        await inner.DeleteDirectory(folderPath, recursive, cancellationToken);
     }
 
     public override async Task<bool> ObjectExists(string objectPath, CancellationToken cancellationToken = default)

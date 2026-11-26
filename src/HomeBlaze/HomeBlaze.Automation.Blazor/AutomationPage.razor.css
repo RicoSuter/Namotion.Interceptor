@@ -1,0 +1,10 @@
+.automation-tab-count {
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    line-height: 20px;
+    text-align: center;
+    background: var(--mud-palette-action-default-hover);
+}

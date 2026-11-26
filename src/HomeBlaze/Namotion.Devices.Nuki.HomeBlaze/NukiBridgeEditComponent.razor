@@ -4,7 +4,7 @@
 <MudForm>
     <MudTextField @bind-Value="_hostAddress" @bind-Value:after="OnFieldChanged"
                   Label="Host address"
-                  Placeholder="192.168.1.50:8080"
+                  Placeholder="192.0.2.50:8080"
                   Required="true"
                   RequiredError="The host address is required"
                   Error="@(HostAddressError is not null)"

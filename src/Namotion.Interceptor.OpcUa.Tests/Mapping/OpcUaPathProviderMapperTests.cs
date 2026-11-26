@@ -167,6 +167,32 @@ public class OpcUaPathProviderMapperTests
         Assert.Null(config.ReferenceType);
     }
 
+    [Fact]
+    public void WhenTheProviderRaisesItsVersion_ThenTheMapperReportsIt()
+    {
+        // Arrange
+        var pathProvider = new VersionedPathProvider();
+        var mapper = new OpcUaPathProviderMapper(pathProvider);
+        var versionBefore = mapper.Version;
+
+        // Act
+        pathProvider.CurrentVersion = 5;
+
+        // Assert
+        Assert.Equal(0, versionBefore);
+        Assert.Equal(5, mapper.Version);
+    }
+
+    [Fact]
+    public void WhenTheProviderDoesNotDeriveFromPathProviderBase_ThenTheMapperVersionIsZero()
+    {
+        // Arrange
+        var mapper = new OpcUaPathProviderMapper(new Mock<IPathProvider>().Object);
+
+        // Act & Assert
+        Assert.Equal(0, mapper.Version);
+    }
+
     #region TryGetPropertyAsync Tests
 
     [Fact]
@@ -251,4 +277,11 @@ public class OpcUaPathProviderMapperTests
     }
 
     #endregion
+
+    private sealed class VersionedPathProvider() : AttributeBasedPathProvider("opc")
+    {
+        public long CurrentVersion { get; set; }
+
+        public override long Version => CurrentVersion;
+    }
 }

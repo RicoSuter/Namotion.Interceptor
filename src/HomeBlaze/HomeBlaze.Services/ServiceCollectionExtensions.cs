@@ -1,5 +1,12 @@
+using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Services.Clients;
+using HomeBlaze.Services.Diagnostics;
+using HomeBlaze.Services.Discovery;
+using HomeBlaze.Services.Discovery.MulticastDns;
+using HomeBlaze.Services.Secrets;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using HomeBlaze.Components.Abstractions.TimeZones;
@@ -27,18 +34,56 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<SubjectTypeCatalog>();
+        // Read when the serializer is created, so a corrupt store stops the start before any configuration is read.
+        services.AddSingleton(serviceProvider => new SecretStore(
+            HomeBlazePaths.GetSecretsPath(serviceProvider.GetService<IConfiguration>())));
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
         // The root accessor is deferred so constructing the resolver does not pull in RootManager,
         // which depends on the resolver.
-        services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
+        services.AddSingleton(sp => new SubjectPathResolver(context, () => sp.GetRequiredService<RootManager>().Root));
         services.AddSingleton<DeveloperModeService>();
         services.AddSingleton(serviceProvider => new ClientConnectionService(
             serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System,
             serviceProvider.GetService<ILogger<ClientConnectionService>>() ?? NullLogger<ClientConnectionService>.Instance));
+        services.AddSingleton<ISsdpSearch>(serviceProvider => new SsdpSearch(
+            serviceProvider.GetService<ILogger<SsdpSearch>>() ?? NullLogger<SsdpSearch>.Instance));
+        services.AddSingleton<IMulticastDnsBrowser>(serviceProvider => new MulticastDnsBrowser(
+            serviceProvider.GetService<ILogger<MulticastDnsBrowser>>() ?? NullLogger<MulticastDnsBrowser>.Instance));
+        services.AddSingleton<IUdpDiscovery>(serviceProvider => new UdpDiscovery(
+            serviceProvider.GetService<ILogger<UdpDiscovery>>() ?? NullLogger<UdpDiscovery>.Instance));
         services.AddScoped<ITimeZoneDisplay, TimeZoneDisplayService>();
+        // The logging factory creates the provider when the host builds it, so the store fills from startup on,
+        // before a host system subject configures it.
+        services.TryAddSingleton(serviceProvider => new RecentLogStore(serviceProvider.GetService<TimeProvider>()));
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ILoggerProvider, RecentLogLoggerProvider>(
+            serviceProvider => new RecentLogLoggerProvider(serviceProvider.GetRequiredService<RecentLogStore>())));
+        // It subscribes before any hosted service starts and unsubscribes after all have stopped. Registered
+        // ahead of the HomeBlaze services so it also covers their lifecycle callbacks, but not those of
+        // services registered earlier, such as by AddServiceDefaults.
+        services.AddHostedService(serviceProvider => new FirstChanceExceptionLogger(
+            serviceProvider.GetService<ILogger<FirstChanceExceptionLogger>>() ?? NullLogger<FirstChanceExceptionLogger>.Instance,
+            serviceProvider.GetService<TimeProvider>()));
         services.AddHostedService(sp => sp.GetRequiredService<RootManager>());
 
+        return services;
+    }
+
+    /// <summary>
+    /// Adds <see cref="IHttpClientFactory"/> whose clients give up connecting after 10 seconds, so that a device that is
+    /// not reachable fails fast. Requests that are connected have no limit besides the one of the client.
+    /// </summary>
+    public static IServiceCollection AddHomeBlazeHttpClients(this IServiceCollection services)
+    {
+        services.AddHttpClient();
+        services.ConfigureHttpClientDefaults(builder => builder.ConfigurePrimaryHttpMessageHandler((handler, _) =>
+        {
+            // Only the timeout is set, so the primary handler and its pooling stay those of the factory.
+            if (handler is SocketsHttpHandler socketsHandler)
+            {
+                socketsHandler.ConnectTimeout = TimeSpan.FromSeconds(10);
+            }
+        }));
         return services;
     }
 }

@@ -18,14 +18,14 @@ public class NukiServiceCollectionExtensionsTests
         // Act
         services.AddNukiBridge(bridge =>
         {
-            bridge.HostAddress = "192.168.1.50";
+            bridge.HostAddress = "192.0.2.50";
             bridge.TokenMode = NukiTokenMode.Plain;
         });
         using var serviceProvider = services.BuildServiceProvider();
 
         // Assert
         var bridge = serviceProvider.GetRequiredService<NukiBridge>();
-        Assert.Equal("192.168.1.50", bridge.HostAddress);
+        Assert.Equal("192.0.2.50", bridge.HostAddress);
         Assert.Equal(NukiTokenMode.Plain, bridge.TokenMode);
         Assert.Equal(NukiBridge.DefaultPollingInterval, bridge.PollingInterval);
         Assert.Same(bridge, serviceProvider.GetRequiredService<NukiBridge>());

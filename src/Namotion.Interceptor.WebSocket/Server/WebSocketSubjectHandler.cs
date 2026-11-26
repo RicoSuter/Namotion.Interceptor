@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Secrets;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Metadata;
@@ -20,7 +21,7 @@ namespace HomeBlaze.Storage.Tests;
 /// of <see cref="CallbackSubject"/> are static, so tests that use them must not run next to each other.
 /// </remarks>
 [Collection(nameof(StorageTestBase))]
-public abstract class StorageTestBase : IDisposable
+public abstract class StorageTestBase : IAsyncLifetime
 {
     protected static readonly TimeSpan WatcherTimeout = TimeSpan.FromSeconds(20);
 
@@ -41,6 +42,9 @@ public abstract class StorageTestBase : IDisposable
 
     /// <summary>The context of the storage connected last.</summary>
     protected IInterceptorSubjectContext? Context { get; private set; }
+
+    /// <summary>The file of a secret store for the storage created next, or null for a storage without one.</summary>
+    protected string? SecretsPath { get; set; }
 
     protected async Task<FluentStorageContainer> ConnectAsync(
         bool enableFileWatching = false,
@@ -71,10 +75,15 @@ public abstract class StorageTestBase : IDisposable
         services.AddSingleton(typeProvider);
         services.AddSingleton(typeRegistry);
         services.AddSingleton(context);
+        if (SecretsPath is { } secretsPath)
+        {
+            services.AddSingleton(new SecretStore(secretsPath));
+        }
+
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
-        services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
+        services.AddSingleton(sp => new SubjectPathResolver(context, () => sp.GetRequiredService<RootManager>().Root));
         services.AddSingleton<MarkdownContentParser>();
         var serviceProvider = services.BuildServiceProvider();
         _serviceProvider = serviceProvider;
@@ -185,21 +194,24 @@ public abstract class StorageTestBase : IDisposable
         return counter;
     }
 
-    public void Dispose()
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public virtual async Task DisposeAsync()
     {
-        foreach (var storage in _storages)
+        try
         {
-            storage.Dispose();
+            await StorageCleanup.DisposeAsync(_storages);
+        }
+        finally
+        {
+            _serviceProvider?.Dispose();
         }
 
-        _serviceProvider?.Dispose();
-        StorageDirectory.Delete(recursive: true);
+        await StorageCleanup.DeleteAsync(StorageDirectory);
         foreach (var directory in _temporaryDirectories)
         {
-            directory.Delete(recursive: true);
+            await StorageCleanup.DeleteAsync(directory);
         }
-
-        GC.SuppressFinalize(this);
     }
 
     protected sealed class DetachCounter(IInterceptorSubject subject) : ILifecycleHandler

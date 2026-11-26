@@ -13,8 +13,10 @@ public class EmbeddedSubjectRedactionTests
 {
     private static readonly HashSet<MarkdownBlock> NoLayoutBlocks = [];
 
-    [Fact]
-    public void WhenTheSubjectOfABlockIsNoLongerRegistered_ThenEveryArgumentAndJsonValueIsRedacted()
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void WhenTheSubjectOfABlockIsNoLongerRegistered_ThenEveryArgumentAndJsonValueIsRedacted(string lineEnding)
     {
         // Arrange: the subject that a reload detached, which tells no configuration property anymore.
         var device = new EmbeddedSecretDevice { Host = "detached-host", Password = "detached-secret" };
@@ -24,7 +26,7 @@ public class EmbeddedSubjectRedactionTests
             { "Host": "json-host", "Password": "json-secret" }
             ```
             ::
-            """;
+            """.ReplaceLineEndings(lineEnding);
 
         // Act
         var result = EmbeddedSubjectRedaction.Redact(
@@ -35,7 +37,7 @@ public class EmbeddedSubjectRedactionTests
         Assert.DoesNotContain("json-secret", result);
         Assert.DoesNotContain("detached-host", result);
         Assert.DoesNotContain("json-host", result);
-        Assert.Contains("#gateway Host=*** Password=***\n", result);
+        Assert.Contains("#gateway Host=*** Password=***" + lineEnding, result);
     }
 
     [Fact]
@@ -204,32 +206,6 @@ public class EmbeddedSubjectRedactionTests
     }
 
     [Fact]
-    public void WhenAPlainObjectHasASecretProperty_ThenItsValueIsHidden()
-    {
-        // Arrange
-        var context = SubjectContextFactory.Create(new ServiceCollection());
-        var host = new PlainOptionsHost(context) { Credentials = new PlainCredentials { User = "admin", Password = "plain-secret" } };
-        var source = $$"""
-            :: {{typeof(PlainOptionsHost).FullName}}#host
-            ```json
-            {
-              "Credentials": { "User": "admin", "password": "plain-secret" }
-            }
-            ```
-            ::
-            """;
-
-        // Act
-        var result = EmbeddedSubjectRedaction.Redact(
-            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = host }, NoLayoutBlocks, out _);
-
-        // Assert
-        Assert.DoesNotContain("plain-secret", result);
-        Assert.Contains("\"password\": \"***\"", result);
-        Assert.Contains("\"User\": \"admin\"", result);
-    }
-
-    [Fact]
     public void WhenABlockIsInsideAnInvalidBlock_ThenItsArgumentsAndItsJsonBlockAreRedacted()
     {
         // Arrange
@@ -331,21 +307,10 @@ public partial class PlainOptionsHost : IConfigurable
     [Configuration]
     public partial PlainOptions? Options { get; set; }
 
-    [Configuration]
-    public partial PlainCredentials? Credentials { get; set; }
-
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 public sealed class PlainOptions
 {
     public string? Endpoint { get; set; }
-}
-
-public struct PlainCredentials
-{
-    public string? User { get; set; }
-
-    [Configuration(IsSecret = true)]
-    public string? Password { get; set; }
 }

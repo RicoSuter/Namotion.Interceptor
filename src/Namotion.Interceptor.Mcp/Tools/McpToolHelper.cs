@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -54,10 +55,13 @@ internal static class McpToolHelper
         return false;
     }
 
+    /// <summary>
+    /// Builds the node of a subject whose path, from <see cref="TryGetSubjectPath"/>, is <paramref name="path"/>.
+    /// </summary>
     internal static SubjectNode BuildSubjectNodeDto(
         RegisteredSubject subject,
+        string? path,
         PathProviderBase pathProvider,
-        IInterceptorSubject rootSubject,
         McpServerConfiguration configuration,
         bool includeProperties,
         bool includeAttributes,
@@ -65,8 +69,6 @@ internal static class McpToolHelper
         bool includeInterfaces,
         IReadOnlySet<string>? propertyNames = null)
     {
-        var path = TryGetSubjectPath(subject, pathProvider, rootSubject, configuration.PathPrefix);
-
         // Collect enrichments and extract known fields
         var enrichments = new Dictionary<string, object?>();
         foreach (var enricher in configuration.SubjectEnrichers)
@@ -171,39 +173,23 @@ internal static class McpToolHelper
     /// attribute, a property holding subjects or one the path provider excludes.
     /// </summary>
     internal static string? TryGetSelectableSegment(RegisteredSubjectProperty property, PathProviderBase pathProvider) =>
-        property.IsAttribute || !pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects
-            ? null
-            : pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-
-    /// <summary>
-    /// Resolves <paramref name="segment"/> to a scalar property of <paramref name="subject"/> that the path provider
-    /// exposes, or null when there is none.
-    /// </summary>
-    internal static RegisteredSubjectProperty? TryGetScalarProperty(
-        RegisteredSubject subject,
-        PathProviderBase pathProvider,
-        string segment)
-    {
-        var property = pathProvider.TryGetPropertyFromSegment(subject, segment);
-        return property is null ||
-               property.IsAttribute ||
-               property.CanContainSubjects ||
-               !pathProvider.IsPropertyIncluded(property)
-            ? null
-            : property;
-    }
+        !property.IsAttribute && !property.CanContainSubjects && pathProvider.TryGetPropertySegment(property, out var segment)
+            ? segment
+            : null;
 
     /// <summary>
     /// Resolves a path from the subject through the path provider to a property that a filter can read: every property
-    /// on the way is one the provider includes, and the last one is no attribute and has no index. A property that holds
-    /// subjects is one a filter can read, and its value is the subject, the collection or the dictionary, or null.
+    /// on the way is one the provider includes and is owned by a readable subject, and the last one is no attribute and has
+    /// no index. A property that holds subjects is one a filter can read, and its value is the subject,
+    /// the collection or the dictionary, or null.
     /// </summary>
     internal static RegisteredSubjectProperty? TryGetFilterPropertyFromPath(
         RegisteredSubject subject,
         PathProviderBase pathProvider,
-        string path)
+        string path,
+        McpSubjectReadability readability)
     {
-        if (pathProvider.TryGetPropertyFromPath(subject, path, includedPropertiesOnly: true, createMissingSubject: null) is not
+        if (readability.GetReadableSubjectsPathProvider(pathProvider).TryGetPropertyFromPath(subject, path) is not
             { Index: null, Property: var property })
         {
             return null;
@@ -212,22 +198,32 @@ internal static class McpToolHelper
         return property.IsAttribute ? null : property;
     }
 
+    /// <summary>
+    /// The path the tools build for the subject from <paramref name="rootSubject"/>, after the configuration's
+    /// <see cref="McpServerConfiguration.PathPrefix"/>: for the root the prefix, or null when it is empty. Any other
+    /// subject's path is the first, in parent order, that reaches the root only through properties
+    /// <see cref="McpServerConfiguration.ToolPathProvider"/> effectively includes (see
+    /// <see cref="PathProviderExtensions.IsPropertyEffectivelyIncluded"/>), the holding property too, as get_property and
+    /// browse resolve; null when there is none.
+    /// </summary>
     internal static string? TryGetSubjectPath(
-        RegisteredSubject subject,
-        PathProviderBase pathProvider,
-        IInterceptorSubject rootSubject,
-        string pathPrefix = "")
+        RegisteredSubject subject, McpServerConfiguration configuration, IInterceptorSubject rootSubject)
     {
+        var pathPrefix = configuration.PathPrefix;
         if (subject.Subject == rootSubject)
         {
             return pathPrefix.Length > 0 ? pathPrefix : null;
         }
 
-        if (subject.Parents.Length > 0)
+        // The registry checks inclusion in the walk that builds the text, so a subject moved on it while a call runs
+        // cannot put the name of a hidden property into the text.
+        var pathProvider = configuration.ToolPathProvider;
+        foreach (var parent in subject.Parents)
         {
-            var parent = subject.Parents[0];
-            var path = parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index);
-            return path is not null ? $"{pathPrefix}{path}" : null;
+            if (parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index) is { } path)
+            {
+                return $"{pathPrefix}{path}";
+            }
         }
 
         return null;
@@ -244,9 +240,7 @@ internal static class McpToolHelper
             attributes = [];
             foreach (var attribute in property.Attributes)
             {
-                // A read-only attribute without a value says nothing about its property; a writable one can be set.
-                var value = attribute.GetValue();
-                if (value is not null || attribute.HasSetter)
+                if (TryGetListedAttributeValue(attribute, configuration, out var value))
                 {
                     attributes.Add(new PropertyAttribute(attribute.BrowseName, value));
                 }
@@ -266,14 +260,34 @@ internal static class McpToolHelper
     }
 
     /// <summary>
+    /// Whether the tools list the attribute of a listed property, and its value when they do: it cannot hold subjects,
+    /// the policy allows to read it, and it has a value or a setter.
+    /// </summary>
+    internal static bool TryGetListedAttributeValue(
+        RegisteredSubjectProperty attribute, McpServerConfiguration configuration, out object? value)
+    {
+        // A value holding subjects would be serialized with all their properties, past the policy; as for a scalar
+        // property, such a subject is reached through its own path instead.
+        if (attribute.CanContainSubjects || !configuration.IsAllowed(attribute, McpAccessActions.Read))
+        {
+            value = null;
+            return false;
+        }
+
+        // A read-only attribute without a value says nothing about its property; a writable one can be set.
+        value = attribute.GetValue();
+        return value is not null || attribute.HasSetter;
+    }
+
+    /// <summary>
     /// Whether set_property may write the property: <see cref="GetWriteError"/> returns null for it.
     /// </summary>
     internal static bool IsWritable(RegisteredSubjectProperty property, McpServerConfiguration configuration) =>
-        !configuration.IsReadOnly && property.HasPublicSetter && configuration.PropertyWriteFilter?.Invoke(property) is null;
+        !configuration.IsReadOnly && property.HasPublicSetter && configuration.IsAllowed(property, McpAccessActions.Write);
 
     /// <summary>
     /// The error set_property returns for the property, or null when it may be written: the server is read-only, the
-    /// property has no public setter, or the <see cref="McpServerConfiguration.PropertyWriteFilter"/> refuses it.
+    /// property has no public setter, or the <see cref="McpServerConfiguration.AccessPolicy"/> does not allow writing it.
     /// </summary>
     /// <param name="property">The property.</param>
     /// <param name="path">The path of the property as the client gave it, for the message.</param>
@@ -290,9 +304,9 @@ internal static class McpToolHelper
             return $"Property is not writable: {path}";
         }
 
-        return configuration.PropertyWriteFilter?.Invoke(property) is { } reason
-            ? $"Property is not writable: {path}. {reason}"
-            : null;
+        return configuration.IsAllowed(property, McpAccessActions.Write)
+            ? null
+            : $"Property is not writable: {path}. The access policy does not allow it.";
     }
 
     private static string[]? ToStringArray(object? value)

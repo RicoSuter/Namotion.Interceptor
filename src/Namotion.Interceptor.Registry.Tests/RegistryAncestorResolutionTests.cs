@@ -5,6 +5,7 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Derived;
 using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Registry.Tests;

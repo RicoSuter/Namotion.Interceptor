@@ -53,7 +53,7 @@ internal sealed class StorageMetadataStore
             throw new ArgumentException("values must be a JSON object, for example {\"navTitle\": \"Hall light\"}.", nameof(values));
         }
 
-        var subject = FluentStorageContainer.ResolveMetadataPath(_storage, path)
+        var subject = MetadataSearch.ResolvePath(_storage, path)
             ?? throw new ArgumentException(FluentStorageContainer.GetNoSubjectMessage(path));
         var store = subject.FindMetadataStore()
             ?? throw new ArgumentException("The subject is in no storage.", nameof(path));
@@ -232,6 +232,35 @@ internal sealed class StorageMetadataStore
             {
                 _logger?.LogWarning(exception, "Failed to apply the deleted metadata file of a deleted subject: {Path}", metadataPath);
             }
+        }
+    }
+
+    /// <summary>
+    /// Deletes the metadata file of a folder that is deleted, if it has one, and removes it from the index. A failure
+    /// is thrown, as the folder cannot be deleted while the file is there. Called on the worker.
+    /// </summary>
+    public Task DeleteFolderMetadataFileAsync(StorageConnection connection, string folderPath, CancellationToken cancellationToken)
+        => DeleteMetadataFileAsync(connection, StorageMetadataPath.GetFolderFilePath(folderPath), cancellationToken);
+
+    /// <summary>
+    /// Writes the metadata file of a folder back after the delete of the folder failed, also when the caller has given
+    /// up by now, as nothing would write it later. A failure is only logged, as the delete fails with its own error.
+    /// Called on the worker.
+    /// </summary>
+    public async Task RestoreFolderMetadataFileAsync(StorageConnection connection, string folderPath, byte[] content)
+    {
+        var path = StorageMetadataPath.GetFolderFilePath(folderPath);
+        try
+        {
+            StorageMetadataFile.TryParse(content, out var file, out _);
+            var entry = new StorageEntry { Path = path, IsFolder = false, Metadata = file };
+            await _storage.WriteAndRecordAsync(connection, entry, content, CancellationToken.None);
+            connection.Index.Set(entry);
+            connection.Reconciler.Apply();
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogWarning(exception, "Failed to write back the metadata file of a folder that could not be deleted: {Path}", path);
         }
     }
 

@@ -15,4 +15,11 @@ public class OperationAttribute : SubjectMethodAttribute
     /// operation, whatever its own attribute says.
     /// </summary>
     public bool RequiresConfirmation { get; set; }
+
+    /// <summary>
+    /// What the operation is for; <see cref="OperationPurpose.None"/> by default. Independent of
+    /// <see cref="RequiresConfirmation"/>, which still decides whether agents may call the operation. Ignored on an
+    /// operation with a parameter that requires input.
+    /// </summary>
+    public OperationPurpose Purpose { get; set; }
 }

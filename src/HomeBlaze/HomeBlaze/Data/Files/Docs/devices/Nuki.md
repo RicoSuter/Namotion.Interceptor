@@ -15,11 +15,15 @@ The Nuki integration reads and controls Nuki smart locks and Nuki Openers throug
 
 The setup reads the token from the bridge and picks the token mode: `Encrypted` when the bridge accepts it, `Plain` for a software bridge. When it cannot confirm the mode, it shows a warning that says what to check. See [Security](#security).
 
+## Discovery
+
+The Discover page of the create dialog asks the Nuki discovery service, which lists the bridges seen from your public IP address. It only does so when you open the Discover page and on Scan again, and at most about once a minute: a scan within a minute of the last answer of the service, also an error answer, or of a lookup that timed out reuses its result. When the service cannot be reached, no bridge is listed, the search does not count as failed, and the next scan asks again. A bridge that is already added is recognized by its host address and port.
+
 ## Configuration
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `HostAddress` | string | null | IP address or host name of the bridge with an optional port (8080 by default), for example `192.168.1.50`, `nuki-bridge:8080` or `[fd00::5]:8080` (IPv6 with a port in brackets). An `http://` prefix is allowed, `https://` is not because the bridge offers no HTTPS |
+| `HostAddress` | string | null | IP address or host name of the bridge with an optional port (8080 by default), for example `192.0.2.50`, `nuki-bridge:8080` or `[fd00::5]:8080` (IPv6 with a port in brackets). An `http://` prefix is allowed, `https://` is not because the bridge offers no HTTPS |
 | `Token` | string (secret) | null | API token of the bridge |
 | `TokenMode` | `Encrypted` or `Plain` | `Encrypted` | How requests carry the token, see [Security](#security) |
 | `PollingInterval` | TimeSpan | 10 seconds | How often the device list is read; `Uptime`, the versions and `IsServerConnected` are read every sixth poll. Keep it below 30 seconds to see every ring, see [Opener](#opener) |
@@ -111,7 +115,7 @@ The bridge offers no HTTPS, so requests and responses travel unencrypted in the 
 - **Encrypted**: After pairing the token itself is never sent. Each request carries the token encrypted with XSalsa20-Poly1305 together with the time and a random number, which the bridge accepts once and within 60 seconds, so it refuses a recorded request that it has already received. The bridge clock must be within 60 seconds of the HomeBlaze clock. The encrypted token is not bound to the request, though: an attacker who can intercept a request and keep it from reaching the bridge can use its encrypted token for any action within 60 seconds. A short token, and bridge tokens are typically only 6 characters long, can also be guessed offline from one recorded request.
 - **Plain**: Software bridges only accept `Plain`, which sends the token with every request, so anyone who records one request can control the devices.
 - **Pairing**: The bridge returns the token in plain text when you pair. When the bridge refuses the encrypted token, the setup sends the token once in plain text to read the bridge type, see [Setup](#setup).
-- **Storage**: The token is stored in plain text in the JSON file of the bridge, like other secrets; protect the data folder accordingly.
+- **Storage**: The token is stored in `Data/Secrets.json`, like other secrets, and the JSON file of the bridge holds a reference; protect the data folder accordingly.
 - **Logs**: .NET hides the query of a request URI in its HTTP logs, and with it a plain token, unless the environment variable `DOTNET_SYSTEM_NET_HTTP_DISABLEURIREDACTION` is set.
 
 ## Widgets
@@ -132,7 +136,7 @@ Embed them with a `Widget` block, see [Widget](../administration/widgets/widget.
 ```json
 {
   "$type": "Namotion.Devices.Nuki.NukiBridge",
-  "hostAddress": "192.168.1.50:8080",
+  "hostAddress": "192.0.2.50:8080",
   "token": "your-token",
   "tokenMode": "Encrypted",
   "pollingInterval": "00:00:10",

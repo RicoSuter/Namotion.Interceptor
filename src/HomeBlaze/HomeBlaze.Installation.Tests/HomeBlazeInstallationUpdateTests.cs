@@ -52,6 +52,50 @@ public class HomeBlazeInstallationUpdateTests
     }
 
     [Theory]
+    [InlineData(10, false, null, "Release 0.6.0 is offered 30 minutes after it was published, once its image exists.", 20)]
+    [InlineData(30, true, "0.6.0", null, null)]
+    public async Task WhenANewerReleaseWasJustPublished_ThenItIsOfferedAndCheckedAgainOnceItsImageHadTimeToPublish(
+        int minutesSincePublished, bool expectedUpdateAvailable, string? expectedLatestVersion, string? expectedStatus, int? expectedNextCheckMinutes)
+    {
+        // Arrange: the local clock is a day behind, and only GitHub's clock in the Date header counts.
+        var publishedAt = new DateTimeOffset(2026, 10, 20, 8, 0, 0, TimeSpan.Zero);
+        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(ReleaseJson, publishedAt.AddMinutes(minutesSincePublished)));
+        var timeProvider = new TestTimeProvider(publishedAt.AddDays(-1));
+        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler), timeProvider);
+
+        // Act
+        var retryDelay = await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(expectedNextCheckMinutes is { } minutes ? TimeSpan.FromMinutes(minutes) : null, retryDelay);
+        Assert.Equal(expectedUpdateAvailable, installation.UpdateAvailable);
+        Assert.Equal(expectedLatestVersion, installation.LatestVersion);
+        Assert.Equal(expectedStatus, installation.UpdateCheckStatus);
+    }
+
+    [Fact]
+    public async Task WhenAnotherReleaseWasJustPublished_ThenTheReleaseOfferedBeforeStaysOffered()
+    {
+        // Arrange
+        var answeredAt = new DateTimeOffset(2026, 10, 20, 8, 5, 0, TimeSpan.Zero);
+        var releases = new Queue<string>([
+            """{ "tag_name": "v0.6.0", "published_at": "2026-10-01T08:00:00Z" }""",
+            """{ "tag_name": "v0.7.0", "published_at": "2026-10-20T08:00:00Z" }""",
+        ]);
+        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(releases.Dequeue(), answeredAt));
+        var installation = CreateInstallation(CreateBuild(), () => new HttpClient(handler));
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Act
+        await installation.CheckForUpdatesCoreAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(installation.UpdateAvailable);
+        Assert.Equal("0.6.0", installation.LatestVersion);
+        Assert.Equal("Release 0.7.0 is offered 30 minutes after it was published, once its image exists.", installation.UpdateCheckStatus);
+    }
+
+    [Theory]
     [InlineData("0.6.0", "0.5.0", true)]
     [InlineData("0.5.0", "0.5.0", false)]
     [InlineData("0.5.0", "0.6.0-beta.1", false)]

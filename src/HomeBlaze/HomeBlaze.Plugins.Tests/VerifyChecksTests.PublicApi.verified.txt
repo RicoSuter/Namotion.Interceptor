@@ -64,7 +64,7 @@ namespace HomeBlaze.Plugins
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
-        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true, Title="Remove Plugin")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Purpose=HomeBlaze.Abstractions.Attributes.OperationPurpose.Delete, RequiresConfirmation=true, Title="Remove Plugin")]
         public void RemovePlugin() { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }

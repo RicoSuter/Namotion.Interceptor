@@ -4,7 +4,7 @@ using System.Text;
 namespace Namotion.Interceptor.Registry.Paths;
 
 /// <summary>
-/// Key text and index writing for the grammar <see cref="PathSegmentReader"/> reads, and the reader's error text.
+/// Key text and index building for the grammar <see cref="PathSegmentReader"/> parses, and its syntax error text.
 /// </summary>
 internal static class PathSyntax
 {

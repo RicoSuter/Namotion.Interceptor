@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Mcp.Tests.Tools.Access;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -290,6 +291,37 @@ public class ListTypesToolTests
         Assert.True(concreteType.TryGetProperty("interfaces", out var interfaces));
         var interfaceNames = interfaces.EnumerateArray().Select(i => i.GetString()).ToArray();
         Assert.Contains(typeof(ITestInterface).FullName, interfaceNames);
+    }
+
+    [Fact]
+    public async Task WhenThePolicyDeniesEveryRead_ThenListTypesListsAsWithoutAPolicy()
+    {
+        // Arrange
+        var typeProvider = new TestTypeProvider(
+            new McpTypeInfo("ITestInterface", "Test", IsInterface: true, Type: typeof(ITestInterface)),
+            new McpTypeInfo("TestMotor", "Test motor", IsInterface: false, Type: typeof(TestMotor)));
+        var configuration = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            TypeProviders = { typeProvider }
+        };
+        var configurationWithPolicy = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            TypeProviders = { typeProvider },
+            AccessPolicy = new TestAccessPolicy((_, action) => action != McpAccessActions.Read)
+        };
+        var input = JsonSerializer.SerializeToElement(new { });
+
+        // Act
+        var withoutPolicy = JsonSerializer.SerializeToElement(await new McpToolFactory(() => null!, configuration)
+            .CreateTools().First(t => t.Name == "list_types").Handler(input, CancellationToken.None));
+        var withPolicy = JsonSerializer.SerializeToElement(await new McpToolFactory(() => null!, configurationWithPolicy)
+            .CreateTools().First(t => t.Name == "list_types").Handler(input, CancellationToken.None));
+
+        // Assert
+        Assert.Equal(2, withoutPolicy.GetProperty("types").GetArrayLength());
+        Assert.Equal(withoutPolicy.GetRawText(), withPolicy.GetRawText());
     }
 
     private class TestTypeProvider : IMcpTypeProvider

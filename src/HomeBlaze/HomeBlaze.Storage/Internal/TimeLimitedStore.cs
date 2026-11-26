@@ -76,6 +76,12 @@ internal sealed class TimeLimitedStore : StoreBase
     public override Task<StoreObject> GetObjectInfo(string objectPath, CancellationToken cancellationToken = default)
         => RunAsync(nameof(GetObjectInfo), objectPath, () => VerifyRoot().GetObjectInfo(objectPath, cancellationToken), cancellationToken);
 
+    // The base of this store lists and deletes the objects below the folder itself. On a bucket the folder is virtual and
+    // the inner store would delete every object below it, so the caller must not call this there (see
+    // FluentStorageContainer.DeleteFolderAsync).
+    public override Task DeleteDirectory(string folderPath, bool recursive, CancellationToken cancellationToken = default)
+        => RunAsync(nameof(DeleteDirectory), folderPath, () => VerifyRoot().DeleteDirectory(folderPath, recursive, cancellationToken), cancellationToken);
+
     public override void Dispose() => _inner.Dispose();
 
     // Within the call, so that a root that stalls when it is examined is limited like the call itself.

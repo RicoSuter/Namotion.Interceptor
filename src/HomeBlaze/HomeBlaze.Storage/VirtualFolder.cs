@@ -122,11 +122,11 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
         => Storage.DeleteSubjectAsync(subject, cancellationToken);
 
     /// <summary>
-    /// Opens the create subject dialog to add a new subject to this folder.
+    /// Opens the create subject dialog to add new subjects to this folder.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
-        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
+        => subjectSetupService.CreateSubjectsAndAddToStorageAsync(this, cancellationToken);
 
     /// <summary>Gets the names of the children of this folder in the order in which they are shown, for agents.</summary>
     [Query(Title = "Get Order", Description = StorageMetadataMethods.GetOrderDescription, Position = 3)]

@@ -83,7 +83,7 @@ public class RootManagerRootLoadedTests : IDisposable
             .Returns(configurationFilePath);
 
         RootManager? rootManager = null;
-        var pathResolver = new SubjectPathResolver(() => rootManager!.Root);
+        var pathResolver = new SubjectPathResolver(context, () => rootManager!.Root);
         rootManager = new RootManager(typeRegistry, serializer, context, pathResolver, configuration.Object);
 
         _disposables.Add(serviceProvider);

@@ -1,5 +1,6 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Services
+@using HomeBlaze.Abstractions.Discovery
 
 @implements IAsyncDisposable
 
@@ -22,7 +23,7 @@
             <SubjectComponent @key="Subject"
                               Subject="@Subject"
                               Type="hostedComponentType"
-                              AdditionalParameters="@(IsCreating ? CreatingParameters : EditingParameters)"
+                              AdditionalParameters="@GetHostedComponentParameters(hostedComponentType)"
                               ComponentInstance="_subjectComponent"
                               ComponentInstanceChanged="OnSubjectComponentRendered" />
         }
@@ -37,13 +38,33 @@
 }
 
 @code {
-    // SubjectComponent builds the parameters of the hosted component again whenever it is given another instance.
-    private static readonly Dictionary<string, object?> CreatingParameters = new() { ["IsCreating"] = true };
-    private static readonly Dictionary<string, object?> EditingParameters = new() { ["IsCreating"] = false };
+    private const string IsCreatingParameterName = "IsCreating";
+    private const string DiscoveryResultParameterName = nameof(ISubjectDiscoveryComponent.DiscoveryResult);
+
+    // Shared instances, for the reason given at _mergedParameters.
+    private static readonly Dictionary<string, object?> CreatingParameters = new() { [IsCreatingParameterName] = true };
+    private static readonly Dictionary<string, object?> EditingParameters = new() { [IsCreatingParameterName] = false };
 
     [Parameter] public IInterceptorSubject? Subject { get; set; }
 
     [Parameter] public bool IsCreating { get; set; }
+
+    /// <summary>
+    /// Gets or sets extra parameters for the hosted edit or setup component, or null for none. The panel's own
+    /// <c>IsCreating</c> and <c>DiscoveryResult</c> entries take precedence over ones of the same name.
+    /// </summary>
+    /// <remarks>
+    /// Every entry must name a parameter the hosted component declares, as Blazor throws for an unknown one, and is
+    /// not passed to the generated properties editor of a subject without a registered component. Pass the same
+    /// instance on every render, another instance rebuilds the parameters of the hosted component.
+    /// </remarks>
+    [Parameter] public IReadOnlyDictionary<string, object?>? EditorParameters { get; set; }
+
+    /// <summary>
+    /// Gets or sets the device the user picked on the Discover page, or null. It reaches the hosted component only
+    /// when that implements <see cref="ISubjectDiscoveryComponent"/>.
+    /// </summary>
+    [Parameter] public IDiscoveryResult? DiscoveryResult { get; set; }
 
     /// <summary>
     /// Raised with the current validity once the hosted editor is ready, and again whenever the validity changes.
@@ -63,6 +84,12 @@
     private ConfigurationPropertiesEditor? _propertiesEditor;
     private bool? _reportedIsValid;
     private Func<Task> _refreshIsValid = () => Task.CompletedTask;
+    // SubjectComponent builds the parameters of the hosted component again whenever it is given another instance, so
+    // the merged dictionary is kept until EditorParameters, IsCreating or the discovery result change.
+    private IReadOnlyDictionary<string, object?>? _mergedEditorParameters;
+    private bool _mergedIsCreating;
+    private IDiscoveryResult? _mergedDiscoveryResult;
+    private Dictionary<string, object?>? _mergedParameters;
 
     private SubjectComponentType? HostedComponentType
     {
@@ -73,14 +100,72 @@
                 return null;
             }
 
-            var subjectType = Subject.GetType();
-            if (IsCreating && ComponentRegistry.HasComponent(subjectType, SubjectComponentType.Setup))
-            {
-                return SubjectComponentType.Setup;
-            }
-
-            return ComponentRegistry.HasComponent(subjectType, SubjectComponentType.Edit) ? SubjectComponentType.Edit : null;
+            return ComponentRegistry.GetEditorComponent(Subject.GetType(), IsCreating)?.Type;
         }
+    }
+
+    private Dictionary<string, object?> GetHostedComponentParameters(SubjectComponentType componentType)
+    {
+        var discoveryResult = GetAcceptedDiscoveryResult(componentType);
+        if (EditorParameters is null && discoveryResult is null)
+        {
+            return CreateHostedComponentParameters(IsCreating, null);
+        }
+
+        if (_mergedParameters is null ||
+            !ReferenceEquals(_mergedEditorParameters, EditorParameters) ||
+            _mergedIsCreating != IsCreating ||
+            !ReferenceEquals(_mergedDiscoveryResult, discoveryResult))
+        {
+            _mergedEditorParameters = EditorParameters;
+            _mergedIsCreating = IsCreating;
+            _mergedDiscoveryResult = discoveryResult;
+            _mergedParameters = CreateHostedComponentParameters(IsCreating, EditorParameters, discoveryResult);
+        }
+
+        return _mergedParameters;
+    }
+
+    private IDiscoveryResult? GetAcceptedDiscoveryResult(SubjectComponentType componentType)
+    {
+        // Blazor throws for a parameter the hosted component does not declare.
+        if (DiscoveryResult is null || Subject is null)
+        {
+            return null;
+        }
+
+        var registration = ComponentRegistry.GetComponent(Subject.GetType(), componentType);
+        return registration is { TakesDiscoveryResults: true } ? DiscoveryResult : null;
+    }
+
+    /// <summary>
+    /// Creates the parameters of the hosted component: the <c>IsCreating</c> entry, the given editor parameters and
+    /// the discovery result when one is given. Returns a shared instance when there are neither.
+    /// </summary>
+    internal static Dictionary<string, object?> CreateHostedComponentParameters(
+        bool isCreating, IReadOnlyDictionary<string, object?>? editorParameters, IDiscoveryResult? discoveryResult = null)
+    {
+        if (editorParameters is null && discoveryResult is null)
+        {
+            return isCreating ? CreatingParameters : EditingParameters;
+        }
+
+        var parameters = new Dictionary<string, object?>((editorParameters?.Count ?? 0) + 2);
+        if (editorParameters is not null)
+        {
+            foreach (var (name, value) in editorParameters)
+            {
+                parameters[name] = value;
+            }
+        }
+
+        if (discoveryResult is not null)
+        {
+            parameters[DiscoveryResultParameterName] = discoveryResult;
+        }
+
+        parameters[IsCreatingParameterName] = isCreating;
+        return parameters;
     }
 
     // A null instance cannot stand for "not reported yet": a registered component that is not an
@@ -199,7 +284,7 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+            Snackbar.AddConfigurationSaveError(ex.Message);
             return false;
         }
 
@@ -264,7 +349,7 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+            Snackbar.AddConfigurationSaveError(ex.Message);
         }
     }
 

@@ -346,6 +346,30 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenSubjectIsAddedWhereAnotherWriterCreatedAFileSinceTheLastPass_ThenItThrowsAndAPassLoadsThatFile()
+    {
+        // Arrange: no file watcher and no periodic pass, so nothing but the add can tell the storage of the file.
+        var timeProvider = new ManualTimeProvider();
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+        });
+        WriteFile("Motor.json", SerializeMotor("Written elsewhere"));
+        var added = CreateMotor("Added");
+
+        // Act
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            storage.AddSubjectAsync("Motor.json", added, CancellationToken.None));
+        timeProvider.Advance(ReconcileTrigger.MaximumDelay);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Children.ContainsKey("Motor"), WatcherTimeout);
+        Assert.Equal("Written elsewhere", Assert.IsType<Samples.Motor>(storage.Children["Motor"]).Name);
+        Assert.Contains("Written elsewhere", File.ReadAllText(GetFullPath("Motor.json")));
+    }
+
+    [Fact]
     public async Task WhenSubjectIsAddedWithKeyOfFolder_ThenItThrowsAndNoFileIsWritten()
     {
         // Arrange

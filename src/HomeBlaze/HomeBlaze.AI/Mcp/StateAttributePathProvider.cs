@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Display;
 using HomeBlaze.Services.Metadata;
@@ -16,43 +17,14 @@ public class StateAttributePathProvider : PathProviderBase
 {
     public override char PathSeparator => ExpressionDisplay.PathSeparator;
 
-    public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
-        => property.TryGetAttribute(KnownAttributes.State) is not null || property.CanContainSubjects || IsMetadataWithValue(property);
-
-    public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
+    public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
-        if (property.TryGetAttribute(KnownAttributes.State) is not null)
-        {
-            return property.Name;
-        }
-
-        return property.CanContainSubjects || IsMetadataWithValue(property) ? property.Name : null;
+        segment = property.TryGetAttribute(KnownAttributes.State) is not null || property.CanContainSubjects || IsMetadataWithValue(property)
+            ? property.Name
+            : null;
+        return segment is not null;
     }
 
     // Removed metadata stays as a null value, as the registry cannot remove a property; it is listed as no metadata.
     private static bool IsMetadataWithValue(RegisteredSubjectProperty property) => property.IsMetadata() && property.GetValue() is not null;
-
-    public override RegisteredSubjectProperty? TryGetPropertyFromSegment(
-        RegisteredSubject subject, string segment)
-    {
-        // First try base lookup (matches State properties and [InlinePaths] fallback)
-        var result = base.TryGetPropertyFromSegment(subject, segment);
-        if (result is not null)
-        {
-            return result;
-        }
-
-        // Also match structural properties (CanContainSubjects) by name,
-        // so navigation through Children dictionaries works even when
-        // the property doesn't have a [State] attribute.
-        foreach (var property in subject.Properties)
-        {
-            if (property.CanContainSubjects && property.Name == segment)
-            {
-                return property;
-            }
-        }
-
-        return null;
-    }
 }

@@ -506,7 +506,7 @@ public partial class WallboxCharger : BackgroundService,
 
         // Only override Finished flag for definitive "not plugged" states;
         // all other statuses (including future ones) fall back to API's Finished flag.
-        IsPluggedIn = ChargerStatus is not (WallboxChargerStatus.Disconnected or WallboxChargerStatus.Ready) && !status.IsFinished;
+        IsPluggedIn = ChargerStatus is not (WallboxChargerStatus.Disconnected or WallboxChargerStatus.Ready) && status.IsFinished != true;
 
         IsCharging = ChargerStatus is WallboxChargerStatus.Charging or WallboxChargerStatus.Discharging;
         ChargingPower = status.ChargingPowerInKw * 1000m;
@@ -515,8 +515,8 @@ public partial class WallboxCharger : BackgroundService,
         // Derive current from power and phases assuming 230V nominal (EU/Type 2 markets).
         ChargingCurrent = status.ChargingCurrent > 0
             ? status.ChargingCurrent
-            : status is { CurrentMode: > 0, ChargingPowerInKw: > 0 }
-                ? Math.Round(status.ChargingPowerInKw * 1000m / (230m * status.CurrentMode), 1)
+            : status is { CurrentMode: { } phases and > 0, ChargingPowerInKw: { } powerInKw and > 0 }
+                ? Math.Round(powerInKw * 1000m / (230m * phases), 1)
                 : 0;
 
         // max_available_power from the API is actually the hardware max current in amps
@@ -526,8 +526,8 @@ public partial class WallboxCharger : BackgroundService,
 
         MaximumChargingCurrent = status.ConfigData?.MaximumChargingCurrent;
 
-        MaximumChargingPower = status is { MaxAvailablePower: > 0, CurrentMode: > 0 }
-            ? status.MaxAvailablePower * 230m * status.CurrentMode
+        MaximumChargingPower = status is { MaxAvailablePower: { } maximumCurrent and > 0, CurrentMode: { } currentPhases and > 0 }
+            ? maximumCurrent * 230m * currentPhases
             : null;
 
         IsLocked = status.ConfigData?.Locked switch
@@ -544,7 +544,7 @@ public partial class WallboxCharger : BackgroundService,
         Session.AddedGreenEnergy = status.AddedGreenEnergy * 1000m;
         Session.AddedGridEnergy = status.AddedGridEnergy * 1000m;
         Session.AddedRange = status.AddedRange;
-        Session.ChargingTime = TimeSpan.FromSeconds(status.ChargingTime);
+        Session.ChargingTime = status.ChargingTime is { } chargingSeconds ? TimeSpan.FromSeconds(chargingSeconds) : null;
         Session.SessionCost = status is { AddedEnergy: > 0, Cost: 0 } ? null : status.Cost;
 
         // Energy pricing
@@ -612,7 +612,7 @@ public partial class WallboxCharger : BackgroundService,
 
         // AddedEnergy from status API is in kWh; add current session energy (not yet in sessions API)
         TotalConsumedEnergy = GetTotalConsumedEnergy(TotalConsumedEnergy, _cachedSessionEnergy,
-            IsPluggedIn == true ? status.AddedEnergy * 1000m : 0);
+            IsPluggedIn == true ? (status.AddedEnergy ?? 0) * 1000m : 0);
 
         IsConnected = true;
     }

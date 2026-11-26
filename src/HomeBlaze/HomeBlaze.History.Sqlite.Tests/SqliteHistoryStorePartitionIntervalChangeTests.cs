@@ -41,7 +41,7 @@ public sealed class SqliteHistoryStorePartitionIntervalChangeTests : IDisposable
         // Act
         var series = store.Query(DailyQuery(Monday, HistoryAggregations.Delta));
 
-        // Assert - an out-of-order reading looks like a counter restart and adds the whole counter value.
+        // Assert - an out-of-order reading looks like a step back of the counter and moves the increase to another day.
         Assert.Equal(new double?[] { 0, 10, 10, 10, 0 }, Numbers(series));
     }
 

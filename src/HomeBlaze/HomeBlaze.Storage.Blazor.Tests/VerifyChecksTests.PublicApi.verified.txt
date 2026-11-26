@@ -1,11 +1,12 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("HomeBlaze.Storage.Blazor.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace HomeBlaze.Storage.Blazor
 {
     public class BlazorSubjectSetupService : HomeBlaze.Storage.Abstractions.ISubjectSetupService
     {
         public BlazorSubjectSetupService(MudBlazor.IDialogService dialogService) { }
-        public System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.CreateSubjectResult?> CreateSubjectAsync(HomeBlaze.Storage.Abstractions.IStorageContainer target, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task CreateSubjectsAsync(HomeBlaze.Storage.Abstractions.IStorageContainer target, System.Func<HomeBlaze.Storage.Abstractions.CreateSubjectResult, System.Threading.CancellationToken, System.Threading.Tasks.Task> addSubjectAsync, System.Threading.CancellationToken cancellationToken) { }
     }
     [HomeBlaze.Components.Abstractions.Attributes.SubjectComponent(HomeBlaze.Components.Abstractions.Attributes.SubjectComponentType.Widget, typeof(HomeBlaze.Storage.Internal.RenderExpression?))]
     public class RenderExpressionComponent : Microsoft.AspNetCore.Components.ComponentBase, HomeBlaze.Components.Abstractions.ISubjectComponent
@@ -18,6 +19,10 @@ namespace HomeBlaze.Storage.Blazor
     public static class ServiceCollectionExtensions
     {
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHomeBlazeStorage(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
+    }
+    public static class StorageFileEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapStorageFiles(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
     }
 }
 namespace HomeBlaze.Storage.Blazor.Files

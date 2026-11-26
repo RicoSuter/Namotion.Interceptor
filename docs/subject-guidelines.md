@@ -277,6 +277,8 @@ public partial class Person
 }
 ```
 
+Read other subjects through partial properties, or through a field that holds an owner. Through a field that holds any other subject, a derived property stops following that subject once it is detached and attached again, see [Reaching Other Subjects](tracking.md#reaching-other-subjects).
+
 ### Data Annotations
 
 ```csharp

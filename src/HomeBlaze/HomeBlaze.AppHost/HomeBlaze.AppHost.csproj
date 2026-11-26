@@ -1,4 +1,4 @@
-<Project Sdk="Aspire.AppHost.Sdk/13.5.4">
+<Project Sdk="Aspire.AppHost.Sdk/13.6.5">
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
@@ -12,8 +12,6 @@
 
     <ItemGroup>
         <PackageReference Include="Aspire.Hosting.Seq" />
-        <!-- Lifts StreamJsonRpc's transitive 2.5.302 (GHSA-qhrr-8q5h-9q3h); remove once Aspire.Hosting depends on a patched version. -->
-        <PackageReference Include="MessagePack" />
     </ItemGroup>
 
 </Project>

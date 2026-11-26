@@ -43,7 +43,7 @@
      @onclick:stopPropagation="@IsEditing"
      @ondblclick:stopPropagation="@IsEditing">
 
-    <Diagram @ref="_diagram" SelectionChanged="OnDiagramSelectionChanged" class="canvas-diagram" style="@($"width: 100%; height: {height}px;")">
+    <CanvasDiagram @ref="_diagram" SelectionChanged="OnDiagramSelectionChanged" class="canvas-diagram" style="@($"width: 100%; height: {height}px;")">
         <NavigationSettings DisableZooming="@(!IsEditing)" DisablePanning="@(!IsEditing)" OriginChanged="@(_ => _ignoreNextClick = true)" />
         <Links />
         <Nodes OnModified="OnNodeModified">
@@ -82,7 +82,7 @@
                 </Node>
             }
         </Nodes>
-    </Diagram>
+    </CanvasDiagram>
 </div>;
 }
 
@@ -195,7 +195,7 @@ else
 </style>
 
 @code {
-    private Diagram? _diagram;
+    private CanvasDiagram? _diagram;
     // The release of a node move or of a pan is a click on the canvas, which is not meant to add a node. The diagram reports
     // both before the click: OnModified at the release of a node, and OriginChanged with every move of a pan. A mouse down
     // clears the flag, so that a move that ended without a click on the container does not swallow a later click.
@@ -255,17 +255,7 @@ else
         // line changes.
         IInterceptorSubject moved = Nodes.FirstOrDefault(node => GetNodeId(node) == modifiedNode.Id) ?? (IInterceptorSubject)canvas;
 
-        _ = InvokeAsync(async () =>
-        {
-            try
-            {
-                await RootManager.WriteConfigurationOrWarnAsync(moved, Snackbar, CancellationToken.None);
-            }
-            catch (Exception exception)
-            {
-                Console.Error.WriteLine($"Failed to persist canvas layout: {exception.Message}");
-            }
-        });
+        _ = InvokeAsync(() => RootManager.WriteConfigurationOrWarnAsync(moved, Snackbar, CancellationToken.None));
     }
 
     // Only an edited canvas has these handlers. A viewed one has none, so that a click or a mouse down in a widget of a node

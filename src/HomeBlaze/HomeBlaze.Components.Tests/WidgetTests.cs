@@ -16,7 +16,7 @@ public class WidgetTests
         .WithParents()
         .WithLifecycle();
 
-    private static Widget CreateWidget() => new(new SubjectPathResolver(() => null));
+    private static Widget CreateWidget() => new(new SubjectPathResolver(InterceptorSubjectContext.Create(), () => null));
 
     [Fact]
     public void WhenSubjectIsTheWidgetItself_ThenItIsSelfOrAncestor()
@@ -118,7 +118,7 @@ public class WidgetTests
         var first = new Card(_context);
         var second = new Card(_context);
         var root = new Card(_context) { Content = first, Footer = second };
-        var resolver = new SubjectPathResolver(() => root);
+        var resolver = new SubjectPathResolver(_context, () => root);
         var firstWidget = new Widget(resolver);
         var secondWidget = new Widget(resolver);
         first.Content = firstWidget;
@@ -169,7 +169,7 @@ public class WidgetTests
         var first = new Card(_context);
         var second = new Card(_context);
         var root = new Card(_context) { Content = first, Footer = second };
-        var widget = new Widget(new SubjectPathResolver(() => root));
+        var widget = new Widget(new SubjectPathResolver(_context, () => root));
         first.Content = widget;
         widget.Path = "/Footer";
 
@@ -190,7 +190,7 @@ public class WidgetTests
     {
         // Arrange
         var root = new Card(_context) { Content = new Card(_context) };
-        var widget = new Widget(new SubjectPathResolver(() => root));
+        var widget = new Widget(new SubjectPathResolver(_context, () => root));
         root.Footer = widget;
 
         // Act
@@ -206,7 +206,7 @@ public class WidgetTests
         // Arrange
         var content = new Card(_context);
         var root = new Card(_context) { Content = content };
-        var widget = new Widget(new SubjectPathResolver(() => root));
+        var widget = new Widget(new SubjectPathResolver(_context, () => root));
 
         // Act
         var absolute = widget.ResolveSubject("/Content");

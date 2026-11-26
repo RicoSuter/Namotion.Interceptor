@@ -164,9 +164,9 @@ public partial class HomeBlazeInstallation : BackgroundService,
     // Update
 
     /// <summary>
-    /// Whether a newer release exists or, for an edge build, whether its branch has newer commits; null until the first
-    /// successful check, when the running version of a release build is not a semantic version, and when GitHub cannot
-    /// compare the commit of an edge build with its branch.
+    /// Whether a newer release published at least 30 minutes ago exists or, for an edge build, whether its branch has
+    /// newer commits; null until the first successful check, when the running version of a release build is not a
+    /// semantic version, and when GitHub cannot compare the commit of an edge build with its branch.
     /// </summary>
     [State(IsDiscrete = true, Position = 460)]
     [Category("Update")]
@@ -205,8 +205,9 @@ public partial class HomeBlazeInstallation : BackgroundService,
     public partial DateTimeOffset? LastUpdateCheck { get; internal set; }
 
     /// <summary>
-    /// Why no check can run for this build, the error of the last check until a check succeeds, or why the last check
-    /// could not place the commit of an edge build on its branch.
+    /// Why no check can run for this build, the error of the last check until a check succeeds, which newer release the
+    /// last check holds back because it was published less than 30 minutes ago, or why the last check could not place
+    /// the commit of an edge build on its branch.
     /// </summary>
     [State(Position = 467)]
     [Category("Update")]
@@ -313,6 +314,11 @@ public partial class HomeBlazeInstallation : BackgroundService,
         _updateCheckUnavailableReason = GetUpdateCheckUnavailableReason(Channel, build);
         UpdateCheckStatus = _updateCheckUnavailableReason;
 
+        IsUpdaterAvailable = false;
+        UpdateInstallState = UpdateInstallState.None;
+        UpdateInstallStatus = null;
+        LastUpdateInstall = null;
+
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
         LastUpdated = null;
@@ -338,9 +344,10 @@ public partial class HomeBlazeInstallation : BackgroundService,
             // Read after subscribing, so a change in between is not missed.
             RefreshDeveloperMode();
             ReconcileClients();
+            RestoreInstall();
             Status = ServiceStatus.Running;
 
-            await Task.WhenAll(RunPollingAsync(stoppingToken), RunUpdateChecksAsync(stoppingToken));
+            await Task.WhenAll(RunPollingAsync(stoppingToken), RunUpdateChecksAsync(stoppingToken), RunInstallMonitorAsync(stoppingToken));
         }
         finally
         {

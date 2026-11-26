@@ -71,7 +71,8 @@ public partial string? AppKey { get; set; }
 ```
 
 Secret configuration properties:
-- Are **persisted** to JSON like regular configuration
+- Must be `string` properties of a subject: any other type, or a secret property of a plain object, throws when the type is read or written
+- Are **persisted** to `Secrets.json` in the data folder; the file in `Files/` holds a `$secret:` reference instead (see [Configuration](../administration/configuration.md#data-folder))
 - Are **hidden** in the browser property panel
 - Show as **masked password fields** in the edit dialog (empty by default, only overwritten when the user enters a new value)
 - **Cannot** be combined with `[State]`: the app throws at startup to prevent accidental exposure
@@ -148,7 +149,9 @@ public enum StateUnit
     VoltAmpereReactiveHour, // 2.5 kvarh (reactive energy)
     AmpereHour,             // 50 Ah (charge, battery capacity)
     WattPerSquareMeter,     // 850 W/m² (irradiance)
-    DecibelMilliwatt        // -75 dBm (received signal strength)
+    DecibelMilliwatt,       // -75 dBm (received signal strength)
+    KilometerPerHour,       // 87 km/h (vehicle speed)
+    Bar                     // 2.9 bar (tire pressure)
 }
 ```
 
@@ -158,7 +161,11 @@ Values are auto-scaled for display within unit families (e.g., 1500 W displays a
 
 A property with `IsCumulative = true` is a counter that only grows and is named `Total<Modifier><Quantity>`, with the modifier (such as a direction) before the quantity like in plain English: `TotalConsumedEnergy`, `TotalImportedEnergy`, `TotalExportedEnergy`, `TotalProducedThermalEnergy`, `TotalRain`, `TotalOperatingHours`. The `Total` prefix is reserved for such counters. A value that sums parts at one instant, such as the power or current of all phases of a meter, takes no prefix (`MeasuredPower`, `ElectricalCurrent`), and a value that covers a period, such as a charging session or a day, is not cumulative and does not start with `Total`.
 
-The subject keeps the value from decreasing: if the API reports periodic buckets (daily, monthly) that reset, the subject accumulates them into a true counter and persists the offset via `[Configuration]`. Only a reset of the device or service that owns the counter (for example a reboot that clears it) may restart the value at 0 or step it back once, and a change of the counter's source passes through `null`. A consumer that computes deltas treats a decrease as such a reset and restarts after `null`, counting no change for that interval.
+The subject keeps the value from decreasing: if the API reports periodic buckets (daily, monthly) that reset, the subject accumulates them into a true counter and persists the offset via `[Configuration]`. Only a reset of the device or service that owns the counter (for example a reboot that clears it) may restart the value at 0 or step it back once. A consumer that computes deltas, such as the history `Delta` aggregation, counts a drop below half of the previous value as a restart from 0 and a smaller drop as no change. It skips `null` and steps from the last value before it to the first one after it, because the counter keeps counting while its source is offline, so a change of the counter's source to one with another value counts as one such step; see [Query semantics](../architecture/design/history.md#query-semantics).
+
+### Readings Are Null Until Observed
+
+A property that holds a reading of a device or a service, such as a temperature, a power or the state of a door, is nullable and `null` until the subject received the value from its source. A subject must not restore readings at startup from a cache, a file or the history, and should set a reading back to `null` when it knows that its source is offline. [Automations](../administration/automation.md#unknown-values) and page expressions treat `null` as unknown, so a rule over a reading waits after a restart until the device reports. Where values can get stale, implementing `ILastUpdatedProvider` is recommended, so that a rule can check their age, as in `now - /Devices/Meter/LastUpdated < 1m`.
 
 ### Interface Inheritance and Attribute Merging
 
@@ -178,9 +185,8 @@ public interface IPowerSensor
 [InterceptorSubject]
 public partial class MyDevice : IPowerSensor
 {
-    [Derived]
     [State(Position = 1)]
-    public decimal? Power => InternalPower;  // Merged: Position=1, Unit=Watt
+    public partial decimal? Power { get; set; }  // Merged: Position=1, Unit=Watt
 }
 ```
 
@@ -231,7 +237,9 @@ public partial class Motor
 - Must be expression-bodied (`=>`) or have only a getter
 - Cannot be `partial` (they're computed, not stored)
 - Can combine with `[State]` to display in UI
+- Computes a value; it never forwards a value of another subject or renames a live value, see [Modeling Subjects](#modeling-subjects)
 - Automatically recalculates when `TargetSpeed` or `CurrentSpeed` changes
+- Reads another subject through intercepted properties or through a field that holds its owner (see [Shared Child Subjects](#shared-child-subjects)). Through a field that holds any other subject, it stops following that subject once the subject is detached and attached again while this one stays attached
 
 ## Child Subject Collections
 
@@ -279,6 +287,38 @@ A subject may be held by several collections, for example a light in a bridge's 
 - **Relative paths from a shared subject do not resolve.** A `../` path starting at a subject with several parents resolves to nothing, because its parent is ambiguous.
 - **Do not reference a parent through an intercepted property.** An intercepted (partial) property holding a subject reference attaches the referenced subject under the referencing one; only such a property attaches anything. The parent would become a child of its own child, and the two keep each other attached. Keep a back-reference to an owner in a field.
 
+## Modeling Subjects
+
+These rules decide where a value lives and how other code reaches it.
+
+**One live value, one property, one path.** Paths are permanent identifiers: history records values under them, and automations, dashboards and configuration files refer to them, so a live value that appears at two paths is recorded twice and splits its consumers. `[Derived]` is for computed values, such as a flag from a state or a power from voltage and current. It never forwards the value of another subject or gives a live value of the same subject a second name. A static or descriptive value (identity, model, version) may also be exposed under the name a generic interface expects, for example a vehicle's VIN as `SerialNumber`, because it never changes and so has no history to split.
+
+**Group a large device into child subjects, keep a small device flat.** Cohesive groups of a large device may be child subjects, for example the charge, the climate and the body of a vehicle, each one a typed partial property of the device. A small device stays flat and groups its properties with [`[Category]`](#categories). Repeated instances of one type, such as the phases of a meter or the tires of a vehicle, and separate physical parts are child subjects in any case (see [Child Subject Collections](#child-subject-collections)).
+
+**A capability interface goes on the subject that owns its data.** A battery level of a vehicle that lives in its charge child makes the charge child implement `IBatteryState`, not the vehicle.
+
+**A device-level interface navigates to its capabilities.** When a device interface needs a capability of a child, it exposes it as a typed navigation property, such as `IVehicleChargingState Charge { get; }`. The subject keeps its concretely typed, tracked child property and implements the interface member explicitly with the same name:
+
+```csharp
+public interface IElectricVehicle : IVehicle
+{
+    IVehicleChargingState Charge { get; }
+}
+
+[InterceptorSubject]
+public partial class MyVehicle : IElectricVehicle
+{
+    [State(Position = 400)]
+    public partial MyChargeState Charge { get; internal set; }  // implements IVehicleChargingState
+
+    IVehicleChargingState IElectricVehicle.Charge => Charge;
+}
+```
+
+A class-declared property takes the name over an explicit implementation of the same name without a diagnostic, so the metadata keeps exactly one `Charge` entry, the tracked child (see [Interface Default Properties](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/generator.md#interface-default-properties) and NI0061 in the source generator documentation). A capability that not every device has is nullable, such as `IVehicleClimateState? Climate { get; }`, and is `null` when the device does not report it.
+
+**Interfaces specialize by inheritance and never rename a quantity.** `IVehicleChargingState` inherits `IChargingState` and `IBatteryState` instead of declaring its own power or level. A new abstraction reuses the name of an existing property for the same quantity, or inherits the interface that defines it.
+
 ## Display Interfaces
 
 Implement these interfaces for UI integration:
@@ -306,7 +346,9 @@ public partial class Motor : IIconProvider
 
 ## Create Dialog
 
-Every registered, non-abstract subject type that implements `IConfigurable` is offered in the create dialog, which is opened from a storage folder, from the markdown editor and from the grid and canvas layouts. The dialog shows a searchable list of types with a group sidebar, and then a configure page for the chosen type. The configure page shows the type's Setup component when it has one, otherwise its Edit component, and otherwise the generated properties editor for its `[Configuration]` properties. Setup and Edit components receive `IsCreating = true`. "Back" on the configure page returns to the list. Typing in the search box selects the group "All" so that a match is never hidden behind a group that was selected before, and selecting a group during a search narrows the matches to it.
+Every registered, non-abstract subject type that implements `IConfigurable` is offered in the create dialog, which is opened from a storage folder, from the markdown editor and from the grid and canvas layouts. The dialog shows a searchable list of types with a group sidebar, and then a configure page for the chosen type. The configure page shows the type's Setup component when it has one, otherwise its Edit component, and otherwise the generated properties editor for its `[Configuration]` properties. The generated editor has no field for a property that holds subjects, such as a slot or a nested configuration subject; such a subject is edited in its own dialog, opened from the subject browser. Setup and Edit components receive `IsCreating = true`. "Back" on the configure page returns to the list. Typing in the search box selects the group "All" so that a match is never hidden behind a group that was selected before, and selecting a group during a search narrows the matches to it.
+
+A Discover page lists the devices found on the network, and picking one opens the configure page filled in from the device. Opened from a storage folder, the dialog returns to the Discover page after each Create from a found device, see [Creating several devices](../architecture/design/discovery.md#creating-several-devices). A type takes part with a subject discovery, see [Writing a Subject Discovery](subject-discovery.md).
 
 The dialog describes a type with attributes on the class. All of them are optional:
 
@@ -356,6 +398,7 @@ A type belongs to exactly one group, the one that its `[Category]` names. The si
 | Samples | Examples and simulated devices |
 | Switches | Switches, relays and smart plugs |
 | System | Parts of HomeBlaze itself, such as storage and plugins |
+| Vehicles | Cars and other vehicles, and the accounts that hold them |
 
 When none of them fits, name a new group in `[Category]`. Using the name is all it takes to create the group, and group names are compared ignoring case. A type in such a group that sets no `[SubjectIcon]` gets a generic icon.
 
@@ -474,6 +517,7 @@ public partial class Motor
 | `Icon` | MudBlazor icon name | `"Speed"`, `"Stop"` |
 | `Position` | Sort position in operations list | `1`, `2`, `3` |
 | `RequiresConfirmation` | Show confirmation dialog before executing | `true` |
+| `Purpose` | What the operation is for. `OperationPurpose.Delete` makes it the subject's Delete button in the browser instead of an operation button | `OperationPurpose.Delete` |
 
 **Key points:**
 - Operations appear as buttons in the subject's property panel, grouped by [category](#categories)
@@ -484,6 +528,7 @@ public partial class Motor
 - Operations with `RequiresConfirmation = true` show a confirmation dialog first and cannot be called through MCP, see [AI Agents](../administration/ai-agents.md#tools-and-permissions). Use it for operations a person must decide on, such as unlocking, rebooting or installing code
 - Confirmation is inherited: an implementation of an interface operation or an override of a base class operation that requires confirmation requires it too, also with its own `[Operation]`, and a `[Query]` in its place becomes an operation that requires confirmation
 - Do not require confirmation for safety actions such as an emergency stop; agents must be able to call them
+- An operation with `Purpose = OperationPurpose.Delete` deletes or removes the subject. The subject browser shows it as the Delete button of the subject's pane, asks for confirmation before it runs it, whether or not it sets `RequiresConfirmation`, and leaves it out of the operation buttons. The button is disabled while the operation's `IsEnabled` attribute is false. Agents see it as an ordinary operation, so `RequiresConfirmation` still decides whether they may call it. It must take no parameter that requires input, otherwise the purpose is ignored. `Purpose` comes from the `[Operation]` attribute of the method itself and, unlike `RequiresConfirmation`, is not inherited: an override or implementation with its own `[Operation]` has only the purpose it sets itself. A subject stored in a file of a storage gets a `Delete` operation from the storage, which requires confirmation, unless it has a delete operation of its own, and so does a folder of a storage, which is enabled only while the folder is empty
 
 **Where a method is offered:**
 
@@ -564,7 +609,7 @@ public void SetTargetSpeed(int speed) { /* ... */ }
 ```
 
 - Categories are ordered by the lowest `Position` of their state properties. Categories with only methods come last, and names break ties.
-- A `[Category]` on an interface member applies to the class member that implements it. One on the class member wins, and `[Category("")]` there removes the category. The shared interfaces in `HomeBlaze.Abstractions` carry "Device", "Network", "Light", "Playback", "Volume", "Track", "Lock" and "Door" this way.
+- A `[Category]` on an interface member applies to the class member that implements it. One on the class member wins, and `[Category("")]` there removes the category. The shared interfaces in `HomeBlaze.Abstractions` carry "Device", "Network", "Light", "Playback", "Volume", "Track", "Lock", "Door", "Charging", "Climate" and "Vehicle" this way.
 - Names are case-sensitive. .NET shows "Default" as "Misc", "Config" as "Configurations", "DragDrop" as "Drag Drop" and "WindowStyle" as "Window Style".
 
 ## Background Services
@@ -847,7 +892,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | Attribute | Purpose | Persisted | Displayed |
 |-----------|---------|-----------|-----------|
 | `[Configuration]` | User-editable settings | Yes | No (unless also `[State]`) |
-| `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes | Never (masked in editor) |
+| `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes, in Secrets.json | Never (masked in editor) |
 | `[State]` | Live values for display | No | Yes |
 | `[Configuration] + [State]` | Editable and displayed, but not writable through MCP's `set_property`, see [AI Agents](../administration/ai-agents.md#tools-and-permissions); expose a write through an operation instead | Yes | Yes |
 | `[Configuration] + [SubjectPath]` | Path with a picker, see [Path Properties](#path-properties) | Yes | No (unless also `[State]`) |
@@ -889,7 +934,7 @@ Core platform interfaces and attributes:
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
 | Security | `IAuthenticatedSubject` |
 | Networking | `IConnectionState` |
-| Devices | Switches, lighting, covers, locks, energy, media, input devices |
+| Devices | Switches, lighting, covers, locks, energy, media, input devices, vehicles |
 | Sensors | Temperature, humidity, presence, light, door, rain, soil, power, camera |
 
 Subjects implement these interfaces to declare their capabilities. For example, a Zigbee temperature sensor plugin would implement `ITemperatureSensor`, and a Philips Hue light plugin would implement `ILightbulb` (which composes `ISwitchDevice`, `IBrightnessController`, `IColorController`).

@@ -17,15 +17,41 @@ public static class PropertyReferenceExtensions
     }
 
     /// <summary>
-    /// Cascade re-entry path: invokes the write chain with a pre-resolved raw timestamp so the
-    /// new <see cref="PropertyWriteContext{TProperty}"/>'s cache is seeded directly. Bypasses
-    /// the <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope-push
-    /// dance the derived-cascade would otherwise need to share the trigger's captured time.
+    /// Publishes a derived property's calculated value through the write chain without storing anything, with
+    /// <see cref="PropertyWriteContext{TProperty}.IsDerivedRecalculation"/> set. A nonzero
+    /// <paramref name="rawTimestamp"/> seeds the new <see cref="PropertyWriteContext{TProperty}"/>'s timestamp
+    /// cache directly, which spares a recalculation cascade the
+    /// <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope push it would otherwise
+    /// need to share the trigger's captured time; 0 resolves it lazily. With
+    /// <paramref name="finalValueIsNewValue"/> set, publishing reuses <paramref name="newValue"/> instead of invoking
+    /// the getter again (see <see cref="PropertyWriteContext{TProperty}.FinalValueIsNewValue"/>).
     /// </summary>
-    internal static void SetPropertyValueWithInterception(this PropertyReference property, object? newValue,
-        object? currentValue, Action<IInterceptorSubject, object?> writeValue, long rawTimestamp)
+    internal static void PublishDerivedPropertyValue(this PropertyReference property, object? newValue,
+        object? currentValue, long rawTimestamp, bool finalValueIsNewValue)
     {
         var executor = property.Subject.Context as InterceptorExecutor;
-        executor?.SetPropertyValue(property.Name, newValue, currentValue, writeValue, rawTimestamp);
+        executor?.PublishDerivedPropertyValue(property.Name, newValue, currentValue, rawTimestamp, finalValueIsNewValue);
+    }
+
+    /// <summary>
+    /// Publishes the initial value of a just-added derived property through the write chain, as a change from
+    /// null. The value is read through the property's getter and no setter is invoked. The write has
+    /// <see cref="PropertyWriteContext{TProperty}.IsDerivedRecalculation"/> set, and the published value is read
+    /// again when the change is published. When the getter returns null and <c>PropertyValueEqualityCheckHandler</c>
+    /// is registered, nothing is published, because that handler drops a write whose new value equals its current
+    /// value.
+    /// </summary>
+    /// <param name="property">The derived property.</param>
+    /// <exception cref="InvalidOperationException">The property is not derived.</exception>
+    public static void PublishInitialDerivedPropertyValue(this PropertyReference property)
+    {
+        var metadata = property.Metadata;
+        if (!metadata.IsDerived)
+        {
+            throw new InvalidOperationException($"Property '{property.Name}' is not derived.");
+        }
+
+        var value = metadata.GetValue?.Invoke(property.Subject);
+        property.PublishDerivedPropertyValue(value, null, rawTimestamp: 0, finalValueIsNewValue: false);
     }
 }

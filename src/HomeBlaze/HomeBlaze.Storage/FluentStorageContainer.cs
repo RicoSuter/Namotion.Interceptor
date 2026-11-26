@@ -6,6 +6,7 @@ using FluentStorage;
 using FluentStorage.Storage;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Metadata;
 using HomeBlaze.Storage.Abstractions;
@@ -13,11 +14,13 @@ using HomeBlaze.Storage.Abstractions.Metadata;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Metadata;
+using HomeBlaze.Storage.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
 using StoragePath = HomeBlaze.Storage.Internal.StoragePath;
 
@@ -39,8 +42,14 @@ namespace HomeBlaze.Storage;
 [InterceptorSubject]
 public partial class FluentStorageContainer :
     BackgroundService,
-    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable, IMetadataContainer, IMetadataStore
+    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable, IMetadataContainer, IMetadataStore,
+    IChildMethodProvider
 {
+    private const string DeleteOperationName = "Delete";
+
+    private static readonly MethodParameter[] DeleteParameters =
+        [new MethodParameter { Name = "cancellationToken", Type = typeof(CancellationToken), IsRuntimeProvided = true }];
+
     private static readonly IReadOnlySet<string> NoPaths = new HashSet<string>();
 
     private readonly FileSubjectFactory _subjectFactory;
@@ -63,6 +72,9 @@ public partial class FluentStorageContainer :
     // only what it read, so its item never touches the index or the client of a later connection.
     private volatile StorageConnection? _connection;
 
+    // Stateless, so a race of two first uses only creates an equal second instance.
+    private SecretPageConverter? _pageConverter;
+
     internal StorageConnection Connection => _connection is { IsEnded: false } connection
         ? connection
         : throw new StorageRefusedException("Storage not connected");
@@ -72,6 +84,10 @@ public partial class FluentStorageContainer :
 
     /// <summary>Applies and writes the metadata of this storage.</summary>
     internal StorageMetadataStore MetadataStore { get; }
+
+    /// <summary>Converts the plaintext secrets of a page. Created on first use, which needs the <see cref="MarkdownContentParser"/> service.</summary>
+    internal SecretPageConverter PageConverter
+        => _pageConverter ??= new SecretPageConverter(_serializer, _serviceProvider.GetRequiredService<MarkdownContentParser>().FindType);
 
     /// <summary>Wraps the storage client when the storage connects.</summary>
     internal Func<IStore, IStore>? ClientDecorator { get; set; }
@@ -558,7 +574,9 @@ public partial class FluentStorageContainer :
     /// Adds a new subject to storage at the specified path.
     /// </summary>
     /// <exception cref="ArgumentException">The path is hidden, temporary or the name of a metadata file, and would not be loaded again.</exception>
-    /// <exception cref="InvalidOperationException">A file exists at the path, or its key in the hierarchy is taken.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A file exists at the path, which a pass then loads when the storage did not know it yet, or its key in the hierarchy is taken.
+    /// </exception>
     public async Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var relativePath = StoragePath.Normalize(path);
@@ -579,7 +597,11 @@ public partial class FluentStorageContainer :
                 throw new InvalidOperationException($"A subject already exists at '{path}'.");
 
             if (await connection.Client.ObjectExists(relativePath, token))
+            {
+                // A file the index does not know, which no watcher reported, as CreateMarkdownFileAsync handles it.
+                connection.NotifyChanged(relativePath);
                 throw new InvalidOperationException($"A file already exists at '{path}'.");
+            }
 
             var entry = new StorageEntry { Path = relativePath, IsFolder = false, Subject = subject };
             await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(subject)), token);
@@ -692,33 +714,74 @@ public partial class FluentStorageContainer :
         return await Connection.Client.OpenRead(path, cancellationToken);
     }
 
-    /// <summary>
-    /// IStorageContainer - Writes a blob to storage and refreshes the subject of the file.
-    /// </summary>
+    /// <inheritdoc />
     /// <remarks>
-    /// The content is held in memory while it is written. When the subject cannot be refreshed after the write,
-    /// the write still succeeds, and the next pass loads the file again.
+    /// Refreshes the subject of the file after the write. The content is held in memory while it is written. When the
+    /// subject cannot be refreshed after the write, the write still succeeds, and the next pass loads the file again.
     /// </remarks>
     public async Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken)
     {
         using var buffer = new MemoryStream();
         await content.CopyToAsync(buffer, cancellationToken);
-        await WriteBlobCoreAsync(path, buffer.ToArray(), cancellationToken);
+        await WriteBlobUnconvertedAsync(path, ConvertSecrets(path, buffer.ToArray()), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Refreshes the subject of the file after the write. The content is copied. When the subject cannot be refreshed
+    /// after the write, the write still succeeds, and the next pass loads the file again.
+    /// </remarks>
+    public async Task WriteBlobAsync(string path, ReadOnlyMemory<byte> content, CancellationToken cancellationToken)
+        => await WriteBlobUnconvertedAsync(path, ConvertSecrets(path, content.ToArray()), cancellationToken);
+
+    /// <summary>
+    /// Replaces the plaintext secrets of a JSON file or a page by references, keeping the encoding and byte order mark.
+    /// Returns the given bytes when the file is neither, holds no plaintext secret or is not valid text in its encoding.
+    /// </summary>
+    private byte[] ConvertSecrets(string path, byte[] bytes)
+    {
+        if (!StorageReconciler.IsConvertible(path) ||
+            !TryDecodeExact(path, bytes, out var text, out var encoding, out var hasByteOrderMark))
+        {
+            return bytes;
+        }
+
+        return TryConvertSecrets(path, text, out var converted) ? StorageText.Encode(converted, encoding, hasByteOrderMark) : bytes;
     }
 
     /// <summary>
-    /// IStorageContainer - Writes a blob to storage and refreshes the subject of the file.
+    /// Decodes the content of a file whose plaintext secrets are converted, and returns whether encoding the text gives
+    /// the content back, which a converted write needs. Logs a warning when it does not.
     /// </summary>
-    /// <remarks>
-    /// The content is copied. When the subject cannot be refreshed after the write, the write still succeeds,
-    /// and the next pass loads the file again.
-    /// </remarks>
-    public Task WriteBlobAsync(string path, ReadOnlyMemory<byte> content, CancellationToken cancellationToken)
-        => WriteBlobCoreAsync(path, content.ToArray(), cancellationToken);
+    internal bool TryDecodeExact(string path, byte[] content, out string text, out Encoding encoding, out bool hasByteOrderMark)
+    {
+        text = StorageText.Decode(content, out encoding, out hasByteOrderMark);
+        if (StorageText.IsExact(text, content, encoding, hasByteOrderMark))
+        {
+            return true;
+        }
 
-    // The bytes belong to the write and are not changed by anyone else, because a write that was given up still
-    // reads them after the caller got its result, see TimeLimitedStore.
-    private async Task WriteBlobCoreAsync(string path, byte[] bytes, CancellationToken cancellationToken)
+        _logger?.LogWarning("{Path} is not valid text in its encoding, so its plaintext secrets are not moved to the secret store; save it as UTF-8.", path);
+        return false;
+    }
+
+    /// <summary>
+    /// Replaces the plaintext secrets of the text of a JSON file or, for any other path, a page by references. Returns
+    /// false, with <paramref name="converted"/> being <paramref name="text"/>, when it holds no plaintext secret.
+    /// </summary>
+    internal bool TryConvertSecrets(string path, string text, out string converted) => StoragePath.IsJson(path)
+        ? _serializer.TryConvertSecrets(text, ConfigurationNaming.JsonProperty, out converted)
+        : PageConverter.TryConvert(text, out converted);
+
+    /// <summary>
+    /// Writes a blob as it is and refreshes the subject of the file, for content whose secrets are already references,
+    /// such as a block write of a page.
+    /// </summary>
+    /// <param name="path">The path of the blob.</param>
+    /// <param name="bytes">The content, which nobody may change afterward: a write that was given up still reads it
+    /// after the caller got its result, see TimeLimitedStore.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    internal async Task WriteBlobUnconvertedAsync(string path, byte[] bytes, CancellationToken cancellationToken)
     {
         var connection = Connection;
         var relativePath = StoragePath.Normalize(path);
@@ -794,22 +857,6 @@ public partial class FluentStorageContainer :
     public static string GetNoSubjectMessage(string path) => $"No subject at {NameList.Format([path])} in this storage.";
 
     /// <summary>
-    /// Resolves the path that <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/> takes,
-    /// relative to <paramref name="storage"/> with the <see cref="ISubjectPathResolver"/> of its context, so that a
-    /// caller that checks the path resolves it alike: the storage itself for a path of only whitespace and slashes,
-    /// and null when no subject is at the path or the context has no resolver.
-    /// </summary>
-    public static IInterceptorSubject? ResolveMetadataPath(IInterceptorSubject storage, string path)
-    {
-        // Without leading slashes, which lead the resolver to the root of the application; "./" keeps the resolution
-        // inside the storage, which a leading "../" would leave.
-        var relativePath = path.AsSpan().Trim().TrimStart('/');
-        return relativePath.IsEmpty
-            ? storage
-            : storage.Context.TryGetService<ISubjectPathResolver>()?.ResolveSubject(string.Concat("./", relativePath), PathStyle.Canonical, storage);
-    }
-
-    /// <summary>
     /// Gets the message with which a metadata write refuses a property that the subject does not have, so that a
     /// caller that hides a property refuses it alike.
     /// </summary>
@@ -838,13 +885,13 @@ public partial class FluentStorageContainer :
     /// </summary>
     /// <returns>
     /// Every match, in order, with the path of its subject relative to this storage, as <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/>
-    /// takes it; none when <paramref name="path"/> is given and <see cref="ResolveMetadataPath"/> resolves it to no subject.
+    /// takes it; none when <paramref name="path"/> is given and <see cref="MetadataSearch.ResolvePath"/> resolves it to no subject.
     /// </returns>
     [Query(Title = "Search Metadata", Description = StorageMetadataMethods.SearchMetadataDescription, Position = 6)]
     [ExcludeFrom(ExclusionTarget.UserInterface)]
     public MetadataSearchMatch[] SearchMetadata(string? tag, string? key, string? value, string? path)
     {
-        var start = path is null ? this : ResolveMetadataPath(this, path);
+        var start = path is null ? this : MetadataSearch.ResolvePath(this, path);
         return start is null ? [] : [.. MetadataSearch.Search(this, tag, key, value, start)];
     }
 
@@ -864,11 +911,11 @@ public partial class FluentStorageContainer :
         => StorageMetadataMethods.RunAsync(() => MetadataStoreExtensions.SetOrderAsync(this, names, cancellationToken));
 
     /// <summary>
-    /// Opens the create subject dialog to add a new subject to this storage.
+    /// Opens the create subject dialog to add new subjects to this storage.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
-        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
+        => subjectSetupService.CreateSubjectsAndAddToStorageAsync(this, cancellationToken);
 
     /// <summary>
     /// Creates a Markdown file in the root folder of this storage and adds it as a page.
@@ -980,18 +1027,132 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// IStorageContainer - Deletes a subject by finding its path in the index.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The subject is not the subject of a file in this storage.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The subject is not the subject of a file or folder in this storage, or it is a folder that is not empty.
+    /// </exception>
     public async Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var connection = Connection;
         await RunOperationAsync(connection, token =>
         {
-            // A folder has an entry too, but no file that could be deleted.
-            if (!connection.Index.TryGetEntry(subject, out var entry) || entry.IsFolder)
+            if (!connection.Index.TryGetEntry(subject, out var entry))
                 throw new InvalidOperationException("Subject not found in storage registry");
 
-            return DeleteEntryAsync(connection, entry, token);
+            return entry.IsFolder
+                ? DeleteFolderAsync(connection, entry, token)
+                : DeleteEntryAsync(connection, entry, token);
         }, cancellationToken);
+    }
+
+    // Only an empty folder, which has at most its own metadata file. Never recursive, so that a file that appeared since
+    // the last pass makes the delete fail instead of being lost. Called on the worker.
+    private async Task DeleteFolderAsync(StorageConnection connection, StorageEntry entry, CancellationToken cancellationToken)
+    {
+        var name = StoragePath.GetName(entry.Path);
+        var folderPrefix = entry.Path + "/";
+        var metadataPath = StorageMetadataPath.GetFolderFilePath(entry.Path);
+        foreach (var other in connection.Index.Entries)
+        {
+            if (other.Path.StartsWith(folderPrefix, StringComparison.Ordinal) &&
+                !string.Equals(other.Path, metadataPath, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"'{name}' cannot be deleted: the folder is not empty.");
+            }
+        }
+
+        // Only a directory on disk has folders as such. On a bucket the folder is virtual and ends with its last object,
+        // and deleting it there deletes every object below it.
+        byte[]? metadata = null;
+        if (connection.IsOnDisk)
+        {
+            // Before anything is deleted: files that the index never holds, such as hidden ones, are not seen as content,
+            // and would make the delete of the directory fail after the metadata file is gone.
+            var content = await connection.Client.ListObjects(new StorageListOptions { FolderPath = entry.Path }, cancellationToken);
+            if (content.Exists(blob => !string.Equals(blob.FullPath, metadataPath, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException($"'{name}' cannot be deleted: the folder contains files that are not shown.");
+            }
+
+            if (connection.Index.TryGet(metadataPath, out var metadataEntry) && !metadataEntry.IsFolder)
+            {
+                metadata = await connection.Reconciler.ReadMetadataFileAsync(metadataPath, cancellationToken);
+            }
+        }
+
+        await MetadataStore.DeleteFolderMetadataFileAsync(connection, entry.Path, cancellationToken);
+
+        if (connection.IsOnDisk)
+        {
+            try
+            {
+                await connection.Client.DeleteDirectory(entry.Path, recursive: false, cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                // A file can still have appeared since the listing, and the folder is then still there with its metadata.
+                if (metadata is not null)
+                {
+                    await MetadataStore.RestoreFolderMetadataFileAsync(connection, entry.Path, metadata);
+                }
+
+                if (CanHaveReachedStorage(exception))
+                {
+                    connection.NotifyChanged(entry.Path);
+                }
+
+                throw;
+            }
+        }
+
+        connection.Index.Remove(entry.Path);
+        connection.Reconciler.Apply();
+        _subjectFactory.Release(entry.Subject);
+
+        // The key is free now, and an entry that waited for it is only loaded by a pass.
+        connection.NotifyChanged(entry.Path);
+
+        _logger?.LogDebug("Deleted folder from storage: {Path}", entry.Path);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Adds <c>Delete</c>, which requires confirmation and deletes through <see cref="DeleteSubjectAsync"/>, to each
+    /// subject that this storage holds in a file and to each of its folders, unless it has a delete operation or a property
+    /// of that name already. The operation of a folder is enabled only while the folder is empty.
+    /// A subject that keeps its <c>Delete</c> when it moves to another storage deletes through the storage that added it.
+    /// </remarks>
+    public void AddMethods(IInterceptorSubject subject)
+    {
+        if (subject.TryGetRegisteredSubject() is not { } registered ||
+            registered.TryGetProperty(DeleteOperationName) is not null ||
+            !MetadataStore.Applier.TryFindStoredSubject(registered, out var stored) ||
+            !ReferenceEquals(stored, registered) ||
+            registered.GetDeleteOperation(ExclusionTarget.None) is not null)
+        {
+            return;
+        }
+
+        var operation = new MethodMetadata(arguments => DeleteSubjectAsync(subject, (CancellationToken)arguments![0]!))
+        {
+            Kind = MethodKind.Operation,
+            Purpose = OperationPurpose.Delete,
+            PropertyName = DeleteOperationName,
+            Title = "Delete",
+            Description = subject is VirtualFolder
+                ? "Deletes the folder from the storage, which only an empty folder allows."
+                : "Deletes the file of this subject from the storage.",
+            Icon = "Delete",
+            RequiresConfirmation = true,
+            Parameters = DeleteParameters,
+        };
+
+        var property = registered.AddProperty(DeleteOperationName, typeof(MethodMetadata), _ => operation, null);
+
+        // A folder with something in it cannot be deleted, so the operation is offered only while it is empty.
+        if (subject is VirtualFolder folder)
+        {
+            property.AddAttribute<bool>(KnownAttributes.IsEnabled, _ => folder.Children.Count == 0);
+        }
     }
 
     private async Task DeleteEntryAsync(StorageConnection connection, StorageEntry entry, CancellationToken cancellationToken)
@@ -1036,5 +1197,16 @@ public partial class FluentStorageContainer :
         // Ended outside the lock, because cancelling it runs code of the work it cancels.
         connection?.Dispose();
         base.Dispose();
+    }
+
+    /// <summary>
+    /// Disposes the container and completes once the worker of its connection has stopped: the item that it was
+    /// running has finished. A call into the storage that the item gave up can still be running, see
+    /// <see cref="IsStorageUnresponsive"/>.
+    /// </summary>
+    internal Task DisposeAndWaitForWorkerAsync()
+    {
+        Dispose();
+        return _connection?.Worker.StopAsync() ?? Task.CompletedTask;
     }
 }

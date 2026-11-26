@@ -1,0 +1,56 @@
+using System.Collections.Frozen;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using HomeBlaze.Abstractions.Messaging;
+using HomeBlaze.Services;
+using HomeBlaze.Services.Display;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Expressions;
+
+namespace HomeBlaze.Automation.Expressions;
+
+/// <summary>
+/// Reads the members of an event payload: the public properties of its record, found once per type, without those that
+/// <see cref="SecretValueTypes.IsSecret"/> tells. A member that holds a subject continues the path into that subject, as
+/// in <c>event/Button/Name</c>. A value that <see cref="SecretValueTypes.HoldsSecret"/>, such as a payload with a hidden
+/// member, is missing.
+/// </summary>
+internal static class EventPayloadReader
+{
+    // Weak, so that the event types of an unloaded plugin are not kept alive.
+    private static readonly ConditionalWeakTable<Type, FrozenDictionary<string, PropertyInfo>> MembersByType = new();
+
+    public static IReadOnlyDictionary<string, PropertyInfo> GetMembers(Type eventType) =>
+        MembersByType.GetValue(eventType, static type => type
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(property => property.CanRead && property.GetIndexParameters().Length == 0 && !SecretValueTypes.IsSecret(property))
+            .DistinctBy(property => property.Name)
+            .ToFrozenDictionary(property => property.Name, StringComparer.Ordinal));
+
+    /// <summary>Reads the payload itself, which is missing when it holds a secret.</summary>
+    public static ExpressionValue Read(IEvent payload) => FromValue(payload);
+
+    /// <summary>Reads the member path from the payload; an unknown member or a path into a value that is no subject is missing.</summary>
+    public static ExpressionValue Read(IEvent payload, string memberPath, SubjectPathResolver resolver)
+    {
+        var separator = memberPath.IndexOf(SubjectPathResolver.Separator);
+        var name = separator < 0 ? memberPath : memberPath[..separator];
+        if (!GetMembers(payload.GetType()).TryGetValue(name, out var member))
+        {
+            return ExpressionValue.Missing;
+        }
+
+        var value = member.GetValue(payload);
+        if (separator < 0)
+        {
+            return FromValue(value);
+        }
+
+        return value is IInterceptorSubject subject
+            ? resolver.ReadFrom(memberPath[(separator + 1)..], subject)
+            : ExpressionValue.Missing;
+    }
+
+    private static ExpressionValue FromValue(object? value) =>
+        value is not null && SecretValueTypes.HoldsSecret(value) ? ExpressionValue.Missing : ExpressionValue.FromValue(value);
+}

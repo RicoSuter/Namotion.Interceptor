@@ -327,10 +327,24 @@ else
     // after it, so that the regions carry the subjects of the reloaded page.
     private async Task WriteShownTextAsync(string content)
     {
-        await File!.WriteAsync(content, CancellationToken.None);
+        var written = await File!.WriteAsync(content, CancellationToken.None);
+        _originalContent = written;
+        await TryShowWrittenTextAsync(content, written);
         await _sourceEditor!.RefreshDecorationsAsync();
-        _originalContent = content;
         ReportIsDirty();
+    }
+
+    // The write stores plaintext secrets and writes references instead, which the editor then shows, so that its next save
+    // does not send the plaintext again. Compared with the text of the editor rather than _contentChangeCount: setting the
+    // text before a write raises a change of its own, and _currentContent follows typing with a delay.
+    private async Task<bool> TryShowWrittenTextAsync(string sent, string written)
+    {
+        if (written == sent || await _sourceEditor!.GetTextAsync() != sent)
+            return false;
+
+        SetCurrentContent(written);
+        await _sourceEditor.SetTextAsync(written);
+        return true;
     }
 
     public async Task<bool> RevealAsync(IInterceptorSubject subject)
@@ -433,13 +447,13 @@ else
 
         var contentChangeCount = _contentChangeCount;
 
-        await File.WriteAsync(content, cancellationToken);
+        var written = await File.WriteAsync(content, cancellationToken);
 
-        _originalContent = content;
+        _originalContent = written;
 
         // Text typed during the write was read by its content change after the read above, and stays the current
         // text, which is not saved.
-        if (_contentChangeCount == contentChangeCount)
+        if (!await TryShowWrittenTextAsync(content, written) && _contentChangeCount == contentChangeCount)
         {
             SetCurrentContent(content);
         }

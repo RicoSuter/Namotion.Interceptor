@@ -5,7 +5,7 @@ icon: Router
 
 # FRITZ!Box
 
-Connects to an AVM FRITZ!Box router over its documented local TR-064 interface, without MyFRITZ or any cloud connection. One `FritzBox` lists every device the router knows as a `FritzBoxClient` with presence, shows the router itself and every FRITZ!Repeater or meshed FRITZ!Box as a `FritzBoxAccessPoint` with the clients connected to it, and reports the internet connection, current traffic rates and the WLANs. The guest WLAN can be switched on and off. Turning it on opens the network to guests, so turning it on and toggling it need confirmation in the operations panel and cannot be called by AI agents or over MCP, see [Operations](#operations); the switch on the dashboard widget acts directly. Everything else is read only.
+Connects to an AVM FRITZ!Box router over its documented local TR-064 interface, without MyFRITZ or any cloud connection. One `FritzBox` lists every device the router knows as a `FritzBoxClient` with presence, shows the router itself and every FRITZ!Repeater or meshed FRITZ!Box as a `FritzBoxAccessPoint` with the clients connected to it, and reports the internet connection, current traffic rates and the WLANs. The guest WLAN can be switched on and off. Turning it on opens the network to guests, so turning it on and toggling it need confirmation in the operations panel and cannot be called by AI agents or over MCP, see [Operations](#operations); the switch on the dashboard widget acts directly. The internet access of a client can be blocked and allowed, both with confirmation, for now only in debug builds. Everything else is read only.
 
 ## Supported Devices
 
@@ -17,11 +17,17 @@ Connects to an AVM FRITZ!Box router over its documented local TR-064 interface, 
 
 1. In the FRITZ!Box web UI, enable **Home Network > Network > Network Settings > Allow access for applications**.
 2. Create a FRITZ!Box user under **System > FRITZ!Box Users** with the **FRITZ!Box settings** permission. A dedicated user is recommended.
-3. In HomeBlaze, create a **FRITZ!Box**. The setup searches the network for routers and also tries `fritz.box`; select the one found or enter its address by hand. Repeaters are listed last and marked: in a FRITZ!Box mesh their clients already appear under the router, so add a repeater only when your router is not a FRITZ!Box. The address field accepts an IPv4 address, an IPv6 address, or a host name, without a scheme or a port.
+3. In HomeBlaze, create a **FRITZ!Box**. The setup searches the network for routers and also tries `fritz.box` when that name points into your local network; select the one found or enter its address by hand. Repeaters are listed last and marked: in a FRITZ!Box mesh their clients already appear under the router, so add a repeater only when your router is not a FRITZ!Box. The address field accepts an IPv4 address, an IPv6 address, or a host name, without a scheme or a port.
 4. Enter the user and password and select **Test Connection**.
 5. The router's certificate is self-signed, so your browser normally warns about it; open `https://<router address>` once and read the certificate details from that warning page or the padlock. Compare that SHA-256 fingerprint with the one HomeBlaze shows here, and tick the confirmation box only once they match, then save.
 
 The router's certificate key is pinned on first connection; see [Certificate Trust](#certificate-trust) for how it is trusted and how to accept a new one.
+
+## Discovery
+
+The Discover page of the create dialog finds FRITZ!Box routers and repeaters over SSDP and at `fritz.box`, when that name points into your local network. A router that is already added is recognized by its host address, or, while the subject is connected, by the unique device name it read from the router, so a connected router configured as `fritz.box` is also recognized under its IP address. A router that moved to another address while the subject is not connected shows as new on the Discover page.
+
+In a FRITZ!Box mesh, the clients of the repeaters already appear under the router. Discovery cannot see which mesh a repeater belongs to, so when it finds exactly one router, it lists the repeaters under that router, with their name and address, instead of as devices of their own. With several routers or none, each repeater is listed as a device of its own, and picking one explains when to add it.
 
 ## Configuration
 
@@ -77,7 +83,7 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 
 - **FRITZ!Box:** connection, internet state, present and total clients, current upload and download rates, external IP, a link to the router's own web UI.
 - **Access point:** model, uplink type and speed, number of connected clients.
-- **Client:** presence, IP address, access point name and band or LAN port, link speed.
+- **Client:** presence, a "No internet" chip while the router denies internet access, IP address, access point name and band or LAN port, link speed, access profile.
 - **WLAN:** band, channel and clients; the guest WLAN has an on/off switch, which acts directly without confirmation.
 
 ## Interfaces
@@ -119,6 +125,9 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 | `Band`, `Port` | | WLAN band or LAN port, empty while absent; a client the mesh list does not place has no band but can have the host list's port, see [How It Works](#how-it-works) |
 | `LinkSpeed` | Mbit/s | Current link speed; a client the mesh list does not place falls back to the host list's speed while present |
 | `DevicePath` | | Path of the subject of this device, see [Linked Devices](#linked-devices) |
+| `HasInternetAccess` | | Whether the router lets the device reach the internet, from its block and the rules of its access profile; empty when the router does not report it |
+| `IsInternetAccessBlocked` | | Whether the internet access of the device is blocked on its own (the lock button in the router's device list), regardless of its access profile; empty when the router does not report it |
+| `AccessProfile` | | Name of the access profile (Zugangsprofil) of the device; empty when the router does not report it or the FRITZ!OS version has no host filter service |
 
 ### FritzBoxAccessPoint
 
@@ -142,6 +151,7 @@ WLANs are keyed by the band their radio reports: `2.4GHz`, `5GHz` or `6GHz`. Whe
 
 | Subject | Operation | Description |
 |---|---|---|
+| `FritzBoxClient` | `BlockInternetAccess`, `AllowInternetAccess` | Blocks or allows the internet access of the device by the IP address the router currently lists for its MAC address, like the lock button in the router's device list. Both require confirmation in the operations panel and cannot be called by AI agents or over MCP: blocking can cut off a device, also the host HomeBlaze runs on, and allowing lifts a deliberate block. Allowing lifts only the block; the access profile may still deny access. The router applies the change asynchronously, so `HasInternetAccess` may follow only with the next poll. The router refuses it for FRITZ! devices. **Only in debug builds for now:** HomeBlaze has no authentication yet, so anyone who can open it could block or unblock any device. In other builds both operations are disabled and refuse to run. This restriction is removed once HomeBlaze has authentication. |
 | `FritzBoxGuestWlan` | `TurnOn`, `TurnOff`, `Toggle` | Switches the guest WLAN. `TurnOn` and `Toggle` require confirmation in the operations panel and cannot be called by AI agents or over MCP, `TurnOff` does not; the switch on the dashboard widget acts directly. The main bands cannot be switched, because switching one off can cut off the connection HomeBlaze itself uses. |
 
 Operations that require confirmation cannot be called through MCP, neither by [AI agents](../administration/ai-agents.md#tools-and-permissions) nor by external clients; turning the guest WLAN off stays available to them.
@@ -181,6 +191,11 @@ HomeBlaze connects to the router on TCP port 49000 (description, unauthenticated
 | "Data may be stale (n of 3)" | A poll failed; after three in a row the connection is reset and retried after `RetryInterval`. |
 | Internet values, rates and line speed stay empty | The subject is a FRITZ!Repeater, which offers no internet services, or the user cannot read those services on the router. |
 | "The FRITZ!Box is not connected. Try again when its status is Running." when switching the guest WLAN | The router is not connected right now; the switch works again once `Status` is Running. |
+| "Blocking and allowing internet access is only available in debug builds until HomeBlaze has authentication." | The build is not a debug build; see [Operations](#operations). |
+| "The FRITZ!Box lists no IP address for this device." when blocking or allowing internet access | The router lists the device without an IPv4 address; the host filter addresses devices by it. |
+| "The FRITZ!Box no longer lists this device." when blocking or allowing internet access | The router removed the device from its host list. |
+| "The FRITZ!Box lists the last IP address of this device for another device." when blocking or allowing internet access | The device is absent and the router has given its last address to another device. The host filter addresses devices by IP address, so the command is refused instead of hitting that device; try again when the device is connected. |
+| "The device refused DisallowWANAccessByIP..." | The router refused the command with the UPnP error shown; error 880 means the device is a FRITZ! or powerline device, whose internet access cannot be blocked, and 501 that the router runs in IP client mode. |
 | "The device refused SetEnable..." when switching the guest WLAN | The router refused the command with the UPnP error shown; "action not authorized (UPnP error 606)" means the user lacks the FRITZ!Box settings permission. |
 
 ## Limitations
@@ -194,7 +209,8 @@ HomeBlaze connects to the router on TCP port 49000 (description, unauthenticated
 
 - Byte totals from a 64-bit counter source.
 - Hiding long-inactive clients.
-- Wake-on-LAN and internet blocking per client.
+- Wake-on-LAN per client.
+- Blocking and allowing internet access in release builds, once HomeBlaze has authentication.
 - Reboot and reconnect.
 
 ## References

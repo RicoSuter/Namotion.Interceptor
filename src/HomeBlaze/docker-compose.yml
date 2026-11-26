@@ -4,19 +4,69 @@
 services:
   homeblaze:
     image: ghcr.io/ricosuter/homeblaze:latest
+    hostname: homeblaze  # stable across recreated containers, so the OPC UA certificates kept in data/OpcUa stay valid
     restart: unless-stopped
     ports:
       - "8080:8080"   # UI and MCP
       - "4840:4840"   # OPC UA server subject
     volumes:
       - ./data:/data  # Root.json, Files/, History/, OpcUa/, DataProtection-Keys/; filled with defaults on first start, Files/Docs is replaced on every start
+      # - /sys/class/gpio:/sys/class/gpio  # GPIO of a Raspberry Pi 3, 4, 400, Zero 2 W or Compute Module 3 or 4, with /dev/gpiomem below: pin changes go through sysfs
+      # - /sys/devices/platform/soc:/sys/devices/platform/soc
     environment:
       TZ: Europe/Zurich
       McpServer__Enabled: "true"
       McpServer__ReadOnly: "true"  # set to "false" to let MCP clients write values
       ConnectionStrings__seq: http://seq:5341
     # devices:
-    #   - /dev/gpiomem  # Raspberry Pi 3/4 GPIO; Pi 5 is not supported in the container (needs libgpiod)
+    #   - /dev/gpiomem  # GPIO of a Raspberry Pi 3, 4, 400, Zero 2 W or Compute Module 3 or 4, with the two /sys volumes above; Pi 5 is not supported in the container (needs libgpiod)
+
+  updater:
+    # Opt-in: lets the Installation subject install updates, see the installation guide. Holds the Docker socket,
+    # which gives it root access to the host; it writes only data/. Needs COMPOSE_DIR and COMPOSE_PROFILES=updater in .env.
+    # Without COMPOSE_DIR the updater does not start (compose reports the missing path); installs without the profile are unaffected.
+    image: docker:29-cli@sha256:34507eb5069d8be82c95dd3b6987d4250fd5fee49b82e2509b7d7a7030740d6d
+    profiles: [updater]
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /root/.docker
+    working_dir: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind  # same path as on the host, so compose resolves ./data to the host folder; read-only, compose only reads it
+        source: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}
+        target: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind  # the only folder the updater writes; created when missing, as compose creates and only then starts both containers
+        source: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}/data
+        target: ${COMPOSE_DIR:-/homeblaze-updater-needs-COMPOSE_DIR}/data
+        bind: { create_host_path: true }
+    command:
+      - sh
+      - -c
+      - |
+        # A run the updater was restarted in never finishes; report it as failed.
+        if [ -f data/.update-running ] && [ ! -f data/.update-result ]; then
+          echo "The updater restarted while an install ran." >> data/.update-log
+          echo 1 > data/.update-result.tmp && mv data/.update-result.tmp data/.update-result
+        fi
+        tick=0
+        while true; do
+          # The heartbeat only marks the updater as available, so every 30 seconds is enough; requests are still taken within 5 seconds.
+          if [ $$tick -eq 0 ]; then touch data/.updater-heartbeat; fi
+          tick=$$(( (tick + 1) % 6 ))
+          if [ -f data/.update-request ]; then
+            rm -f data/.update-result
+            if mv data/.update-request data/.update-running 2>/dev/null; then
+              { timeout 1500 docker compose pull homeblaze && docker compose up -d homeblaze; } > data/.update-log 2>&1
+              echo $$? > data/.update-result.tmp && mv data/.update-result.tmp data/.update-result
+            fi
+          fi
+          sleep 5
+        done
 
   seq:
     image: datalust/seq

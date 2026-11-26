@@ -48,6 +48,9 @@ public class SubjectHierarchyBenchmark
     private BenchmarkLeaf _leaf = null!;
     private IInterceptorSubject[] _hierarchy = null!;
     private PropertyReference _baseDeclaredReference;
+    private Car _car = null!;
+    private Tire _tire = null!;
+    private bool _isAlternate;
 
     [GlobalSetup]
     public void Setup()
@@ -56,10 +59,35 @@ public class SubjectHierarchyBenchmark
         _leaf = new BenchmarkLeaf(_context);
         _hierarchy = [_root, new BenchmarkMiddle(_context), _leaf];
         _baseDeclaredReference = new PropertyReference(_leaf, nameof(BenchmarkRoot.RootValue));
+        _car = new Car(_context);
+        _tire = _car.Tires[0];
     }
 
     [Benchmark] public string RootOnlyGet() => _root.RootValue;
     [Benchmark] public void RootOnlySet() => _root.RootValue = "x";
+
+    // Writes to one type without derived property data, with alternating values so that the equality check lets
+    // every write land and reach the derived type gate.
+    [Benchmark]
+    public void RootOnlyLandedSet()
+    {
+        _isAlternate = !_isAlternate;
+        _root.RootValue = _isAlternate ? "x" : "y";
+    }
+
+    // Writes alternate between subject types, as in a real graph, so the thread's last derived type gate never
+    // matches: a type without derived property data (BenchmarkRoot) and two types a derived property read (Car
+    // and Tire, through Car.AveragePressure), each on a property no derived property reads. The values alternate
+    // so that the equality check lets every write land.
+    [Benchmark]
+    public void MixedTypeSet()
+    {
+        _isAlternate = !_isAlternate;
+        _root.RootValue = _isAlternate ? "x" : "y";
+        _car.Name = _isAlternate ? "x" : "y";
+        _tire.Pressure_Minimum = _isAlternate ? 1m : 0m;
+    }
+
     [Benchmark] public string DerivedDeclaredGet() => _leaf.LeafValue;
     [Benchmark] public void DerivedDeclaredSet() => _leaf.LeafValue = "x";
     [Benchmark] public int PropertiesAccess() => ((IInterceptorSubject)_leaf).Properties.Count;

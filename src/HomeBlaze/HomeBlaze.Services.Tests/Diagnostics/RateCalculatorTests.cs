@@ -116,6 +116,36 @@ public class RateCalculatorTests
     }
 
     [Fact]
+    public void WhenACountGrows_ThenPerSecondIsRoundedToTwoDecimals()
+    {
+        // Act
+        var rate = RateCalculator.ComputePerSecond(10, 20, TimeSpan.FromSeconds(3));
+
+        // Assert
+        Assert.Equal(3.33m, rate);
+    }
+
+    [Fact]
+    public void WhenACountGoesBackwards_ThenPerSecondIsNull()
+    {
+        // Act
+        var rate = RateCalculator.ComputePerSecond(20, 10, TimeSpan.FromSeconds(3));
+
+        // Assert
+        Assert.Null(rate);
+    }
+
+    [Fact]
+    public void WhenElapsedTimeIsZero_ThenPerSecondIsNull()
+    {
+        // Act
+        var rate = RateCalculator.ComputePerSecond(0, 10, TimeSpan.Zero);
+
+        // Assert
+        Assert.Null(rate);
+    }
+
+    [Fact]
     public void WhenTicksWrapAround_ThenAccumulatesTheWrappedDelta()
     {
         // Act

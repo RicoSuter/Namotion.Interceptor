@@ -1,0 +1,99 @@
+using HomeBlaze.Abstractions.Discovery;
+using HomeBlaze.Components.Editors;
+using Namotion.Interceptor;
+using Xunit;
+
+namespace HomeBlaze.Components.Tests;
+
+public class SubjectEditPanelParametersTests
+{
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WhenThereAreNoEditorParameters_ThenTheSameInstanceIsReturnedEachTime(bool isCreating)
+    {
+        // Act
+        var first = SubjectEditPanel.CreateHostedComponentParameters(isCreating, null);
+        var second = SubjectEditPanel.CreateHostedComponentParameters(isCreating, null);
+
+        // Assert
+        Assert.Same(first, second);
+        Assert.Equal(isCreating, first["IsCreating"]);
+        Assert.Single(first);
+    }
+
+    [Fact]
+    public void WhenEditorParametersAreGiven_ThenTheyAreMergedWithIsCreating()
+    {
+        // Arrange
+        var editorParameters = new Dictionary<string, object?> { ["InitialRuleKey"] = "rule-1" };
+
+        // Act
+        var parameters = SubjectEditPanel.CreateHostedComponentParameters(false, editorParameters);
+
+        // Assert
+        Assert.Equal(2, parameters.Count);
+        Assert.Equal("rule-1", parameters["InitialRuleKey"]);
+        Assert.False((bool)parameters["IsCreating"]!);
+    }
+
+    [Fact]
+    public void WhenEditorParametersContainIsCreating_ThenThePanelValueWins()
+    {
+        // Arrange
+        var editorParameters = new Dictionary<string, object?> { ["IsCreating"] = false };
+
+        // Act
+        var parameters = SubjectEditPanel.CreateHostedComponentParameters(true, editorParameters);
+
+        // Assert
+        Assert.True((bool)parameters["IsCreating"]!);
+    }
+
+    [Fact]
+    public void WhenADiscoveryResultIsGiven_ThenItIsPassedUnderItsParameterName()
+    {
+        // Arrange
+        var result = new FoundDevice();
+
+        // Act
+        var parameters = SubjectEditPanel.CreateHostedComponentParameters(true, null, result);
+
+        // Assert
+        Assert.Equal(2, parameters.Count);
+        Assert.Same(result, parameters["DiscoveryResult"]);
+        Assert.True((bool)parameters["IsCreating"]!);
+    }
+
+    [Fact]
+    public void WhenEditorParametersAndADiscoveryResultAreGiven_ThenBothAreMergedAndThePanelResultWins()
+    {
+        // Arrange
+        var result = new FoundDevice();
+        var editorParameters = new Dictionary<string, object?>
+        {
+            ["InitialRuleKey"] = "rule-1",
+            ["DiscoveryResult"] = new FoundDevice()
+        };
+
+        // Act
+        var parameters = SubjectEditPanel.CreateHostedComponentParameters(true, editorParameters, result);
+
+        // Assert
+        Assert.Equal(3, parameters.Count);
+        Assert.Equal("rule-1", parameters["InitialRuleKey"]);
+        Assert.Same(result, parameters["DiscoveryResult"]);
+        Assert.True((bool)parameters["IsCreating"]!);
+    }
+
+    private sealed class FoundDevice : IDiscoveryResult
+    {
+        public string Key => "device";
+
+        public string DisplayName => "Device";
+
+        public string? Detail => null;
+
+        public bool Matches(IInterceptorSubject subject) => false;
+    }
+}

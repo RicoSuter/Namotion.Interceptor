@@ -75,7 +75,10 @@ public abstract class TransactionTestBase
             bufferTime: TimeSpan.FromMilliseconds(8),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale)
+        {
+            TeardownTimeProvider = new ManualTeardownClock()
+        };
 
         using var processorCts = new CancellationTokenSource();
         var processTask = processor.ProcessAsync(processorCts.Token);
@@ -99,7 +102,7 @@ public abstract class TransactionTestBase
             // Await the consumer before disposing: Dispose tears down the subscription's signal,
             // which a still-running TryDequeue may be about to wait on (ObjectDisposedException).
             await processorCts.CancelAsync();
-            try { await processTask; } catch (OperationCanceledException) { }
+            try { await processTask.WaitAsync(TimeSpan.FromSeconds(30)); } catch (OperationCanceledException) { }
             processor.Dispose();
         }
 

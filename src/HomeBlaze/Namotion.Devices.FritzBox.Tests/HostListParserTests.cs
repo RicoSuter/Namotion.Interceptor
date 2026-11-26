@@ -19,8 +19,8 @@ public class HostListParserTests
 
         // Assert
         Assert.Equal(5, hosts.Count);
-        Assert.Equal(new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", true, "laptop", "802.11", 0, 144, false), hosts[0]);
-        Assert.Equal(new HostEntry("aa:aa:aa:00:00:02", "192.168.178.21", true, "desktop", "Ethernet", 1, 1000, false), hosts[1]);
+        Assert.Equal(new HostEntry("AA:AA:AA:00:00:01", "192.168.178.20", true, "laptop", "802.11", 0, 144, false, true, false, "filtprof1"), hosts[0]);
+        Assert.Equal(new HostEntry("aa:aa:aa:00:00:02", "192.168.178.21", true, "desktop", "Ethernet", 1, 1000, false, false, true, "filtprof1"), hosts[1]);
         Assert.False(hosts[2].IsActive);
         Assert.True(hosts[2].IsGuest);
         Assert.Equal(string.Empty, hosts[4].MacAddress);
@@ -52,6 +52,56 @@ public class HostListParserTests
 
         // Act & Assert
         Assert.Throws<XmlException>(() => HostListParser.Parse(stream));
+    }
+
+    [Theory]
+    [InlineData("granted", true)]
+    [InlineData("denied", false)]
+    [InlineData(" granted ", true)]
+    [InlineData("error", null)]
+    [InlineData("unknown", null)]
+    [InlineData("", null)]
+    public void WhenTheWanAccessIsRead_ThenOnlyGrantedAndDeniedAreKnown(string value, bool? expected)
+    {
+        // Arrange
+        using var stream = ToStream($"<List><Item><X_AVM-DE_WANAccess>{value}</X_AVM-DE_WANAccess></Item></List>");
+
+        // Act
+        var hosts = HostListParser.Parse(stream);
+
+        // Assert
+        Assert.Equal(expected, hosts[0].HasWanAccess);
+    }
+
+    [Theory]
+    [InlineData("1", true)]
+    [InlineData("0", false)]
+    [InlineData("", null)]
+    public void WhenTheDisallowFlagIsRead_ThenItIsABooleanOrNull(string value, bool? expected)
+    {
+        // Arrange
+        using var stream = ToStream($"<List><Item><X_AVM-DE_Disallow>{value}</X_AVM-DE_Disallow></Item></List>");
+
+        // Act
+        var hosts = HostListParser.Parse(stream);
+
+        // Assert
+        Assert.Equal(expected, hosts[0].IsWanAccessDisallowed);
+    }
+
+    [Fact]
+    public void WhenTheFirmwareOmitsTheInternetAccessFields_ThenTheyAreNull()
+    {
+        // Arrange
+        using var stream = ToStream("<List><Item><HostName>laptop</HostName></Item></List>");
+
+        // Act
+        var hosts = HostListParser.Parse(stream);
+
+        // Assert
+        Assert.Null(hosts[0].HasWanAccess);
+        Assert.Null(hosts[0].IsWanAccessDisallowed);
+        Assert.Null(hosts[0].FilterProfileId);
     }
 
     [Fact]

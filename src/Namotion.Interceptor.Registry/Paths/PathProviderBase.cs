@@ -1,10 +1,12 @@
+using System.Diagnostics.CodeAnalysis;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Registry.Paths;
 
 /// <summary>
-/// Base implementation with configurable separators and [InlinePaths] support.
+/// Base implementation with configurable separators and [InlinePaths] support. It includes every property under its
+/// BrowseName unless <see cref="TryGetPropertySegment"/> is overridden.
 /// </summary>
 public abstract class PathProviderBase : IPathProvider
 {
@@ -24,45 +26,60 @@ public abstract class PathProviderBase : IPathProvider
     /// </summary>
     public virtual char IndexClose => ']';
 
+    /// <summary>
+    /// Gets a number that increases after every change of the answers of <see cref="TryGetPropertySegment"/> and
+    /// <see cref="TryGetPropertyFromSegment"/>, and never decreases. 0, the default, means the answers never change.
+    /// </summary>
+    /// <remarks>
+    /// A provider whose answers change while it is in use overrides it and raises it after each change: caches of paths
+    /// serve an entry only while it is unchanged.
+    /// </remarks>
+    public virtual long Version => 0;
+
     internal PathCharacters GetCharacters() => new(PathSeparator, IndexOpen, IndexClose);
 
     /// <inheritdoc />
-    public virtual bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
-
-    /// <inheritdoc />
     /// <remarks>
-    /// Default implementation returns the property's BrowseName.
-    /// Override to return null for no-mapping scenarios.
+    /// The default includes every property under its BrowseName. An <c>IsPropertyIncluded</c> method on a derived
+    /// provider hides <see cref="PathProviderExtensions.IsPropertyIncluded"/>; delete it and return false here instead.
     /// </remarks>
-    public virtual string? TryGetPropertySegment(RegisteredSubjectProperty property)
-        => property.BrowseName;
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Default implementation:
-    /// 1. First looks up direct properties by matching TryGetPropertySegment
-    /// 2. Falls back to [InlinePaths] dictionary lookup if no direct match found
-    /// </remarks>
-    public virtual RegisteredSubjectProperty? TryGetPropertyFromSegment(
-        RegisteredSubject subject, string segment)
+    public virtual bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? segment)
     {
-        // 1. Direct property lookup by segment name
-        foreach (var property in subject.Properties)
+        segment = property.BrowseName;
+        return true;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The default matches the segments of <see cref="TryGetPropertySegment"/> of every property other than the
+    /// [InlinePaths] property and, when none matches, falls back to the [InlinePaths] property of the subject when that
+    /// is included.
+    /// </remarks>
+    public virtual bool TryGetPropertyFromSegment(
+        RegisteredSubject subject, string segment, [NotNullWhen(true)] out RegisteredSubjectProperty? property)
+    {
+        foreach (var candidate in subject.Properties)
         {
-            if (TryGetPropertySegment(property) == segment)
+            // The [InlinePaths] property yields its own segment to every other property, so it is matched only below.
+            if (TryGetPropertySegment(candidate, out var candidateSegment) && candidateSegment == segment &&
+                !candidate.IsInlinePathsProperty)
             {
-                return property;
+                property = candidate;
+                return true;
             }
         }
 
-        // 2. [InlinePaths] fallback - segment is a dictionary key
+        // The segment is the [InlinePaths] property's own segment or a dictionary key; the caller tells them apart.
         var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(subject.Subject.GetType());
-        if (inlinePathsPropertyName is not null)
+        if (inlinePathsPropertyName is not null &&
+            subject.TryGetProperty(inlinePathsPropertyName) is { } inlinePathsProperty &&
+            TryGetPropertySegment(inlinePathsProperty, out _))
         {
-            // Return the InlinePaths property - caller uses segment as dictionary key
-            return subject.TryGetProperty(inlinePathsPropertyName);
+            property = inlinePathsProperty;
+            return true;
         }
 
-        return null;
+        property = null;
+        return false;
     }
 }

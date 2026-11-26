@@ -177,7 +177,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.True(File.Exists(GetFullPath("Docs/.metadata.json/Notes.md")));
     }
 
-    [Theory]
+    [CaseSensitiveFileSystemTheory]
     [InlineData("Docs/Motor.Metadata.json", "Docs/Motor.metadata.json")]
     [InlineData("Docs/.Metadata.json", "Docs/.metadata.json")]
     [InlineData("Docs/motor.metadata.json", "Docs/Motor.metadata.json")]
@@ -201,7 +201,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.False(File.Exists(GetFullPath(expectedPath)));
     }
 
-    [Fact]
+    [CaseSensitiveFileSystemFact]
     public async Task WhenTwoSubjectsDifferOnlyInCase_ThenEachMetadataFileIsReadAndWritten()
     {
         // Arrange
@@ -227,7 +227,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.Equal("{\n  \"navTitle\": \"Lower\",\n  \"icon\": \"Air\"\n}\n", ReadText("Docs/motor.metadata.json"));
     }
 
-    [Fact]
+    [CaseSensitiveFileSystemFact]
     public async Task WhenTwoSubjectsDifferOnlyInExtensionCase_ThenEachMetadataFileIsReadAndWritten()
     {
         // Arrange
@@ -253,7 +253,7 @@ public class StorageMetadataWriteTests : StorageTestBase
         Assert.Equal("{\n  \"navTitle\": \"Lower\",\n  \"icon\": \"Air\"\n}\n", ReadText("Docs/motor.metadata.json"));
     }
 
-    [Fact]
+    [CaseSensitiveFileSystemFact]
     public async Task WhenTwoFoldersDifferOnlyInCase_ThenEachMetadataFileIsWritten()
     {
         // Arrange

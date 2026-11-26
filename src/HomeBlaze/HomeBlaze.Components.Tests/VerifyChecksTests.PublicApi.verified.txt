@@ -1649,6 +1649,11 @@ namespace HomeBlaze.Components.Components
 }
 namespace HomeBlaze.Components.Controls
 {
+    public sealed class CanvasDiagram : Excubo.Blazor.Diagrams.Diagram, System.IDisposable
+    {
+        public CanvasDiagram() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+    }
     public sealed class PropertyWriter : System.IDisposable
     {
         public static readonly System.TimeSpan PersistDelay;
@@ -1699,14 +1704,43 @@ namespace HomeBlaze.Components.Dialogs
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public static System.Threading.Tasks.Task ShowAsync(MudBlazor.IDialogService dialogService, string operationTitle, object? result) { }
     }
+    public static class OperationInputLayout
+    {
+        public static string[]? GetEnumNames(System.Type type) { }
+        public static string GetLabel(string name) { }
+        public static string GetMemberKey(string parameterName, string memberName) { }
+        public static bool IsEnteredPerMember(HomeBlaze.Abstractions.Metadata.MethodParameter parameter) { }
+    }
+    public class SubjectDiscoveryPage : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public SubjectDiscoveryPage() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.IInterceptorSubject> ExistingSubjects { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsActive { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnNavigating { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<HomeBlaze.Services.Discovery.DiscoveredSubject> OnSelected { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Services.SubjectTypeDescriptor> Types { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnParametersSet() { }
+        protected override bool ShouldRender() { }
+    }
     public class SubjectEditDialog : Microsoft.AspNetCore.Components.ComponentBase
     {
         public SubjectEditDialog() { }
         [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyDictionary<string, object?>? EditorParameters { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public Namotion.Interceptor.IInterceptorSubject? Subject { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public MudBlazor.MaxWidth GetPreferredDialogSize() { }
-        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, HomeBlaze.Services.Components.SubjectComponentRegistry componentRegistry, Namotion.Interceptor.IInterceptorSubject subject, string? title = null) { }
+        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, HomeBlaze.Services.Components.SubjectComponentRegistry componentRegistry, Namotion.Interceptor.IInterceptorSubject subject, string? title = null, System.Collections.Generic.IReadOnlyDictionary<string, object?>? editorParameters = null) { }
     }
     public sealed class SubjectNameOptions : System.IEquatable<HomeBlaze.Components.Dialogs.SubjectNameOptions>
     {
@@ -1716,6 +1750,7 @@ namespace HomeBlaze.Components.Dialogs
         public System.Func<string, string?>? Rule { get; init; }
         public string Suffix { get; init; }
         public string SuggestName(System.Type type) { }
+        public string SuggestName(string preferredName, System.Type type) { }
         public string? Validate(string? name) { }
     }
     public class SubjectSetupDialog : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
@@ -1734,6 +1769,7 @@ namespace HomeBlaze.Components.Dialogs
         public SubjectSetupOptions() { }
         public System.Action<Namotion.Interceptor.IInterceptorSubject>? BeforeSave { get; init; }
         public HomeBlaze.Components.Dialogs.SubjectNameOptions? NameField { get; init; }
+        public System.Func<HomeBlaze.Storage.Abstractions.CreateSubjectResult, System.Threading.Tasks.Task>? OnCreatedAsync { get; init; }
         public System.Type? Type { get; init; }
     }
     public class SubjectTypePicker : Microsoft.AspNetCore.Components.ComponentBase
@@ -1786,7 +1822,11 @@ namespace HomeBlaze.Components.Editors
     public class SubjectEditPanel : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
     {
         public SubjectEditPanel() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public HomeBlaze.Abstractions.Discovery.IDiscoveryResult? DiscoveryResult { get; set; }
         public HomeBlaze.Components.Abstractions.ISubjectComponent? EditComponent { get; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyDictionary<string, object?>? EditorParameters { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool IsCreating { get; set; }
         public bool IsValid { get; }
@@ -1807,6 +1847,74 @@ namespace HomeBlaze.Components.Editors
 }
 namespace HomeBlaze.Components.Inputs
 {
+    public class ExpressionField : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public ExpressionField() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Immutable.ImmutableArray<string> Fields { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, System.Collections.Immutable.ImmutableArray<string>>? Hints { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Label { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Lead { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<bool> OnPendingRowChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback PendingRowDiscarded { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, System.Func<HomeBlaze.Components.Abstractions.Expressions.ExpressionPreview>?>? Preview { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string TestId { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, string?>? Validate { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Value { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string?> ValueChanged { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Immutable.ImmutableArray<string> Variables { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
+    }
+    public struct ExpressionScanner
+    {
+        public bool IsOpen { get; }
+        public bool Read(char character) { }
+    }
+    public class MarkdownField : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public MarkdownField() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Class { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, string?> GetError { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Hint { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter(CaptureUnmatchedValues=true)]
+        public System.Collections.Generic.IReadOnlyDictionary<string, object>? InputAttributes { get; set; }
+        public bool IsValid { get; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Label { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public int? MaxSize { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<string, string?> ToHtml { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Value { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string?> ValueChanged { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
+    public sealed class PreviewTicker : System.IDisposable
+    {
+        public PreviewTicker(System.TimeProvider timeProvider, Microsoft.Extensions.Logging.ILogger<HomeBlaze.Components.Inputs.PreviewTicker> logger) { }
+        public void Dispose() { }
+        public System.IDisposable Subscribe(System.Func<System.Func<System.Threading.Tasks.Task>, System.Threading.Tasks.Task> invokeAsync, System.Func<System.Threading.Tasks.Task> tick) { }
+    }
     public class SubjectPathField : Microsoft.AspNetCore.Components.ComponentBase
     {
         public SubjectPathField() { }
@@ -1816,6 +1924,8 @@ namespace HomeBlaze.Components.Inputs
         public System.Func<Namotion.Interceptor.IInterceptorSubject, bool>? CanSelectSubject { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Class { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? ErrorText { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, bool>? IsPropertyVisible { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -1876,6 +1986,63 @@ namespace HomeBlaze.Components.Inputs
         public string? SelectedPath { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnInitialized() { }
+    }
+}
+namespace HomeBlaze.Components.Metadata
+{
+    public class MetadataEditDialog : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public MetadataEditDialog() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Namotion.Interceptor.IInterceptorSubject Owner { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? PropertyName { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnInitialized() { }
+        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, Namotion.Interceptor.IInterceptorSubject owner, string title, string? propertyName = null) { }
+    }
+    public static class MetadataEditing
+    {
+        public static HomeBlaze.Storage.Abstractions.Metadata.IMetadataStore? FindStore(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static bool IsConnected(object container) { }
+    }
+    public class MetadataSummary : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public MetadataSummary() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Class { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>? Metadata { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> OnTagClick { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool ShowTagsOnly { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
+    public class MetadataSummaryDialog : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public MetadataSummaryDialog() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Func<System.Threading.Tasks.Task>? Edit { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>? Metadata { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnInitialized() { }
+        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, string title, System.Collections.Immutable.ImmutableDictionary<string, System.Text.Json.JsonElement>? metadata, System.Func<System.Threading.Tasks.Task>? edit) { }
+    }
+    public class MetadataTagFilterDialog : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public MetadataTagFilterDialog() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Tag { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnInitialized() { }
+        public static System.Threading.Tasks.Task<MudBlazor.IDialogReference> ShowAsync(MudBlazor.IDialogService dialogService, string tag) { }
     }
 }
 namespace HomeBlaze.Components.Operations

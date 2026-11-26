@@ -7,7 +7,7 @@ namespace Namotion.Devices.Sonos.Tests;
 public class DeviceDescriptionParserTests
 {
     [Fact]
-    public void WhenParsingRayDescription_ThenModelAndServicesAreRead()
+    public void WhenParsingRayDescription_ThenModelRoomAndServicesAreRead()
     {
         // Act
         var description = DeviceDescriptionParser.Parse(TestFixtures.Read("device-description-ray.xml"));
@@ -15,6 +15,7 @@ public class DeviceDescriptionParserTests
         // Assert
         Assert.Equal("Sonos Ray", description.ModelName);
         Assert.Equal("S36", description.ModelNumber);
+        Assert.Equal("Büro", description.RoomName);
         Assert.Contains("HTControl", description.ServiceIds);
         Assert.Contains("AVTransport", description.ServiceIds);
         Assert.Contains("GroupRenderingControl", description.ServiceIds);

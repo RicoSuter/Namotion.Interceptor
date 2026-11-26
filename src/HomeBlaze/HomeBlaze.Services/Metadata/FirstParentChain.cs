@@ -4,7 +4,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 namespace HomeBlaze.Services.Metadata;
 
 /// <summary>
-/// Enumerates a subject and then the first parent of each subject up, as the registry writes the path of a subject.
+/// Enumerates a subject and then the first parent of each subject up, as the registry builds the path of a subject.
 /// Ends at a subject without parents, and before a subject that came already, which subjects that only reference each
 /// other reach. Allocates nothing for up to 16 subjects.
 /// </summary>

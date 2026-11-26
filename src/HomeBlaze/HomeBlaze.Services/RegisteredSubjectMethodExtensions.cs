@@ -12,17 +12,41 @@ public static class RegisteredSubjectMethodExtensions
 {
     /// <summary>
     /// Gets the methods (operations and queries) of the subject that are offered to the target, so not excluded from
-    /// it, ordered by Position.
+    /// it, ordered by Position. With <paramref name="excludeMethodsWithPurpose"/>, the methods that have a purpose other
+    /// than <see cref="OperationPurpose.None"/> are left out.
     /// </summary>
-    public static IReadOnlyList<MethodMetadata> GetAllMethods(this RegisteredSubject subject, ExclusionTarget target)
+    public static IReadOnlyList<MethodMetadata> GetAllMethods(
+        this RegisteredSubject subject, ExclusionTarget target, bool excludeMethodsWithPurpose = false)
     {
         return subject.Properties
             .Where(CanContainMethodMetadata)
             .Select(property => property.GetValue())
             .OfType<MethodMetadata>()
-            .Where(method => !method.IsExcludedFrom(target))
+            .Where(method => !method.IsExcludedFrom(target) &&
+                (!excludeMethodsWithPurpose || method.Purpose == OperationPurpose.None))
             .OrderBy(method => method.Position)
             .ToList();
+    }
+
+    /// <summary>
+    /// Gets the delete operation of the subject that is offered to the target: the operation whose purpose is
+    /// <see cref="OperationPurpose.Delete"/>, the one with the lowest position when there are several (an arbitrary one of
+    /// those with equal positions), or null when it has none.
+    /// </summary>
+    public static MethodMetadata? GetDeleteOperation(this RegisteredSubject subject, ExclusionTarget target)
+    {
+        MethodMetadata? deleteOperation = null;
+        foreach (var property in subject.Properties)
+        {
+            if (property.TryGetMethodMetadata() is { Kind: MethodKind.Operation, Purpose: OperationPurpose.Delete } method &&
+                !method.IsExcludedFrom(target) &&
+                (deleteOperation is null || method.Position < deleteOperation.Position))
+            {
+                deleteOperation = method;
+            }
+        }
+
+        return deleteOperation;
     }
 
     /// <summary>

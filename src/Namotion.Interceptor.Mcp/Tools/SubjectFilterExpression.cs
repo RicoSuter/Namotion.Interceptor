@@ -8,8 +8,8 @@ namespace Namotion.Interceptor.Mcp.Tools;
 
 /// <summary>
 /// A value filter over the properties of a subject, written in the expression language of
-/// <c>Namotion.Interceptor.Expressions</c>: comparisons, <c>and</c>, <c>or</c>, <c>not</c>, parentheses and bare booleans
-/// over paths that resolve from the subject through the path provider. <c>subject</c> is the subject itself. A filter
+/// <c>Namotion.Interceptor.Expressions</c>: arithmetic, comparisons, <c>and</c>, <c>or</c>, <c>not</c>, parentheses and
+/// bare booleans over paths that resolve from the subject through the path provider. <c>subject</c> is the subject itself. A filter
 /// matches only when it is true: a missing value makes a comparison unknown, and <c>== null</c> is true for it.
 /// </summary>
 internal sealed class SubjectFilterExpression
@@ -72,10 +72,13 @@ internal sealed class SubjectFilterExpression
         return true;
     }
 
-    /// <summary>Evaluates the filter against the current property values of <paramref name="subject"/>.</summary>
-    public bool Matches(RegisteredSubject subject, PathProviderBase pathProvider)
+    /// <summary>
+    /// Evaluates the filter against the current property values of <paramref name="subject"/>. A path reads as missing
+    /// when its property is on a subject that is not readable, and a reference to a subject that is not readable reads as null.
+    /// </summary>
+    public bool Matches(RegisteredSubject subject, PathProviderBase pathProvider, McpSubjectReadability readability)
     {
-        var context = new FilterContext(subject, pathProvider);
+        var context = new FilterContext(subject, pathProvider, readability);
         return _expression.EvaluateCondition(ref context) == true;
     }
 
@@ -90,7 +93,7 @@ internal sealed class SubjectFilterExpression
         foreach (var path in parsed.Paths)
         {
             var memberPath = path;
-            if (ExpressionVariables.TryGetVariable(path, pathSeparator, out var variable, out var variableMemberPath))
+            if (parsed.TryGetVariable(path, out var variable, out var variableMemberPath))
             {
                 if (variable == ExpressionVariables.Value)
                 {
@@ -136,9 +139,35 @@ internal sealed class SubjectFilterExpression
             return ErrorPrefix + $"a path starts at the subject and cannot start with '{pathSeparator}'";
         }
 
-        if (HasParentSegment(memberPath, pathSeparator))
+        // Everything inside the brackets of an index belongs to its key, so only the characters outside them are read.
+        var segmentStart = 0;
+        var depth = 0;
+        for (var index = 0; index <= memberPath.Length; index++)
         {
-            return ErrorPrefix + "a path starts at the subject and cannot go up with '..'";
+            // The end of the path closes its last segment like a separator does.
+            var character = index < memberPath.Length ? memberPath[index] : pathSeparator;
+            if (character == '[')
+            {
+                depth++;
+            }
+            else if (character == ']' && depth > 0)
+            {
+                depth--;
+            }
+            else if (depth == 0 && character == pathSeparator)
+            {
+                if (memberPath.AsSpan(segmentStart, index - segmentStart) is "..")
+                {
+                    return ErrorPrefix + "a path starts at the subject and cannot go up with '..'";
+                }
+
+                segmentStart = index + 1;
+            }
+            else if (depth == 0 && character is '+' or '*' or '/')
+            {
+                // A property name holds none of these, so it is an operator without the spaces around it.
+                return ErrorPrefix + $"put spaces around '{character}' in '{path}'";
+            }
         }
 
         return memberPath[^1] == ']'
@@ -146,47 +175,22 @@ internal sealed class SubjectFilterExpression
             : null;
     }
 
-    private static bool HasParentSegment(string memberPath, char pathSeparator)
+    private readonly struct FilterContext(RegisteredSubject subject, PathProviderBase pathProvider, McpSubjectReadability readability)
+        : IExpressionContext
     {
-        var segmentStart = 0;
-        var depth = 0;
-        for (var index = 0; index <= memberPath.Length; index++)
+        public ExpressionValue ResolvePath(string path)
         {
-            if (index < memberPath.Length)
+            if (McpToolHelper.TryGetFilterPropertyFromPath(subject, pathProvider, path, readability) is not { } property)
             {
-                var character = memberPath[index];
-                if (character == '[')
-                {
-                    depth++;
-                }
-                else if (character == ']' && depth > 0)
-                {
-                    depth--;
-                }
-
-                if (character != pathSeparator || depth > 0)
-                {
-                    continue;
-                }
+                return ExpressionValue.Missing;
             }
 
-            if (memberPath.AsSpan(segmentStart, index - segmentStart) is "..")
-            {
-                return true;
-            }
-
-            segmentStart = index + 1;
+            // Browse leaves out a referenced subject that is not readable, so the filter reads the reference as unset.
+            var value = property.GetValue();
+            return property.IsSubjectReference && value is IInterceptorSubject referenced && !readability.IsReadableWithPathCheck(referenced)
+                ? ExpressionValue.FromProperty(property, null)
+                : ExpressionValue.FromProperty(property, value);
         }
-
-        return false;
-    }
-
-    private readonly struct FilterContext(RegisteredSubject subject, PathProviderBase pathProvider) : IExpressionContext
-    {
-        public ExpressionValue ResolvePath(string path) =>
-            McpToolHelper.TryGetFilterPropertyFromPath(subject, pathProvider, path) is { } property
-                ? ExpressionValue.FromProperty(property, property.GetValue())
-                : ExpressionValue.Missing;
 
         // TryParse refuses 'value', so only 'subject' arrives here.
         public ExpressionValue ResolveVariable(string variable, string? memberPath) =>
