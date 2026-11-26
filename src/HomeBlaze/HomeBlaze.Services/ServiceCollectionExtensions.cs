@@ -3,6 +3,8 @@ using HomeBlaze.Services.Clients;
 using HomeBlaze.Services.Diagnostics;
 using HomeBlaze.Services.Discovery;
 using HomeBlaze.Services.Discovery.MulticastDns;
+using HomeBlaze.Services.Secrets;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -32,6 +34,9 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<SubjectTypeCatalog>();
+        // Read when the serializer is created, so a corrupt store stops the start before any configuration is read.
+        services.AddSingleton(serviceProvider => new SecretStore(
+            HomeBlazePaths.GetSecretsPath(serviceProvider.GetService<IConfiguration>())));
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
         // The root accessor is deferred so constructing the resolver does not pull in RootManager,

@@ -95,8 +95,7 @@ public sealed partial class MarkdownContentParser
         }
 
         var path = url.AsSpan(0, pathEnd);
-        if (path.IsEmpty || path.EndsWith(FileExtensions.Markdown, StringComparison.OrdinalIgnoreCase) ||
-            path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase))
+        if (path.IsEmpty || StoragePath.IsMarkdown(path))
         {
             return LinkKind.Page;
         }
@@ -393,6 +392,13 @@ public sealed partial class MarkdownContentParser
         {
             // Nothing of this parse is published, so nothing would ever detach the subjects it created.
             ReleaseCreatedSince(state, 0);
+
+            // No snapshot lists what it applied to the subjects it updated in place, so the next parse applies it again.
+            foreach (var subject in state.AppliedSubjects)
+            {
+                ForgetAppliedConfiguration(subject);
+            }
+
             throw;
         }
     }
@@ -800,6 +806,7 @@ public sealed partial class MarkdownContentParser
     {
         private readonly List<(int BlockIndex, string? Id, IInterceptorSubject Subject)> _registrations = [];
         private readonly List<IInterceptorSubject> _created = [];
+        private List<IInterceptorSubject>? _appliedSubjects;
         private readonly Dictionary<string, int> _nameOwners = new();
         private readonly string _source;
         private bool? _hasLoneCarriageReturn;
@@ -865,6 +872,12 @@ public sealed partial class MarkdownContentParser
         public void AddCreated(IInterceptorSubject subject) => _created.Add(subject);
 
         public void AddErrorBox() => ErrorBoxCount++;
+
+        /// <summary>The subjects that this parse applied configuration to.</summary>
+        public IReadOnlyList<IInterceptorSubject> AppliedSubjects => _appliedSubjects ?? [];
+
+        /// <summary>Records that this parse applied configuration to the subject.</summary>
+        public void AddAppliedSubject(IInterceptorSubject subject) => (_appliedSubjects ??= []).Add(subject);
 
         /// <summary>The text of the page that this parse reads.</summary>
         public string Source => _source;

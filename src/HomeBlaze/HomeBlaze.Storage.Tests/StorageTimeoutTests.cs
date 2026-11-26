@@ -380,8 +380,8 @@ public class StorageTimeoutTests : StorageTestBase
         WriteFile("First.md");
         WriteFile("Second.md");
 
-        // The first stream of a file is hashed, the second one is read by its subject.
-        var readReached = _client!.PauseReadOfStream(2);
+        // The storage reads a page once and passes the text to it.
+        var readReached = _client!.PauseReadOfStream(1);
         var pass = storage.ReconcileAsync();
         await readReached;
 
@@ -399,6 +399,26 @@ public class StorageTimeoutTests : StorageTestBase
         Assert.Equal(["Second.md"], childrenAfterPass);
         Assert.Equal(["Second.md"], childrenAfterIdlePass);
         Assert.Equal(["First.md", "Second.md"], storage.Children.Keys.Order());
+    }
+
+    [Fact]
+    public async Task WhenAPageReadsItsFileAndTheReadHangs_ThenTheReadTimesOut()
+    {
+        // Arrange
+        WriteFile("Home.md", "# Home");
+        var storage = await ConnectPausableAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Home.md"]);
+        WriteFile("Home.md", "# Changed");
+        var readReached = _client!.PauseReadOfStream(1);
+        var reload = page.OnFileChangedAsync(CancellationToken.None);
+        await readReached;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+
+        // Assert
+        await Assert.ThrowsAsync<TimeoutException>(() => reload);
+        Assert.Equal("# Home", page.Content);
     }
 
     [Fact]

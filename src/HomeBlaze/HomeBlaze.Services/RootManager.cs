@@ -122,6 +122,7 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         }
 
         var json = await File.ReadAllTextAsync(ConfigurationPath, cancellationToken);
+        json = await ConvertSecretsAsync(json, cancellationToken);
         using var startup = _context.DeferHostedServiceStarts();
         var skipped = new List<SkippedConfigurationProperty>();
 
@@ -144,6 +145,29 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         _rootLoaded.TrySetResult(Root);
 
         return Root;
+    }
+
+    // Root.json is outside the storage, so its plaintext secrets are moved here. The target of a symbolic link is replaced,
+    // so the link stays. A failure, such as for a file mounted on its own, which cannot be replaced, leaves the file as it is.
+    private async Task<string> ConvertSecretsAsync(string json, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!_serializer.TryConvertSecrets(json, ConfigurationNaming.JsonProperty, out var converted))
+            {
+                return json;
+            }
+
+            var targetPath = new FileInfo(ConfigurationPath).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? ConfigurationPath;
+            await AtomicFile.WriteAllTextAsync(targetPath, converted, cancellationToken);
+            _logger?.LogInformation("Moved the plaintext secrets of the root configuration to the secret store.");
+            return converted;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger?.LogWarning(exception, "The plaintext secrets of the root configuration could not be moved to the secret store and stay in {Path}.", ConfigurationPath);
+            return json;
+        }
     }
 
     /// <summary>

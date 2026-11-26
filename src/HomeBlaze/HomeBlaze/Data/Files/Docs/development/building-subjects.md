@@ -71,7 +71,8 @@ public partial string? AppKey { get; set; }
 ```
 
 Secret configuration properties:
-- Are **persisted** to JSON like regular configuration
+- Must be `string` properties of a subject: any other type, or a secret property of a plain object, throws when the type is read or written
+- Are **persisted** to `Secrets.json` in the data folder; the file in `Files/` holds a `$secret:` reference instead (see [Configuration](../administration/configuration.md#data-folder))
 - Are **hidden** in the browser property panel
 - Show as **masked password fields** in the edit dialog (empty by default, only overwritten when the user enters a new value)
 - **Cannot** be combined with `[State]`: the app throws at startup to prevent accidental exposure
@@ -891,7 +892,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | Attribute | Purpose | Persisted | Displayed |
 |-----------|---------|-----------|-----------|
 | `[Configuration]` | User-editable settings | Yes | No (unless also `[State]`) |
-| `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes | Never (masked in editor) |
+| `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes, in Secrets.json | Never (masked in editor) |
 | `[State]` | Live values for display | No | Yes |
 | `[Configuration] + [State]` | Editable and displayed, but not writable through MCP's `set_property`, see [AI Agents](../administration/ai-agents.md#tools-and-permissions); expose a write through an operation instead | Yes | Yes |
 | `[Configuration] + [SubjectPath]` | Path with a picker, see [Path Properties](#path-properties) | Yes | No (unless also `[State]`) |

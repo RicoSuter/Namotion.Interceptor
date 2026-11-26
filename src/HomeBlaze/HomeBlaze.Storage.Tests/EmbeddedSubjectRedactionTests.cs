@@ -206,32 +206,6 @@ public class EmbeddedSubjectRedactionTests
     }
 
     [Fact]
-    public void WhenAPlainObjectHasASecretProperty_ThenItsValueIsHidden()
-    {
-        // Arrange
-        var context = SubjectContextFactory.Create(new ServiceCollection());
-        var host = new PlainOptionsHost(context) { Credentials = new PlainCredentials { User = "admin", Password = "plain-secret" } };
-        var source = $$"""
-            :: {{typeof(PlainOptionsHost).FullName}}#host
-            ```json
-            {
-              "Credentials": { "User": "admin", "password": "plain-secret" }
-            }
-            ```
-            ::
-            """;
-
-        // Act
-        var result = EmbeddedSubjectRedaction.Redact(
-            MarkdownPageParser.Parse(source), new Dictionary<int, IInterceptorSubject> { [0] = host }, NoLayoutBlocks, out _);
-
-        // Assert
-        Assert.DoesNotContain("plain-secret", result);
-        Assert.Contains("\"password\": \"***\"", result);
-        Assert.Contains("\"User\": \"admin\"", result);
-    }
-
-    [Fact]
     public void WhenABlockIsInsideAnInvalidBlock_ThenItsArgumentsAndItsJsonBlockAreRedacted()
     {
         // Arrange
@@ -333,21 +307,10 @@ public partial class PlainOptionsHost : IConfigurable
     [Configuration]
     public partial PlainOptions? Options { get; set; }
 
-    [Configuration]
-    public partial PlainCredentials? Credentials { get; set; }
-
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 public sealed class PlainOptions
 {
     public string? Endpoint { get; set; }
-}
-
-public struct PlainCredentials
-{
-    public string? User { get; set; }
-
-    [Configuration(IsSecret = true)]
-    public string? Password { get; set; }
 }
