@@ -14,6 +14,8 @@ pwsh scripts/benchmark.ps1 -Filter "*RegistryBenchmark*","*ServiceOrderResolverB
 
 The script header lists every flag. The one with a trap is `-Filter`: several patterns are matched as OR, but they must be a PowerShell array rather than a comma joined string, and the array form needs a PowerShell caller, since from bash `"a","b"` collapses into one argument that matches nothing. Output is `benchmark_<timestamp>.md` in the working directory.
 
+`-Project` runs another benchmark project than `src/Namotion.Interceptor.Benchmark`. A comparison against a base branch that lacks the project fails before running, so use `-LocalOnly` until the project exists there.
+
 ### Where it goes wrong
 
 The script checks the base branch out **in your working tree**, so:
