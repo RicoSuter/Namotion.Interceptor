@@ -28,9 +28,9 @@ public class StateAttribute : Attribute
 
     /// <summary>
     /// Gets or sets a value indicating whether the value is a cumulative counter that only grows. Only a reset of the device or
-    /// service that owns the counter may restart it at 0 or step it back once, and a change of its source passes through <c>null</c>,
-    /// so a consumer that computes deltas treats a drop below half of the previous value as a restart from 0, a smaller drop as a
-    /// step back that adds nothing, and restarts after <c>null</c>.
+    /// service that owns the counter may restart it at 0 or step it back once. A consumer that computes deltas treats a drop below
+    /// half of the previous value as a restart from 0 and a smaller drop as a step back that adds nothing, and skips <c>null</c>,
+    /// stepping from the last value before it to the first one after it.
     /// </summary>
     public bool IsCumulative
     {
