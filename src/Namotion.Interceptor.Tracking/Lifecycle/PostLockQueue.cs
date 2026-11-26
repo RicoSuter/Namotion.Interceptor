@@ -102,36 +102,40 @@ internal static class PostLockQueue
     internal static bool IsAnchorWrite(int depth) => _innermost is { } innermost && innermost.AnchorDepth == depth;
 
     /// <summary>
-    /// Called by a lifecycle interceptor before it takes its lock. When the thread holds no lifecycle lock yet, a
-    /// write reconciliation makes the write the anchor; otherwise the release of this lock is the anchor.
+    /// Counts a lifecycle lock until the returned scope is disposed: taken by a lifecycle interceptor before it takes
+    /// its lock, disposed after it released it. When the thread holds no lifecycle lock yet, a write reconciliation
+    /// makes the write the anchor; otherwise the release of this lock is the anchor.
     /// </summary>
-    internal static void EnterLock(bool isWriteReconciliation)
+    internal static LockScope EnterLock(bool isWriteReconciliation)
     {
         _deferrals++;
-        if (_heldLocks++ != 0)
+        if (_heldLocks++ == 0)
         {
-            return;
+            Debug.Assert(
+                !isWriteReconciliation || ReferenceEquals(PropertyAccessObservation.WriteObserver, TrackingWriteObserver.Instance),
+                "The anchor write is completed by the write observer of Tracking, which the lifecycle interceptor installs.");
+            _lockAnchorDepth = isWriteReconciliation ? PropertyAccessObservation.WriteDepth : 0;
         }
 
-        // The anchor write is completed by the write observer of Tracking, so another observer installed in its
-        // place leaves the release of the lock as the anchor.
-        _lockAnchorDepth = isWriteReconciliation &&
-                           ReferenceEquals(PropertyAccessObservation.WriteObserver, TrackingWriteObserver.Instance)
-            ? PropertyAccessObservation.WriteDepth
-            : 0;
+        return default;
     }
 
     /// <summary>
-    /// Called by a lifecycle interceptor after it released its lock. The release of the thread's last lifecycle lock
-    /// drains the segment that has no anchor write; a segment of an anchor write waits for that write to complete.
-    /// Exceptions of the drained work are traced.
+    /// A lifecycle lock counted by <see cref="EnterLock"/>, disposed after the monitor is released so queued work never
+    /// runs under a lifecycle lock. The release of the thread's last lifecycle lock drains the segment that has no
+    /// anchor write; a segment of an anchor write waits for that write to complete. Exceptions of the drained work are
+    /// traced.
     /// </summary>
-    internal static void ExitLock()
+    internal readonly struct LockScope : IDisposable
     {
-        _deferrals--;
-        if (--_heldLocks == 0 && _innermost is { AnchorDepth: 0 })
+        public void Dispose()
         {
-            Drain(Pop(), rawTimestamp: 0, rethrow: false);
+            Debug.Assert(_heldLocks > 0, "A lock scope is disposed only after its EnterLock.");
+            _deferrals--;
+            if (--_heldLocks == 0 && _innermost is { AnchorDepth: 0 })
+            {
+                Drain(Pop(), rawTimestamp: 0, rethrow: false);
+            }
         }
     }
 
@@ -315,19 +319,14 @@ internal static class PostLockQueue
     private static void Drain(Segment segment, long rawTimestamp, bool rethrow)
     {
         ExceptionDispatchInfo? firstException = null;
-        var isRecordingSuspended = DerivedPropertyRecorder.TrySuspend();
         try
         {
+            using var suspension = DerivedPropertyRecorder.Suspend();
             RunDeliveries(ref firstException);
             RunRequests(segment.Requests, rawTimestamp, ref firstException);
         }
         finally
         {
-            if (isRecordingSuspended)
-            {
-                DerivedPropertyRecorder.Resume();
-            }
-
             Return(segment);
         }
 
