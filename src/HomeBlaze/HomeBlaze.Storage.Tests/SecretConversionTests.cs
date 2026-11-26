@@ -895,6 +895,32 @@ public class SecretConversionTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenTheSecretStoreCannotBeWrittenDuringABlockWrite_ThenTheExceptionPropagatesAndTheBlockTakesTheFileAgain()
+    {
+        // Arrange
+        UseSecretStore();
+        var ownerType = typeof(SecretListOwner).FullName;
+        var content = $"# Gateway\n\n:: {ownerType}#owner Host=10.0.0.1\n::: Item Host=a\n:::\n::\n";
+        WriteFile("Gateway.md", content);
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var owner = Assert.IsType<SecretListOwner>(page.Children["owner"]);
+        Directory.CreateDirectory(SecretsPath!);
+        owner.Host = "10.0.0.2";
+        owner.Items = [owner.Items[0], new EmbeddedSecretDevice { Host = "b", Password = "s3cr3t" }];
+
+        // Act
+        var failure = await Record.ExceptionAsync(() => page.WriteConfigurationAsync(owner, CancellationToken.None));
+
+        // Assert
+        Assert.True(failure is IOException or UnauthorizedAccessException, failure?.ToString());
+        Assert.Equal("10.0.0.1", owner.Host);
+        Assert.Equal("a", Assert.Single(owner.Items).Host);
+        Assert.Equal(content, page.Content);
+        Assert.Equal(content, TryReadText("Gateway.md"));
+    }
+
+    [Fact]
     public async Task WhenAMetadataFileIsWritten_ThenItIsNotConverted()
     {
         // Arrange

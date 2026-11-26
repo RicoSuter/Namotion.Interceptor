@@ -437,7 +437,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     // Not cancelled once the content is decided: a cancelled reload after the write would leave the parse snapshot of
     // the old content, which a later configuration write-back would write back.
-    // Unconverted: every caller converts the content first, block writes and structure edits in PublishAndWriteAsync.
+    // Unconverted: every caller converts the content first, block writes and structure edits before PublishAndWriteAsync.
     private Task WriteUnlockedAsync(string content)
     {
         var bytes = Encoding.UTF8.GetBytes(content);
@@ -550,7 +550,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// blocks would be inserted or removed while a reload runs or after one that failed, until the page has been
     /// read again, or when a reload changed the page while this one ran. When the page cannot keep the change, it is
     /// read again from its file before this returns, so the graph matches the text again unless that read fails.
-    /// When the storage fails the write, the page is read again in the same way and the exception propagates.
+    /// When the storage or the secret store fails the write, the page is read again in the same way and the exception
+    /// propagates.
     /// Saves of one page run one after the other.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
@@ -1114,7 +1115,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 return MarkdownEditResult.Refused(sizeRefusal);
             }
 
-            var publishRefusal = await PublishAndWriteAsync(snapshot, change.Write, change.ChangedBlock, changedPageRefusal);
+            var publishRefusal = await PublishAndWriteAsync(snapshot, ConvertSecrets(change.Write), change.ChangedBlock, changedPageRefusal);
             return publishRefusal is null
                 ? MarkdownEditResult.WrittenFor(FindResultSubject(change))
                 : MarkdownEditResult.Refused(publishRefusal);
@@ -1183,23 +1184,52 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
         // The block spans index into the text the page was parsed from, which is the source of the
         // page and not necessarily Content.
-        var write = MarkdownBlockReconciler.TryWrite(page, snapshot.BlockSubjects, blockIndex, _serializer, out var refusal);
+        MarkdownBlockWrite? write;
+        string? refusal;
+        try
+        {
+            write = MarkdownBlockReconciler.TryWrite(page, snapshot.BlockSubjects, blockIndex, _serializer, out refusal);
+            write = write is null ? null : ConvertSecrets(write);
+        }
+        catch
+        {
+            // The secret store failed the write before anything was published.
+            await ReadBlockAgainAsync(page, blockIndex, snapshot.BlockSubjects, CancellationToken.None);
+            throw;
+        }
+
         if (write is null)
         {
             _parser.LogRefusedWrite(FullPath, refusal!);
-
-            // The graph keeps the refused values of a slot, and a later reload would give the blocks to them by
-            // their position, so a value would take the block of another one. The reload keeps the blocks whose
-            // text did not change as they are in memory, so this block and the blocks inside it are made to take
-            // their text again, and the blocks around it are read in full so that the reload reaches them.
-            ForgetAppliedConfigurations(page.AllBlocks[blockIndex], snapshot.BlockSubjects);
-            ForgetAppliedBlocksAround(page, page.AllBlocks[blockIndex], snapshot.BlockSubjects);
-            await ReloadAfterRefusalAsync(cancellationToken);
+            await ReadBlockAgainAsync(page, blockIndex, snapshot.BlockSubjects, cancellationToken);
             return false;
         }
 
         return await PublishAndWriteAsync(snapshot, write, page.AllBlocks[blockIndex], ConfigurationChangedRefusal) is null;
     }
+
+    // Under _writeLock, after a block write that wrote nothing. The graph keeps the values of a slot that were not
+    // written, and a later reload would give the blocks to them by their position, so a value would take the block of
+    // another one. The reload keeps the blocks whose text did not change as they are in memory, so this block and the
+    // blocks inside it are made to take their text again, and the blocks around it are read in full so that the reload
+    // reaches them.
+    private async Task ReadBlockAgainAsync(
+        MarkdownPage page, int blockIndex, IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, CancellationToken cancellationToken)
+    {
+        ForgetAppliedConfigurations(page.AllBlocks[blockIndex], blockSubjects);
+        ForgetAppliedBlocksAround(page, page.AllBlocks[blockIndex], blockSubjects);
+        await ReloadAfterRefusalAsync(cancellationToken);
+    }
+
+    // The text that an edit adds is converted by the edit, before its size is checked. The snapshot can still hold
+    // plaintext that the storage did not convert, such as from the read after a refusal. Written as it is, its hash would
+    // be recorded as current, and no later pass would convert the file. The conversion only changes head lines and fences,
+    // so the blocks and their indexes stay, and the published page is the written text, which the reload inside the write
+    // needs to keep the subjects of the snapshot.
+    private MarkdownBlockWrite ConvertSecrets(MarkdownBlockWrite write) =>
+        ConvertSecrets(write.Page.Source) is var converted && !ReferenceEquals(converted, write.Page.Source)
+            ? write with { Page = MarkdownPageParser.Parse(converted) }
+            : write;
 
     // Under _writeLock, after a refusal. A failed read is logged, and the next pass of the storage reads the file again.
     private async Task ReloadAfterRefusalAsync(CancellationToken cancellationToken)
@@ -1214,8 +1244,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
-    // Under _writeLock: publishes the write as the snapshot that follows `snapshot` and writes its text. Returns why
-    // nothing was written, or null. `changedBlock` is the block of the snapshot whose text changed, null for the page.
+    // Under _writeLock: publishes the write as the snapshot that follows `snapshot` and writes its text, which the caller
+    // has converted. Returns why nothing was written, or null. `changedBlock` is the block of the snapshot whose text
+    // changed, null for the page.
     private async Task<string?> PublishAndWriteAsync(
         MarkdownParseResult snapshot, MarkdownBlockWrite write, MarkdownBlock? changedBlock, string changedPageRefusal)
     {
@@ -1228,16 +1259,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         {
             _parser.LogRefusedWrite(FullPath, ReloadRefusal);
             return ReloadRefusal;
-        }
-
-        // The text that an edit adds is converted by the edit, before its size is checked. The snapshot can still hold
-        // plaintext that the storage did not convert, such as from the read after a refusal. Written as it is, its hash
-        // would be recorded as current, and no later pass would convert the file. The conversion only changes head lines
-        // and fences, so the blocks and their indexes stay, and the published page is the written text, which the reload
-        // inside the write needs to keep the subjects of the snapshot.
-        if (ConvertSecrets(write.Page.Source) is var converted && !ReferenceEquals(converted, write.Page.Source))
-        {
-            write = write with { Page = MarkdownPageParser.Parse(converted) };
         }
 
         // The text was computed from the snapshot, so it would undo what a reload published since then.
