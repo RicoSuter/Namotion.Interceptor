@@ -19,14 +19,30 @@ public static class AtomicFile
     private static readonly SearchValues<char> LowercaseHexDigits = SearchValues.Create("0123456789abcdef");
 
     /// <summary>Replaces the file with <paramref name="content"/>.</summary>
+    /// <param name="path">The file to replace.</param>
+    /// <param name="content">The new content.</param>
+    /// <param name="unixCreateMode">The mode of the new file on Unix, or null for the default of the process. Must be null on Windows.</param>
+    /// <exception cref="PlatformNotSupportedException"><paramref name="unixCreateMode"/> is set on Windows.</exception>
     /// <exception cref="IOException">The file cannot be written.</exception>
     /// <exception cref="UnauthorizedAccessException">The file cannot be written.</exception>
-    public static void WriteAllBytes(string path, ReadOnlySpan<byte> content)
+    public static void WriteAllBytes(string path, ReadOnlySpan<byte> content, UnixFileMode? unixCreateMode = null)
     {
         var temporaryPath = CreateTemporaryPath(path);
         try
         {
-            using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+            if (unixCreateMode is { } mode)
+            {
+                if (OperatingSystem.IsWindows())
+                {
+                    throw new PlatformNotSupportedException("A Unix create mode is not supported on Windows.");
+                }
+
+                // Set on the temporary file, so the content is never readable with a wider mode.
+                options.UnixCreateMode = mode;
+            }
+
+            using (var stream = new FileStream(temporaryPath, options))
             {
                 stream.Write(content);
 

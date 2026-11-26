@@ -1,0 +1,111 @@
+using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
+
+namespace HomeBlaze.Services.Secrets;
+
+/// <summary>
+/// Keeps the values of secret configuration properties in a JSON file outside the storage, each under a random key that
+/// configuration files reference instead of the value. Entries are added or replaced, never removed.
+/// </summary>
+/// <remarks>
+/// The file is read once, when the store is created, and every write replaces it with the values in memory, so a file
+/// that is replaced or edited while the store lives is overwritten by its next write.
+/// </remarks>
+public sealed class SecretStore
+{
+    private readonly ConcurrentDictionary<string, string> _values;
+    private readonly Lock _writeLock = new();
+
+    /// <param name="path">The full path of the file.</param>
+    /// <exception cref="InvalidOperationException">The file exists and is not a JSON object of strings.</exception>
+    public SecretStore(string path)
+    {
+        Path = path;
+        _values = Load(path);
+    }
+
+    /// <summary>The full path of the file.</summary>
+    public string Path { get; }
+
+    /// <summary>Gets the value stored under <paramref name="key"/>.</summary>
+    public bool TryGet(string key, [NotNullWhen(true)] out string? value) => _values.TryGetValue(key, out value);
+
+    /// <summary>Creates a random key, 32 lowercase hexadecimal digits, that the store does not hold yet, without storing anything.</summary>
+    internal string CreateKey()
+    {
+        var key = Guid.NewGuid().ToString("N");
+        while (_values.ContainsKey(key))
+        {
+            key = Guid.NewGuid().ToString("N");
+        }
+
+        return key;
+    }
+
+    /// <summary>
+    /// Stores <paramref name="value"/> under <paramref name="key"/>, replacing its value or adding the key when it is
+    /// missing, and returns once the file is written.
+    /// </summary>
+    /// <exception cref="IOException">The file cannot be written. The value is not stored.</exception>
+    /// <exception cref="UnauthorizedAccessException">The file cannot be written. The value is not stored.</exception>
+    public void Set(string key, string value) => SetMany([new(key, value)]);
+
+    /// <summary>
+    /// Stores all <paramref name="values"/> with one write of the file, and returns once the file is written.
+    /// </summary>
+    /// <exception cref="IOException">The file cannot be written. No value is stored.</exception>
+    /// <exception cref="UnauthorizedAccessException">The file cannot be written. No value is stored.</exception>
+    internal void SetMany(IReadOnlyList<KeyValuePair<string, string>> values)
+    {
+        lock (_writeLock)
+        {
+            var file = new Dictionary<string, string>(_values);
+            foreach (var (key, value) in values)
+            {
+                file[key] = value;
+            }
+
+            var content = JsonSerializer.SerializeToUtf8Bytes(file, SecretStoreJsonContext.Default.DictionaryStringString);
+
+            // Readable by the user HomeBlaze runs as only.
+            AtomicFile.WriteAllBytes(Path, content, OperatingSystem.IsWindows() ? null : UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+            // After the write: a value that is not in the file must not be referenced.
+            foreach (var (key, value) in values)
+            {
+                _values[key] = value;
+            }
+        }
+    }
+
+    private static ConcurrentDictionary<string, string> Load(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return new ConcurrentDictionary<string, string>();
+        }
+
+        try
+        {
+            var values = JsonSerializer.Deserialize(File.ReadAllBytes(path), SecretStoreJsonContext.Default.DictionaryStringString)
+                ?? throw new JsonException("The file holds null.");
+
+            foreach (var value in values.Values)
+            {
+                if (value is null)
+                {
+                    throw new JsonException("The file holds a null value.");
+                }
+            }
+
+            return new ConcurrentDictionary<string, string>(values);
+        }
+        catch (JsonException exception)
+        {
+            // Never overwritten: the next add would replace every secret it holds.
+            throw new InvalidOperationException(
+                $"The secret store '{path}' is not a JSON object of strings. Correct or restore the file and start again.", exception);
+        }
+    }
+}

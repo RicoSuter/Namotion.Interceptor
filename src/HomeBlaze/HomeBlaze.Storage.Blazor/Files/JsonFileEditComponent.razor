@@ -56,11 +56,16 @@
     {
         if (File != null)
         {
-            await using var stream = await File.ReadAsync(CancellationToken.None);
-            using var reader = new StreamReader(stream);
-            _originalContent = await reader.ReadToEndAsync();
+            _originalContent = await ReadTextAsync(File);
             _currentContent = _originalContent;
         }
+    }
+
+    private static async Task<string> ReadTextAsync(JsonFile file)
+    {
+        await using var stream = await file.ReadAsync(CancellationToken.None);
+        using var reader = new StreamReader(stream);
+        return await reader.ReadToEndAsync();
     }
 
     private void OnContentChanged(ModelContentChangedEvent e)
@@ -86,8 +91,31 @@
         var content = await _editor.GetValue();
 
         await File.Storage.WriteBlobAsync(File.FullPath, System.Text.Encoding.UTF8.GetBytes(content), CancellationToken.None);
-        _originalContent = content;
-        _currentContent = content;
-        IsDirtyChanged?.Invoke(false);
+
+        // The write stores plaintext secrets and writes references instead, which the editor then shows, so that its next
+        // save does not send the plaintext again. Text typed during the write stays in the editor and is not saved.
+        // The file is already written, so a failing read-back must not fail the save; the editor then keeps the typed text.
+        string written;
+        try
+        {
+            written = await ReadTextAsync(File);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            written = content;
+        }
+
+        _originalContent = written;
+        if (await _editor.GetValue() == content)
+        {
+            if (written != content)
+            {
+                await _editor.SetValue(written);
+            }
+
+            _currentContent = written;
+        }
+
+        IsDirtyChanged?.Invoke(IsDirty);
     }
 }

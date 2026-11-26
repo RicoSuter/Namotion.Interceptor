@@ -43,6 +43,14 @@ public partial class JsonFile : IStorageFile, ITitleProvider, IIconProvider
     public Task<Stream> ReadAsync(CancellationToken cancellationToken)
         => Storage.ReadBlobAsync(FullPath, cancellationToken);
 
+    /// <summary>
+    /// Writes the content to the file. Plaintext secrets in the content are stored in the secret store and written as
+    /// references, so the written content can differ from the given one.
+    /// </summary>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="InvalidOperationException">A type in the content has a secret configuration property that is
+    /// not a string property of a subject. Nothing is written.</exception>
     public Task WriteAsync(Stream content, CancellationToken cancellationToken)
         => Storage.WriteBlobAsync(FullPath, content, cancellationToken);
 

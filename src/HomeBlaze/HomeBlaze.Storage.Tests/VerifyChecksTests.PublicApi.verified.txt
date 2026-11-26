@@ -125,7 +125,7 @@ namespace HomeBlaze.Storage.Files
         public string ResolveLink(string link) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public System.Threading.Tasks.Task WriteAsync(System.IO.Stream content, System.Threading.CancellationToken cancellationToken) { }
-        public System.Threading.Tasks.Task WriteAsync(string content, System.Threading.CancellationToken cancellationToken) { }
+        public System.Threading.Tasks.Task<string> WriteAsync(string content, System.Threading.CancellationToken cancellationToken) { }
         public System.Threading.Tasks.Task<bool> WriteConfigurationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken) { }
     }
 }

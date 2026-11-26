@@ -7,4 +7,5 @@ public static class FileExtensions
 {
     public const string Json = ".json";
     public const string Markdown = ".md";
+    public const string MarkdownLong = ".markdown";
 }

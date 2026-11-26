@@ -115,7 +115,7 @@ The bridge offers no HTTPS, so requests and responses travel unencrypted in the 
 - **Encrypted**: After pairing the token itself is never sent. Each request carries the token encrypted with XSalsa20-Poly1305 together with the time and a random number, which the bridge accepts once and within 60 seconds, so it refuses a recorded request that it has already received. The bridge clock must be within 60 seconds of the HomeBlaze clock. The encrypted token is not bound to the request, though: an attacker who can intercept a request and keep it from reaching the bridge can use its encrypted token for any action within 60 seconds. A short token, and bridge tokens are typically only 6 characters long, can also be guessed offline from one recorded request.
 - **Plain**: Software bridges only accept `Plain`, which sends the token with every request, so anyone who records one request can control the devices.
 - **Pairing**: The bridge returns the token in plain text when you pair. When the bridge refuses the encrypted token, the setup sends the token once in plain text to read the bridge type, see [Setup](#setup).
-- **Storage**: The token is stored in plain text in the JSON file of the bridge, like other secrets; protect the data folder accordingly.
+- **Storage**: The token is stored in `Data/Secrets.json`, like other secrets, and the JSON file of the bridge holds a reference; protect the data folder accordingly.
 - **Logs**: .NET hides the query of a request URI in its HTTP logs, and with it a plain token, unless the environment variable `DOTNET_SYSTEM_NET_HTTP_DISABLEURIREDACTION` is set.
 
 ## Widgets

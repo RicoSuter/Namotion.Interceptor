@@ -42,4 +42,9 @@ internal static class StoragePath
     /// <summary>Checks whether the path is a JSON file, whose content can describe a subject.</summary>
     public static bool IsJson(string path)
         => path.EndsWith(FileExtensions.Json, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Checks whether the path is a page, a file with an extension that <c>MarkdownFile</c> is registered for.</summary>
+    public static bool IsMarkdown(ReadOnlySpan<char> path)
+        => path.EndsWith(FileExtensions.Markdown, StringComparison.OrdinalIgnoreCase) ||
+           path.EndsWith(FileExtensions.MarkdownLong, StringComparison.OrdinalIgnoreCase);
 }

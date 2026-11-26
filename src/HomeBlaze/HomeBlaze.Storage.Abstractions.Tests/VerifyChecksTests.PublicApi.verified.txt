@@ -27,6 +27,7 @@ namespace HomeBlaze.Storage.Abstractions
     {
         public const string Json = ".json";
         public const string Markdown = ".md";
+        public const string MarkdownLong = ".markdown";
     }
     public interface IConfigurationWriter
     {
