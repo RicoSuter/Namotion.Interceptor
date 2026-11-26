@@ -847,6 +847,54 @@ public class SecretConversionTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenAStructureEditIsRetriedAfterARefusalReadAPlaintextSecret_ThenTheFileHoldsAReferenceForGood()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", "# Gateway\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#gateway Password=s3cr3t\n::\n");
+        var refused = await page.InsertTextAsync(page, null, "Text one.", CancellationToken.None);
+
+        // Act
+        var result = await page.InsertTextAsync(page, null, "Text two.", CancellationToken.None);
+        await storage.ReconcileAsync();
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.False(refused.IsWritten);
+        Assert.True(result.IsWritten);
+        Assert.Contains("Text two.", TryReadText("Gateway.md"));
+        AssertPageHoldsSecretReferenceOnly(page, "Gateway.md");
+    }
+
+    [Fact]
+    public async Task WhenABlockIsSavedAfterARefusalReadAPlaintextSecret_ThenTheFileHoldsAReferenceForGood()
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#other Host=10.0.0.1\n::\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#other Host=10.0.0.1\n::\n\n:: {DeviceType}#gateway Password=s3cr3t\n::\n");
+        var refused = await page.InsertTextAsync(page, null, "Text.", CancellationToken.None);
+        var other = Assert.IsType<EmbeddedSecretDevice>(page.Children["other"]);
+        other.Host = "10.0.0.2";
+
+        // Act
+        var isWritten = await page.WriteConfigurationAsync(other, CancellationToken.None);
+        await storage.ReconcileAsync();
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.False(refused.IsWritten);
+        Assert.True(isWritten);
+        Assert.Contains("Host=10.0.0.2", TryReadText("Gateway.md"));
+        AssertPageHoldsSecretReferenceOnly(page, "Gateway.md");
+    }
+
+    [Fact]
     public async Task WhenAMetadataFileIsWritten_ThenItIsNotConverted()
     {
         // Arrange

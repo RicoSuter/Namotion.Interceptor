@@ -437,9 +437,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     // Not cancelled once the content is decided: a cancelled reload after the write would leave the parse snapshot of
     // the old content, which a later configuration write-back would write back.
-    // Unconverted: the other callers convert the content or the text they add themselves, and a block write writes the
-    // text of the last parsed page, which the storage converted when it read the file, around a configuration that the
-    // serializer wrote with references. A block write leaves any plaintext that the parsed page still has as it is.
+    // Unconverted: every caller converts the content first, block writes and structure edits in PublishAndWriteAsync.
     private Task WriteUnlockedAsync(string content)
     {
         var bytes = Encoding.UTF8.GetBytes(content);
@@ -494,12 +492,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     {
         ArgumentNullException.ThrowIfNull(content);
         EnsureNotWithinWrite();
-        content = ConvertSecrets(content);
-
         await _writeLock.WaitAsync(cancellationToken);
         var write = BeginWrite();
         try
         {
+            // Once the lock is held, so that a cancel while waiting stores no secret that is never written.
+            content = ConvertSecrets(content);
             await WriteUnlockedAsync(content);
             return content;
         }
@@ -556,7 +554,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Saves of one page run one after the other.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage, such as the
-    /// load of a file, or from within a write of this page.</exception>
+    /// load of a file, or from within a write of this page; or a block type has a secret configuration property that is
+    /// not a string property of a subject, and nothing is written.</exception>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     public async Task<bool> WriteConfigurationAsync(
         IInterceptorSubject subject,
         CancellationToken cancellationToken)
@@ -582,7 +583,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Refused when the file differs from the text the page last read, and the page then reads it, or when the page would
     /// be larger than <see cref="MaxContentSize"/> bytes.
     /// </remarks>
-    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of
+    /// this page; or a block type has a secret configuration property that is not a string property of a subject, and nothing
+    /// is written.</exception>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     public Task<MarkdownEditResult> DeleteBlockAsync(IInterceptorSubject subject, CancellationToken cancellationToken) =>
         EditStructureAsync(
             (snapshot, page) => FindOwnBlock(page, snapshot.BlockSubjects, subject) is { } block
@@ -601,7 +606,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Refused as <see cref="DeleteBlockAsync"/> is, and for a text block when the segment starts no text block that can be
     /// edited any more or there is nothing to move past in the direction.
     /// </remarks>
-    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of
+    /// this page; or a block type has a secret configuration property that is not a string property of a subject, and nothing
+    /// is written.</exception>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     public Task<MarkdownEditResult> MoveBlockAsync(IInterceptorSubject subject, int direction, CancellationToken cancellationToken)
     {
         if (subject is HtmlSegment segment)
@@ -629,7 +638,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// null. The page then creates its own subject for it.
     /// </summary>
     /// <remarks>Refused as <see cref="DeleteBlockAsync"/> is.</remarks>
-    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of
+    /// this page; or a block type has a secret configuration property that is not a string property of a subject, and nothing
+    /// is written.</exception>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     public Task<MarkdownEditResult> InsertWidgetAsync(
         IInterceptorSubject content, IInterceptorSubject? before, IInterceptorSubject widget, string? name, CancellationToken cancellationToken)
     {
@@ -827,7 +840,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// content gets a new block from <see cref="AddWidgetToSlotAsync"/> or <see cref="AddTextToSlotAsync"/>.
     /// </summary>
     /// <remarks>Refused as <see cref="DeleteBlockAsync"/> is.</remarks>
-    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of
+    /// this page; or a block type has a secret configuration property that is not a string property of a subject, and nothing
+    /// is written.</exception>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     public Task<MarkdownEditResult> AddSlotItemAsync(
         IInterceptorSubject owner, string slotName, IInterceptorSubject item, CancellationToken cancellationToken)
     {
@@ -865,7 +882,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Refused when the block has no slot of that name that takes page content or no closing line, and as
     /// <see cref="DeleteBlockAsync"/> is.
     /// </remarks>
-    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of this page.</exception>
+    /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of
+    /// this page; or a block type has a secret configuration property that is not a string property of a subject, and nothing
+    /// is written.</exception>
+    /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     public Task<MarkdownEditResult> AddWidgetToSlotAsync(
         IInterceptorSubject owner, string? slotName, IInterceptorSubject widget, string? name, CancellationToken cancellationToken)
     {
@@ -1207,6 +1228,15 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         {
             _parser.LogRefusedWrite(FullPath, ReloadRefusal);
             return ReloadRefusal;
+        }
+
+        // The snapshot can hold plaintext that the storage did not convert, such as from the read after a refusal. Written
+        // as it is, its hash would be recorded as current, and no later pass would convert the file. The conversion only
+        // changes head lines and fences, so the blocks and their indexes stay, and the published page is the written text,
+        // which the reload inside the write needs to keep the subjects of the snapshot.
+        if (ConvertSecrets(write.Page.Source) is var converted && !ReferenceEquals(converted, write.Page.Source))
+        {
+            write = write with { Page = MarkdownPageParser.Parse(converted) };
         }
 
         // The text was computed from the snapshot, so it would undo what a reload published since then.
