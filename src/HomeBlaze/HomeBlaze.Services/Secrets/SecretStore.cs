@@ -9,8 +9,8 @@ namespace HomeBlaze.Services.Secrets;
 /// configuration files reference instead of the value. Entries are added or replaced, never removed.
 /// </summary>
 /// <remarks>
-/// The file is read once, when the store is created, so a file that is replaced while the store lives takes effect
-/// after a restart.
+/// The file is read once, when the store is created, and every write replaces it with the values in memory, so a file
+/// that is replaced or edited while the store lives is overwritten by its next write.
 /// </remarks>
 public sealed class SecretStore
 {

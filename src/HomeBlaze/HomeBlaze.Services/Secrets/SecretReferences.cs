@@ -118,7 +118,7 @@ internal sealed class SecretReferences
         // Remembered, so the reference is written back while the property stays empty, and a restored store recovers it.
         SetRemembered(owner, propertyName, new RememberedKey(key, text, IsUnresolved: true));
         _logger?.LogWarning(
-            "The secret {Key} of {Property} of {Type} is not in the secret store {Path}, so the property is empty. Enter it again, or restore the secret store and restart.",
+            "The secret {Key} of {Property} of {Type} is not in the secret store {Path}, so the property is empty. Enter it again, or stop HomeBlaze, restore the secret store and start it again.",
             key, propertyName, owner.GetType().FullName, _store.Path);
         return null;
     }
