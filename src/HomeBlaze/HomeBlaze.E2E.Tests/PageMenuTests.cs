@@ -31,7 +31,7 @@ public class PageMenuTests
         var head = page.GetByTestId("page-head");
         await Assertions.Expect(head.GetByRole(AriaRole.Button, new() { Name = "Page info and edit mode" })).ToBeVisibleAsync(new() { Timeout = Timeout });
         await Assertions.Expect(head).ToHaveTextAsync("");
-        await Assertions.Expect(page.GetByTestId("page-last-modified")).ToBeHiddenAsync();
+        await Assertions.Expect(page.GetByTestId("page-last-modified")).ToBeHiddenAsync(new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]

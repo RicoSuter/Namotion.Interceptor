@@ -84,9 +84,42 @@ internal static class HostListParser
                 fields.IsGuest = reader.ReadElementContentAsString().Trim() == "1";
                 return true;
             default:
+                return TryApplyInternetAccessField(ref fields, reader);
+        }
+    }
+
+    private static bool TryApplyInternetAccessField(ref HostFields fields, XmlReader reader)
+    {
+        switch (reader.LocalName)
+        {
+            case "X_AVM-DE_WANAccess":
+                fields.HasWanAccess = ParseWanAccess(reader.ReadElementContentAsString());
+                return true;
+            case "X_AVM-DE_Disallow":
+                fields.IsWanAccessDisallowed = ParseBoolean(reader.ReadElementContentAsString());
+                return true;
+            case "X_AVM-DE_FilterProfileID":
+                fields.FilterProfileId = reader.ReadElementContentAsString();
+                return true;
+            default:
                 return false;
         }
     }
+
+    /// <returns>True for <c>granted</c>, false for <c>denied</c>, null for <c>error</c>, <c>unknown</c> or any other value.</returns>
+    internal static bool? ParseWanAccess(string? value) => value?.Trim() switch
+    {
+        "granted" => true,
+        "denied" => false,
+        _ => null
+    };
+
+    private static bool? ParseBoolean(string value) => value.Trim() switch
+    {
+        "1" => true,
+        "0" => false,
+        _ => null
+    };
 
     private static int? ParseInt32(string value) =>
         int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) ? number : null;
@@ -101,8 +134,11 @@ internal static class HostListParser
         internal int? Speed;
         internal bool IsActive;
         internal bool IsGuest;
+        internal bool? HasWanAccess;
+        internal bool? IsWanAccessDisallowed;
+        internal string? FilterProfileId;
 
         internal HostEntry ToHostEntry() =>
-            new(MacAddress, IpAddress, IsActive, HostName, InterfaceType, Port, Speed, IsGuest);
+            new(MacAddress, IpAddress, IsActive, HostName, InterfaceType, Port, Speed, IsGuest, HasWanAccess, IsWanAccessDisallowed, FilterProfileId);
     }
 }

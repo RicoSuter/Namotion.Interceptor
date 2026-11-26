@@ -12,7 +12,7 @@ public class GpioWriteTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
         var pin = new GpioPin
@@ -20,8 +20,8 @@ public class GpioWriteTests
             Controller = controller,
             PinNumber = 17,
             Mode = GpioPinMode.Output,
-            Status = ServiceStatus.Running
         };
+        pin.Attach(controller, _ => { }, _ => { });
 
         // Act
         pin.Value = true;
@@ -35,7 +35,7 @@ public class GpioWriteTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Output);
         simulationDriver.SimulatePinValueChange(17, PinValue.High); // Start high
 
@@ -44,9 +44,9 @@ public class GpioWriteTests
             Controller = controller,
             PinNumber = 17,
             Mode = GpioPinMode.Output,
-            Status = ServiceStatus.Running,
             Value = true
         };
+        pin.Attach(controller, _ => { }, _ => { });
 
         // Act
         pin.Value = false;
@@ -60,22 +60,18 @@ public class GpioWriteTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Input);
 
-        var pin = new GpioPin
-        {
-            Controller = controller,
-            PinNumber = 17,
-            Mode = GpioPinMode.Input, // Input mode
-            Status = ServiceStatus.Running
-        };
+        var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Input };
+        pin.Attach(controller, _ => { }, _ => { });
 
         // Act
         pin.Value = true;
 
-        // Assert - No writes should have happened for input pin
-        Assert.DoesNotContain(simulationDriver.WriteHistory, w => w.PinNumber == 17);
+        // Assert - The controller only stores a level written to an input, so a write would fail its verification
+        Assert.Equal(ServiceStatus.Running, pin.Status);
+        Assert.Null(pin.StatusMessage);
     }
 
     [Fact]
@@ -83,16 +79,12 @@ public class GpioWriteTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
-        var pin = new GpioPin
-        {
-            Controller = controller,
-            PinNumber = 17,
-            Mode = GpioPinMode.Output,
-            Status = ServiceStatus.Unavailable // Not running
-        };
+        var pin = new GpioPin { PinNumber = 17, Mode = GpioPinMode.Output };
+        pin.Attach(controller, _ => { }, _ => { });
+        pin.Status = ServiceStatus.Unavailable;
 
         // Act
         pin.Value = true;
@@ -106,7 +98,7 @@ public class GpioWriteTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriver();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
         var pin = new GpioPin
@@ -129,7 +121,7 @@ public class GpioWriteTests
     {
         // Arrange
         var simulationDriver = new SimulationGpioDriverWithVerificationFailure();
-        using var controller = new GpioController(PinNumberingScheme.Logical, simulationDriver);
+        using var controller = new GpioController(simulationDriver);
         controller.OpenPin(17, PinMode.Output);
 
         var pin = new GpioPin
@@ -137,8 +129,8 @@ public class GpioWriteTests
             Controller = controller,
             PinNumber = 17,
             Mode = GpioPinMode.Output,
-            Status = ServiceStatus.Running
         };
+        pin.Attach(controller, _ => { }, _ => { });
 
         // Act - Write should fail verification
         pin.Value = true;

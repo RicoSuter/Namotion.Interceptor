@@ -2,9 +2,11 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services.Lifecycle;
+using HomeBlaze.Services.Tests.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -25,6 +27,86 @@ public class RegisteredSubjectMethodExtensionsTests
 
         // Assert
         Assert.Equal(new[] { "Object", "Interface", "Subclass" }, all.Select(method => method.Title));
+    }
+
+    [Fact]
+    public void WhenASubjectHasNoDeleteOperation_ThenGetDeleteOperationReturnsNull()
+    {
+        // Arrange
+        var registered = new NoMethodsSubject(CreateContext()).TryGetRegisteredSubject()!;
+        AddOperation(registered, "Remove", OperationPurpose.None, position: 0);
+
+        // Act
+        var deleteOperation = registered.GetDeleteOperation(ExclusionTarget.UserInterface);
+
+        // Assert
+        Assert.Null(deleteOperation);
+    }
+
+    [Fact]
+    public void WhenASubjectHasSeveralDeleteOperations_ThenTheOneWithTheLowestPositionIsReturned()
+    {
+        // Arrange
+        var registered = new NoMethodsSubject(CreateContext()).TryGetRegisteredSubject()!;
+        AddOperation(registered, "Later", OperationPurpose.Delete, position: 5);
+        AddOperation(registered, "First", OperationPurpose.Delete, position: 1);
+
+        // Act
+        var deleteOperation = registered.GetDeleteOperation(ExclusionTarget.UserInterface);
+
+        // Assert
+        Assert.Equal("First", deleteOperation?.Title);
+    }
+
+    [Fact]
+    public void WhenTheDeleteOperationIsExcludedFromTheTarget_ThenGetDeleteOperationReturnsNull()
+    {
+        // Arrange
+        var registered = new NoMethodsSubject(CreateContext()).TryGetRegisteredSubject()!;
+        AddOperation(registered, "Remove", OperationPurpose.Delete, position: 0, ExclusionTarget.UserInterface);
+
+        // Act
+        var forUserInterface = registered.GetDeleteOperation(ExclusionTarget.UserInterface);
+        var forAgents = registered.GetDeleteOperation(ExclusionTarget.Agents);
+
+        // Assert
+        Assert.Null(forUserInterface);
+        Assert.Equal("Remove", forAgents?.Title);
+    }
+
+    [Fact]
+    public void WhenMethodsWithAPurposeAreExcluded_ThenGetAllMethodsReturnsOnlyTheOtherMethodsInOrder()
+    {
+        // Arrange
+        var registered = new NoMethodsSubject(CreateContext()).TryGetRegisteredSubject()!;
+        AddOperation(registered, "Second", OperationPurpose.None, position: 2);
+        AddOperation(registered, "Remove", OperationPurpose.Delete, position: 0);
+        AddOperation(registered, "First", OperationPurpose.None, position: 1);
+
+        // Act
+        var all = registered.GetAllMethods(ExclusionTarget.UserInterface);
+        var withoutPurpose = registered.GetAllMethods(ExclusionTarget.UserInterface, excludeMethodsWithPurpose: true);
+
+        // Assert
+        Assert.Equal(new[] { "Remove", "First", "Second" }, all.Select(method => method.Title));
+        Assert.Equal(new[] { "First", "Second" }, withoutPurpose.Select(method => method.Title));
+    }
+
+    private static void AddOperation(
+        RegisteredSubject registered, string name, OperationPurpose purpose, int position,
+        ExclusionTarget excludedFrom = ExclusionTarget.None)
+    {
+        var operation = new MethodMetadata(_ => null)
+        {
+            Kind = MethodKind.Operation,
+            Purpose = purpose,
+            PropertyName = name,
+            Title = name,
+            Position = position,
+            ExcludedFrom = excludedFrom,
+        };
+
+        registered.AddProperty(name, typeof(MethodMetadata), _ => operation, null);
     }
 
     private static IInterceptorSubjectContext CreateContext()

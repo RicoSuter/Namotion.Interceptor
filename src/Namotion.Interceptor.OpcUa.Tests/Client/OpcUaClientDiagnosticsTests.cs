@@ -85,7 +85,7 @@ public class OpcUaClientDiagnosticsTests
         try
         {
             // Act
-            SetCurrentSession(sessionManager, session);
+            sessionManager.SetSession(session);
             polling = source.Diagnostics.Polling!;
             readAfterWrite = source.Diagnostics.ReadAfterWrite!;
 
@@ -98,7 +98,7 @@ public class OpcUaClientDiagnosticsTests
         finally
         {
             // Act
-            SetCurrentSession(sessionManager, null);
+            sessionManager.SetSession(null);
         }
 
         // Assert
@@ -108,7 +108,7 @@ public class OpcUaClientDiagnosticsTests
         try
         {
             // Act
-            SetCurrentSession(sessionManager, session);
+            sessionManager.SetSession(session);
             var pollingAfterRestore = source.Diagnostics.Polling;
             var readAfterWriteAfterRestore = source.Diagnostics.ReadAfterWrite;
 
@@ -119,7 +119,7 @@ public class OpcUaClientDiagnosticsTests
         finally
         {
             // Act
-            SetCurrentSession(sessionManager, null);
+            sessionManager.SetSession(null);
         }
 
         // Act
@@ -151,7 +151,7 @@ public class OpcUaClientDiagnosticsTests
         SetSessionManager(source, sessionManager);
 
         var session = (Session)RuntimeHelpers.GetUninitializedObject(typeof(Session));
-        SetCurrentSession(sessionManager, session);
+        sessionManager.SetSession(session);
         try
         {
             var pollingDiagnostics = source.Diagnostics.Polling!;
@@ -171,7 +171,7 @@ public class OpcUaClientDiagnosticsTests
         }
         finally
         {
-            SetCurrentSession(sessionManager, null);
+            sessionManager.SetSession(null);
         }
     }
 
@@ -304,13 +304,13 @@ public class OpcUaClientDiagnosticsTests
         Assert.True(source.Ownership.ClaimSource(property));
 
         await using var executionGate = HostedExecutionGate.Install(source);
-        await executionGate.Started.WaitAsync(TimeSpan.FromSeconds(5));
+        await executionGate.Started.WaitAsync(TestTimeouts.Default);
 
         // Act
         var disposal = source.DisposeAsync().AsTask();
         try
         {
-            await executionGate.CancellationObserved.WaitAsync(TimeSpan.FromSeconds(5));
+            await executionGate.CancellationObserved.WaitAsync(TestTimeouts.Default);
 
             // Assert
             Assert.False(disposal.IsCompleted);
@@ -368,11 +368,6 @@ public class OpcUaClientDiagnosticsTests
             .GetField("_sessionManager", BindingFlags.Instance | BindingFlags.NonPublic)!
             .SetValue(source, sessionManager);
 
-    private static void SetCurrentSession(SessionManager sessionManager, Session? session) =>
-        typeof(SessionManager)
-            .GetField("_session", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .SetValue(sessionManager, session);
-
     private static async Task<(bool CompletedWhileLocked, int[] Results)> ReadCountsWhileDictionaryLocksAreHeldAsync(
         (object Owner, string FieldName, Func<int> Getter)[] cases)
     {
@@ -390,10 +385,10 @@ public class OpcUaClientDiagnosticsTests
                 lock (GetFirstConcurrentDictionaryLock(testCase.Owner, testCase.FieldName))
                 {
                     locksAcquired.Signal();
-                    if (!releaseLocks.Wait(TimeSpan.FromSeconds(5)))
-                    {
-                        throw new TimeoutException("The test did not release a ConcurrentDictionary lock.");
-                    }
+
+                    // Unbounded because the finally below always releases it, and a holder that gave up early
+                    // would let a blocking getter complete as if it had not waited.
+                    releaseLocks.Wait();
                 }
             }))
             .ToArray();
@@ -402,7 +397,7 @@ public class OpcUaClientDiagnosticsTests
         bool completedWhileLocked;
         try
         {
-            Assert.True(locksAcquired.Wait(TimeSpan.FromSeconds(5)), "The dictionary locks were not acquired.");
+            Assert.True(locksAcquired.Wait(TestTimeouts.Default), "The dictionary locks were not acquired.");
             getterTasks = cases
                 .Select(testCase => DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
                 {
@@ -418,8 +413,8 @@ public class OpcUaClientDiagnosticsTests
                 }))
                 .ToArray();
 
-            Assert.True(gettersStarted.Wait(TimeSpan.FromSeconds(5)), "The diagnostics getters did not start.");
-            completedWhileLocked = gettersCompleted.Wait(TimeSpan.FromSeconds(5));
+            Assert.True(gettersStarted.Wait(TestTimeouts.Default), "The diagnostics getters did not start.");
+            completedWhileLocked = gettersCompleted.Wait(TestTimeouts.Default);
         }
         finally
         {

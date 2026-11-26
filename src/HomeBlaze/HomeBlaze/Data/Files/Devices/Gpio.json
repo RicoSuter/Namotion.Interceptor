@@ -68,7 +68,6 @@
       "mode": "Input"
     },
     "17": {
-      "name": "GPIO17",
       "mode": "Input"
     },
     "18": {
@@ -85,26 +84,21 @@
       "mode": "Input"
     },
     "22": {
-      "name": "GPIO22",
       "mode": "Input"
     },
     "23": {
-      "name": "GPIO23",
       "mode": "Input"
     },
     "24": {
-      "name": "GPIO24",
       "mode": "Input"
     },
     "25": {
-      "name": "GPIO25",
       "mode": "Input"
     },
     "26": {
       "mode": "Input"
     },
     "27": {
-      "name": "GPIO27",
       "mode": "Input"
     }
   }

@@ -28,12 +28,6 @@ namespace Namotion.Interceptor.Mqtt.Tests;
 /// </remarks>
 public class MqttConnectionMonitorTests
 {
-    /// <summary>Budget for an observation the monitor produces within milliseconds. Reached only on a genuine failure.</summary>
-    private static readonly TimeSpan ObservationTimeout = TimeSpan.FromSeconds(10);
-
-    /// <summary>Hard stop for the monitoring loop so a hang fails the run instead of blocking the test host.</summary>
-    private static readonly TimeSpan MonitorWatchdogTimeout = TimeSpan.FromSeconds(30);
-
     /// <summary>Poll interval for observations. The monitor reacts within a few milliseconds when it is configured that way.</summary>
     private static readonly TimeSpan ObservationPollInterval = TimeSpan.FromMilliseconds(2);
 
@@ -95,7 +89,7 @@ public class MqttConnectionMonitorTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                observation, ObservationTimeout, ObservationPollInterval, observationDescription);
+                observation, TestTimeouts.Default, ObservationPollInterval, observationDescription);
         }
         finally
         {
@@ -106,7 +100,7 @@ public class MqttConnectionMonitorTests
             {
                 // Bounded join: a monitor that ignores its token fails the test at the watchdog
                 // instead of hanging the class.
-                await monitorTask.WaitAsync(MonitorWatchdogTimeout);
+                await monitorTask.WaitAsync(TestTimeouts.Default);
             }
             catch (OperationCanceledException)
             {
@@ -252,7 +246,7 @@ public class MqttConnectionMonitorTests
     {
         // Arrange: the transport termination cancels the monitor and then fails, which is what a shutdown looks like
         var client = new Mock<IMqttClient>();
-        using var watchdog = new CancellationTokenSource(MonitorWatchdogTimeout);
+        using var watchdog = new CancellationTokenSource(TestTimeouts.Default);
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(watchdog.Token);
         var errorCount = 0;
         var transportTerminationAttempted = false;

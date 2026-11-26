@@ -268,7 +268,7 @@ public class AgentOperationAccessTests
                 () => new MethodPropertyInitializer(),
                 handler => handler is MethodPropertyInitializer);
         var root = new AgentTestRoot(context);
-        context.AddService<ISubjectPathResolver>(new SubjectPathResolver(() => root));
+        context.AddService<ISubjectPathResolver>(new SubjectPathResolver(context, () => root));
         var agentServices = AgentTestContext.CreateServices(root);
         var agent = new FakeAgent(agentServices);
         root.Children = new Dictionary<string, IInterceptorSubject> { ["Agent"] = agent };

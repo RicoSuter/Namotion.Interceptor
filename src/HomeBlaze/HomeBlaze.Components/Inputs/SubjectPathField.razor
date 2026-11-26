@@ -9,6 +9,8 @@
               Placeholder="@Placeholder"
               Variant="@Variant"
               Required="@Required"
+              Error="@(ErrorText is not null)"
+              ErrorText="@ErrorText"
               Immediate="true"
               Adornment="Adornment.End"
               AdornmentIcon="@Icons.Material.Filled.Search"
@@ -38,6 +40,12 @@
     /// </summary>
     [Parameter]
     public bool Required { get; set; }
+
+    /// <summary>
+    /// The message to show on the field as an error, or null when it has none.
+    /// </summary>
+    [Parameter]
+    public string? ErrorText { get; set; }
 
     [Parameter]
     public IDictionary<string, IInterceptorSubject>? LocalSubjects { get; set; }

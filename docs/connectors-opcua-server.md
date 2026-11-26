@@ -95,6 +95,7 @@ await server.StartAsync(cancellationToken);
 |----------|------|---------|-------------|
 | `RootName` | `string?` | null | Optional folder name under ObjectsFolder to organize server nodes |
 | `ApplicationName` | `string` | "Namotion.Interceptor.Server" | Application name for identification and certificate generation |
+| `ApplicationUri` | `string?` | null | Application URI the server certificate carries (`urn:{host name}:Namotion.Interceptor:{ApplicationName}` when null), see [Certificates](#certificates) |
 | `BaseAddress` | `string` | "opc.tcp://localhost:4840/" | Server endpoint address |
 | `NamespaceUri` | `string` | "http://namotion.com/Interceptor/" | Primary namespace URI for custom nodes |
 | `ValueConverter` | `OpcUaValueConverter` | *required* | Converts between C# properties and OPC UA values |
@@ -102,8 +103,8 @@ await server.StartAsync(cancellationToken);
 | `BufferTime` | `TimeSpan?` | 8ms | Time window to buffer incoming property changes before publishing to clients |
 | `TelemetryContext` | `ITelemetryContext` | NullTelemetryContext | Telemetry integration for logging and diagnostics |
 | `AutoAcceptUntrustedCertificates` | `bool` | false | Accept untrusted client certificates (testing/development only) |
-| `CleanCertificateStore` | `bool` | true | Remove old certificates from the application certificate store on startup |
-| `CertificateStoreBasePath` | `string` | "pki" | Base directory for certificate stores. Change to isolate stores for parallel test execution |
+| `CleanCertificateStore` | `bool` | false | Empty `{CertificateStoreBasePath}/own` on every start, so the server creates a new certificate each time, see [Certificates](#certificates) |
+| `CertificateStoreBasePath` | `string` | "pki" | Base directory for certificate stores |
 
 Final outbound delivery on stop uses the internal five-second safety bound described in [Flushing On Stop](connectors.md#flushing-on-stop). It cannot be configured per connector.
 
@@ -119,6 +120,16 @@ The server supports multiple security policies out of the box:
 | Aes128_Sha256_RsaOaep | Sign, Sign & Encrypt |
 | Aes256_Sha256_RsaPss | Sign, Sign & Encrypt |
 | None | No security |
+
+### Certificates
+
+The server follows the client's [store layout](connectors-opcua-client.md#certificate-stores) and [expiry rules](connectors-opcua-client.md#certificate-expiry), with these differences:
+
+- On each start it loads its certificate from `own`, or creates a self-signed one valid for 12 months. It keeps it across restarts unless `CleanCertificateStore` is set, and clients have to trust each new one.
+- An expired certificate is replaced only at the next start; until then clients reject it. An override that sets `DisableCertificateAutoCreation` turns off creation and replacement.
+- A stored certificate must match the application URI and the host of `BaseAddress`, where `localhost` stands for the host name. Both defaults contain the host name, so after a rename, such as a recreated container, a self-signed certificate is replaced and clients have to trust the new one, while any other certificate fails the start. Keep the host name stable, or set `ApplicationUri` and an explicit host in `BaseAddress`. To start over, delete the certificate from `own/certs` and its key from `own/private`.
+- With `AutoAcceptUntrustedCertificates = false`, the default, an untrusted client certificate on a secured connection is written to `rejected/certs`; moving it to `trusted/certs` lets the client connect.
+- A failed start is logged, reported in `Diagnostics.LastError` and retried. A certificate that cannot be loaded is reported with its folder, the expected subject and application URI, and the remedies.
 
 ### User Authentication
 
@@ -145,9 +156,11 @@ public class MyServerConfiguration : OpcUaServerConfiguration
 
         var config = application.ApplicationConfiguration;
 
-        // Tighten security
-        config.SecurityConfiguration.AutoAcceptUntrustedCertificates = false;
+        // Tighten security; a smaller existing certificate in {CertificateStoreBasePath}/own then fails the start until deleted.
         config.SecurityConfiguration.MinimumCertificateKeySize = 4096;
+
+        // Changed security settings take effect only through UpdateAsync.
+        await config.CertificateValidator.UpdateAsync(config);
 
         // Adjust transport limits
         config.TransportQuotas.MaxMessageSize = 64_000_000;

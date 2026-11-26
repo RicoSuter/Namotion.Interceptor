@@ -5,6 +5,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Performance;
+using Namotion.Interceptor.Tracking.Transactions.Handlers;
+using Namotion.Interceptor.Tracking.Transactions.Writers;
 
 namespace Namotion.Interceptor.Tracking.Transactions;
 
@@ -449,6 +451,8 @@ public sealed class SubjectTransaction : IDisposable
         TimeSpan commitTimeout,
         CancellationToken cancellationToken)
     {
+        PropertyChangeInterceptor.ThrowIfInSynchronousCallback();
+
         // Check before acquiring the context lock so an attempted nested exclusive transaction cannot deadlock.
         if (CurrentTransaction.Value is { IsDisposed: false })
         {
@@ -1010,6 +1014,8 @@ public sealed class SubjectTransaction : IDisposable
 
     private void ValidateCanCommit()
     {
+        PropertyChangeInterceptor.ThrowIfInSynchronousCallback();
+
         if (Volatile.Read(ref _isDisposed) != 0)
             throw new ObjectDisposedException(nameof(SubjectTransaction));
 

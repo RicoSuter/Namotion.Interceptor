@@ -1,7 +1,13 @@
+using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.Services;
+using HomeBlaze.Services.Discovery;
 using HomeBlaze.Storage;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
+using Namotion.Devices.Nuki;
 using Xunit;
 
 namespace HomeBlaze.E2E.Tests;
@@ -18,6 +24,57 @@ public class PlaywrightFixtureTests
     public PlaywrightFixtureTests(PlaywrightFixture fixture)
     {
         _fixture = fixture;
+    }
+
+    [Fact]
+    public void WhenTheFixtureStartedTheServer_ThenTheBrowserAndTheServicesUseItsOnlyHost()
+    {
+        // Arrange
+        var serverAddress = new Uri(_fixture.ServerAddress);
+
+        // Act
+        var addresses = _fixture.ServerServices.GetRequiredService<IServer>().Features.GetRequiredFeature<IServerAddressesFeature>().Addresses;
+
+        // Assert
+        Assert.Equal(1, _fixture.StartedHostCount);
+        Assert.Contains(addresses, address => new Uri(address) == serverAddress);
+    }
+
+    [Fact]
+    public async Task WhenTheDiscoveriesOfTheApplicationScan_ThenTheyFindNothingWithoutTheNetwork()
+    {
+        // Arrange
+        var services = _fixture.ServerServices;
+        using var httpClient = services.GetRequiredService<IHttpClientFactory>().CreateClient();
+        var udpDiscovery = services.GetRequiredService<IUdpDiscovery>();
+
+        // The real service can also find nothing on a quiet network, so the replacement itself is checked, before any
+        // call that would use the network.
+        Assert.Same(typeof(PlaywrightFixtureTests).Assembly, udpDiscovery.GetType().Assembly);
+
+        // Act
+        var ssdpResponses = await services.GetRequiredService<ISsdpSearch>().SearchAsync("ssdp:all", CancellationToken.None);
+        var multicastDnsInstances = await services.GetRequiredService<IMulticastDnsBrowser>().BrowseAsync("_hue._tcp", CancellationToken.None);
+        var broadcastAnswers = await udpDiscovery.BroadcastAsync(46000, new byte[] { 0x01 }, TimeSpan.FromSeconds(1), CancellationToken.None).ToListAsync();
+        var listenedDatagrams = await udpDiscovery.ListenAsync(7979, TimeSpan.FromSeconds(1), CancellationToken.None).ToListAsync();
+        var nukiAnswer = await httpClient.GetStringAsync(NukiBridgeDiscovery.DiscoveryAddress);
+        var discoveries = services.GetRequiredService<SubjectDiscoveryRegistry>().GetSubjectDiscoveries();
+
+        // Assert
+        Assert.Empty(ssdpResponses);
+        Assert.Empty(multicastDnsInstances);
+        Assert.Empty(broadcastAnswers);
+        Assert.Empty(listenedDatagrams);
+        // The stub of the host answers with exactly this; the real service adds an error code.
+        Assert.Equal("{\"bridges\":[]}", nukiAnswer);
+        // The subject discoveries get these services injected from the same container. One that cannot be created is
+        // left out without an error a test sees, so every subject discovery of the application must be there.
+        Assert.Equal(
+            [
+                "DiscoverableTestDiscovery", "EcowittGatewayDiscovery", "FritzBoxDiscovery", "HueBridgeDiscovery", "MyStromSwitchDiscovery",
+                "NukiBridgeDiscovery", "ShellyDeviceDiscovery", "SonosHouseholdDiscovery"
+            ],
+            discoveries.Select(discovery => discovery.GetType().Name).Order());
     }
 
     [Fact]

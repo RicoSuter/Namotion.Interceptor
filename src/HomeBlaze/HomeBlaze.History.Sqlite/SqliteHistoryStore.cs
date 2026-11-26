@@ -83,8 +83,38 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     private readonly object _connectionLock = new();
     private readonly Dictionary<string, SqliteConnection> _connections = new(StringComparer.Ordinal);
 
+    // _connections.Count, published on every change so metrics read it without waiting for _connectionLock, which
+    // a long query holds for its whole run.
+    private int _openConnectionCount;
+
+    // Set under _connectionLock and checked under it wherever a connection opens, so nothing reopens one after
+    // Dispose closed them all. Volatile for CoverageRanges, which reads it without the lock.
+    private volatile bool _disposed;
+
     // Partitions this build refused to open, so a read skips them without retrying and logging per query.
     private readonly HashSet<string> _unreadablePartitions = new(StringComparer.Ordinal);
+
+    // How long a partition connection stays cached without use before the sweep closes it (see the SQLite
+    // section of the history design document).
+    internal static readonly TimeSpan IdlePartitionConnectionTimeout = TimeSpan.FromMinutes(5);
+
+    // The page cache, in KiB, of a connection opened to a partition whose range has ended (see the SQLite section of
+    // the history design document).
+    internal const int PastPartitionPageCacheKibibytes = 256;
+
+    private static readonly string PastPartitionPageCacheSql =
+        "PRAGMA cache_size=-" + PastPartitionPageCacheKibibytes.ToString(CultureInfo.InvariantCulture) + ";";
+
+    // Hands the heap freed by closed connections back to the operating system; replaceable by tests.
+    internal Action TrimNativeHeap { get; set; } = NativeHeap.Trim;
+
+    // When each cached partition connection was last handed out. Under _connectionLock.
+    private readonly Dictionary<string, DateTimeOffset> _partitionLastUsed = new(StringComparer.Ordinal);
+
+    // Paths a walk over every partition found in none of them, until a flush writes them. Under _connectionLock.
+    // Capped because callers such as MCP clients can ask for any path; past the cap a read only walks again.
+    private readonly HashSet<string> _absentPaths = new(StringComparer.Ordinal);
+    private const int MaxAbsentPaths = 4096;
 
     private readonly SqliteCoverageStore _coverageStore;
 
@@ -126,7 +156,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         _getUtcNow = getUtcNow;
         _logger = logger;
         _readContext = new SqliteReadContext(
-            _databaseDirectory, MetadataKey, TryOpenPartition, OpenMetadata);
+            _databaseDirectory, MetadataKey, TryOpenPartition, OpenMetadata,
+            path => _absentPaths.Contains(path), MarkPathAbsent);
         _coverageStore = new SqliteCoverageStore(OpenMetadata);
 
         // After the coverage store exists: publishing the watermark compares against its snapshot.
@@ -191,7 +222,16 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
 
     public string? LastError => _lastError;
 
-    public ImmutableArray<HistoryCoverage> CoverageRanges => GetEffectiveCoverageSnapshot();
+    /// <summary>
+    /// Gets the ranges this store holds complete history for, or none once the store is disposed.
+    /// </summary>
+    public ImmutableArray<HistoryCoverage> CoverageRanges =>
+        _disposed ? ImmutableArray<HistoryCoverage>.Empty : GetEffectiveCoverageSnapshot();
+
+    /// <summary>
+    /// Gets the number of open database connections, partitions and the metadata database together.
+    /// </summary>
+    public int OpenConnectionCount => Volatile.Read(ref _openConnectionCount);
 
     public long EstimatedStorageBytes
     {
@@ -326,6 +366,14 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                         _reloadCoverageAfterFailure = false;
                     }
 
+                    if (_absentPaths.Count > 0)
+                    {
+                        foreach (var sample in batch)
+                        {
+                            _absentPaths.Remove(sample.Path);
+                        }
+                    }
+
                     foreach (var (key, samples) in byPartition)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -454,6 +502,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         }
 
         _connections.Clear();
+        Volatile.Write(ref _openConnectionCount, 0);
+        _partitionLastUsed.Clear();
     }
 
     public Task<HistorySeries> QueryAsync(HistoryQuery query, CancellationToken cancellationToken)
@@ -482,6 +532,11 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         // through the engine's OpenPartition/OpenMoves delegates, which re-enter this lock).
         lock (_connectionLock)
         {
+            if (_disposed)
+            {
+                return EmptySeries(query.PropertyPath);
+            }
+
             // The bucket reader's look-backs (the TWA carry seed and the Delta reading) read directly through the
             // same context; they run while this lock is already held, matching the original inline look-back.
             var result = query.Bucket is null
@@ -499,6 +554,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         }
     }
 
+    // A series without points or coverage: the answer of a store that holds no history.
+    internal static HistorySeries EmptySeries(string propertyPath) =>
+        new(propertyPath, ImmutableArray<HistoryPoint>.Empty, false, ImmutableArray<HistoryCoverage>.Empty);
+
     public HistoryPoint? GetSampleAtOrBefore(string propertyPath, DateTimeOffset asOf)
     {
         var coverageRanges = GetEffectiveCoverageSnapshot();
@@ -506,7 +565,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         // Serialize connection use under the re-entrant _connectionLock (see Query for the rationale).
         lock (_connectionLock)
         {
-            return GetSampleAtOrBeforeCore(propertyPath, asOf, coverageRanges);
+            return _disposed ? null : GetSampleAtOrBeforeCore(propertyPath, asOf, coverageRanges);
         }
     }
 
@@ -523,7 +582,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         // Serialize connection use under the re-entrant _connectionLock (see Query for the rationale).
         lock (_connectionLock)
         {
-            return SqliteHistoryReader.GetLastNumericSampleBefore(_readContext, propertyPath, before);
+            return _disposed ? null : SqliteHistoryReader.GetLastNumericSampleBefore(_readContext, propertyPath, before);
         }
     }
 
@@ -550,7 +609,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             return null;
         }
 
-        var sample = SqliteHistoryReader.GetSampleAtOrBefore(_readContext, propertyPath, asOf);
+        var sample = SqliteHistoryReader.GetSampleAtOrBefore(_readContext, propertyPath, asOf, coverage.From);
         return sample is not null && sample.Timestamp >= coverage.From ? sample : null;
     }
 
@@ -680,100 +739,117 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_flushLock)
         {
-            var cutoff = _getUtcNow() - _maxAge;
+            var now = _getUtcNow();
+            var cutoff = now - _maxAge;
+            var closedCount = 0;
 
-            lock (_connectionLock)
+            try
             {
-                // Give up the claim before deleting the data behind it. Deleting first leaves the store
-                // claiming a window whose partitions are gone if a delete throws (a locked file) or the
-                // process dies mid-sweep, and inside claimed coverage the merger will not fall back to
-                // another store, so those queries return empty rather than the other store's data.
-                //
-                // The claim is also trimmed before the coverage start is advanced below. Advancing it
-                // first lifts the constraint that stops an untrimmed range being claimed, and this lock
-                // is held for the whole of every query, so the window between the two is as wide as the
-                // slowest read.
-                _coverageStore.Trim(EpochTicks.ToEpochTicks(cutoff));
-
-                foreach (var key in _readContext.EnumeratePartitionFileKeys().ToArray())
+                lock (_connectionLock)
                 {
-                    var (_, end) = SqlitePartition.InferredRange(key);
-                    if (end >= cutoff)
+                    // Give up the claim before deleting the data behind it. Deleting first leaves the store
+                    // claiming a window whose partitions are gone if a delete throws (a locked file) or the
+                    // process dies mid-sweep, and inside claimed coverage the merger will not fall back to
+                    // another store, so those queries return empty rather than the other store's data.
+                    //
+                    // The claim is also trimmed before the coverage start is advanced below. Advancing it
+                    // first lifts the constraint that stops an untrimmed range being claimed, and this lock
+                    // is held for the whole of every query, so the window between the two is as wide as the
+                    // slowest read.
+                    _coverageStore.Trim(EpochTicks.ToEpochTicks(cutoff));
+
+                    foreach (var key in _readContext.EnumeratePartitionFileKeys().ToArray())
                     {
-                        continue;
+                        var (_, end) = SqlitePartition.InferredRange(key);
+                        if (end >= cutoff)
+                        {
+                            continue;
+                        }
+
+                        try
+                        {
+                            if (DeletePartition(key))
+                            {
+                                closedCount++;
+                            }
+                        }
+                        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                        {
+                            // One locked file must not abort the sweep: the rest still needs trimming, and
+                            // this partition is already outside the coverage claimed above.
+                            _lastError = exception.Message;
+                        }
                     }
 
+                    // Moves describing samples that no longer exist only slow down chain resolution, which
+                    // every query and look-back performs, and they accumulate in the one database retention
+                    // never deletes. The newest move at or before the cutoff is kept, because that is the one
+                    // bounding the leg covering the cutoff instant. Mirrors InMemoryHistoryStore.Sweep.
                     try
                     {
-                        DeletePartition(key);
+                        PruneMoves(EpochTicks.ToEpochTicks(cutoff));
                     }
-                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                    catch (SqliteException exception)
                     {
-                        // One locked file must not abort the sweep: the rest still needs trimming, and
-                        // this partition is already outside the coverage claimed above.
+                        // Same reasoning as the delete loop above: a locked or failing metadata database
+                        // must not abort the sweep before the partitions are checkpointed and before the
+                        // coverage start advances below. The next sweep prunes what this one did not.
                         _lastError = exception.Message;
                     }
-                }
 
-                // Moves describing samples that no longer exist only slow down chain resolution, which
-                // every query and look-back performs, and they accumulate in the one database retention
-                // never deletes. The newest move at or before the cutoff is kept, because that is the one
-                // bounding the leg covering the cutoff instant. Mirrors InMemoryHistoryStore.Sweep.
-                try
-                {
-                    PruneMoves(EpochTicks.ToEpochTicks(cutoff));
-                }
-                catch (SqliteException exception)
-                {
-                    // Same reasoning as the delete loop above: a locked or failing metadata database
-                    // must not abort the sweep before the partitions are checkpointed and before the
-                    // coverage start advances below. The next sweep prunes what this one did not.
-                    _lastError = exception.Message;
-                }
+                    // First, so a checkpoint that throws below cannot keep idle connections open. Closing the last
+                    // connection to a database checkpoints it as well.
+                    closedCount += CloseIdlePartitions(now);
 
-                // Persist the WAL contents back into the surviving main database files so their on-disk
-                // size reflects the data after the sweep.
-                //
-                // Only the files that actually have frames. A sweep runs after every flush, so at the
-                // default year of weekly partitions this loop faced more than fifty cached connections
-                // every ten seconds while a flush usually writes one of them. An idle TRUNCATE leaves
-                // the database itself untouched, so the cost was not rewriting them: it was ~55
-                // truncate-to-zero calls and inode updates every ten seconds, which still matters on
-                // the SD cards and eMMC these installations run on.
-                foreach (var (key, connection) in _connections)
-                {
-                    if (HasWalFrames(_readContext.PartitionFilePath(key)))
+                    // Persist the WAL contents back into the surviving main database files so their on-disk
+                    // size reflects the data after the sweep.
+                    //
+                    // Only the files that actually have frames. A sweep runs after every flush, so at the
+                    // default year of weekly partitions this loop faced more than fifty cached connections
+                    // every ten seconds while a flush usually writes one of them. An idle TRUNCATE leaves
+                    // the database itself untouched, so the cost was not rewriting them: it was ~55
+                    // truncate-to-zero calls and inode updates every ten seconds, which still matters on
+                    // the SD cards and eMMC these installations run on.
+                    foreach (var (key, connection) in _connections)
                     {
-                        Execute(connection, "PRAGMA wal_checkpoint(TRUNCATE);");
+                        if (HasWalFrames(_readContext.PartitionFilePath(key)))
+                        {
+                            Execute(connection, "PRAGMA wal_checkpoint(TRUNCATE);");
+                        }
+                    }
+                }
+
+                lock (_pendingLock)
+                {
+                    if (_pendingCoverageStart < cutoff)
+                    {
+                        SetPendingCoverageStart(cutoff);
                     }
                 }
             }
-
-            lock (_pendingLock)
+            finally
             {
-                if (_pendingCoverageStart < cutoff)
+                // Also when the sweep failed after closing connections. Outside the connection lock, since trimming
+                // walks the whole C heap; only after a close, so a sweep that freed nothing costs nothing.
+                if (closedCount > 0)
                 {
-                    SetPendingCoverageStart(cutoff);
+                    TrimNativeHeap();
                 }
             }
         }
     }
 
     // Closes and removes the cached connection (Windows holds WAL/SHM locks), then deletes the
-    // partition's main file and its -wal/-shm siblings if present.
-    private void DeletePartition(string key)
+    // partition's main file and its -wal/-shm siblings if present. Returns whether a connection was closed.
+    private bool DeletePartition(string key)
     {
-        if (_connections.TryGetValue(key, out var connection))
-        {
-            connection.Close();
-            connection.Dispose();
-            _connections.Remove(key);
-        }
+        var closed = ClosePartition(key);
 
         var path = _readContext.PartitionFilePath(key);
         DeleteFileIfExists(path);
         DeleteFileIfExists(path + "-wal");
         DeleteFileIfExists(path + "-shm");
+        return closed;
     }
 
     // Drops moves that only describe samples already aged out, keeping the newest one at or before the
@@ -821,7 +897,9 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_connectionLock)
         {
-            if (_unreadablePartitions.Contains(key))
+            // Defensive: queries already return before reading once disposed, and they hold this lock throughout.
+            // Left to OpenPartition, the throw would mark the partition unreadable.
+            if (_disposed || _unreadablePartitions.Contains(key))
             {
                 return null;
             }
@@ -853,8 +931,12 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_connectionLock)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            var now = _getUtcNow();
             if (_connections.TryGetValue(key, out var existing))
             {
+                _partitionLastUsed[key] = now;
                 return existing;
             }
 
@@ -895,6 +977,11 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
                     "CREATE VIEW IF NOT EXISTS history_paths AS " +
                     "SELECT p.path, h.ts, h.value_long, h.value_double, h.value_json " +
                     "FROM history h JOIN paths p ON p.id = h.path_id;");
+
+                if (SqlitePartition.InferredRange(key).End <= now)
+                {
+                    Execute(connection, PastPartitionPageCacheSql);
+                }
             }
             catch
             {
@@ -903,6 +990,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             }
 
             _connections[key] = connection;
+            Volatile.Write(ref _openConnectionCount, _connections.Count);
+            _partitionLastUsed[key] = now;
             return connection;
         }
     }
@@ -912,6 +1001,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_connectionLock)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
             if (_connections.TryGetValue(MetadataKey, out var existing))
             {
                 return existing;
@@ -946,6 +1037,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             }
 
             _connections[MetadataKey] = connection;
+            Volatile.Write(ref _openConnectionCount, _connections.Count);
             return connection;
         }
     }
@@ -1004,6 +1096,70 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         }
     }
 
+    // Closes the partition connections not handed out for IdlePartitionConnectionTimeout. Every query holds
+    // _connectionLock for its whole run, as this caller does, so no connection is closed while in use.
+    // Returns how many connections it closed.
+    private int CloseIdlePartitions(DateTimeOffset now)
+    {
+        List<string>? idle = null;
+        foreach (var (key, lastUsed) in _partitionLastUsed)
+        {
+            // A last use in the future means the clock went back; closing then only costs a reopen, while
+            // waiting for the clock to catch up could keep the connection for days.
+            if (now - lastUsed >= IdlePartitionConnectionTimeout || lastUsed > now)
+            {
+                (idle ??= []).Add(key);
+            }
+        }
+
+        if (idle is null)
+        {
+            return 0;
+        }
+
+        var closedCount = 0;
+        foreach (var key in idle)
+        {
+            try
+            {
+                if (ClosePartition(key))
+                {
+                    closedCount++;
+                }
+            }
+            catch (SqliteException exception)
+            {
+                // One failing close must not stop the others or the checkpoints and coverage advance after it.
+                _lastError = exception.Message;
+            }
+        }
+
+        return closedCount;
+    }
+
+    // Returns whether a cached connection was closed.
+    private bool ClosePartition(string key)
+    {
+        _partitionLastUsed.Remove(key);
+        if (!_connections.Remove(key, out var connection))
+        {
+            return false;
+        }
+
+        Volatile.Write(ref _openConnectionCount, _connections.Count);
+
+        connection.Dispose();
+        return true;
+    }
+
+    private void MarkPathAbsent(string path)
+    {
+        if (_absentPaths.Count < MaxAbsentPaths)
+        {
+            _absentPaths.Add(path);
+        }
+    }
+
     private const string HasUserTablesSql =
         "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%');";
 
@@ -1021,10 +1177,37 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         return Convert.ToInt64(command.ExecuteScalar() ?? 0L, CultureInfo.InvariantCulture);
     }
 
+    // Whether the partition has a cached connection.
+    internal bool IsPartitionOpen(string partitionKey)
+    {
+        lock (_connectionLock)
+        {
+            return _connections.ContainsKey(partitionKey);
+        }
+    }
+
+    // The page cache of a cached partition connection as PRAGMA cache_size reports it (negative values are KiB),
+    // or null when the partition has no cached connection.
+    internal long? GetPageCacheSize(string partitionKey)
+    {
+        lock (_connectionLock)
+        {
+            return _connections.TryGetValue(partitionKey, out var connection)
+                ? QueryLong(connection, "PRAGMA cache_size;")
+                : null;
+        }
+    }
+
+    /// <summary>
+    /// Closes every connection. Waits for a query in progress to finish first. Afterwards the store opens no
+    /// connection again: queries return empty results and no coverage, and flushing or sweeping throws
+    /// <see cref="ObjectDisposedException"/> where it would open one.
+    /// </summary>
     public void Dispose()
     {
         lock (_connectionLock)
         {
+            _disposed = true;
             DisposeConnections();
         }
     }

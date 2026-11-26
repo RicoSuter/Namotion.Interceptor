@@ -139,11 +139,13 @@ When the scheduler defers delivery, the captured old and new values can be stale
 
 Dispatch starts on the writing thread, outside the subject lock. The pull queue and inline per-property subscriptions accept changes there. `GetPropertyChangeObservable()` also receives changes there but reschedules its subscribers by default. Scheduled per-property subscriptions invoke observers through their selected schedulers, which may run asynchronously or inline.
 
-- **Lifecycle runs first** (with `WithLifecycle()`, included in `WithFullPropertyTracking()`): for subject-typed writes, notifications dispatch after attach/detach reconciliation, so at callback time the subject graph and registry already reflect the write (barring a concurrent overwrite or a concurrent detach of the parent). A subject assigned to a property is attached, and writes a consumer makes to it are themselves tracked. Removals are the reverse: the departing subject is already detached, so writes to it from a callback are stored but not tracked, which is intended. One consequence for custom handlers: an `ILifecycleHandler` that writes properties while attaching emits those changes before the structural change that introduced the subject.
+- **Lifecycle runs first** (with `WithLifecycle()`, included in `WithFullPropertyTracking()`): for subject-typed writes, notifications dispatch after attach/detach reconciliation, so at callback time the subject graph and registry already reflect the write (barring a concurrent overwrite or a concurrent detach of the parent). A subject assigned to a property is attached, and writes a consumer makes to it are themselves tracked. Removals are the reverse: the departing subject is already detached, so writes to it from a callback are stored but not tracked, which is intended.
+- **Changes written under the lifecycle lock are delivered after the lifecycle operation**: a write that an `ILifecycleHandler`, a lifecycle event or a `TryRunWhileAttached` callback makes is delivered once the lifecycle released its lock, after the structural change that introduced the subject, and before the derived changes the operation caused. The change is built and its listeners are resolved when the write is made, so a listener subscribed later is not owed it. Without a structural write (a context attach or detach, such as `new Subject(context)`, or `TryRunWhileAttached`), the changes are delivered when the operation releases the lock, and an exception of an observer of such a change is traced instead of propagating to the caller. No change is delivered through these channels while the thread holds a lifecycle lock, so an observer can make structural writes without deadlocking with a handler that writes on another thread. The generated `On<Property>Changed` hook and `RaisePropertyChanged` (`INotifyPropertyChanged`) of a write made under the lock still run under it, in the setter, so their handlers must not block either. Another thread that recalculates a derived property at the same time, for a write of its own, can read values written under the lock and publish its change before the structural change is announced.
 - **Synchronous channel order**: each `PropertyChangeInterceptor` enqueues to its pull queues first, publishes to its Rx observable second, and dispatches to its resolved per-property subscriptions last. A scheduled per-property subscription accepts the change in that last phase, although its callback may run later or inline according to its scheduler. With aggregated contexts, the innermost interceptor resolves the per-property subscriptions, so they may accept or invoke a change before an outer context's pull queue and Rx channels. A throwing synchronous observer propagates out of the write and suppresses later deliveries in this order; queue items already enqueued remain available.
-- **Ordering**: under concurrent writes to the same property, notifications may arrive out of commit order. If you need the current value, re-read the property rather than relying on the delivered new value: `change.GetCurrentValue<TValue>()` does this for you, reading the property now instead of returning the value captured when the change was created, without needing to keep a separately typed reference to the subject. `GetOldValue<TValue>()` is the value the setter observed when it started, including when the subscription raced the write. It is not necessarily the value immediately preceding the commit, so under concurrency delivered old and new pairs may not chain.
+- **Ordering**: on one thread, the change of a write made after another write completed is delivered after that write's change, also when a lifecycle operation queued that change until the operation completed. So when an observer of the structural change, or of a queued change, writes a property again, its change is delivered after the queued one, and the last change delivered for the property carries its last value. Such a write returns before its own change is delivered, so an exception of one of its observers does not propagate from it: it comes from the structural write that delivers the change, or is traced when a context attach, a context detach or `TryRunWhileAttached` delivers it. The structural write itself is delivered before the changes that its lifecycle handlers wrote under the lock. Under concurrent writes to the same property, notifications may arrive out of commit order. If you need the current value, re-read the property rather than relying on the delivered new value: `change.GetCurrentValue<TValue>()` does this for you, reading the property now instead of returning the value captured when the change was created, without needing to keep a separately typed reference to the subject. `GetOldValue<TValue>()` is the value the setter observed when it started, including when the subscription raced the write. It is not necessarily the value immediately preceding the commit, so under concurrency delivered old and new pairs may not chain.
 - **A derived recalculation publishes the stabilized value**: the change carries the value the recalculation committed rather than a fresh read of the getter. The getter therefore runs once per recalculation instead of twice, a throwing getter does not suppress the notification, and an interceptor that rewrites `NewValue` on that path now changes what is published.
 - **Transactions replay on commit**: with `WithTransactions()`, writes captured inside a transaction do not notify during capture. They replay through the interceptor on commit and notifications fire then. If the transaction is rolled back (disposed without commit), the changes are discarded, no notifications fire, and the property keeps its pre-transaction value. If a best-effort commit partially applies and then reverts, listeners observe the apply-and-revert pair, so a consumer such as a watchdog or dirty flag must not treat the revert as a user change.
+- **No transactions in synchronous callbacks**: beginning or committing a transaction in a synchronous change observer or a lifecycle callback throws `InvalidOperationException`. In an observer, the exception propagates from the write that delivers the change, or is traced when a context attach, a context detach or `TryRunWhileAttached` delivers it; Rx then disposes the subscription whose observer threw. Run the transaction on a scheduler, or start it with `Task.Run` without waiting for it. See [Edge Cases and Limitations](tracking-transactions.md#edge-cases-and-limitations).
 
 ### Delivery Guarantees
 
@@ -159,7 +161,7 @@ The revision exists because arrival order can differ from commit order. Dispatch
 | Pull queue | conditional (a) | arrival | consumer thread |
 | `ChangeQueueProcessor`, buffer > 0 | no, latest-state-wins | arrival of survivors; per-property newest within a flush (b) | processor thread |
 
-(a) A throwing lifecycle handler or an earlier synchronous observer, including an inline per-property observer or synchronous Rx observer, suppresses delivery for the rest of that write's consumers. Delivery is exactly-once only while those no-throw contracts hold.
+(a) A throwing lifecycle handler or an earlier synchronous observer, including an inline per-property observer or synchronous Rx observer, suppresses delivery for the rest of that write's consumers. Delivery is exactly-once only while those no-throw contracts hold. A change written under the lifecycle lock is still delivered after the lifecycle operation even when the delivery of another change, or the structural write itself, threw.
 
 (b) Per property, a flush collapses to the newest commit in that batch, and collapsing also applies **across** flushes: a change whose revision the property has already moved past is dropped rather than emitted. Which commits count as having moved the property past it depends on the connector, via `ChangeDeliveryRule`; see [Change Batching and Merging](connectors.md#change-batching-and-merging). A consumer that needs the current value still re-reads the property rather than assuming arrival order matches commit order.
 
@@ -257,9 +259,46 @@ person.LastName = "Doe";
 ```
 
 **How it works:**
-- During derived property evaluation, the handler records which properties are read
-- When a dependency changes, the derived property is recalculated
-- If the derived value changes, a change event is triggered with `Source = null` (indicating local calculation)
+
+- When a derived property attaches, its getter is evaluated and every intercepted property it reads is recorded as a dependency
+- When a dependency is written, the derived property is recalculated once the write completed, and its dependencies are recorded again
+- If the derived value changes, a change event is published through the derived property's own subject, with a local origin
+
+### What a Derived Property Follows
+
+A `[Derived]` property whose subject is attached to a context with derived change detection follows every intercepted property its getter reads, on any subject: one that is attached, not attached yet or already detached, one in another context, one without a context, and one the getter reached through a field, a captured variable or a service. Reading the property is what makes it a dependency, so it does not matter which context the subject has. This includes a subject stored in a tracked property whose declared type is a class that is not a subject, for example a non-subject base class of the subject's type: the lifecycle still does not attach the subject through such a property (no parent link, not a registry child, see issue #961), but the getter's reads of it are recorded and followed.
+
+Getters must not block or take locks. The evaluations of the attach (the first value and the re-evaluations that follow it) run while the subject attaches, under the lifecycle lock, because consumers read the value then. Every other recalculation runs outside the lifecycle lock: one that a write under the lock causes, such as a lifecycle handler's write, runs once the structural write was announced, and its change carries the timestamp of that structural write. When the recalculation of one dependent of a write throws (an observer of its change threw), the other dependents are still recalculated, and the first exception propagates from the write, unless the write itself threw. A getter may write properties, at a cost: a getter that writes a property it read before is evaluated once more per change, and a getter that writes a property it depends on every time it runs is stopped after a limit of evaluations, with a trace warning, and keeps its last value.
+
+A subject without a context is followed because generated code reads and writes it through `InterceptorExecutor.GetPropertyValueWithoutContext` and `InterceptorExecutor.SetPropertyValueWithoutContext`. A [hand-written subject base class](generator.md#hand-written-base-classes-and-subclasses) has to call them as well instead of reading and writing its fields directly while the subject has no context, or derived properties do not follow its subjects until they are attached.
+
+A derived property also follows the graph state (lifecycle and registry state) of a subject its getter reads through `GetParents`, `TryGetFirstParent`, `GetReferenceCount` or the registry (`TryGetRegisteredSubject`, the parents, properties, attributes and children of a registered subject): whether the subject is attached and registered, its reference count, its parents, its registered properties, and the children of its properties. Any change of that graph state recalculates the derived property.
+
+Not followed:
+
+- State outside the model, such as external services, static state, or plain fields and properties that are not intercepted
+- Context services read directly, such as `subject.Context.TryGetService<T>()`
+- Registry resolution changed by a fallback context added to a subject that is already attached, or replaced by application code
+- Registry-wide queries, such as `KnownSubjects`
+- `IInterceptorSubject.Properties` and `subject.Data` read directly
+
+Use `RecalculateDerivedProperty()` (below) when such state changes.
+
+### Reaching Other Subjects
+
+A derived property depends on the properties it reads, not on how its getter reached their subject. Detaching the subject does not drop those dependencies: the derived property keeps following its properties, and is recalculated when they are written, also while the subject is detached and after it is attached again.
+
+How the getter reached the subject decides when the derived property switches to another subject. Through tracked properties, the getter also reads the properties that lead to the subject, so assigning another subject recalculates it. Through a field, a captured variable or a service, nothing tracked leads to the subject, so when the field or the service returns another subject, the derived property keeps following the old one until another dependency changes or `RecalculateDerivedProperty()` is called:
+
+```csharp
+[Derived]
+public double? Temperature => _room.Sensor?.Temperature; // follows the sensor, and switches when Room.Sensor is assigned
+
+[Derived]
+public double LastTemperature => _sensor.Temperature;   // follows this sensor, also while it is detached
+```
+
+A derived property holds on to a subject it reads only while it is attached: when its own subject leaves its last graph, its dependencies are removed.
 
 ### Manual Recalculation
 
@@ -281,7 +320,7 @@ property.RecalculateDerivedProperty();
 // Getter is re-evaluated; if the value changed, change notifications fire
 ```
 
-This goes through the same pipeline as automatic recalculation: the getter is re-evaluated, dependencies are updated, and all notifications (observable, queue, per-property subscriptions, `INotifyPropertyChanged`) fire if the value changed. It is fully thread-safe and can be called concurrently with property writes. Like automatic detection, it requires `WithDerivedPropertyChangeDetection()`.
+This goes through the same pipeline as automatic recalculation: the getter is re-evaluated, dependencies are updated, and all notifications (observable, queue, per-property subscriptions, `INotifyPropertyChanged`) fire if the value changed. It is fully thread-safe and can be called concurrently with property writes. When another thread is recalculating the property at that moment, the call returns at once and that thread evaluates the getter again before it finishes. Called while the thread holds a lifecycle lock (from a lifecycle handler or a `TryRunWhileAttached` callback), it returns at once and the recalculation runs after the lifecycle operation. The call does nothing for a property that is not attached. Like automatic detection, it requires `WithDerivedPropertyChangeDetection()`.
 
 > **Internal design:** For details on the dependency graph, concurrency model, and correctness guarantees, see [Derived Property Design](design/tracking-derived-properties.md).
 
@@ -408,6 +447,14 @@ Events are useful for:
 - Dynamic subscribers that register/unregister at runtime (unlike `ILifecycleHandler` which is registered at startup)
 - Integration packages (MQTT, OPC UA) that need to clean up internal state
 
+**Replacement order:** when a property that holds subjects gets a new value, for example `person.Father = newFather`, the setter does three things before it returns:
+
+1. It stores the new value, so `person.Father` returns `newFather`.
+2. It detaches the subjects that are no longer referenced (`oldFather`).
+3. It attaches the new subjects (`newFather`).
+
+Once the setter returns, the code that assigned the property sees the final state, unless another thread overwrote the property or detached `person` in the meantime. A lifecycle handler of the detach in step 2, or another thread reading in that moment, can see `person.Father` already return `newFather` while `newFather` is not attached yet. A subject that another property in the graph still holds after step 2 is not attached again; it only gains a property reference (`IsPropertyReferenceAdded` without `IsContextAttach`). Likewise, a subject that another property still holds is not detached; it only loses one (`IsPropertyReferenceRemoved` without `IsContextDetach`). React to each lifecycle and child index change rather than assuming the first one shows the final state.
+
 ### Child Index Changes
 
 A structural write that keeps a subject in the property raises neither a detach nor an attach for it, also when the subject now sits at another position or under another key. A handler that stores that index implements `IChildIndexHandler` and is registered as a context service:
@@ -430,7 +477,7 @@ These rules hold for every index the library keeps, in the registry (`Children`,
 - The index is `null` for a subject reference, the position for a collection and the key for a dictionary. A subject the value holds more than once has one entry, with the first of its positions or keys in enumeration order.
 - The handler is called once per write, after the attach and detach callbacks of that write, with each kept subject whose index changed, and not at all when none did. A subject the write attached already carries its index and is not reported, and a dictionary assigned again in another order with the same keys reports nothing, unless it holds a subject under several keys and the first of them changes.
 - An index is compared with the one the old value had. The old value is read as it is now, so a collection or dictionary mutated in place and then assigned again hides the changes the two share, and the indices stay as they were before the mutation. A subject removed in place and then assigned again counts as still attached, so it is neither attached again nor reported, and keeps its old index.
-- Keys are compared with `Equals`, and only while an `IChildIndexHandler` is registered. Two keys that are equal but different instances count as unchanged, so the stored index keeps the old instance. A key whose `Equals` throws makes the write throw after the value is stored, so the interceptors ordered before the lifecycle, which act once the value is stored, such as change notification and derived properties, miss that write, and the indices keep their old values until a later write changes them again, since that write is compared with the value that was stored.
+- Keys are compared with `Equals`, and only while an `IChildIndexHandler` is registered. Two keys that are equal but different instances count as unchanged, so the stored index keeps the old instance. A key whose `Equals` throws makes the write throw after the value is stored, so the interceptors ordered before the lifecycle, which act once the value is stored, such as change notification, miss that write (derived properties still follow it), and the indices keep their old values until a later write changes them again, since that write is compared with the value that was stored.
 - The same requirements apply as to `ILifecycleHandler` (below). The handler must not write the property that was written, and the span is only valid during the call.
 - Apart from the cases above, once concurrent writes settle, every index matches the stored value. While a write runs, a reader on another thread can see the value and the indices updated at different times.
 - On detach, remove a stored index by its property, not by `SubjectLifecycleChange.Index`: a subject held more than once is detached with one of its positions or keys, and after an in-place mutation with a position or key read from the mutated value, neither of which needs to be the stored one.
@@ -443,7 +490,7 @@ The lifecycle interceptor is fully thread-safe. Multiple threads can concurrentl
 
 ### Handler Requirements
 
-> **Important**: Both `ILifecycleHandler` methods and lifecycle events are invoked **synchronously inside a lock**. Handlers must follow these requirements:
+> **Important**: Both `ILifecycleHandler` methods and lifecycle events are invoked **synchronously inside a lock**. Changes of the property writes they make are delivered, and the derived properties those writes affect recalculated, after the lock is released (see [Concurrency and Delivery](#concurrency-and-delivery)). Handlers must follow these requirements:
 
 1. **Must be exception-free**: Throwing exceptions will break the lifecycle pipeline for other handlers. Wrap any potentially failing operations in try-catch internally.
 
@@ -603,7 +650,7 @@ var accessedProperties = scope.GetPropertiesAndDispose();
 // accessedProperties contains references to FirstName and LastName
 ```
 
-This is primarily used internally by the derived property change detection system but can also be used for custom scenarios.
+It is independent of derived property change detection, which records the reads of its getters on its own.
 
 For synchronous code on one thread, `ReadPropertyRecorder.RecordOnCurrentThread(target)` sends the reads of the current thread to an `IReadPropertyRecorderTarget` instead. Its `OnRead` is called on the reading thread before the value of each intercepted property is read. The method returns a `ref struct` scope that restores the previous target of the thread when disposed, so targets nest, and it must be disposed on the thread that started it. While a target is set, reads on that thread go only to it and are not recorded by the async scopes of `ReadPropertyRecorder.Start`.
 

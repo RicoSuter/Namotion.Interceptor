@@ -3,6 +3,9 @@ using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Derived;
+using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Transactions.Handlers;
 
 namespace Namotion.Interceptor.Tracking.Transactions;
 
@@ -11,7 +14,9 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// Must run before all downstream interceptors to suppress side effects during capture.
 /// Also manages the per-context transaction lock for serialized transactions.
 /// </summary>
-[RunsBefore(typeof(DerivedPropertyChangeHandler))]
+// Before the lifecycle, so a captured structural write is never reconciled, and before the change
+// interceptor, so it is never announced.
+[RunsBefore(typeof(LifecycleInterceptor), typeof(PropertyChangeInterceptor))]
 public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInterceptor
 {
     private readonly SemaphoreSlim _exclusiveTransactionLock = new(1, 1);
@@ -116,7 +121,8 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        if (!SubjectTransaction.HasActiveTransaction)
+        // A derived recalculation publishes an already committed value, so it is neither captured nor rejected.
+        if (!SubjectTransaction.HasActiveTransaction || context.IsDerivedRecalculation)
         {
             next(ref context);
             return;

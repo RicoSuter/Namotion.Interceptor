@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.AI.Agents;

@@ -33,7 +33,7 @@ public class RootManagerWriteConfigurationTests : IDisposable
             new SubjectTypeRegistry(typeProvider),
             new ConfigurableSubjectSerializer(typeProvider, _serviceProvider),
             _context,
-            new SubjectPathResolver(() => rootManager!.Root),
+            new SubjectPathResolver(_context, () => rootManager!.Root),
             configuration.Object);
     }
 
@@ -88,6 +88,22 @@ public class RootManagerWriteConfigurationTests : IDisposable
         // Assert
         Assert.Equal([true, true], results);
         Assert.Contains("\"childConfig\": \"second\"", await File.ReadAllTextAsync(_configurationFilePath));
+    }
+
+    [Fact]
+    public async Task WhenAValueOfTheRootConfigurationCannotBeRead_ThenWritingWritesTheConfigurationAsLoaded()
+    {
+        // Arrange
+        await File.WriteAllTextAsync(_configurationFilePath, $$"""{ "$type": "{{typeof(ParentWithChildSubject).FullName}}", "name": "root", "child": 5 }""");
+        await _rootManager.StartAsync(CancellationToken.None);
+        var root = await _rootManager.RootLoaded.WaitAsync(DeadlockTimeout);
+
+        // Act
+        var isWritten = await _rootManager.WriteConfigurationAsync(root, CancellationToken.None);
+
+        // Assert
+        Assert.True(isWritten);
+        Assert.DoesNotContain("\"child\": 5", await File.ReadAllTextAsync(_configurationFilePath));
     }
 
     /// <summary>Blocks the thread of the next read of one property of one subject, after the value was read, until it is released.</summary>

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
@@ -275,37 +276,36 @@ public class SubjectFilterToolTests
     }
 
     [Fact]
-    public async Task WhenPathProviderHasNoSegmentForASelectedProperty_ThenSearchSelectsItByBrowseNameWithoutWarning()
+    public async Task WhenPathProviderRenamesASelectedProperty_ThenSearchSelectsItBySegmentWithoutWarning()
     {
         // Arrange
-        var tool = CreateTool(CreateGroup(), "search", new NoSegmentPathProvider(nameof(TestDevice.IsOn)));
+        var tool = CreateTool(CreateGroup(), "search", new RenamingPathProvider(nameof(TestDevice.IsOn), "On"));
 
         // Act
-        var json = await InvokeAsync(tool, new { format = "json", types = new[] { typeof(TestDevice).FullName }, properties = new[] { "IsOn" } });
+        var json = await InvokeAsync(tool, new { format = "json", types = new[] { typeof(TestDevice).FullName }, properties = new[] { "On" } });
 
         // Assert
         Assert.Equal(3, json.GetProperty("subjectCount").GetInt32());
         foreach (var result in json.GetProperty("results").EnumerateObject())
         {
-            Assert.True(result.Value.GetProperty("properties").TryGetProperty("IsOn", out _));
+            Assert.True(result.Value.GetProperty("properties").TryGetProperty("On", out _));
         }
 
         Assert.False(json.TryGetProperty("warnings", out _));
     }
 
     [Fact]
-    public async Task WhenPathProviderHasNoSegmentForAWhereProperty_ThenSearchWarnsLikeTheFilterResolvesIt()
+    public async Task WhenPathProviderRenamesAWhereProperty_ThenSearchFiltersOnItBySegment()
     {
         // Arrange
-        var tool = CreateTool(CreateGroup(), "search", new NoSegmentPathProvider(nameof(TestDevice.IsOn)));
+        var tool = CreateTool(CreateGroup(), "search", new RenamingPathProvider(nameof(TestDevice.IsOn), "On"));
 
         // Act
-        var json = await InvokeAsync(tool, new { format = "json", where = "IsOn == true" });
+        var json = await InvokeAsync(tool, new { format = "json", where = "On == true" });
 
         // Assert
-        Assert.Equal(0, json.GetProperty("subjectCount").GetInt32());
-        var warnings = json.GetProperty("warnings").EnumerateArray().Select(warning => warning.GetString()!).ToArray();
-        Assert.Equal(["No subject in scope has a property named 'IsOn'."], warnings);
+        Assert.Equal(1, json.GetProperty("subjectCount").GetInt32());
+        Assert.False(json.TryGetProperty("warnings", out _));
     }
 
     private static TestDeviceGroup CreateGroup()
@@ -346,10 +346,13 @@ public class SubjectFilterToolTests
         public override char PathSeparator => '/';
     }
 
-    // Includes every property but gives the named one no path segment, so it is listed by its browse name only.
-    private sealed class NoSegmentPathProvider(string propertyName) : PathProviderBase
+    // Includes every property, the named one under the given segment instead of its browse name.
+    private sealed class RenamingPathProvider(string propertyName, string segment) : PathProviderBase
     {
-        public override string? TryGetPropertySegment(RegisteredSubjectProperty property) =>
-            property.BrowseName == propertyName ? null : property.BrowseName;
+        public override bool TryGetPropertySegment(RegisteredSubjectProperty property, [NotNullWhen(true)] out string? propertySegment)
+        {
+            propertySegment = property.BrowseName == propertyName ? segment : property.BrowseName;
+            return true;
+        }
     }
 }

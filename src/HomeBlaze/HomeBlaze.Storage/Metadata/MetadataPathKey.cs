@@ -5,7 +5,7 @@ using Namotion.Interceptor.Registry.Paths;
 namespace HomeBlaze.Storage.Metadata;
 
 /// <summary>
-/// The keys of the entries of a metadata file. An entry is written with the path that the registry writes
+/// The keys of the entries of a metadata file. An entry is written with the path that the registry builds
 /// (<c>Channels[0]/Power</c>) and read also in the route notation (<c>Channels/0/Power</c>): the key of a path is its
 /// names and keys in order, separated by slashes, so that both notations of a target have the same key. A slash or a
 /// backslash in a name or a key is escaped with a backslash, so that a key with a slash differs from more segments.
@@ -43,7 +43,7 @@ internal static class MetadataPathKey
         => GetPath(subject, storedSubject) is { } path ? (path.Length == 0 ? string.Empty : Normalize(path)) : null;
 
     /// <summary>
-    /// Gets the path that the registry writes for a subject inside a stored subject, through the first parent of each
+    /// Gets the path that the registry builds for a subject inside a stored subject, through the first parent of each
     /// subject when that way reaches the stored subject, which an entry of the subject is written with; empty for the
     /// stored subject itself, and null when the subject cannot be reached from it.
     /// </summary>

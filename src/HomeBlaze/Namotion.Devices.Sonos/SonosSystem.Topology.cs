@@ -47,12 +47,14 @@ public partial class SonosSystem
     /// Applies a ZoneGroupState from a topology event. Throws <see cref="System.Xml.XmlException"/> or
     /// <see cref="FormatException"/> when it cannot be parsed.
     /// </summary>
-    internal void ApplyTopologyEvent(string zoneGroupState)
+    /// <param name="zoneGroupState">The ZoneGroupState XML the event carries.</param>
+    /// <param name="confirmsMissingPlayers">Whether the event counts toward the two reads that take a missing player offline, see <see cref="ApplyTopology"/>.</param>
+    internal void ApplyTopologyEvent(string zoneGroupState, bool confirmsMissingPlayers = true)
     {
         var topology = ParseUnlessApplied(zoneGroupState);
         lock (_topologyLock)
         {
-            if (ApplyZoneGroupState(zoneGroupState, topology, confirmsMissingPlayers: true))
+            if (ApplyZoneGroupState(zoneGroupState, topology, confirmsMissingPlayers))
             {
                 _topologyOrder.RecordEvent(NextOrder());
             }
@@ -125,6 +127,13 @@ public partial class SonosSystem
                 if (!confirmsMissingPlayers)
                 {
                     return false;
+                }
+
+                // Gone, even briefly, a speaker may have rebooted or missed sending events, and it does not tell
+                // either; new subscriptions make it send its full state again.
+                foreach (var uuid in missing)
+                {
+                    players[uuid].RequestNewSubscriptions();
                 }
 
                 if (!missing.IsSubsetOf(_unconfirmedMissingPlayers))

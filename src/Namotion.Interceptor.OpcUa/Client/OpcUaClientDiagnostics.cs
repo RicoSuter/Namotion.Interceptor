@@ -123,7 +123,7 @@ public sealed class ReconnectDiagnostics
 
     /// <summary>
     /// Gets the number of attempts that ended without a usable session and without a fault: a null
-    /// session, a failed transfer, a preserved session after a server restart, a stall reset, or a
+    /// session, a new session without subscriptions, a preserved session, a stall reset, or a
     /// cancellation from a kill or from the listen attempt being torn down, which happens both when the
     /// source stops and when the retry loop ends an attempt.
     /// </summary>

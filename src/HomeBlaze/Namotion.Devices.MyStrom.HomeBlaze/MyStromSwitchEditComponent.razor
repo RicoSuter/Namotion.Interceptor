@@ -1,7 +1,9 @@
 @using Namotion.Interceptor
+@using global::HomeBlaze.Abstractions.Discovery
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(MyStromSwitch))]
 @implements ISubjectEditComponent
+@implements ISubjectDiscoveryComponent
 
 <MudForm>
     <MudTextField @bind-Value="_name"
@@ -68,6 +70,9 @@
     [Parameter]
     public bool IsCreating { get; set; }
 
+    [Parameter]
+    public IDiscoveryResult? DiscoveryResult { get; set; }
+
     private MyStromSwitch? SwitchSubject => Subject as MyStromSwitch;
 
     private string _name = string.Empty;
@@ -107,6 +112,12 @@
             _originalAllowTurnOff = _allowTurnOff;
             _originalPollingIntervalSeconds = _pollingIntervalSeconds;
             _originalRetryIntervalSeconds = _retryIntervalSeconds;
+
+            // A switch picked on the Discover page fills in the form; the originals stay, so the value counts as unsaved.
+            if (IsCreating && DiscoveryResult is MyStromDiscoveredSwitch discovered)
+            {
+                _ipAddress = discovered.HostAddress;
+            }
         }
     }
 

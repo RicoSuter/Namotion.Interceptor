@@ -67,7 +67,7 @@ public class LayoutBlockSaveTests
                 $"{GridHeadLine}\n::: Cell Row=0 Column=2\n:::: HomeBlaze.Samples.Motor Name={motorName}",
                 text);
             Assert.DoesNotContain("json", text);
-            await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
             // The buttons of the cell are below the edit button of the selected widget in it, and not over it.
             var cell = page.Locator(".grid-cell.editing[style*='grid-column: 3 / span 1']");
@@ -108,7 +108,7 @@ public class LayoutBlockSaveTests
                 "The page was not written without the block of the deleted cell");
 
             Assert.Equal(CreateGridPage("::: Cell Row=0 Column=1", "second cell"), text);
-            await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
             await Assertions.Expect(page.Locator(".grid-cell.editing").GetByText("second cell")).ToBeVisibleAsync(new() { Timeout = Timeout });
             await Assertions.Expect(page.GetByText("first cell")).ToHaveCountAsync(0, new() { Timeout = Timeout });
         });
@@ -249,8 +249,8 @@ public class LayoutBlockSaveTests
             Assert.True(x > 40, $"X is {x}");
             Assert.True(y > 40, $"Y is {y}");
             Assert.Equal(before.Replace(FirstNodeLine, $"::: Node X={x} Y={y} Width=200 Height=100"), text);
-            await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0);
-            await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+            await Assertions.Expect(page.Locator(".mud-dialog")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         });
     }
 
@@ -282,7 +282,7 @@ public class LayoutBlockSaveTests
                 "The page was not written with the new column span of the cell");
 
             Assert.Equal(CreateGridPage("::: Cell Row=0 Column=0 ColumnSpan=2", "the cell"), text);
-            await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0);
+            await Assertions.Expect(page.GetByText(NotSavedWarning)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
             await Assertions.Expect(page.Locator(".grid-cell.editing").GetByText("the cell")).ToBeVisibleAsync(new() { Timeout = Timeout });
         });
     }
@@ -334,7 +334,7 @@ public class LayoutBlockSaveTests
             var text = Normalize(await _fixture.ReadFileAsync(_fixture.GetDemoPagePath(GridPage)));
 
             Assert.Equal(before.Replace("Columns=4", "Columns=3"), text);
-            await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         });
     }
 

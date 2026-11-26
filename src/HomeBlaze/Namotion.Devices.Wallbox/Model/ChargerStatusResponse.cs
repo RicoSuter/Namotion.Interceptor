@@ -2,6 +2,8 @@ using System.Text.Json.Serialization;
 
 namespace Namotion.Devices.Wallbox.Model;
 
+// The cloud sends null for values it does not know, such as added_range during a session on firmware 6.14.7, so
+// every value except the status is nullable: one missing value must not fail the whole status.
 internal class ChargerStatusResponse
 {
     [JsonPropertyName("name")]
@@ -11,46 +13,46 @@ internal class ChargerStatusResponse
     public int StatusId { get; set; }
 
     [JsonPropertyName("charging_power")]
-    public decimal ChargingPowerInKw { get; set; }
+    public decimal? ChargingPowerInKw { get; set; }
 
     [JsonPropertyName("max_available_power")]
-    public decimal MaxAvailablePower { get; set; }
+    public decimal? MaxAvailablePower { get; set; }
 
     [JsonPropertyName("charging_speed")]
-    public decimal ChargingCurrent { get; set; }
+    public decimal? ChargingCurrent { get; set; }
 
     [JsonPropertyName("added_range")]
-    public decimal AddedRange { get; set; }
+    public decimal? AddedRange { get; set; }
 
     [JsonPropertyName("added_energy")]
-    public decimal AddedEnergy { get; set; }
+    public decimal? AddedEnergy { get; set; }
 
     [JsonPropertyName("added_green_energy")]
-    public decimal AddedGreenEnergy { get; set; }
+    public decimal? AddedGreenEnergy { get; set; }
 
     [JsonPropertyName("added_discharged_energy")]
-    public decimal AddedDischargedEnergy { get; set; }
+    public decimal? AddedDischargedEnergy { get; set; }
 
     [JsonPropertyName("added_grid_energy")]
-    public decimal AddedGridEnergy { get; set; }
+    public decimal? AddedGridEnergy { get; set; }
 
     [JsonPropertyName("charging_time")]
-    public int ChargingTime { get; set; }
+    public int? ChargingTime { get; set; }
 
     [JsonPropertyName("finished")]
-    public bool IsFinished { get; set; }
+    public bool? IsFinished { get; set; }
 
     [JsonPropertyName("cost")]
-    public decimal Cost { get; set; }
+    public decimal? Cost { get; set; }
 
     [JsonPropertyName("current_mode")]
-    public int CurrentMode { get; set; }
+    public int? CurrentMode { get; set; }
 
     [JsonPropertyName("state_of_charge")]
     public int? StateOfCharge { get; set; }
 
     [JsonPropertyName("depot_price")]
-    public decimal DepotPrice { get; set; }
+    public decimal? DepotPrice { get; set; }
 
     [JsonPropertyName("config_data")]
     public ChargerConfiguration? ConfigData { get; set; }

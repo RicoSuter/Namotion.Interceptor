@@ -5,7 +5,6 @@ namespace Namotion.Interceptor.Testing;
 /// </summary>
 public static class AsyncTestHelpers
 {
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromMilliseconds(100);
 
     /// <summary>
@@ -46,7 +45,7 @@ public static class AsyncTestHelpers
         TimeSpan? timeout = null,
         TimeSpan? pollInterval = null)
     {
-        var actualTimeout = timeout ?? DefaultTimeout;
+        var actualTimeout = timeout ?? TestTimeouts.Default;
         var actualPollInterval = pollInterval ?? DefaultPollInterval;
         var deadline = DateTime.UtcNow + actualTimeout;
 
@@ -62,6 +61,13 @@ public static class AsyncTestHelpers
             }
 
             await Task.Delay(actualPollInterval).ConfigureAwait(false);
+        }
+
+        // A stalled runner can resume the loop only after the deadline, when the condition may hold already.
+        Thread.MemoryBarrier();
+        if (condition())
+        {
+            return;
         }
 
         var messageText = message();

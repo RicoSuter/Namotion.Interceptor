@@ -164,21 +164,33 @@ namespace Namotion.Devices.FritzBox
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class FritzBoxClient : HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.INetworkAdapter, HomeBlaze.Abstractions.Sensors.IPresenceSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
-        public FritzBoxClient(string macAddress) { }
+        public FritzBoxClient(Namotion.Devices.FritzBox.FritzBox router, string macAddress) { }
         [HomeBlaze.Abstractions.Attributes.State(Position=404)]
         [System.ComponentModel.Category("Network")]
         public string? AccessPointMacAddress { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=403)]
         [System.ComponentModel.Category("Network")]
         public string? AccessPointName { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=412)]
+        [System.ComponentModel.Category("Internet")]
+        public string? AccessProfile { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("AllowInternetAccess", "IsEnabled")]
+        public bool AllowInternetAccess_IsEnabled { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=405)]
         [System.ComponentModel.Category("Network")]
         public string? Band { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        [Namotion.Interceptor.Registry.Attributes.PropertyAttribute("BlockInternetAccess", "IsEnabled")]
+        public bool BlockInternetAccess_IsEnabled { get; }
         [HomeBlaze.Abstractions.Attributes.State("Device", Position=408)]
         [HomeBlaze.Abstractions.Attributes.SubjectPath(typeof(Namotion.Interceptor.IInterceptorSubject))]
         [System.ComponentModel.Category("Network")]
         public string? DevicePath { get; }
         public string? Gateway { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=410)]
+        [System.ComponentModel.Category("Internet")]
+        public bool? HasInternetAccess { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=400)]
         public string? HostName { get; }
         [Namotion.Interceptor.Attributes.Derived]
@@ -192,6 +204,9 @@ namespace Namotion.Devices.FritzBox
         [HomeBlaze.Abstractions.Attributes.State(Position=402)]
         [System.ComponentModel.Category("Network")]
         public bool? IsGuest { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=411)]
+        [System.ComponentModel.Category("Internet")]
+        public bool? IsInternetAccessBlocked { get; }
         public bool? IsPresent { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=409)]
         [Namotion.Interceptor.Attributes.Derived]
@@ -211,6 +226,10 @@ namespace Namotion.Devices.FritzBox
         public string? Title { get; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        public System.Threading.Tasks.Task AllowInternetAccessAsync(System.Threading.CancellationToken cancellationToken) { }
+        [HomeBlaze.Abstractions.Attributes.Operation(RequiresConfirmation=true)]
+        public System.Threading.Tasks.Task BlockInternetAccessAsync(System.Threading.CancellationToken cancellationToken) { }
         protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
         protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
@@ -233,18 +252,26 @@ namespace Namotion.Devices.FritzBox
         public string? Model { get; init; }
         public string? PublicKeyPin { get; init; }
     }
-    public static class FritzBoxDiscovery
+    public sealed class FritzBoxDiscovery : HomeBlaze.Abstractions.Discovery.SubjectDiscovery<Namotion.Devices.FritzBox.FritzBox, Namotion.Devices.FritzBox.FritzBoxDiscoveryResult>
     {
-        public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Namotion.Devices.FritzBox.FritzBoxDiscoveryResult>> DiscoverAsync(System.TimeSpan timeout, System.Threading.CancellationToken cancellationToken) { }
+        public FritzBoxDiscovery(HomeBlaze.Abstractions.Discovery.ISsdpSearch ssdpSearch) { }
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(Namotion.Devices.FritzBox.FritzBoxDiscovery.<DiscoverAsync>d__6))]
+        protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.FritzBox.FritzBoxDiscoveryResult> DiscoverAsync([System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
+        public static System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Namotion.Devices.FritzBox.FritzBoxDiscoveryResult>> SearchAsync(HomeBlaze.Abstractions.Discovery.ISsdpSearch ssdpSearch, System.TimeSpan timeout, System.Threading.CancellationToken cancellationToken) { }
     }
-    public sealed class FritzBoxDiscoveryResult : System.IEquatable<Namotion.Devices.FritzBox.FritzBoxDiscoveryResult>
+    public sealed class FritzBoxDiscoveryResult : HomeBlaze.Abstractions.Discovery.IDiscoveryResult, HomeBlaze.Abstractions.Discovery.IDiscoveryResult<Namotion.Devices.FritzBox.FritzBox>, System.IEquatable<Namotion.Devices.FritzBox.FritzBoxDiscoveryResult>
     {
         public FritzBoxDiscoveryResult(string HostAddress, string? FriendlyName, string? Model, string? Udn, bool IsRepeater) { }
+        public string? Detail { get; }
+        public string DisplayName { get; }
         public string? FriendlyName { get; init; }
         public string HostAddress { get; init; }
+        public System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.DiscoveredItem> IncludedItems { get; init; }
         public bool IsRepeater { get; init; }
+        public string Key { get; }
         public string? Model { get; init; }
         public string? Udn { get; init; }
+        public bool Matches(Namotion.Devices.FritzBox.FritzBox subject) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class FritzBoxGuestWlan : Namotion.Devices.FritzBox.FritzBoxWlan, HomeBlaze.Abstractions.Devices.ISwitchController, Namotion.Interceptor.IInterceptorSubject

@@ -180,13 +180,19 @@ public class MovedChildConsistencyTests
         readerStarted.Wait();
 
         // Act
-        for (var iteration = 0; iteration < 10_000; iteration++)
+        try
         {
-            garage.CarsByName = new Dictionary<string, Car> { [iteration % 2 == 0 ? "B" : "A"] = car };
+            for (var iteration = 0; iteration < 10_000; iteration++)
+            {
+                garage.CarsByName = new Dictionary<string, Car> { [iteration % 2 == 0 ? "B" : "A"] = car };
+            }
         }
-
-        writesDone.Set();
-        reader.Join();
+        finally
+        {
+            // The reader is a foreground thread that spins until this is set, so a failing write must still stop it.
+            writesDone.Set();
+            reader.Join();
+        }
 
         // Assert
         Assert.Empty(failures);

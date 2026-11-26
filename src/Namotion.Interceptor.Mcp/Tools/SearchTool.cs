@@ -1,8 +1,6 @@
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Models;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mcp.Tools;
 
@@ -36,7 +34,7 @@ internal class SearchTool
             path = new { type = "string", description = "Scope search to a subtree path prefix" },
             query = new { type = "string", description = "Filter by path and enrichment values (e.g. $title, $icon) ONLY — does NOT match types, interfaces, or property names. Use list_types + types parameter for capability filtering" },
             properties = new { type = "array", items = new { type = "string" }, description = "Return only these properties, e.g. [\"IsConnected\",\"BatteryLevel\"]. Implies includeProperties." },
-            where = new { type = "string", description = "Filter by property values, C#-style: comparisons (== != < <= > >=) of a property against a number, true, false, null, a string or another property, combined with && (and), || (or), ! (not) and parentheses. Properties are written as paths relative to the subject, as browse returns them, with the server's path separator; a bare boolean property is a condition. Example: IsConnected == false || BatteryLevel < 0.2. Enums compare by name, dates against ISO 8601 strings. A property the subject does not have (or that is null) is null: == null matches it, != null does not, and any other comparison with it is unknown, so neither it nor its negation matches. A property that holds subjects compares with null only." }
+            where = new { type = "string", description = "Filter by property values, C#-style: comparisons (== != < <= > >=) of a property against a number, true, false, null, a string or another property, combined with && (and), || (or), ! (not) and parentheses. Values compute with + - * / written with spaces around them, a leading - negates, and durations are written like 90s, 15m, 1h30m or 2d. Properties are written as paths relative to the subject, as browse returns them, with the server's path separator; a bare word after a comparison is a string unless it holds the separator or is an operand of + - * /; a bare boolean property is a condition. Example: IsConnected == false || BatteryLevel < 0.2 || Power - Offset > Limit * 0.8. Enums compare by name, dates against ISO 8601 strings, and a date minus a date is a duration. A property the subject does not have (or that is null) is null: == null matches it, != null does not, and any other comparison with it is unknown, so neither it nor its negation matches. A property that holds subjects compares with null only." }
         }
     });
 
@@ -55,8 +53,7 @@ internal class SearchTool
 
     private Task<object?> HandleSearchAsync(JsonElement input, CancellationToken cancellationToken)
     {
-        var pathProvider = _configuration.PathProvider as PathProviderBase
-            ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
+        var pathProvider = _configuration.ToolPathProvider;
 
         var registry = _rootSubjectProvider().Context.TryGetService<ISubjectRegistry>();
         if (registry is null)
@@ -114,6 +111,7 @@ internal class SearchTool
         var subjects = new Dictionary<string, SubjectNode>();
         var truncated = false;
         var rootSubject = _rootSubjectProvider();
+        var readability = McpSubjectReadability.For(_configuration, rootSubject);
 
         foreach (var (_, registered) in registry.KnownSubjects)
         {
@@ -128,7 +126,7 @@ internal class SearchTool
             }
 
             // Compute path cheaply before building full DTO
-            var path = McpToolHelper.TryGetSubjectPath(registered, pathProvider, rootSubject, _configuration.PathPrefix);
+            var path = McpToolHelper.TryGetSubjectPath(registered, _configuration, rootSubject);
             if (path is null)
             {
                 continue;
@@ -145,9 +143,14 @@ internal class SearchTool
                 continue;
             }
 
-            unseenPropertyNames?.Observe(registered, pathProvider);
+            if (!readability.IsReadableWithoutPathCheck(registered))
+            {
+                continue;
+            }
 
-            if (filter is not null && !filter.Matches(registered, pathProvider))
+            unseenPropertyNames?.Observe(registered, pathProvider, readability);
+
+            if (filter is not null && !filter.Matches(registered, pathProvider, readability))
             {
                 continue;
             }
@@ -160,7 +163,7 @@ internal class SearchTool
 
             // Build full DTO only for subjects that pass all filters
             var node = McpToolHelper.BuildSubjectNodeDto(
-                registered, pathProvider, rootSubject, _configuration,
+                registered, path, pathProvider, _configuration,
                 includeProperties, includeAttributes, includeMethods, includeInterfaces, propertyNames);
 
             subjects[path] = node;

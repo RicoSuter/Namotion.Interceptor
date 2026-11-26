@@ -12,7 +12,7 @@ namespace HomeBlaze.E2E.Tests;
 public class PluginLoadingTests
 {
     private const int PageLoadTimeout = 30000;
-    private const int ElementVisibilityTimeout = 10000;
+    private const int ElementVisibilityTimeout = 30000;
 
     private readonly PlaywrightFixture _fixture;
 

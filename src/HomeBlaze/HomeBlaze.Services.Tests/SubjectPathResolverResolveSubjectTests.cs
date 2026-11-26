@@ -399,7 +399,7 @@ public class SubjectPathResolverResolveSubjectTests : SubjectPathResolverTestBas
     [Theory]
     [InlineData(PathStyle.Route)]
     [InlineData(PathStyle.Canonical)]
-    public void WhenWrittenPathOfIntKeyedEntryIsResolved_ThenReturnsEntry(PathStyle style)
+    public void WhenBuiltPathOfIntKeyedEntryIsResolved_ThenReturnsEntry(PathStyle style)
     {
         // Arrange
         var item = new TestContainer(Context) { Name = "Item" };
@@ -418,13 +418,13 @@ public class SubjectPathResolverResolveSubjectTests : SubjectPathResolverTestBas
     [Theory]
     [InlineData(PathStyle.Route, "/Items/-3")]
     [InlineData(PathStyle.Canonical, "/Items[-3]")]
-    public void WhenCultureWritesNegativeNumbersWithAnotherSign_ThenWrittenPathHasInvariantKeyAndResolves(PathStyle style, string expectedPath)
+    public void WhenCultureFormatsNegativeNumbersWithAnotherSign_ThenBuiltPathHasInvariantKeyAndResolves(PathStyle style, string expectedPath)
     {
         // Arrange
         var originalCulture = CultureInfo.CurrentCulture;
         try
         {
-            // Swedish writes a negative number with U+2212, not with the ASCII hyphen-minus of the invariant culture.
+            // Swedish formats a negative number with U+2212, not with the ASCII hyphen-minus of the invariant culture.
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("sv-SE");
             Assert.Equal("−", CultureInfo.CurrentCulture.NumberFormat.NegativeSign);
 
@@ -472,7 +472,7 @@ public class SubjectPathResolverResolveSubjectTests : SubjectPathResolverTestBas
     [Theory]
     [InlineData(PathStyle.Route)]
     [InlineData(PathStyle.Canonical)]
-    public void WhenWrittenPathOfIntKeyedInlinePathsEntryIsResolved_ThenReturnsEntry(PathStyle style)
+    public void WhenBuiltPathOfIntKeyedInlinePathsEntryIsResolved_ThenReturnsEntry(PathStyle style)
     {
         // Arrange
         var item = new TestContainer(Context) { Name = "Item" };

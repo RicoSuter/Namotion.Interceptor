@@ -8,8 +8,10 @@
     "metadata.md",
     "paths.md",
     "monitoring.md",
+    "opc-ua.md",
     "updates.md",
     "ai-agents.md",
+    "automation.md",
     "widgets"
   ]
 }

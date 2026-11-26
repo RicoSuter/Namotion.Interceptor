@@ -1,18 +1,22 @@
+using System.Net;
+using System.Text;
+using HomeBlaze.Abstractions.Discovery;
 using HomeBlaze.Services;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Hosting.Server;
-using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Devices.Nuki;
 
 namespace HomeBlaze.E2E.Tests.Infrastructure;
 
 /// <summary>
-/// A custom WebApplicationFactory that uses Kestrel instead of TestServer.
-/// Playwright requires a real HTTP endpoint to connect to.
-/// Based on: https://danieldonbavand.com/2022/06/13/using-playwright-with-the-webapplicationfactory-to-test-a-blazor-application/
+/// A <see cref="WebApplicationFactory{TEntryPoint}"/> that runs the application in one Kestrel host on a free port,
+/// because Playwright needs a real HTTP endpoint. <see cref="WebApplicationFactory{TEntryPoint}.Services"/> belongs to
+/// that host.
 /// </summary>
 /// <typeparam name="TProgram">The entry point class (usually Program)</typeparam>
 public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
@@ -20,13 +24,13 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
 {
     private readonly IReadOnlyCollection<Type> _testTypes;
 
-    private IHost? _kestrelHost;
-    private string? _serverAddress;
+    private int _startedHostCount;
 
     /// <param name="testTypes">Subject and component types of the tests that the server has to know.</param>
     public WebTestingHostFactory(IReadOnlyCollection<Type> testTypes)
     {
         _testTypes = testTypes;
+        UseKestrel(0);
     }
 
     /// <summary>
@@ -34,32 +38,25 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
     /// </summary>
     public ServerLogRecorder ServerLog { get; } = new();
 
+    /// <summary>
+    /// The base address of the server, with a trailing slash. Starts the server.
+    /// </summary>
     public string ServerAddress
     {
         get
         {
-            EnsureServer();
-            return _serverAddress!;
+            StartServer();
+            return ClientOptions.BaseAddress.AbsoluteUri;
         }
     }
 
     /// <summary>
-    /// The services of the Kestrel host that serves the tests. This is a different container from
-    /// <see cref="WebApplicationFactory{TProgram}.Services"/>, which belongs to the TestServer host
-    /// the base class requires and which no request ever reaches.
+    /// The number of hosts of the application that this factory started.
     /// </summary>
-    public IServiceProvider ServerServices
-    {
-        get
-        {
-            EnsureServer();
-            return _kestrelHost!.Services;
-        }
-    }
+    public int StartedHostCount => Volatile.Read(ref _startedHostCount);
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseUrls("http://127.0.0.1:0");
         builder.UseEnvironment("Development");
 
         // Use test-specific root configuration to avoid loading HomeBlaze's Data folder
@@ -72,29 +69,40 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         // hosted service that loads the root does. So the types of the tests are added by a hosted service that starts
         // before every other one: added after the start of the server, they are missed whenever the root loads first.
         builder.ConfigureServices(services => services.Insert(0, ServiceDescriptor.Singleton<IHostedService>(
-            provider => new TestTypeRegistration(provider.GetRequiredService<TypeProvider>(), _testTypes))));
+            provider => new TestTypeRegistration(this, provider.GetRequiredService<TypeProvider>()))));
 
         builder.ConfigureServices(services => services.AddSingleton<ILoggerProvider>(ServerLog));
+
+        // A scan on the Discover page runs the subject discoveries of the application too, which must not search the
+        // network of the machine, send broadcasts or bind its ports, or tell the Nuki discovery service its public IP
+        // address.
+        builder.ConfigureTestServices(services =>
+        {
+            Replace<ISsdpSearch, EmptySsdpSearch>(services);
+            Replace<IMulticastDnsBrowser, EmptyMulticastDnsBrowser>(services);
+            Replace<IUdpDiscovery, EmptyUdpDiscovery>(services);
+            services.ConfigureHttpClientDefaults(httpClient => httpClient.AddHttpMessageHandler(() => new NukiDiscoveryStub()));
+        });
     }
 
-    private sealed class TestTypeRegistration(TypeProvider typeProvider, IReadOnlyCollection<Type> types) : IHostedService
+    /// <summary>
+    /// Replaces the registration of <typeparamref name="TService"/> with a singleton of
+    /// <typeparamref name="TImplementation"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The host does not register <typeparamref name="TService"/>.</exception>
+    private static void Replace<TService, TImplementation>(IServiceCollection services)
+        where TService : class
+        where TImplementation : class, TService
     {
-        public Task StartAsync(CancellationToken cancellationToken)
+        // A host that stopped registering the service would leave the subject discoveries that need it uncreated in
+        // production, while adding it here kept the tests green.
+        if (!services.Any(descriptor => descriptor.ServiceType == typeof(TService)))
         {
-            typeProvider.AddTypes(types);
-            return Task.CompletedTask;
+            throw new InvalidOperationException($"{typeof(TService)} is not registered by the host");
         }
 
-        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-    }
-
-    private void EnsureServer()
-    {
-        if (_serverAddress is null)
-        {
-            // Force the server to start by accessing Services
-            _ = Services;
-        }
+        services.RemoveAll<TService>();
+        services.AddSingleton<TService, TImplementation>();
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -102,54 +110,61 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         // Set CWD to the test output directory so relative paths in test configuration
         // (testRoot.json, ./TestData) resolve correctly regardless of where dotnet test is run from.
         Environment.CurrentDirectory = AppContext.BaseDirectory;
-
-        // Create the standard TestServer host (required by base class)
-        var testHost = builder.Build();
-
-        // Reconfigure the builder to use Kestrel instead
-        builder.ConfigureWebHost(webHostBuilder =>
-            webHostBuilder.UseKestrel());
-
-        // Build and start the Kestrel host
-        _kestrelHost = builder.Build();
-
-        // TypeProvider is deliberately not populated here. The entry point already registers every
-        // assembly this factory used to add, and loads the same plugins, against the same singleton.
-        // Doing it again from this thread while the entry point runs on its own put two writers into
-        // one provider at once, which is what made the E2E fixture fail to initialise.
-
-        _kestrelHost.Start();
-
-        // Get the address from Kestrel
-        var server = _kestrelHost.Services.GetRequiredService<IServer>();
-        var addresses = server.Features.Get<IServerAddressesFeature>();
-
-        _serverAddress = addresses!.Addresses.FirstOrDefault()
-            ?? throw new InvalidOperationException("Could not determine Kestrel server address");
-
-        if (!_serverAddress.EndsWith('/'))
-            _serverAddress += '/';
-
-        // Start the TestServer host to satisfy the base class
-        testHost.Start();
-        return testHost;
+        return base.CreateHost(builder);
     }
 
-    protected override void Dispose(bool disposing)
+    private sealed class TestTypeRegistration(WebTestingHostFactory<TProgram> factory, TypeProvider typeProvider) : IHostedService
     {
-        if (disposing)
+        public Task StartAsync(CancellationToken cancellationToken)
         {
-            // Give the host time to stop gracefully, including OPC UA server shutdown
-            try
-            {
-                _kestrelHost?.StopAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
-            }
-            catch
-            {
-                // Ignore timeout exceptions during shutdown
-            }
-            _kestrelHost?.Dispose();
+            Interlocked.Increment(ref factory._startedHostCount);
+            typeProvider.AddTypes(factory._testTypes);
+            return Task.CompletedTask;
         }
-        base.Dispose(disposing);
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class EmptySsdpSearch : ISsdpSearch
+    {
+        public Task<IReadOnlyList<SsdpResponse>> SearchAsync(string searchTarget, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<SsdpResponse>>([]);
+    }
+
+    private sealed class EmptyMulticastDnsBrowser : IMulticastDnsBrowser
+    {
+        public Task<IReadOnlyList<MulticastDnsServiceInstance>> BrowseAsync(string serviceType, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<MulticastDnsServiceInstance>>([]);
+    }
+
+    private sealed class EmptyUdpDiscovery : IUdpDiscovery
+    {
+        public IAsyncEnumerable<UdpDatagram> BroadcastAsync(int port, ReadOnlyMemory<byte> request, TimeSpan window, CancellationToken cancellationToken) =>
+            AsyncEnumerable.Empty<UdpDatagram>();
+
+        public IAsyncEnumerable<UdpDatagram> ListenAsync(int port, TimeSpan window, CancellationToken cancellationToken) =>
+            AsyncEnumerable.Empty<UdpDatagram>();
+    }
+
+    /// <summary>
+    /// Answers the Nuki discovery service with no bridges and passes every other request on.
+    /// </summary>
+    private sealed class NukiDiscoveryStub : DelegatingHandler
+    {
+        private static readonly string DiscoveryHost = new Uri(NukiBridgeDiscovery.DiscoveryAddress).Host;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (string.Equals(request.RequestUri?.Host, DiscoveryHost, StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    RequestMessage = request,
+                    Content = new StringContent("{\"bridges\":[]}", Encoding.UTF8, "application/json")
+                });
+            }
+
+            return base.SendAsync(request, cancellationToken);
+        }
     }
 }

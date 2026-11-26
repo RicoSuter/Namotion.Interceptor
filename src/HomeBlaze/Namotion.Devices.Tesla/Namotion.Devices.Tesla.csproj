@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Namotion.Devices.Tesla.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="Protos\*.proto" GrpcServices="None" Access="Internal" ProtoRoot="Protos" />
+    <!-- The code generated from the Apache-2.0 protos ships in this assembly, so its license ships with it. -->
+    <None Update="Protos\LICENSE" Link="Licenses\Namotion.Devices.Tesla\vehicle-command-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
+    <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
+    <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\Namotion.Interceptor.Hosting\Namotion.Interceptor.Hosting.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Storage.Abstractions\HomeBlaze.Storage.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

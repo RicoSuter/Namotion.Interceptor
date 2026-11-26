@@ -74,7 +74,7 @@ public class LlmAgentBaseTests
             await release.Task.WaitAsync(cancellationToken);
             return new AgentTurnResult("The answer so far", null, null);
         });
-        var resolver = new SubjectPathResolver(() => test.Root);
+        var resolver = new SubjectPathResolver(((IInterceptorSubject)test.Root).Context, () => test.Root);
         var send = test.Agent.SendMessageAsync("Hello", CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.StreamingText.Length > 0, message: "The agent should stream text.");
 
@@ -132,7 +132,7 @@ public class LlmAgentBaseTests
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount >= 1);
 
         // Assert
-        var lines = test.Agent.Requests[0].UserMessage.Split('\n');
+        var lines = test.Agent.Requests[0].UserMessage.ReplaceLineEndings("\n").Split('\n');
         var stateLines = lines.SkipWhile(line => line != "```jsonl").Skip(1).TakeWhile(line => line != "```").ToList();
         Assert.Equal(3, stateLines.Count);
         var subject = JsonDocument.Parse(stateLines[0]).RootElement;
@@ -260,7 +260,7 @@ public class LlmAgentBaseTests
 
         // Act
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Unavailable);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Unavailable);
 
         // Assert
         Assert.Contains("not logged in", test.Agent.StatusMessage);
@@ -426,7 +426,7 @@ public class LlmAgentBaseTests
                 AgentFailureKind.UsageLimit, "Usage limit reached", retryAfter: time.GetUtcNow().AddMinutes(10)),
             timeProvider: time);
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Unavailable && !test.Agent.IsBusy);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Unavailable);
         await AsyncTestHelpers.WaitUntilAsync(() => time.PendingTimerCount == 1);
 
         // Act
@@ -565,6 +565,7 @@ public class LlmAgentBaseTests
                 }
             };
         });
+        test.ReleaseOnDispose(release);
 
         // Act
         await test.Agent.SendMessageAsync("First", CancellationToken.None);
@@ -622,6 +623,7 @@ public class LlmAgentBaseTests
                 hasEnded = true;
             };
         });
+        test.ReleaseOnDispose(release);
         await test.Agent.SendMessageAsync("First", CancellationToken.None);
         await started.Task;
 
@@ -658,6 +660,7 @@ public class LlmAgentBaseTests
                 return Task.CompletedTask;
             };
         });
+        test.ReleaseOnDispose(release);
         var chat = test.Agent.SendMessageAsync("Hello", CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
 
@@ -762,6 +765,7 @@ public class LlmAgentBaseTests
             await release.Task;
             return new AgentTurnResult("late", null, null);
         });
+        test.ReleaseOnDispose(release);
         var chat = test.Agent.SendMessageAsync("Hello", CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
         await StopWithoutWaitingAsync(test.Agent);
@@ -830,7 +834,7 @@ public class LlmAgentBaseTests
 
         // Act
         time.Advance(TimeSpan.FromMinutes(5));
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Error);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Error);
 
         // Assert
         Assert.Contains("did not finish", test.Agent.StatusMessage);
@@ -854,6 +858,7 @@ public class LlmAgentBaseTests
 
             return new AgentTurnResult("[quiet] ok", null, null);
         });
+        test.ReleaseOnDispose(release);
         test.Agent.RunNow();
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
         var staleRun = test.Agent.ExecuteTask!;
@@ -863,13 +868,15 @@ public class LlmAgentBaseTests
         await ((IHostedService)test.Agent).StartAsync(CancellationToken.None);
         release.SetResult();
         await staleRun;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => test.Agent.Status == ServiceStatus.Running && test.Agent.StatusMessage == "Idle",
+            message: "The new run should finish starting.");
+
+        // Requested once: a request while a run is busy queues another run, so the count would pass 2.
+        await test.RunNowAndWaitAsync();
 
         // Assert
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-        {
-            test.Agent.RunNow();
-            return test.Agent.RunCount == 2 && !test.Agent.IsBusy;
-        });
+        Assert.Equal(2, test.Agent.RunCount);
         Assert.Equal(ServiceStatus.Running, test.Agent.Status);
         Assert.Equal("Idle", test.Agent.StatusMessage);
     }
@@ -886,6 +893,7 @@ public class LlmAgentBaseTests
             await release.Task;
             return new AgentTurnResult("[quiet] ok", null, null);
         });
+        test.ReleaseOnDispose(release, finishStarting);
         test.Agent.RunNow();
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
         var staleRun = test.Agent.ExecuteTask!;
@@ -1037,7 +1045,7 @@ public class LlmAgentBaseTests
 
         // Act
         test.Agent.RunNow();
-        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Error);
+        await test.WaitUntilTurnEndedAsync(ServiceStatus.Error);
 
         // Assert
         var entry = Assert.Single(test.Agent.Timeline.Entries);

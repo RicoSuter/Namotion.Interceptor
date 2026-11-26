@@ -25,13 +25,18 @@ Standard ASP.NET Core logging configuration:
   "Logging": {
     "LogLevel": {
       "Default": "Information",
-      "Microsoft.AspNetCore": "Warning"
+      "Microsoft.AspNetCore": "Warning",
+      "System.Net.Http.HttpClient": "Warning"
     }
   }
 }
 ```
 
 Category-level overrides use the fully qualified type name (or prefix) as the key.
+
+`System.Net.Http.HttpClient` is set to `Warning` because devices are polled over HTTP every few seconds, and at `Information` every request writes four log entries. To see the requests of a device while troubleshooting, set it to `Information`, for example with the environment variable `Logging__LogLevel__System.Net.Http.HttpClient=Information`.
+
+The shared HTTP clients of HomeBlaze give up connecting after 10 seconds, so an unreachable device is detected quickly. Ecowitt, MyStrom, Shelly, Sonos, Wallbox, Pushover and the update check use them; FritzBox, Hue and Nuki create their own connections. A request that is connected has no further limit unless the device sets one.
 
 ---
 
@@ -56,6 +61,7 @@ Data/
 ├── Root.json            root configuration
 ├── Files/               devices, dashboards, pages, Plugins.json, docs
 ├── Agents/              timeline, memory, chat session, run count and CLI working directory of AI agents
+├── AutomationState/     current state and last runs of automations, one checkpoint file each
 ├── DataProtection-Keys/ ASP.NET Core keys that keep antiforgery tokens valid across restarts
 ├── History/Sqlite/      SQLite history
 └── OpcUa/               OPC UA certificates
@@ -64,6 +70,10 @@ Data/
 When running from source, the data folder is `src/HomeBlaze/HomeBlaze/Data`. The container image uses `/data`; see [Installation](installation.md#data-folder).
 
 `DataProtection-Keys/` holds the secret keys that sign the browser's connection to the UI and any sign-in, so treat the folder and every backup of it like a password, or encrypt it with a certificate (see [HomeBlaze:DataProtection](#homeblazedataprotection)). To revoke the keys, for example after a backup leaked or in a copy of the data folder that runs as a second instance, stop HomeBlaze, delete the folder and start it again. Open browser tabs then need a reload.
+
+`AutomationState/` holds one checkpoint file per automation with its current state and last runs, described in [Automations: The checkpoint](automation.md#the-checkpoint).
+
+`OpcUa/` holds the certificate stores of the OPC UA client and server subjects, `OpcUa/Client/Pki` and `OpcUa/Server/Pki`, described in [OPC UA](opc-ua.md#certificates).
 
 ---
 

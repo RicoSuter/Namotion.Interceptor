@@ -1,8 +1,11 @@
 @using HueApi
 @using HueApi.BridgeLocator
+@using HueApiBridgeDiscovery = HueApi.BridgeLocator.HueBridgeDiscovery
+@using global::HomeBlaze.Abstractions.Discovery
 
 @attribute [SubjectComponent(SubjectComponentType.Setup, typeof(HueBridge))]
 @implements ISubjectEditComponent
+@implements ISubjectDiscoveryComponent
 
 @if (_bridges == null)
 {
@@ -72,6 +75,9 @@ else
     [Parameter]
     public bool IsCreating { get; set; }
 
+    [Parameter]
+    public IDiscoveryResult? DiscoveryResult { get; set; }
+
     private HueBridge? BridgeSubject => Subject as HueBridge;
 
     private List<LocatedBridge>? _bridges;
@@ -89,9 +95,17 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // Picked on the Discover page, which has searched already; the bridge still needs its Link button.
+        if (DiscoveryResult is HueDiscoveredBridge discovered)
+        {
+            _bridges = [new LocatedBridge(discovered.BridgeId, discovered.HostAddress, null)];
+            _selectedBridge = _bridges[0];
+            return;
+        }
+
         try
         {
-            _bridges = await HueBridgeDiscovery.FastDiscoveryWithNetworkScanFallbackAsync(
+            _bridges = await HueApiBridgeDiscovery.FastDiscoveryWithNetworkScanFallbackAsync(
                 TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
         }
         catch

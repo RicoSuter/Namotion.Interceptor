@@ -10,6 +10,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Resilience;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.WebSocket.Internal;
 using Namotion.Interceptor.WebSocket.Protocol;

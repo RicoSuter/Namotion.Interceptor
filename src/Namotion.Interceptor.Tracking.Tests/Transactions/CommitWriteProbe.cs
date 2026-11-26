@@ -1,6 +1,7 @@
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Transactions;
+using Namotion.Interceptor.Tracking.Transactions.Handlers;
 
 namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 

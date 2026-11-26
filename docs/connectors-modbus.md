@@ -27,7 +27,7 @@ var context = InterceptorSubjectContext
     .WithRegistry();
 
 builder.Services.AddSingleton(new HeatMeter(context));
-builder.Services.AddModbusSubjectClientSource<HeatMeter>("192.168.1.50");
+builder.Services.AddModbusSubjectClientSource<HeatMeter>("192.0.2.50");
 
 [InterceptorSubject]
 public partial class HeatMeter

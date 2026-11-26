@@ -21,6 +21,7 @@ internal sealed class PausableStore(IStore inner) : StoreBase
     private string? _blockedOperation;
     private Action? _afterNextListing;
     private Exception? _deleteFailure;
+    private Exception? _deleteDirectoryFailure;
     private int _pausedStreamNumber;
     private int _callCount;
     private int _openedStreamCount;
@@ -100,6 +101,11 @@ internal sealed class PausableStore(IStore inner) : StoreBase
     /// </summary>
     public void FailNextDeleteAfterItRan(Exception exception) => Volatile.Write(ref _deleteFailure, exception);
 
+    /// <summary>
+    /// Makes the next delete of a directory fail without deleting it.
+    /// </summary>
+    public void FailNextDeleteDirectory(Exception exception) => Volatile.Write(ref _deleteDirectoryFailure, exception);
+
     public override async Task<List<StoreObject>> ListObjects(StorageListOptions? options = null, CancellationToken cancellationToken = default)
     {
         await ArriveAsync(nameof(ListObjects));
@@ -136,6 +142,17 @@ internal sealed class PausableStore(IStore inner) : StoreBase
         {
             throw failure;
         }
+    }
+
+    public override async Task DeleteDirectory(string folderPath, bool recursive, CancellationToken cancellationToken = default)
+    {
+        await ArriveAsync(nameof(DeleteDirectory));
+        if (Interlocked.Exchange(ref _deleteDirectoryFailure, null) is { } failure)
+        {
+            throw failure;
+        }
+
+        await inner.DeleteDirectory(folderPath, recursive, cancellationToken);
     }
 
     public override async Task<bool> ObjectExists(string objectPath, CancellationToken cancellationToken = default)

@@ -10,7 +10,7 @@ using static HomeBlaze.Storage.Tests.Pages.TestTypeNames;
 
 namespace HomeBlaze.Storage.Tests;
 
-public class MarkdownSlotContentWriteTests : IDisposable
+public class MarkdownSlotContentWriteTests : IAsyncLifetime
 {
     private const string CardPage = "# Cards\n\n:: HomeBlaze.Components.Card#card Title=A\nBody.\n::\n";
 
@@ -409,7 +409,7 @@ public class MarkdownSlotContentWriteTests : IDisposable
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
-        services.AddSingleton(provider => new SubjectPathResolver(() => provider.GetRequiredService<RootManager>().Root));
+        services.AddSingleton(provider => new SubjectPathResolver(context, () => provider.GetRequiredService<RootManager>().Root));
         services.AddSingleton<MarkdownContentParser>();
         var serviceProvider = services.BuildServiceProvider();
 
@@ -433,13 +433,11 @@ public class MarkdownSlotContentWriteTests : IDisposable
 
     private string ReadPage(string name = "Page.md") => File.ReadAllText(Path.Combine(_directory.FullName, name));
 
-    public void Dispose()
-    {
-        foreach (var storage in _storages)
-        {
-            storage.Dispose();
-        }
+    public Task InitializeAsync() => Task.CompletedTask;
 
-        _directory.Delete(recursive: true);
+    public async Task DisposeAsync()
+    {
+        await StorageCleanup.DisposeAsync(_storages);
+        await StorageCleanup.DeleteAsync(_directory);
     }
 }

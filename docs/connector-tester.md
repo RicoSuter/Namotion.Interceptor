@@ -15,6 +15,7 @@ Run all commands from the repository root. Each run creates a timestamped direct
 ```bash
 # Chaos test: correctness under kill/disconnect disruptions (exits with code 1 on failure)
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-chaos --configuration Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-chaos-secured --configuration Release
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-chaos --configuration Release
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-chaos --configuration Release
 
@@ -103,7 +104,7 @@ Each connector implements `IFaultInjectable` (separate from the production `ISub
 
 - **Disconnect** (`FaultType.Disconnect`): Soft kill. Breaks the transport connection without stopping the connector. Lets the connector's built-in reconnection logic detect the failure and recover.
   - *OPC UA Server*: Delegates to Kill (no meaningful "soft disconnect" for a multi-connection server).
-  - *OPC UA Client*: Disposes the transport channel. Keep-alive failure triggers `SessionReconnectHandler.BeginReconnect`, exercising the session preservation/transfer path.
+  - *OPC UA Client*: Disposes the transport channel. Keep-alive failure triggers `SessionReconnectHandler.BeginReconnect`, which reactivates the session on a new channel; the client then abandons the preserved session and reconnects manually.
   - *MQTT Server*: Enumerates connected clients and disconnects each one individually.
   - *MQTT Client*: Calls `DisconnectAsync()` on the MQTT client for a graceful disconnect.
   - *WebSocket Server*: Closes all client connections via `CloseAllConnectionsAsync()`.
@@ -129,6 +130,8 @@ The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconn
 
 **OPC UA**: Uses `OpcUaValueConverter` for type mapping. `decimal` values lose precision beyond ~15 significant digits due to `decimal` -> `double` -> `decimal` round-trip. `BufferTime=100ms` batches changes. Server chaos closes transport listeners before dispose, so clients get an immediate TCP RST rather than waiting for keep-alive timeout. Client chaos disposes the session without `CloseAsync`, simulating an abrupt disconnection.
 
+**OPC UA secured** (`opcua-chaos-secured`): the `opcua-chaos` profile with `OpcUa.MinimumSecurityMode` set to `SignAndEncrypt`, so the clients load or create their certificates and all traffic is signed and encrypted. Each participant keeps its certificate store in `logs/{run}/pki/{participant}` for the whole run, so certificates survive chaos restarts, and both sides accept the other's certificate. Clients request a one minute security token lifetime, so secure channels renew within a cycle, and log `OPC UA session created on ... with security mode SignAndEncrypt` for every new session.
+
 **MQTT**: Uses server-authoritative relay pattern where client publishes are intercepted, applied to the server model, and re-published to all clients. Ticks-based timestamp serialization (`UtcTicks`) for full precision. QoS=AtLeastOnce with retained messages.
 
 **WebSocket**: Uses Hello/Welcome handshake for initial state delivery. Server broadcasts all changes to all clients (including originator) with monotonic sequence numbers. Client tracks sequences and triggers reconnection on gap detection. Server kill cancels the current attempt, and the still-running background loop rebuilds the listener; client kill aborts the underlying `ClientWebSocket`. Disconnect mode closes all server connections or aborts the client socket respectively. Circuit breaker (5 failures, 60s cooldown) pauses reconnection during prolonged outages.
@@ -149,7 +152,7 @@ dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile o
 
 When `--participant` is specified, only the named participant starts and the verification engine is skipped. Mutations run continuously with performance metrics.
 
-This isolates each side's CPU and throughput and stops one shared heap hiding which side grew, but it is not the mode for measuring memory: without the verification engine there are no cycles and no `cycles.csv`, and `HeapMB` in `performance-{participant}.csv` is sampled without forcing a collection, so it is not leak evidence. Split the run for throughput and attribution, and use a single-process run for the post-GC heap trend.
+This isolates each side's CPU and throughput and stops one shared heap hiding which side grew, but it is not the mode for measuring memory: without the verification engine there are no cycles and no `cycles.csv`, and `HeapMB` in `performance-{participant}.csv` is the heap after the most recent collection of any kind, not a forced one, so it is not leak evidence. Split the run for throughput and attribution, and use a single-process run for the post-GC heap trend.
 
 ### What to Look For
 
@@ -220,7 +223,7 @@ Cycle log files are created as `pending` and renamed to `pass` or `FAIL` on comp
 
 ### Performance Logs
 
-Performance metrics are written to `performance-{participant}.csv` per participant. Each file has a header row and one data row per reporting interval. Columns: Timestamp, Participant, Cycle, Received/s, Received-Average, Received-P50, Received-P90, Received-P95, Received-P99, Received-P999, Received-Max, Received-Processing, Published, Received, CPU%, ProcessMB, HeapMB, AllocationMB/s. HeapMB in performance logs is sampled at reporting time without forcing GC, so it fluctuates with allocation patterns and is not suitable for leak detection.
+Performance metrics are written to `performance-{participant}.csv` per participant. Each file has a header row and one data row per reporting interval. Columns: Timestamp, Participant, Cycle, Received/s, Received-Average, Received-P50, Received-P90, Received-P95, Received-P99, Received-P999, Received-Max, Received-Processing, Published, Received, CPU%, ProcessMB, HeapMB, AllocationMB/s. HeapMB in performance logs is the live heap after the most recent collection of any kind, which the profiler does not force, so it lags behind allocations, repeats while no collection runs and is not suitable for leak detection.
 
 ### Cycle Logs
 
@@ -250,8 +253,9 @@ See `appsettings.opcua-chaos.json` and `appsettings.opcua-load.json` for example
 | `Clients[].Chaos.IntervalMin/Max` | `00:01:00`/`00:05:00` | Time between disruptions |
 | `Clients[].Chaos.DurationMin/Max` | `00:00:05`/`00:00:30` | Disruption hold time |
 | `ChaosProfiles` | `[]` | Named profiles that rotate round-robin. Empty = all chaos always active |
+| `OpcUa.MinimumSecurityMode` | `"None"` | `"None"`, `"Sign"` or `"SignAndEncrypt"`, see [OPC UA secured](#connector-specific-behaviors) |
 
-Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfiguration.cs`, and `ChaosConfiguration.cs`. Chaos intervals must be shorter than `MutatePhaseDuration`. Set `IntervalMax` to at most half of `MutatePhaseDuration`.
+Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfiguration.cs`, `ChaosConfiguration.cs`, and `OpcUaConfiguration.cs`. Chaos intervals must be shorter than `MutatePhaseDuration`. Set `IntervalMax` to at most half of `MutatePhaseDuration`.
 
 ## Failure Scenario Coverage
 
@@ -261,14 +265,15 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 |----------|------|------------|-------------------|
 | Abrupt server crash | Current attempt cancelled, TCP listeners closed (RST to clients) | Delegates to Kill | Background loop auto-restarts with exponential backoff (1s-30s + jitter) |
 | Abrupt client crash | Session disposed without CloseSession RPC | Transport channel disposed, session preserved | Health check detects missing session, triggers full reconnection |
-| Network partition | N/A | Client transport disposed, keep-alive detects within 5-10s | SDK `SessionReconnectHandler.BeginReconnect` with subscription transfer |
-| Server restart (clean state) | Full server restart, new node manager | N/A | Client subscription transfer fails, falls back to full state reload |
+| Network partition | N/A | Client transport disposed, keep-alive detects within 5-10s | SDK `SessionReconnectHandler` reactivates the session, the client abandons the preserved session and reconnects manually with a full state read |
+| Server restart (clean state) | Full server restart, new node manager | N/A | SDK recreates the session with fresh subscriptions, then a full state read |
 | Session stall / hung reconnect | N/A | N/A | Stall detection after 30s forces SDK handler reset, triggers manual reconnection |
 | Subscription creation failure | N/A | N/A | `SubscriptionHealthMonitor` retries failed items every 5s, falls back to polling |
 | Port already in use on restart | N/A | N/A | Retried with exponential backoff |
 | Resource exhaustion (polling) | N/A | N/A | Circuit breaker (5 failures, 30s cooldown) |
 | Concurrent server + client chaos | Both engines run independently, overlapping disruptions possible | Same | Each connector recovers independently |
 | Bidirectional mutations during chaos | Server and clients mutate concurrently during disruptions | Same | WriteRetryQueue buffers outbound writes, full state sync on reconnect |
+| Secured transport (`opcua-chaos-secured`) | Certificates reloaded from the store on every restart and manual reconnect | Same | Secure channels renew their token about every 45 seconds between disruptions |
 
 ### Covered (WebSocket)
 
@@ -286,7 +291,7 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 | Scenario | Why Not Covered | Production Impact |
 |----------|-----------------|-------------------|
 | Partial network failure (slow/lossy connections) | Keep-alive uses binary pass/fail detection | Low - TCP keepalive settings at OS level handle this |
-| Certificate expiry mid-session | No certificate rotation mechanism | Low for tests, relevant for >6 month production deployments |
+| Certificate expiry mid-session | The OPC UA client and server replace an expired self-signed certificate only when they connect or start | Low for tests, relevant for >6 month production deployments |
 | Server returning persistent error status codes | Polling ignores some error codes | Low - circuit breaker limits impact |
 | Out-of-order or duplicate notifications | Not injected by the chaos profiles | Very low - the OPC UA client skips a value from an older notification message of the same subscription |
 | Notification duplication after subscription transfer | Full state read overwrites stale values | Low - brief inconsistency only |

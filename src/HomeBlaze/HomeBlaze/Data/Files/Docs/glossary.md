@@ -60,7 +60,7 @@ Marks a property for display in the UI property panel. Options: `Name`, `Positio
 Marks a computed property that auto-updates when its dependencies change. Must be expression-bodied (`=>`).
 
 ### `[Operation]`
-Marks a method as an executable action from the UI. Options: `Title`, `Description`, `Icon`, `Position`, `RequiresConfirmation`; `[ExcludeFrom]` beside it decides where it is offered. An operation with `RequiresConfirmation` asks for confirmation in the UI and cannot be called through MCP, neither by AI agents nor by external clients, see [AI Agents](administration/ai-agents.md#tools-and-permissions).
+Marks a method as an executable action from the UI. Options: `Title`, `Description`, `Icon`, `Position`, `RequiresConfirmation`, `Purpose`; `[ExcludeFrom]` beside it decides where it is offered. An operation with `RequiresConfirmation` asks for confirmation in the UI and cannot be called through MCP, neither by AI agents nor by external clients, see [AI Agents](administration/ai-agents.md#tools-and-permissions). An operation with `Purpose = OperationPurpose.Delete` is the subject's Delete button in the browser, see [Building Subjects](development/building-subjects.md).
 
 ### `[Query]`
 Marks a method as a read-only query (no side effects). Similar to `[Operation]` but semantically non-mutating.

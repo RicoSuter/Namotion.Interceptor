@@ -418,7 +418,7 @@ public class InlineStructureEditingTests
         // Assert: the switch stands on the page, so the page keeps its lines and no content inside a block has any.
         await Assertions.Expect(page.Locator(".markdown-content > [data-testid='block-insert-line'] button").First).ToBeVisibleAsync(new() { Timeout = Timeout });
         await page.OpenDialogAfterSelectionAsync(actionBar.GetByTestId("edit-subject-button"));
-        await Assertions.Expect(page.Locator(".markdown-fragment [data-testid='block-insert-line']")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".markdown-fragment [data-testid='block-insert-line']")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -460,8 +460,8 @@ public class InlineStructureEditingTests
         // Assert: the editor selects the block only after the round trip of the click, so the selection of the preview
         // would have arrived by then.
         await page.WaitForPageEditorSelectionAsync(GetLineOf(Content, "HomeBlaze.Components.Switch"));
-        await Assertions.Expect(page.GetWidgetActionBar()).ToHaveCountAsync(0);
-        await Assertions.Expect(page.Locator(".page-split-preview .subject-component-wrapper.selectable")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetWidgetActionBar()).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(page.Locator(".page-split-preview .subject-component-wrapper.selectable")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]

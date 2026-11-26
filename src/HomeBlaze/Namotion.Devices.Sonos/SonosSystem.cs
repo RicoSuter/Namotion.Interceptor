@@ -7,6 +7,8 @@ using HomeBlaze.Abstractions.Networking;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Sonos.Client;
+using Namotion.Devices.Sonos.Events;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -84,7 +86,10 @@ public partial class SonosSystem : BackgroundService,
     public partial int EventPort { get; set; }
 
     /// <summary>
-    /// The time between reconciliations of topology, state and favorites, from 5 seconds to one hour. Zero or less uses 30 seconds.
+    /// The time between polls, from 5 seconds to one hour. Zero or less uses 30 seconds. A poll reads the topology and
+    /// fully reads every player whose event subscriptions are not live; of a player with live subscriptions it reads
+    /// only what events do not deliver. Favorites and a full read of every player follow every 5 minutes while events
+    /// are live, and at every poll otherwise.
     /// </summary>
     [Configuration]
     public partial TimeSpan PollingInterval { get; set; }
@@ -137,7 +142,7 @@ public partial class SonosSystem : BackgroundService,
     public partial string? StatusMessage { get; internal set; }
 
     /// <summary>
-    /// When the last reconciliation of topology, state and favorites completed; null before the first.
+    /// When the last poll completed; null before the first.
     /// </summary>
     [State]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
@@ -201,6 +206,17 @@ public partial class SonosSystem : BackgroundService,
     /// </summary>
     internal TimeSpan FailedRenewalRetryDelay { get; set; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// The time from one full reconciliation to the next poll that is one, while events deliver the state between
+    /// them. Tests change it.
+    /// </summary>
+    internal TimeSpan FullReconcileInterval { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// The event listener of the current connection, null between connections. Tests use it.
+    /// </summary>
+    internal SonosEventListener? CurrentEventListener => GetEventListener();
+
     public SonosSystem(IHttpClientFactory httpClientFactory, ILogger<SonosSystem> logger)
     {
         HttpClientFactory = httpClientFactory;
@@ -213,6 +229,28 @@ public partial class SonosSystem : BackgroundService,
         Groups = new Dictionary<string, SonosGroup>(StringComparer.Ordinal);
         Favorites = [];
         Status = ServiceStatus.Stopped;
+    }
+
+    /// <summary>
+    /// Finds a system among <paramref name="subjects"/>, other than <paramref name="system"/>, whose
+    /// <see cref="EventPort"/> is <paramref name="eventPort"/>. Each system binds its event listener on that port, so
+    /// of two systems on one port only the first receives events.
+    /// </summary>
+    /// <param name="subjects">The subjects to search, such as all subjects known to the registry.</param>
+    /// <param name="eventPort">The event port to look for.</param>
+    /// <param name="system">The system the port is for, which is skipped, or null for a new one.</param>
+    /// <returns>The first other system that uses the port, or null.</returns>
+    public static SonosSystem? FindSystemUsingEventPort(IEnumerable<IInterceptorSubject> subjects, int eventPort, SonosSystem? system)
+    {
+        foreach (var subject in subjects)
+        {
+            if (subject is SonosSystem other && !ReferenceEquals(other, system) && other.EventPort == eventPort)
+            {
+                return other;
+            }
+        }
+
+        return null;
     }
 
     [Derived]

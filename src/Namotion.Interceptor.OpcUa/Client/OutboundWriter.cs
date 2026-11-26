@@ -1,43 +1,57 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.OpcUa.Client.Connection;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
+using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
 internal sealed class OutboundWriter
 {
-    private readonly SessionManager _sessionManager;
+    private readonly Func<(ISession? Session, CancellationToken Lifetime)> _sessionProvider;
+    private readonly ReadAfterWriteManager? _readAfterWriteManager;
+    private readonly Action _onResponseMismatch;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly string _opcUaNodeIdKey;
     private readonly ThroughputCounter _outgoingThroughput;
     private readonly ILogger _logger;
 
+    /// <param name="sessionProvider">Returns the current session with a token that is canceled once it stops being current.</param>
+    /// <param name="readAfterWriteManager">Schedules reads after successful writes, or <c>null</c> when read-after-write is off.</param>
+    /// <param name="onResponseMismatch">Called after a write received the response to a different request.</param>
+    /// <param name="configuration">The client configuration.</param>
+    /// <param name="opcUaNodeIdKey">The property data key under which the node ID of a property is stored.</param>
+    /// <param name="outgoingThroughput">Counts the writes the server accepted.</param>
+    /// <param name="logger">The logger.</param>
     public OutboundWriter(
-        SessionManager sessionManager,
+        Func<(ISession? Session, CancellationToken Lifetime)> sessionProvider,
+        ReadAfterWriteManager? readAfterWriteManager,
+        Action onResponseMismatch,
         OpcUaClientConfiguration configuration,
         string opcUaNodeIdKey,
         ThroughputCounter outgoingThroughput,
         ILogger logger)
     {
-        _sessionManager = sessionManager;
+        _sessionProvider = sessionProvider;
+        _readAfterWriteManager = readAfterWriteManager;
+        _onResponseMismatch = onResponseMismatch;
         _configuration = configuration;
         _opcUaNodeIdKey = opcUaNodeIdKey;
         _outgoingThroughput = outgoingThroughput;
         _logger = logger;
     }
 
-    public int WriteBatchSize => (int)(_sessionManager.CurrentSession?.OperationLimits?.MaxNodesPerWrite ?? 0);
+    public int WriteBatchSize => (int)(_sessionProvider().Session?.OperationLimits?.MaxNodesPerWrite ?? 0);
 
     public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         try
         {
-            var session = _sessionManager.CurrentSession;
-            if (session is null || !session.Connected)
+            var (session, sessionLifetime) = _sessionProvider();
+            if (session is null || !session.Connected || sessionLifetime.IsCancellationRequested)
             {
                 return WriteResult.Failure(changes, new InvalidOperationException("OPC UA session is not connected."));
             }
@@ -48,7 +62,25 @@ internal sealed class OutboundWriter
                 return WriteResult.Success;
             }
 
-            var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
+            var requestHeader = new RequestHeader();
+            WriteResponse writeResponse;
+
+            // Keeps a write on a session that is no longer current from holding the write retry queue, see SessionManager.KillTransportChannel.
+            using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, sessionLifetime);
+            try
+            {
+                writeResponse = await session.WriteAsync(requestHeader, writeValues, requestCancellation.Token).ConfigureAwait(false);
+            }
+            catch (InvalidCastException exception)
+            {
+                return OnResponseMismatch(changes, OpcUaResponseMismatchException.FromInvalidCast("Write", exception));
+            }
+
+            if (OpcUaResponseMismatchException.Check("Write", requestHeader, writeResponse.ResponseHeader) is { } mismatch)
+            {
+                return OnResponseMismatch(changes, mismatch);
+            }
+
             var result = ProcessWriteResults(writeResponse.Results, changes);
             if (result.IsFullySuccessful || result.IsPartialFailure)
             {
@@ -58,15 +90,27 @@ internal sealed class OutboundWriter
 
             return result;
         }
-        catch (InvalidCastException ex)
-        {
-            _logger.LogError(ex, "OPC UA WriteAsync returned unexpected response type (issue #287).");
-            return WriteResult.Failure(changes, ex);
-        }
         catch (Exception ex)
         {
             return WriteResult.Failure(changes, ex);
         }
+    }
+
+    /// <summary>
+    /// Fails the whole write without applying anything from the response, so every change is queued for
+    /// retry, and schedules a full state sync for whatever request the response belonged to.
+    /// </summary>
+    private WriteResult OnResponseMismatch(ReadOnlyMemory<SubjectPropertyChange> changes, OpcUaResponseMismatchException mismatch)
+    {
+        // The only error logged for it: the failure carries the unthrown mismatch, without a stack, into the
+        // write retry queue's warning.
+        _logger.LogError(
+            "OPC UA write of {Count} changes received the response to a different request, so the changes are retried and a full state sync is scheduled. {Reason}",
+            changes.Length,
+            mismatch.Message);
+
+        _onResponseMismatch();
+        return WriteResult.Failure(changes, mismatch);
     }
 
     private WriteResult ProcessWriteResults(StatusCodeCollection results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
@@ -173,7 +217,7 @@ internal sealed class OutboundWriter
 
     private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
-        var manager = _sessionManager.ReadAfterWriteManager;
+        var manager = _readAfterWriteManager;
         if (manager is null)
         {
             return;

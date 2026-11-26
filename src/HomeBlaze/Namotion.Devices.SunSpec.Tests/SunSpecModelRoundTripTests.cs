@@ -22,7 +22,7 @@ namespace Namotion.Devices.SunSpec.Tests;
 [Collection(SunSpecIntegrationCollection.Name)]
 public class SunSpecModelRoundTripTests
 {
-    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan WaitTimeout = TestTimeouts.Default;
 
     public static TheoryData<int> GeneratedModelIds
     {

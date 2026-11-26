@@ -19,7 +19,7 @@ internal sealed class PollingManager : IAsyncDisposable
 {
     private readonly OpcUaSubjectClientSource _source;
     private readonly ILogger _logger;
-    private readonly Func<ISession?> _sessionProvider;
+    private readonly Func<(ISession? Session, CancellationToken Lifetime)> _sessionProvider;
     private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly CircuitBreaker _circuitBreaker;
@@ -38,7 +38,7 @@ internal sealed class PollingManager : IAsyncDisposable
     private int _disposed;
 
     public PollingManager(OpcUaSubjectClientSource source,
-        Func<ISession?> sessionProvider,
+        Func<(ISession? Session, CancellationToken Lifetime)> sessionProvider,
         SubjectPropertyWriter propertyWriter,
         OpcUaClientConfiguration configuration,
         PollingMetrics metrics,
@@ -220,7 +220,7 @@ internal sealed class PollingManager : IAsyncDisposable
             return;
         }
 
-        var session = _sessionProvider();
+        var (session, sessionLifetime) = _sessionProvider();
         if (session is null || !session.Connected)
         {
             _logger.LogDebug("No active session available for polling (null: {IsNull}, connected: {Connected})",
@@ -248,15 +248,21 @@ internal sealed class PollingManager : IAsyncDisposable
             // Get snapshot of items to poll
             var itemsToRead = _pollingItems.Values.ToArray();
 
-            // Process in batches using direct indexing
-            for (int i = 0; i < itemsToRead.Length; i += _configuration.PollingBatchSize)
+            // Each batch is one read, so it may not exceed the server's read limit.
+            var batchLimit = OpcUaValueReader.GetNodesPerRead(session, _configuration.PollingBatchSize);
+
+            // Stops once the session is no longer current: its remaining batches would fail at once, and the next
+            // poll detects the session change and reads every item again.
+            for (int i = 0; i < itemsToRead.Length && !sessionLifetime.IsCancellationRequested; i += batchLimit)
             {
-                var batchSize = Math.Min(_configuration.PollingBatchSize, itemsToRead.Length - i);
+                var batchSize = Math.Min(batchLimit, itemsToRead.Length - i);
                 var batch = new ArraySegment<PollingItem>(itemsToRead, i, batchSize);
-                await ReadBatchAsync(session, batch, cancellationToken).ConfigureAwait(false);
+                await ReadBatchAsync(session, sessionLifetime, batch, cancellationToken).ConfigureAwait(false);
             }
 
-            pollSucceeded = true;
+            // An ended session is neither a failure nor a slow poll: the next poll reads every item on the new session.
+            pollCancelled = sessionLifetime.IsCancellationRequested;
+            pollSucceeded = !pollCancelled;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -320,7 +326,7 @@ internal sealed class PollingManager : IAsyncDisposable
         return Equals(a, b);
     }
 
-    private async Task ReadBatchAsync(ISession session, ArraySegment<PollingItem> batch, CancellationToken cancellationToken)
+    private async Task ReadBatchAsync(ISession session, CancellationToken sessionLifetime, ArraySegment<PollingItem> batch, CancellationToken cancellationToken)
     {
         try
         {
@@ -335,20 +341,15 @@ internal sealed class PollingManager : IAsyncDisposable
                 });
             }
 
-            // Execute read
-            var response = await session.ReadAsync(
-                requestHeader: null,
-                maxAge: 0,
-                timestampsToReturn: TimestampsToReturn.Both,
-                nodesToRead,
-                cancellationToken).ConfigureAwait(false);
+            var results = await OpcUaValueReader.ReadAsync(
+                session, sessionLifetime, nodesToRead, TimestampsToReturn.Both, cancellationToken).ConfigureAwait(false);
 
             // Process results - count metrics per item for accurate monitoring
-            for (var i = 0; i < Math.Min(response.Results.Count, batch.Count); i++)
+            for (var i = 0; i < results.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var dataValue = response.Results[i];
+                var dataValue = results[i];
                 var pollingItem = batch[i];
 
                 if (StatusCode.IsGood(dataValue.StatusCode))
@@ -367,6 +368,10 @@ internal sealed class PollingManager : IAsyncDisposable
         catch (Exception) when (cancellationToken.IsCancellationRequested)
         {
             throw new OperationCanceledException(cancellationToken);
+        }
+        catch (Exception ex) when (sessionLifetime.IsCancellationRequested && ex is not OpcUaResponseMismatchException)
+        {
+            _logger.LogDebug(ex, "Skipped a batch of {Count} polled items because its session is no longer current.", batch.Count);
         }
         catch (Exception ex)
         {

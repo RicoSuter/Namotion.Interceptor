@@ -56,6 +56,7 @@ namespace HomeBlaze.Abstractions.Attributes
     public class OperationAttribute : HomeBlaze.Abstractions.Attributes.SubjectMethodAttribute
     {
         public OperationAttribute() { }
+        public HomeBlaze.Abstractions.Attributes.OperationPurpose Purpose { get; set; }
         public bool RequiresConfirmation { get; set; }
     }
     [System.AttributeUsage(System.AttributeTargets.Parameter, Inherited=true)]
@@ -63,6 +64,11 @@ namespace HomeBlaze.Abstractions.Attributes
     {
         public OperationParameterAttribute() { }
         public HomeBlaze.Abstractions.Attributes.StateUnit Unit { get; set; }
+    }
+    public enum OperationPurpose
+    {
+        None = 0,
+        Delete = 1,
     }
     [System.AttributeUsage(System.AttributeTargets.Class, Inherited=false)]
     public sealed class PageLayoutAttribute : System.Attribute
@@ -144,6 +150,8 @@ namespace HomeBlaze.Abstractions.Attributes
         AmpereHour = 35,
         WattPerSquareMeter = 36,
         DecibelMilliwatt = 37,
+        KilometerPerHour = 38,
+        Bar = 39,
     }
     [System.AttributeUsage(System.AttributeTargets.Interface)]
     public class SubjectAbstractionAttribute : System.Attribute
@@ -361,22 +369,29 @@ namespace HomeBlaze.Abstractions.Devices.Energy
         decimal? BatteryLevel { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
-    [System.ComponentModel.Description("Energy charger device with plug-in and charging state.")]
-    public interface IEnergyCharger : HomeBlaze.Abstractions.Devices.Energy.IEnergyChargerState { }
-    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
-    [System.ComponentModel.Description("Reports whether a charger is plugged in and actively charging.")]
-    public interface IEnergyChargerState
+    [System.ComponentModel.Description("Reports whether a charging cable is plugged in, whether it charges and with which" +
+        " power.")]
+    public interface IChargingState
     {
-        [HomeBlaze.Abstractions.Attributes.State(Position=102)]
-        bool? IsCharging { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=101)]
-        bool? IsPluggedIn { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=330, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [System.ComponentModel.Category("Charging")]
+        decimal? ChargingPower { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=102)]
+        [System.ComponentModel.Category("Charging")]
+        bool? IsCharging { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=101)]
+        [System.ComponentModel.Category("Charging")]
+        bool? IsPluggedIn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=331, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
+        [System.ComponentModel.Category("Charging")]
         decimal? MaximumChargingPower { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Energy charger device with plug-in and charging state.")]
+    public interface IEnergyCharger : HomeBlaze.Abstractions.Devices.Energy.IChargingState { }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Electric vehicle charger with state and control.")]
-    public interface IVehicleCharger : HomeBlaze.Abstractions.Devices.Energy.IEnergyChargerState, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerController, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerState { }
+    public interface IVehicleCharger : HomeBlaze.Abstractions.Devices.Energy.IChargingState, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerController, HomeBlaze.Abstractions.Devices.Energy.IVehicleChargerState { }
     public interface IVehicleChargerController
     {
         System.Threading.Tasks.Task PauseChargingAsync(System.Threading.CancellationToken cancellationToken);
@@ -384,12 +399,10 @@ namespace HomeBlaze.Abstractions.Devices.Energy
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Electric vehicle charger state with charge level and power.")]
-    public interface IVehicleChargerState : HomeBlaze.Abstractions.Devices.Energy.IEnergyChargerState
+    public interface IVehicleChargerState : HomeBlaze.Abstractions.Devices.Energy.IChargingState
     {
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         decimal? ChargeLevel { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Watt)]
-        decimal? ChargingPower { get; }
     }
 }
 namespace HomeBlaze.Abstractions.Devices.Light
@@ -499,6 +512,153 @@ namespace HomeBlaze.Abstractions.Devices.Locks
         [HomeBlaze.Abstractions.Attributes.State(Position=130)]
         [System.ComponentModel.Category("Lock")]
         HomeBlaze.Abstractions.Devices.Locks.DoorLockState? LockState { get; }
+    }
+}
+namespace HomeBlaze.Abstractions.Devices.Vehicles
+{
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Electric vehicle with driven distance, location and the charging state of its bat" +
+        "tery.")]
+    public interface IElectricVehicle : HomeBlaze.Abstractions.Devices.Vehicles.IVehicle
+    {
+        HomeBlaze.Abstractions.Devices.Vehicles.IVehicleChargingState Charge { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Vehicle with driven distance, location, climate and door locks.")]
+    public interface IVehicle
+    {
+        HomeBlaze.Abstractions.Devices.Locks.IDoorLockState? Body { get; }
+        HomeBlaze.Abstractions.Devices.Vehicles.IVehicleClimateState? Climate { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=225)]
+        [System.ComponentModel.Category("Vehicle")]
+        HomeBlaze.Abstractions.Common.GeoCoordinate? Location { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsCumulative=true, Position=224, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        [System.ComponentModel.Category("Vehicle")]
+        decimal? TotalDrivenDistance { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Starts and stops the charging of a vehicle and sets its charge limit.")]
+    public interface IVehicleChargingController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="BatteryChargingFull", Position=3, Title="Set Charge Limit")]
+        [System.ComponentModel.Category("Charging")]
+        System.Threading.Tasks.Task SetChargeLimitAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)] decimal chargeLimit, System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="EvStation", Position=1, Title="Start Charging")]
+        [System.ComponentModel.Category("Charging")]
+        System.Threading.Tasks.Task StartChargingAsync(System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Stop", Position=2, Title="Stop Charging")]
+        [System.ComponentModel.Category("Charging")]
+        System.Threading.Tasks.Task StopChargingAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports the charging state of a vehicle: plug, charging, power, battery level, ch" +
+        "arge limit, remaining time and range.")]
+    public interface IVehicleChargingState : HomeBlaze.Abstractions.Devices.Energy.IBatteryState, HomeBlaze.Abstractions.Devices.Energy.IChargingState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=341, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
+        [System.ComponentModel.Category("Charging")]
+        decimal? ChargeLimit { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=343, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Kilometer)]
+        [System.ComponentModel.Category("Charging")]
+        decimal? Range { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=342)]
+        [System.ComponentModel.Category("Charging")]
+        System.TimeSpan? RemainingChargingTime { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Starts and stops the climate control of a vehicle.")]
+    public interface IVehicleClimateController
+    {
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Thermostat", Position=1, Title="Start Climate")]
+        [System.ComponentModel.Category("Climate")]
+        System.Threading.Tasks.Task StartClimateAsync([HomeBlaze.Abstractions.Attributes.OperationParameter(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)] decimal temperature, System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation(Icon="Stop", Position=2, Title="Stop Climate")]
+        [System.ComponentModel.Category("Climate")]
+        System.Threading.Tasks.Task StopClimateAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether the climate of a vehicle runs and its inside and outside temperat" +
+        "ure.")]
+    public interface IVehicleClimateState
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=201, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [System.ComponentModel.Category("Climate")]
+        decimal? InsideTemperature { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=153)]
+        [System.ComponentModel.Category("Climate")]
+        bool? IsClimateOn { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=202, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.DegreeCelsius)]
+        [System.ComponentModel.Category("Climate")]
+        decimal? OutsideTemperature { get; }
+    }
+}
+namespace HomeBlaze.Abstractions.Discovery
+{
+    public sealed class DiscoveredItem : System.IEquatable<HomeBlaze.Abstractions.Discovery.DiscoveredItem>
+    {
+        public DiscoveredItem(string DisplayName, string? Detail) { }
+        public string? Detail { get; init; }
+        public string DisplayName { get; init; }
+        public static System.Collections.Generic.IComparer<HomeBlaze.Abstractions.Discovery.DiscoveredItem> DisplayOrder { get; }
+    }
+    public interface IDiscoveryResult
+    {
+        string? Detail { get; }
+        string DisplayName { get; }
+        System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.DiscoveredItem> IncludedItems { get; }
+        string Key { get; }
+        bool Matches(Namotion.Interceptor.IInterceptorSubject subject);
+    }
+    public interface IDiscoveryResult<in TSubject> : HomeBlaze.Abstractions.Discovery.IDiscoveryResult
+        where in TSubject : Namotion.Interceptor.IInterceptorSubject
+    {
+        bool Matches(TSubject subject);
+    }
+    public interface IMulticastDnsBrowser
+    {
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.MulticastDnsServiceInstance>> BrowseAsync(string serviceType, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface ISsdpSearch
+    {
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<HomeBlaze.Abstractions.Discovery.SsdpResponse>> SearchAsync(string searchTarget, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface ISubjectDiscovery
+    {
+        System.Type SubjectType { get; }
+        System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.IDiscoveryResult> DiscoverAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IUdpDiscovery
+    {
+        System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.UdpDatagram> BroadcastAsync(int port, System.ReadOnlyMemory<byte> request, System.TimeSpan window, System.Threading.CancellationToken cancellationToken);
+        System.Collections.Generic.IAsyncEnumerable<HomeBlaze.Abstractions.Discovery.UdpDatagram> ListenAsync(int port, System.TimeSpan window, System.Threading.CancellationToken cancellationToken);
+    }
+    public sealed class MulticastDnsServiceInstance : System.IEquatable<HomeBlaze.Abstractions.Discovery.MulticastDnsServiceInstance>
+    {
+        public MulticastDnsServiceInstance(string InstanceName, string? HostName, System.Collections.Generic.IReadOnlyList<System.Net.IPAddress> Addresses, System.Collections.Generic.IReadOnlyDictionary<string, string> Properties) { }
+        public System.Collections.Generic.IReadOnlyList<System.Net.IPAddress> Addresses { get; init; }
+        public string? HostName { get; init; }
+        public string InstanceName { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, string> Properties { get; init; }
+    }
+    public sealed class SsdpResponse : System.IEquatable<HomeBlaze.Abstractions.Discovery.SsdpResponse>
+    {
+        public SsdpResponse(System.Uri Location, string? UniqueServiceName, System.Collections.Generic.IReadOnlyDictionary<string, string> Headers) { }
+        public System.Collections.Generic.IReadOnlyDictionary<string, string> Headers { get; init; }
+        public System.Uri Location { get; init; }
+        public string? UniqueServiceName { get; init; }
+    }
+    public abstract class SubjectDiscovery<TSubject, TResult> : HomeBlaze.Abstractions.Discovery.ISubjectDiscovery
+        where TSubject :  class, Namotion.Interceptor.IInterceptorSubject
+        where TResult :  class, HomeBlaze.Abstractions.Discovery.IDiscoveryResult<TSubject>
+    {
+        protected SubjectDiscovery() { }
+        protected abstract System.Collections.Generic.IAsyncEnumerable<TResult> DiscoverAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    public readonly struct UdpDatagram : System.IEquatable<HomeBlaze.Abstractions.Discovery.UdpDatagram>
+    {
+        public UdpDatagram(System.ReadOnlyMemory<byte> Payload, System.Net.IPAddress SenderAddress) { }
+        public System.ReadOnlyMemory<byte> Payload { get; init; }
+        public System.Net.IPAddress SenderAddress { get; init; }
     }
 }
 namespace HomeBlaze.Abstractions
@@ -808,6 +968,10 @@ namespace HomeBlaze.Abstractions.Metadata
         public ConfigurationMetadata() { }
         public bool IsSecret { get; init; }
     }
+    public interface IChildMethodProvider
+    {
+        void AddMethods(Namotion.Interceptor.IInterceptorSubject subject);
+    }
     public enum MethodKind
     {
         Operation = 0,
@@ -825,6 +989,7 @@ namespace HomeBlaze.Abstractions.Metadata
         public HomeBlaze.Abstractions.Metadata.MethodParameter[] Parameters { get; init; }
         public int Position { get; init; }
         public string PropertyName { get; init; }
+        public HomeBlaze.Abstractions.Attributes.OperationPurpose Purpose { get; init; }
         public bool RequiresConfirmation { get; init; }
         public System.Type? ResultType { get; init; }
         public string Title { get; init; }
@@ -891,6 +1056,10 @@ namespace HomeBlaze.Abstractions.Networking
     public interface INetworkHost
     {
         string? HostAddress { get; }
+    }
+    public static class MacAddressComparison
+    {
+        public static bool AreEqual(string? macAddress, string? otherMacAddress) { }
     }
 }
 namespace HomeBlaze.Abstractions.Security

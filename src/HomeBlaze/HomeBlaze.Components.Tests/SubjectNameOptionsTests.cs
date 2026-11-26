@@ -168,4 +168,93 @@ public class SubjectNameOptionsTests
         Assert.Equal("SubjectNameOptionsTests3", name);
         Assert.Null(options.Validate(name));
     }
+
+    [Fact]
+    public void WhenThePreferredNameIsValid_ThenItIsSuggested()
+    {
+        // Arrange
+        var options = new SubjectNameOptions("File name", ".json", ["Other.json"]);
+
+        // Act
+        var name = options.SuggestName("  Philips Hue - 1A2B3C ", typeof(SubjectNameOptionsTests));
+
+        // Assert
+        Assert.Equal("Philips Hue - 1A2B3C", name);
+    }
+
+    [Fact]
+    public void WhenThePreferredNameIsTaken_ThenTheNextFreeNumberIsAppended()
+    {
+        // Arrange
+        var options = new SubjectNameOptions("File name", ".json", ["FRITZ!Repeater 1200 AX.json", "fritz!repeater 1200 ax 2"]);
+
+        // Act
+        var name = options.SuggestName("FRITZ!Repeater 1200 AX", typeof(SubjectNameOptionsTests));
+
+        // Assert
+        Assert.Equal("FRITZ!Repeater 1200 AX 3", name);
+        Assert.Null(options.Validate(name));
+    }
+
+    [Fact]
+    public void WhenThePreferredNameIsInvalid_ThenTheTypeNameIsSuggested()
+    {
+        // Arrange
+        var options = new SubjectNameOptions("File name", ".json", []);
+
+        // Act
+        var name = options.SuggestName("Living/room", typeof(SubjectNameOptionsTests));
+
+        // Assert
+        Assert.Equal(nameof(SubjectNameOptionsTests), name);
+    }
+
+    [Fact]
+    public void WhenTheNumberedPreferredNameDoesNotFitTheRule_ThenTheTypeNameIsSuggested()
+    {
+        // Arrange
+        var options = new SubjectNameOptions("File name", ".json", ["Kitchen.json"])
+        {
+            Rule = trimmedName => trimmedName.All(char.IsLetter) ? null : "Only letters"
+        };
+
+        // Act
+        var name = options.SuggestName("Kitchen", typeof(SubjectNameOptionsTests));
+
+        // Assert
+        Assert.Equal(nameof(SubjectNameOptionsTests), name);
+    }
+
+    [Theory]
+    [InlineData("Living\nroom")]
+    [InlineData("Living\troom")]
+    [InlineData("Living\u0007room")]
+    [InlineData("Living\u202Emoor")]
+    [InlineData("Living\u200Broom")]
+    [InlineData(".hidden")]
+    [InlineData(" .hidden ")]
+    public void WhenThePreferredNameIsNotPlain_ThenTheTypeNameIsSuggested(string preferredName)
+    {
+        // Arrange
+        var options = new SubjectNameOptions("File name", ".json", []);
+
+        // Act
+        var name = options.SuggestName(preferredName, typeof(SubjectNameOptionsTests));
+
+        // Assert
+        Assert.Equal(nameof(SubjectNameOptionsTests), name);
+    }
+
+    [Fact]
+    public void WhenThePreferredNameHasADotInside_ThenItIsSuggested()
+    {
+        // Arrange
+        var options = new SubjectNameOptions("File name", ".json", []);
+
+        // Act
+        var name = options.SuggestName("shelly1.kitchen", typeof(SubjectNameOptionsTests));
+
+        // Assert
+        Assert.Equal("shelly1.kitchen", name);
+    }
 }
