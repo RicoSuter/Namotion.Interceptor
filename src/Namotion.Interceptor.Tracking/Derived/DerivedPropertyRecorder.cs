@@ -20,6 +20,9 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
     private RecordingFrame[] _frames = [];
     private int _depth;
 
+    // The frames that record, so without the suspended ones.
+    private int _evaluationDepth;
+
     // The read observer this recorder replaced when its first frame started, restored when its last frame ends.
     private IPropertyReadObserver? _replacedObserver;
 
@@ -39,6 +42,9 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
 
     /// <summary>A getter is being evaluated on this thread, also while its recording is suspended.</summary>
     internal static bool IsEvaluatingOnThisThread => _current is { _depth: > 0 };
+
+    /// <summary>The number of recordings that run on this thread, without the suspended ones.</summary>
+    internal static int EvaluationDepth => _current?._evaluationDepth ?? 0;
 
     /// <summary>
     /// Starts a recording frame for the getter of <paramref name="property"/> (reuses a pooled buffer; allocation-free in
@@ -98,6 +104,7 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         if (!isSuspended)
         {
             frame.Buffer ??= _pool.Rent(8);
+            _evaluationDepth++;
         }
 
         // The read observer is a single slot: a recording replaces any other observer of this thread, and the end
@@ -206,6 +213,11 @@ internal sealed class DerivedPropertyRecorder : IPropertyReadObserver
         }
 
         ref var frame = ref _frames[_depth];
+        if (!frame.IsSuspended)
+        {
+            _evaluationDepth--;
+        }
+
         frame.PreviousReads = null;
         return new ReadOnlySpan<RecordedDependency>(frame.Buffer, 0, frame.Count);
     }
