@@ -122,7 +122,7 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         }
 
         var json = await File.ReadAllTextAsync(ConfigurationPath, cancellationToken);
-        json = await ConvertSecretsAsync(json);
+        json = await ConvertSecretsAsync(json, cancellationToken);
         using var startup = _context.DeferHostedServiceStarts();
         var skipped = new List<SkippedConfigurationProperty>();
 
@@ -148,9 +148,8 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
     }
 
     // Root.json is outside the storage, so its plaintext secrets are moved here. A store that cannot be written leaves the
-    // file as it is. Written in place like a save, so that a symbolic link or a single bind-mounted file stays and keeps its
-    // owner and mode, and not canceled, since a write given up halfway would leave a part of the file.
-    private async Task<string> ConvertSecretsAsync(string json)
+    // file as it is. The target of a symbolic link is replaced, so the link stays. A file mounted on its own cannot be replaced.
+    private async Task<string> ConvertSecretsAsync(string json, CancellationToken cancellationToken)
     {
         try
         {
@@ -159,7 +158,8 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
                 return json;
             }
 
-            await File.WriteAllTextAsync(ConfigurationPath, converted, CancellationToken.None);
+            var targetPath = new FileInfo(ConfigurationPath).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? ConfigurationPath;
+            await AtomicFile.WriteAllTextAsync(targetPath, converted, cancellationToken);
             _logger?.LogInformation("Moved the plaintext secrets of the root configuration to the secret store.");
             return converted;
         }

@@ -54,7 +54,7 @@ Restricts which `Host` header values the server will accept. `*` allows any host
 
 ## Data folder
 
-HomeBlaze keeps everything it stores in one data folder: the folder that contains the root configuration file `Root.json`. Relative paths in the configuration resolve against this folder.
+HomeBlaze keeps everything it stores in one data folder: the folder that contains the root configuration file `Root.json`. Relative paths in the configuration resolve against this folder. Mount the folder, not a single file such as `Root.json`, since HomeBlaze may replace a file by writing a new one next to it.
 
 ```
 Data/
