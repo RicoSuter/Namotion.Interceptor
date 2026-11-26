@@ -37,7 +37,7 @@ public class DeltaParityTests
     [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
     public async Task WhenCounterResets_ThenTheNewValueCountsAsTheIncrease(ParityStoreFactory factory)
     {
-        // Arrange - 1000 then a restart to 3, then 8.
+        // Arrange - 1000 then a restart to 3, below half of 1000, then 8.
         using var store = factory.Create();
         Record(store, 1, 1000d);
         Record(store, 3, 3d);
@@ -49,6 +49,25 @@ public class DeltaParityTests
 
         // Assert - 1000 is the baseline (nothing before it), then 3 (restart) and 5.
         ParityAssert.NumbersEqual([8d], series);
+    }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenCounterStepsBackALittle_ThenTheStepBackCountsAsNoChange(ParityStoreFactory factory)
+    {
+        // Arrange - 35'360'000, then 35'360'086, a step back to 35'360'074 after a reboot, then 35'360'080.
+        using var store = factory.Create();
+        Record(store, 1, 35_360_000d);
+        Record(store, 3, 35_360_086d);
+        Record(store, 5, 35_360_074d);
+        Record(store, 7, 35_360_080d);
+        await store.FlushAsync();
+
+        // Act
+        var series = store.Query(Delta(Base, Base.AddSeconds(10)));
+
+        // Assert - 86, nothing for the step back, then 6 counted from the lower reading.
+        ParityAssert.NumbersEqual([92d], series);
     }
 
     [Theory]

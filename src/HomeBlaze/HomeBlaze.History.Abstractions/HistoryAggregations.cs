@@ -38,8 +38,8 @@ public static class HistoryAggregations
 
     /// <summary>
     /// Increase of a cumulative counter in the bucket: every step between consecutive numeric samples, starting
-    /// from the value held before the bucket, where a drop counts as a restart from zero (see
-    /// <see cref="HistoryDelta.Step"/>). Bridges coverage gaps.
+    /// from the value held before the bucket, where a drop below half counts as a restart from zero and a smaller
+    /// drop as a step back that adds nothing (see <see cref="HistoryDelta.Step"/>). Bridges coverage gaps.
     /// </summary>
     public const string Delta = "Delta";
 

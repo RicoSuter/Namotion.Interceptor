@@ -59,8 +59,9 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             {
                 type = "string",
                 description = "Last, First, SampleAverage, TimeWeightedAverage, Minimum, Maximum, Sum, Count, " +
-                              "StandardDeviation, or Delta (increase of a cumulative counter per bucket; a drop counts as " +
-                              "a restart from zero, recording gaps are bridged; needs a bucket; only for properties marked cumulative). " +
+                              "StandardDeviation, or Delta (increase of a cumulative counter per bucket; a drop below half counts as " +
+                              "a restart from zero, a smaller drop as a step back that adds nothing, recording gaps are bridged; " +
+                              "needs a bucket; only for properties marked cumulative). " +
                               "Case-insensitive. Defaults to Last."
             },
             max_points = new
