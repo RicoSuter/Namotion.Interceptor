@@ -55,7 +55,7 @@ public class DeltaParityTests
     [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
     public async Task WhenCounterStepsBackALittle_ThenTheStepBackCountsAsNoChange(ParityStoreFactory factory)
     {
-        // Arrange - 35'360'000, then 35'360'086, a step back to 35'360'074 after a reboot, then 35'360'080.
+        // Arrange - the counter steps back by 12 after a reboot, then grows again.
         using var store = factory.Create();
         Record(store, 1, 35_360_000d);
         Record(store, 3, 35_360_086d);

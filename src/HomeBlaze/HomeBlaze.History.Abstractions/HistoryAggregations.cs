@@ -37,9 +37,8 @@ public static class HistoryAggregations
     public const string StandardDeviation = "StandardDeviation";
 
     /// <summary>
-    /// Increase of a cumulative counter in the bucket: every step between consecutive numeric samples, starting
-    /// from the value held before the bucket, where a drop below half counts as a restart from zero and a smaller
-    /// drop as a step back that adds nothing (see <see cref="HistoryDelta.Step"/>). Bridges coverage gaps.
+    /// Increase of a cumulative counter in the bucket: the sum of <see cref="HistoryDelta.Step"/> over consecutive numeric
+    /// samples, starting from the value held before the bucket. Bridges coverage gaps.
     /// </summary>
     public const string Delta = "Delta";
 
