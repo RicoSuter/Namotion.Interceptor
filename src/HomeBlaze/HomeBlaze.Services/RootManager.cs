@@ -1,3 +1,4 @@
+using System.Text;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Configuration;
@@ -121,8 +122,19 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
             throw new FileNotFoundException($"Root configuration file not found: {ConfigurationPath}", ConfigurationPath);
         }
 
-        var json = await File.ReadAllTextAsync(ConfigurationPath, cancellationToken);
-        json = await ConvertSecretsAsync(json, cancellationToken);
+        var content = await File.ReadAllBytesAsync(ConfigurationPath, cancellationToken);
+        var json = DecodeText(content, out var isExact);
+        if (isExact)
+        {
+            json = await ConvertSecretsAsync(json, cancellationToken);
+        }
+        else
+        {
+            _logger?.LogWarning(
+                "The root configuration {Path} is not valid text in its encoding, so its plaintext secrets are not moved to the secret store; save it as UTF-8 to move them.",
+                ConfigurationPath);
+        }
+
         using var startup = _context.DeferHostedServiceStarts();
         var skipped = new List<SkippedConfigurationProperty>();
 
@@ -145,6 +157,24 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         _rootLoaded.TrySetResult(Root);
 
         return Root;
+    }
+
+    // Decodes in the encoding the byte order mark names, else UTF-8. Not exact when a byte is not valid in that encoding and
+    // became U+FFFD: writing the text back would replace such bytes for good, such as an umlaut in a file saved as Windows-1252.
+    private static string DecodeText(byte[] content, out bool isExact)
+    {
+        using var reader = new StreamReader(new MemoryStream(content), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var text = reader.ReadToEnd();
+        if (!text.Contains('�'))
+        {
+            isExact = true;
+            return text;
+        }
+
+        var encoding = reader.CurrentEncoding;
+        var preamble = content.AsSpan().StartsWith(encoding.Preamble) ? encoding.Preamble : [];
+        isExact = content.AsSpan().SequenceEqual([.. preamble, .. encoding.GetBytes(text)]);
+        return text;
     }
 
     // Root.json is outside the storage, so its plaintext secrets are moved here. The target of a symbolic link is replaced,

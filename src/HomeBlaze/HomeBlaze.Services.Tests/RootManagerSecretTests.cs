@@ -1,3 +1,4 @@
+using System.Text;
 using HomeBlaze.Services.Secrets;
 using HomeBlaze.Services.Tests.Serialization;
 using Microsoft.Extensions.Configuration;
@@ -106,8 +107,51 @@ public class RootManagerSecretTests : IDisposable
             It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
     }
 
-    private static string RootJson(string password) =>
-        $$"""{ "$type": "{{typeof(SecretTestDevice).FullName}}", "password": "{{password}}" }""";
+    [Fact]
+    public async Task WhenRootJsonIsNotValidTextInItsEncoding_ThenItIsLeftAsItIsAndWarns()
+    {
+        // Arrange: Windows-1252 without a byte order mark, whose 0xFC (ü) is not valid UTF-8
+        var original = Encoding.Latin1.GetBytes(RootJson("s3cr3t", host: "Küche"));
+        await File.WriteAllBytesAsync(RootPath, original);
+        var (rootManager, logger) = CreateRootManager(new SecretStore(SecretsPath));
+
+        // Act
+        await rootManager.StartAsync(CancellationToken.None);
+        var root = (SecretTestDevice)await rootManager.RootLoaded.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(original, await File.ReadAllBytesAsync(RootPath));
+        Assert.Equal("s3cr3t", root.Password);
+        logger.Verify(instance => instance.Log(
+            LogLevel.Warning,
+            It.IsAny<EventId>(),
+            It.IsAny<It.IsAnyType>(),
+            It.IsAny<Exception?>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task WhenRootJsonIsUtf16WithAByteOrderMark_ThenItIsConvertedAndWrittenAsUtf8()
+    {
+        // Arrange
+        await File.WriteAllTextAsync(RootPath, RootJson("s3cr3t", host: "Küche"), Encoding.Unicode);
+        var (rootManager, _) = CreateRootManager(new SecretStore(SecretsPath));
+
+        // Act
+        await rootManager.StartAsync(CancellationToken.None);
+        var root = (SecretTestDevice)await rootManager.RootLoaded.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        var text = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)
+            .GetString(await File.ReadAllBytesAsync(RootPath));
+        Assert.DoesNotContain("s3cr3t", text);
+        Assert.Contains("$secret:", text);
+        Assert.Equal("Küche", System.Text.Json.JsonDocument.Parse(text).RootElement.GetProperty("host").GetString());
+        Assert.Equal("s3cr3t", root.Password);
+    }
+
+    private static string RootJson(string password, string host = "10.0.0.1") =>
+        $$"""{ "$type": "{{typeof(SecretTestDevice).FullName}}", "host": "{{host}}", "password": "{{password}}" }""";
 
     private (RootManager RootManager, Mock<ILogger<RootManager>> Logger) CreateRootManager(SecretStore store)
     {
