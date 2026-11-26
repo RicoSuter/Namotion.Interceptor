@@ -1,0 +1,24 @@
+{
+  "$type": "HomeBlaze.Virtual.VirtualSubject",
+  "title": "Pump overview",
+  "properties": {
+    "WaterPump": {
+      "properties": {
+        "TargetSpeed": {
+          "path": "/Demo/WaterPump/TargetSpeed",
+          "dataType": "Number",
+          "state": { "title": "Target speed" }
+        },
+        "SpeedShare": {
+          "expression": "/Demo/WaterPump/CurrentSpeed / TargetSpeed",
+          "dataType": "Number",
+          "state": { "title": "Speed of target", "unit": "Percent" },
+          "attributes": {
+            "Minimum": { "expression": "0", "dataType": "Number" },
+            "Maximum": { "expression": "1", "dataType": "Number" }
+          }
+        }
+      }
+    }
+  }
+}

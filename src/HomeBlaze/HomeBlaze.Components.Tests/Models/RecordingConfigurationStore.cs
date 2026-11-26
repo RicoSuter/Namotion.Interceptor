@@ -27,6 +27,9 @@ public partial class RecordingConfigurationStore : IConfigurationWriter
     /// <summary>A task that every write awaits after it started, to act as a writer that takes long.</summary>
     public Task? WriteGate { get; set; }
 
+    /// <summary>Runs in every write after it was recorded, to act as a writer that changes the graph, such as one that replaces the subject.</summary>
+    public Action? WriteAction { get; set; }
+
     public IReadOnlyCollection<IInterceptorSubject> WrittenSubjects => _writtenSubjects;
 
     /// <summary>The speed of every device whose write started, read when the write starts.</summary>
@@ -50,6 +53,7 @@ public partial class RecordingConfigurationStore : IConfigurationWriter
         }
 
         _writtenSubjects.Enqueue(subject);
+        WriteAction?.Invoke();
         return WritesConfiguration;
     }
 }

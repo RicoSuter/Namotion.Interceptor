@@ -21,6 +21,22 @@ public sealed class ConfigurationPersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTheWriteReplacesTheOwner_ThenWrittenIsReturnedAndTheReplacedOwnerIsNotApplied()
+    {
+        // Arrange
+        var replacement = new PersistedDevice(_graph.Context);
+        _graph.Store.WriteAction = () => _graph.Store.Device = replacement;
+
+        // Act
+        var result = await ConfigurationPersistence.PersistOwnerAsync(_graph.RootManager, _graph.Device, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ConfigurationPersistResult.Written, result);
+        Assert.Same(_graph.Device, Assert.Single(_graph.Store.WrittenSubjects));
+        Assert.Equal(0, _graph.Device.ApplyCount);
+    }
+
+    [Fact]
     public async Task WhenSubjectIsNestedInOwnerConfiguration_ThenOwnerIsWrittenAndApplied()
     {
         // Arrange

@@ -29,6 +29,9 @@ internal sealed class ExpressionFieldPreview
 
     public IReadOnlyList<string> Hints { get; private set; } = [];
 
+    /// <summary>Whether the result is the text of the value rather than true, false or unknown.</summary>
+    public bool ShowsValue { get; set; }
+
     /// <summary>The result of the expression with the current values, or null when it has none to show.</summary>
     public string? ResultText { get; private set; }
 
@@ -110,8 +113,8 @@ internal sealed class ExpressionFieldPreview
     private bool Evaluate()
     {
         var isChanged = false;
-        var resultText = _result is { } result ? FormatResult(result().Result) : null;
-        if (!ReferenceEquals(resultText, ResultText))
+        var resultText = _result is { } result ? Format(result()) : null;
+        if (!string.Equals(resultText, ResultText, StringComparison.Ordinal))
         {
             ResultText = resultText;
             isChanged = true;
@@ -154,7 +157,8 @@ internal sealed class ExpressionFieldPreview
         return isChanged;
     }
 
-    // The result texts are constants, so a changed text is a different reference.
+    private string Format(ExpressionPreview preview) => ShowsValue ? preview.Text ?? NoValueText : FormatResult(preview.Result);
+
     private static string FormatResult(bool? result) => result switch
     {
         true => "true",
