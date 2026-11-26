@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
@@ -19,6 +21,22 @@ public partial class TestSubject : IConfigurable
         ConfigProperty = string.Empty;
         StateProperty = string.Empty;
     }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class SubjectWithExtensionData : IConfigurable
+{
+    [Configuration]
+    public partial string? Name { get; set; }
+
+    [State]
+    public partial string? Status { get; set; }
+
+    [JsonExtensionData]
+    [JsonInclude]
+    internal Dictionary<string, JsonElement>? UnknownKeys { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
@@ -295,6 +313,25 @@ public partial class SubjectWithUnreadableConfiguration : IConfigurable
     {
         get => throw new InvalidOperationException("The value cannot be read.");
         set { }
+    }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+/// <summary>A subject whose constructor gives its configuration values that differ from the defaults of their types.</summary>
+[InterceptorSubject]
+public partial class SubjectWithDefaults : IConfigurable
+{
+    [Configuration]
+    public partial string Label { get; set; }
+
+    [Configuration]
+    public partial int Interval { get; set; }
+
+    public SubjectWithDefaults()
+    {
+        Label = "default label";
+        Interval = 30;
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;

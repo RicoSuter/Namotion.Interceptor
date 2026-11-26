@@ -33,6 +33,10 @@ public partial class MyStromSwitch : BackgroundService,
     INetworkHost,
     IUptimeState
 {
+    // Bounds the polling reads only, because operations may be blocking calls that legitimately take longer.
+    // Without it a switch that accepts the connection but never answers holds the last values for the 100 seconds of the HttpClient default.
+    internal TimeSpan PollRequestTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<MyStromSwitch> _logger;
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
@@ -203,7 +207,11 @@ public partial class MyStromSwitch : BackgroundService,
                 StatusMessage = "Connecting...";
 
                 using var client = _httpClientFactory.CreateClient();
-                await FetchInformationAsync(client, stoppingToken);
+                using (var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
+                {
+                    connectTimeout.CancelAfter(PollRequestTimeout);
+                    await FetchInformationAsync(client, connectTimeout.Token);
+                }
 
                 Status = ServiceStatus.Running;
                 StatusMessage = null;
@@ -220,7 +228,7 @@ public partial class MyStromSwitch : BackgroundService,
                 _logger.LogError(exception, "MyStrom switch {HostAddress} connection failed", HostAddress);
                 IsConnected = false;
                 Status = ServiceStatus.Error;
-                StatusMessage = exception.Message;
+                StatusMessage = GetFailureMessage(exception);
                 IsOn = null;
                 MeasuredPower = null;
                 Temperature = null;
@@ -233,6 +241,11 @@ public partial class MyStromSwitch : BackgroundService,
         StatusMessage = null;
     }
 
+    // The poll timeout and the connect timeout of the handler both surface as an OperationCanceledException; both are 10 seconds.
+    private string GetFailureMessage(Exception exception) => exception is OperationCanceledException
+        ? $"The device did not answer within {PollRequestTimeout.TotalSeconds:0.#} seconds."
+        : exception.Message;
+
     private async Task RunPollingLoopAsync(HttpClient client, CancellationToken stoppingToken)
     {
         // Local to this loop, so that reports read by the turn on and off operations do not move the baseline.
@@ -241,19 +254,24 @@ public partial class MyStromSwitch : BackgroundService,
         {
             try
             {
-                var report = await RefreshReportAsync(client, stoppingToken);
+                // One source per poll cycle; its expiry is not the stop token, so it lands in the poll failure path below.
+                using var pollTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                pollTimeout.CancelAfter(PollRequestTimeout);
+                var pollToken = pollTimeout.Token;
+
+                var report = await RefreshReportAsync(client, pollToken);
                 if (report != null)
                 {
                     // The device restarted, for example after a firmware update, so its information may have changed.
                     if (report.TimeSinceBoot < previousTimeSinceBoot)
                     {
-                        await FetchInformationAsync(client, stoppingToken);
+                        await FetchInformationAsync(client, pollToken);
                     }
 
                     previousTimeSinceBoot = report.TimeSinceBoot;
                 }
 
-                await RefreshTemperatureAsync(client, stoppingToken);
+                await RefreshTemperatureAsync(client, pollToken);
                 LastUpdated = DateTimeOffset.UtcNow;
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -265,7 +283,7 @@ public partial class MyStromSwitch : BackgroundService,
                 _logger.LogWarning(exception, "MyStrom switch {HostAddress} poll failed", HostAddress);
                 IsConnected = false;
                 Status = ServiceStatus.Error;
-                StatusMessage = exception.Message;
+                StatusMessage = GetFailureMessage(exception);
                 return; // Exit polling loop to trigger reconnect
             }
 

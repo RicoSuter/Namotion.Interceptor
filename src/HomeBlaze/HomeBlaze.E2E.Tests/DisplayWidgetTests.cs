@@ -53,7 +53,7 @@ public class DisplayWidgetTests
 
         // Assert
         await Assertions.Expect(page.GetByTestId("subject-table").First).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -84,8 +84,8 @@ public class DisplayWidgetTests
         var gauge = GetGauge(page, "Gauge Missing");
         await Assertions.Expect(gauge.GetByTestId("value-missing")).ToHaveTextAsync(MissingText, new() { Timeout = Timeout });
         var meter = gauge.GetByTestId("gauge-meter");
-        await Assertions.Expect(meter).Not.ToHaveAttributeAsync("aria-valuenow", new Regex(".*"));
-        await Assertions.Expect(meter).Not.ToHaveAttributeAsync("data-percent", new Regex(".*"));
+        await Assertions.Expect(meter).Not.ToHaveAttributeAsync("aria-valuenow", new Regex(".*"), new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(meter).Not.ToHaveAttributeAsync("data-percent", new Regex(".*"), new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(meter).ToHaveAttributeAsync("role", "group");
     }
 
@@ -98,7 +98,7 @@ public class DisplayWidgetTests
         // Assert
         await Assertions.Expect(page.GetByTestId("widget-argument-error").Filter(new() { HasText = "Needs a range" }))
             .ToHaveTextAsync("Needs a range: set Minimum and Maximum", new() { Timeout = Timeout });
-        await Assertions.Expect(GetGauge(page, "Gauge No Range")).ToHaveCountAsync(0);
+        await Assertions.Expect(GetGauge(page, "Gauge No Range")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -110,7 +110,7 @@ public class DisplayWidgetTests
         // Assert
         await Assertions.Expect(page.GetByTestId("widget-argument-error").Filter(new() { HasText = "Maximum must be above Minimum" }))
             .ToHaveTextAsync(["Maximum must be above Minimum: 2000 to 0"], new() { Timeout = Timeout });
-        await Assertions.Expect(page.GetByTestId("progress")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("progress")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -123,8 +123,8 @@ public class DisplayWidgetTests
         var errors = page.GetByTestId("widget-argument-error");
         await Assertions.Expect(errors.Filter(new() { HasText = "nogaugemap" })).ToHaveTextAsync(["Cannot resolve map: nogaugemap"], new() { Timeout = Timeout });
         await Assertions.Expect(errors.Filter(new() { HasText = "nocolumnmap" })).ToHaveTextAsync(["Cannot resolve map: nocolumnmap"]);
-        await Assertions.Expect(GetGauge(page, "Gauge Broken Map")).ToHaveCountAsync(0);
-        await Assertions.Expect(GetTable(page, "Broken Name")).ToHaveCountAsync(0);
+        await Assertions.Expect(GetGauge(page, "Gauge Broken Map")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(GetTable(page, "Broken Name")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -178,7 +178,7 @@ public class DisplayWidgetTests
             var link = links.Nth(index);
             await Assertions.Expect(link.GetByTestId("value-text")).ToHaveTextAsync(new Regex("^(stopped|starting|running|stopping)$"), new() { Timeout = Timeout });
             await Assertions.Expect(link.GetByTestId("value-text")).ToHaveClassAsync(new Regex(@"\bmud-(error|warning|success)-text\b"));
-            await Assertions.Expect(link.GetByTestId("value-missing")).ToHaveCountAsync(0);
+            await Assertions.Expect(link.GetByTestId("value-missing")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
     }
 
@@ -192,8 +192,8 @@ public class DisplayWidgetTests
         var table = GetTable(page, "Gap");
         var first = GetTableRow(table, "Display Motor").GetByTestId("subject-table-link");
         await Assertions.Expect(first).ToHaveTextAsync("Display Motor", new() { Timeout = Timeout });
-        await Assertions.Expect(first.GetByTestId("value-text")).ToHaveCountAsync(0);
-        await Assertions.Expect(first.GetByTestId("value-missing")).ToHaveCountAsync(0);
+        await Assertions.Expect(first.GetByTestId("value-text")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(first.GetByTestId("value-missing")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         var second = GetTableRow(table, "Second Motor").GetByTestId("subject-table-link");
         await Assertions.Expect(second).ToHaveTextAsync("Second Motor");

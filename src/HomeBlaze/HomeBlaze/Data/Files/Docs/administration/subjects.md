@@ -16,7 +16,7 @@ Subjects can be managed in two ways, and both produce the same result:
 **Via the Blazor UI:**
 - **Create subjects**: "Create" in the subject browser opens a dialog that lists the available types by group, with a search box. Picking a type shows its configuration form together with the file name of the new subject, "Back" returns to the list, and "Create" adds the subject
 - **Edit subjects**: Select any subject to view and edit its `[Configuration]` properties in the property panel. Changes are saved back to the JSON file automatically
-- **Inspect and operate subjects**: The property panel shows the child subjects of a subject, then its live values and operations, under headings where its type defines [categories](../development/building-subjects.md#categories). Values that are not set are listed in a "No value" line.
+- **Inspect and operate subjects**: The property panel shows the child subjects of a subject, then its live values and operations, under headings where its type defines [categories](../development/building-subjects.md#categories). Values that are not set are listed in a "No value" line. Open panes follow a subject that is replaced, for example when its file is loaded again, and close when it is gone
 - **Create and edit files**: New JSON and Markdown files can be created from the UI. Markdown files open in an integrated Monaco editor with live preview
 - **Manage folders**: Create, rename, and delete folders in the storage tree. A folder can be deleted only while it is empty, and the Delete button of its pane is disabled until then
 - **Delete subjects**: The Delete button of a pane appears only for subjects that something can delete: subjects stored in files, folders of a storage (enabled only while empty), and plugins. The root storage and subjects inside a file have none
@@ -103,6 +103,12 @@ Create subjects by adding JSON files with a `$type` discriminator:
 
 The `$type` property specifies the .NET class to instantiate. Properties marked with `[Configuration]` in the class are automatically persisted. See [Building Subjects](../development/building-subjects.md) for authoring the C# side.
 
+### Values That Cannot Be Read
+
+A value of the wrong type, such as `"targetSpeed": "fast"` for a number or a name that an option does not have, is skipped when the file is read: the subject keeps the default of that property, or the value it had when the file is read again, and takes the other properties. The log names the file and each value that was skipped. Saving the subject, for example after a change in the UI, writes its configuration as it was loaded, so the value that could not be read is lost. Correct the file first: give each named value the type of its property, such as a number for `targetSpeed`, or remove it so that the property keeps its default. A file in the storage is read again on its own once it changes, right away with file watching and otherwise at the next periodic check. `Root.json` is read only at the start, so restart HomeBlaze after correcting it.
+
+A key at the top level of the file that names no property, such as a misspelled `enabeld`, is ignored.
+
 ### Background Services
 
 Subjects that inherit from `BackgroundService` start automatically when loaded. They stop when removed from the graph.
@@ -173,5 +179,6 @@ The demo includes pre-configured motors in the `demo/` folder:
 
 - [Paths](paths.md): referencing subjects and properties
 - [Markdown Pages](pages.md): building interactive pages
+- [Automations](automation.md): rules that react to properties and events
 - [Building Subjects](../development/building-subjects.md): authoring subject types in C#
 - [Storage Design](../architecture/design/storage.md): storage architecture

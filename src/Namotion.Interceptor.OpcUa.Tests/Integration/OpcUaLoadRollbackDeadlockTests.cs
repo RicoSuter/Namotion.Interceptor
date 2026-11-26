@@ -130,7 +130,7 @@ public class OpcUaLoadRollbackDeadlockTests
                 isConnected: root => root.Connected,
                 serverUrl: port.ServerUrl,
                 certificateStoreBasePath: port.CertificateStoreBasePath,
-                waitForInitialSync: false);
+                waitUntilConnected: false);
 
             Assert.NotNull(server.Root);
             Assert.NotNull(client.Root);

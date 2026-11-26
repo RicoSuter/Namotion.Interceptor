@@ -32,6 +32,22 @@ public class ReverseCompositeMapper<TMapping, TKey> : IReversePropertyMapper<TMa
     }
 
     /// <inheritdoc />
+    public long Version
+    {
+        get
+        {
+            // Each version only grows, so the sum changes whenever one of them does.
+            var version = 0L;
+            foreach (var mapper in _mappers)
+            {
+                version += mapper.Version;
+            }
+
+            return version;
+        }
+    }
+
+    /// <inheritdoc />
     public bool TryGetMapping(
         RegisteredSubjectProperty property,
         IInterceptorSubject rootSubject,

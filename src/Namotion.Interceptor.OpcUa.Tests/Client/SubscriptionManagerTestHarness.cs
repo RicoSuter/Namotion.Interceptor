@@ -85,7 +85,7 @@ internal sealed class SubscriptionManagerTestHarness : IAsyncDisposable
         propertyWriter.LoadInitialStateAndResumeAsync(CancellationToken.None).GetAwaiter().GetResult();
 
         var readAfterWriteManager = new ReadAfterWriteManager(
-            sessionProvider: static () => null,
+            sessionProvider: static () => default,
             source,
             configuration,
             source.ReadAfterWriteMetrics,
@@ -95,7 +95,7 @@ internal sealed class SubscriptionManagerTestHarness : IAsyncDisposable
         var pollingManager = withPollingFallback
             ? new PollingManager(
                 source,
-                sessionProvider: static () => null,
+                sessionProvider: static () => default,
                 propertyWriter,
                 configuration,
                 source.PollingMetrics,
@@ -186,6 +186,20 @@ internal sealed class SubscriptionManagerTestHarness : IAsyncDisposable
             ?? throw new InvalidOperationException("Subject has no registered subject.");
 
         return registeredSubject.TryGetProperty(name)?.GetValue();
+    }
+
+    /// <summary>
+    /// Creates a subscription that holds the given monitored items, the shape <c>CompleteSetup</c> receives.
+    /// </summary>
+    public static Subscription CreateSubscription(params MonitoredItem[] monitoredItems)
+    {
+        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        foreach (var monitoredItem in monitoredItems)
+        {
+            subscription.AddItem(monitoredItem);
+        }
+
+        return subscription;
     }
 
     public static DataChangeNotification CreateNotification(uint clientHandle, object value)

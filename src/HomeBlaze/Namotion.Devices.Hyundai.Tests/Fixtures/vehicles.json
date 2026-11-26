@@ -1,0 +1,12 @@
+{
+  "retCode": "S",
+  "resCode": "0000",
+  "resMsg": {
+    "vehicles": [
+      { "vin": "TESTVIN0000000001", "vehicleId": "VEHICLE-1", "vehicleName": "KONA", "type": "EV", "nickname": "Kona", "year": "2021", "regDate": "2021-05-11 10:00:00.000", "protocolType": 0, "ccuCCS2ProtocolSupport": 0 },
+      { "vin": "TESTVIN0000000002", "vehicleId": "VEHICLE-2", "vehicleName": "IONIQ 5", "type": "EV", "nickname": "IONIQ 5", "year": "2024", "regDate": "2024-02-01 10:00:00.000", "protocolType": 0, "ccuCCS2ProtocolSupport": 1 },
+      { "vin": "TESTVIN0000000003", "vehicleId": "VEHICLE-3", "vehicleName": "TUCSON", "type": "HV", "nickname": "Tucson", "regDate": "2022-12-02 19:21:05.307" }
+    ]
+  },
+  "msgId": "MSG-1"
+}

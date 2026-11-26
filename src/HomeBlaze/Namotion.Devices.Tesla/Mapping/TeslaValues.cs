@@ -1,0 +1,109 @@
+using System.Collections.Concurrent;
+using HomeBlaze.Abstractions.Common;
+using Microsoft.Extensions.Logging;
+
+namespace Namotion.Devices.Tesla.Mapping;
+
+/// <summary>
+/// Converts Tesla API values to the units and types of the subjects.
+/// </summary>
+internal static class TeslaValues
+{
+    private const decimal KilometersPerMile = 1.609344m;
+
+    // Smaller than decimal.MaxValue (about 7.9E28), so the cast from float never overflows.
+    private const float MaximumDecimalFloat = 7.9E28f;
+
+    // Process-wide and keyed by the enum type only, so that it stays small; the first unknown value is the logged sample.
+    private static readonly ConcurrentDictionary<Type, byte> LoggedUnknownEnums = new();
+
+    /// <summary>Returns null for the placeholders Tesla sends instead of a missing text.</summary>
+    public static string? Text(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrEmpty(trimmed) || trimmed == "<invalid>" ? null : trimmed;
+    }
+
+    /// <summary>Converts a protobuf float, or returns null for NaN, infinity and values outside the range of decimal.</summary>
+    public static decimal? Decimal(float value) =>
+        float.IsFinite(value) && Math.Abs(value) < MaximumDecimalFloat ? (decimal)value : null;
+
+    /// <summary>Rounds a JSON value to the precision of a protobuf float, so that both sources produce the same value.</summary>
+    public static decimal? ToFloatPrecision(decimal? value) => value is null ? null : Decimal((float)value.Value);
+
+    /// <summary>Converts protobuf miles to the two decimals of the JSON miles.</summary>
+    public static decimal? Miles(float value) => Miles(Decimal(value));
+
+    /// <summary>Rounds miles to two decimals, the precision both sources share.</summary>
+    public static decimal? Miles(decimal? miles) => miles is null ? null : Math.Round(miles.Value, 2, MidpointRounding.AwayFromZero);
+
+    /// <summary>The last six characters of a VIN, which identify a vehicle in titles.</summary>
+    public static string VinSuffix(string vin) => vin[^Math.Min(6, vin.Length)..];
+
+    public static decimal? WholeNumber(decimal? value) => value is null ? null : Math.Round(value.Value, MidpointRounding.AwayFromZero);
+
+    public static decimal? MilesToKilometers(decimal? miles) => miles * KilometersPerMile;
+
+    public static decimal? MilesPerHourToKilometersPerHour(decimal? milesPerHour) => milesPerHour * KilometersPerMile;
+
+    public static decimal? Percent(decimal? value) => value / 100m;
+
+    public static decimal? KilowattHoursToWattHours(decimal? kilowattHours) => kilowattHours * 1000m;
+
+    public static decimal? KilowattsToWatts(decimal? kilowatts) => kilowatts * 1000m;
+
+    public static DateTimeOffset? FromUnixSeconds(long? seconds) =>
+        seconds is > 0 ? DateTimeOffset.FromUnixTimeSeconds(seconds.Value) : null;
+
+    public static DateTimeOffset? FromUnixMilliseconds(long? milliseconds) =>
+        milliseconds is > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(milliseconds.Value) : null;
+
+    public static TimeSpan? FromMilliseconds(long? milliseconds) => milliseconds is >= 0 ? TimeSpan.FromMilliseconds(milliseconds.Value) : null;
+
+    public static TimeSpan? FromSeconds(long? seconds) => seconds is >= 0 ? TimeSpan.FromSeconds(seconds.Value) : null;
+
+    public static TimeSpan? Minutes(decimal? minutes) => minutes is >= 0 ? TimeSpan.FromMinutes((double)minutes.Value) : null;
+
+    /// <returns>The coordinate, or null when the latitude or the longitude is missing.</returns>
+    public static GeoCoordinate? Coordinate(decimal? latitude, decimal? longitude) =>
+        latitude is { } latitudeValue && longitude is { } longitudeValue ? new GeoCoordinate((double)latitudeValue, (double)longitudeValue) : null;
+
+    public static TimeSpan? MinutesAfterMidnight(int? minutes) => minutes is >= 0 ? TimeSpan.FromMinutes(minutes.Value) : null;
+
+    /// <summary>
+    /// Parses a Tesla text into an enum, ignoring case and underscores. A value Tesla added later becomes Unknown; the first one per enum is logged as a warning.
+    /// </summary>
+    public static TEnum? Enum<TEnum>(string? value, ILogger logger) where TEnum : struct, System.Enum
+    {
+        var text = Text(value);
+        if (text is null)
+        {
+            return null;
+        }
+
+        // Enum.TryParse maps a numeric text to the member with that number, which Tesla never sends on purpose.
+        if (!char.IsAsciiDigit(text[0]) && text[0] is not ('-' or '+') &&
+            System.Enum.TryParse<TEnum>(text.Replace("_", "", StringComparison.Ordinal), ignoreCase: true, out var result) &&
+            System.Enum.IsDefined(result))
+        {
+            return result;
+        }
+
+        if (logger.IsEnabled(LogLevel.Warning) && LoggedUnknownEnums.TryAdd(typeof(TEnum), 0))
+        {
+            logger.LogWarning("Tesla API changed? Unknown {EnumType} value {Value}.", typeof(TEnum).Name, text);
+        }
+
+        return default(TEnum);
+    }
+
+    public static TeslaShiftState? ShiftState(string? value) => Text(value) switch
+    {
+        null => null,
+        "P" => TeslaShiftState.Park,
+        "R" => TeslaShiftState.Reverse,
+        "N" => TeslaShiftState.Neutral,
+        "D" => TeslaShiftState.Drive,
+        _ => TeslaShiftState.Unknown
+    };
+}

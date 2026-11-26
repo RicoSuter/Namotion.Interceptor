@@ -25,7 +25,16 @@ internal sealed class SubscriptionHealthMonitor
             (static (subscription, cancellationToken) => subscription.ApplyChangesAsync(cancellationToken));
     }
 
-    public async Task CheckAndHealSubscriptionsAsync(IReadOnlyCollection<Subscription> subscriptions, CancellationToken cancellationToken)
+    /// <summary>
+    /// Retries the failed monitored items of every subscription that has any.
+    /// </summary>
+    /// <param name="subscriptions">The subscriptions to check.</param>
+    /// <param name="onItemsRecovered">Called for a subscription in which at least one item recovered.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async Task CheckAndHealSubscriptionsAsync(
+        IReadOnlyCollection<Subscription> subscriptions,
+        Action<Subscription>? onItemsRecovered,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -43,6 +52,11 @@ internal sealed class SubscriptionHealthMonitor
                     await _applyChangesAsync(subscription, cancellationToken).ConfigureAwait(false);
 
                     var stillUnhealthyCount = GetUnhealthyCount(subscription);
+                    if (stillUnhealthyCount < unhealthyCount)
+                    {
+                        onItemsRecovered?.Invoke(subscription);
+                    }
+
                     if (stillUnhealthyCount == 0)
                     {
                         _logger.LogInformation(

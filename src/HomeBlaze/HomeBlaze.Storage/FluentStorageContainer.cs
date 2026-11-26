@@ -566,7 +566,9 @@ public partial class FluentStorageContainer :
     /// Adds a new subject to storage at the specified path.
     /// </summary>
     /// <exception cref="ArgumentException">The path is hidden, temporary or the name of a metadata file, and would not be loaded again.</exception>
-    /// <exception cref="InvalidOperationException">A file exists at the path, or its key in the hierarchy is taken.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A file exists at the path, which a pass then loads when the storage did not know it yet, or its key in the hierarchy is taken.
+    /// </exception>
     public async Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var relativePath = StoragePath.Normalize(path);
@@ -587,7 +589,11 @@ public partial class FluentStorageContainer :
                 throw new InvalidOperationException($"A subject already exists at '{path}'.");
 
             if (await connection.Client.ObjectExists(relativePath, token))
+            {
+                // A file the index does not know, which no watcher reported, as CreateMarkdownFileAsync handles it.
+                connection.NotifyChanged(relativePath);
                 throw new InvalidOperationException($"A file already exists at '{path}'.");
+            }
 
             var entry = new StorageEntry { Path = relativePath, IsFolder = false, Subject = subject };
             await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(subject)), token);
@@ -802,22 +808,6 @@ public partial class FluentStorageContainer :
     public static string GetNoSubjectMessage(string path) => $"No subject at {NameList.Format([path])} in this storage.";
 
     /// <summary>
-    /// Resolves the path that <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/> takes,
-    /// relative to <paramref name="storage"/> with the <see cref="ISubjectPathResolver"/> of its context, so that a
-    /// caller that checks the path resolves it alike: the storage itself for a path of only whitespace and slashes,
-    /// and null when no subject is at the path or the context has no resolver.
-    /// </summary>
-    public static IInterceptorSubject? ResolveMetadataPath(IInterceptorSubject storage, string path)
-    {
-        // Without leading slashes, which lead the resolver to the root of the application; "./" keeps the resolution
-        // inside the storage, which a leading "../" would leave.
-        var relativePath = path.AsSpan().Trim().TrimStart('/');
-        return relativePath.IsEmpty
-            ? storage
-            : storage.Context.TryGetService<ISubjectPathResolver>()?.ResolveSubject(string.Concat("./", relativePath), PathStyle.Canonical, storage);
-    }
-
-    /// <summary>
     /// Gets the message with which a metadata write refuses a property that the subject does not have, so that a
     /// caller that hides a property refuses it alike.
     /// </summary>
@@ -846,13 +836,13 @@ public partial class FluentStorageContainer :
     /// </summary>
     /// <returns>
     /// Every match, in order, with the path of its subject relative to this storage, as <see cref="SetMetadataAsync(string, string?, JsonElement, CancellationToken)"/>
-    /// takes it; none when <paramref name="path"/> is given and <see cref="ResolveMetadataPath"/> resolves it to no subject.
+    /// takes it; none when <paramref name="path"/> is given and <see cref="MetadataSearch.ResolvePath"/> resolves it to no subject.
     /// </returns>
     [Query(Title = "Search Metadata", Description = StorageMetadataMethods.SearchMetadataDescription, Position = 6)]
     [ExcludeFrom(ExclusionTarget.UserInterface)]
     public MetadataSearchMatch[] SearchMetadata(string? tag, string? key, string? value, string? path)
     {
-        var start = path is null ? this : ResolveMetadataPath(this, path);
+        var start = path is null ? this : MetadataSearch.ResolvePath(this, path);
         return start is null ? [] : [.. MetadataSearch.Search(this, tag, key, value, start)];
     }
 
@@ -872,11 +862,11 @@ public partial class FluentStorageContainer :
         => StorageMetadataMethods.RunAsync(() => MetadataStoreExtensions.SetOrderAsync(this, names, cancellationToken));
 
     /// <summary>
-    /// Opens the create subject dialog to add a new subject to this storage.
+    /// Opens the create subject dialog to add new subjects to this storage.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
-        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
+        => subjectSetupService.CreateSubjectsAndAddToStorageAsync(this, cancellationToken);
 
     /// <summary>
     /// Creates a Markdown file in the root folder of this storage and adds it as a page.
@@ -1158,5 +1148,16 @@ public partial class FluentStorageContainer :
         // Ended outside the lock, because cancelling it runs code of the work it cancels.
         connection?.Dispose();
         base.Dispose();
+    }
+
+    /// <summary>
+    /// Disposes the container and completes once the worker of its connection has stopped: the item that it was
+    /// running has finished. A call into the storage that the item gave up can still be running, see
+    /// <see cref="IsStorageUnresponsive"/>.
+    /// </summary>
+    internal Task DisposeAndWaitForWorkerAsync()
+    {
+        Dispose();
+        return _connection?.Worker.StopAsync() ?? Task.CompletedTask;
     }
 }

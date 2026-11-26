@@ -57,7 +57,7 @@ namespace HomeBlaze.Storage.Abstractions
     }
     public interface ISubjectSetupService
     {
-        System.Threading.Tasks.Task<HomeBlaze.Storage.Abstractions.CreateSubjectResult?> CreateSubjectAsync(HomeBlaze.Storage.Abstractions.IStorageContainer target, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task CreateSubjectsAsync(HomeBlaze.Storage.Abstractions.IStorageContainer target, System.Func<HomeBlaze.Storage.Abstractions.CreateSubjectResult, System.Threading.CancellationToken, System.Threading.Tasks.Task> addSubjectAsync, System.Threading.CancellationToken cancellationToken);
     }
     public enum StorageStatus
     {
@@ -68,7 +68,7 @@ namespace HomeBlaze.Storage.Abstractions
     }
     public static class SubjectCreatorExtensions
     {
-        public static System.Threading.Tasks.Task CreateSubjectAndAddToStorageAsync(this HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, HomeBlaze.Storage.Abstractions.IStorageContainer storage, System.Threading.CancellationToken cancellationToken) { }
+        public static System.Threading.Tasks.Task CreateSubjectsAndAddToStorageAsync(this HomeBlaze.Storage.Abstractions.ISubjectSetupService subjectSetupService, HomeBlaze.Storage.Abstractions.IStorageContainer storage, System.Threading.CancellationToken cancellationToken) { }
     }
 }
 namespace HomeBlaze.Storage.Abstractions.Metadata
@@ -76,6 +76,13 @@ namespace HomeBlaze.Storage.Abstractions.Metadata
     public interface IMetadataContainer
     {
         System.Collections.Immutable.ImmutableArray<string> ChildOrder { get; }
+    }
+    public interface IMetadataNotesFormat
+    {
+        int MaxSize { get; }
+        string? GetError(string notes);
+        string? ToHtml(string notes);
+        string ToText(string notes);
     }
     public interface IMetadataStore
     {

@@ -20,7 +20,7 @@ namespace HomeBlaze.Storage.Tests;
 /// of <see cref="CallbackSubject"/> are static, so tests that use them must not run next to each other.
 /// </remarks>
 [Collection(nameof(StorageTestBase))]
-public abstract class StorageTestBase : IDisposable
+public abstract class StorageTestBase : IAsyncLifetime
 {
     protected static readonly TimeSpan WatcherTimeout = TimeSpan.FromSeconds(20);
 
@@ -74,7 +74,7 @@ public abstract class StorageTestBase : IDisposable
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
-        services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
+        services.AddSingleton(sp => new SubjectPathResolver(context, () => sp.GetRequiredService<RootManager>().Root));
         services.AddSingleton<MarkdownContentParser>();
         var serviceProvider = services.BuildServiceProvider();
         _serviceProvider = serviceProvider;
@@ -185,21 +185,24 @@ public abstract class StorageTestBase : IDisposable
         return counter;
     }
 
-    public void Dispose()
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public virtual async Task DisposeAsync()
     {
-        foreach (var storage in _storages)
+        try
         {
-            storage.Dispose();
+            await StorageCleanup.DisposeAsync(_storages);
+        }
+        finally
+        {
+            _serviceProvider?.Dispose();
         }
 
-        _serviceProvider?.Dispose();
-        StorageDirectory.Delete(recursive: true);
+        await StorageCleanup.DeleteAsync(StorageDirectory);
         foreach (var directory in _temporaryDirectories)
         {
-            directory.Delete(recursive: true);
+            await StorageCleanup.DeleteAsync(directory);
         }
-
-        GC.SuppressFinalize(this);
     }
 
     protected sealed class DetachCounter(IInterceptorSubject subject) : ILifecycleHandler

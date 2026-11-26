@@ -134,5 +134,5 @@ public class FritzBoxConnectionCheckTests
     }
 
     private static FritzBoxConnectionOptions Options(FakeFritzBox fake, string password) =>
-        new("127.0.0.1", fake.Username, password, null) { DescriptionPort = fake.HttpPort };
+        new("127.0.0.1", fake.Username, password, null) { DescriptionPort = fake.HttpPort, RequestTimeout = TestTimeouts.Default };
 }

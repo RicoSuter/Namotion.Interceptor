@@ -366,6 +366,32 @@ public class ParameterConverterTests
     }
 
     [Fact]
+    public void WhenAnObjectIsCreatedFromValues_ThenTheValuesAreTakenAsTheyAre()
+    {
+        // Arrange
+        var values = new Dictionary<string, object?> { ["Text"] = string.Empty, ["Level"] = TestLevel.High, ["Count"] = 3 };
+
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), values, out var value, out var error);
+
+        // Assert
+        Assert.True(success, error);
+        Assert.Equal(new TestMessage { Text = string.Empty, Level = TestLevel.High, Count = 3 }, value);
+    }
+
+    [Fact]
+    public void WhenAnObjectIsCreatedFromValuesWithoutARequiredMember_ThenCreatingFails()
+    {
+        // Act
+        var success = ParameterConverter.TryCreateObject(typeof(TestMessage), new Dictionary<string, object?> { ["Title"] = "Hi" }, out var value, out var error);
+
+        // Assert
+        Assert.False(success);
+        Assert.Null(value);
+        Assert.Equal("Text is required", error);
+    }
+
+    [Fact]
     public void WhenRequiredMemberHasNoInput_ThenCreatingFails()
     {
         // Act

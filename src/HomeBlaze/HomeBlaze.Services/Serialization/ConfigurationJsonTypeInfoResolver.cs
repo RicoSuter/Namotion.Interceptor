@@ -15,6 +15,9 @@ namespace HomeBlaze.Services.Serialization;
 /// - Sets up polymorphism for IConfigurable with $type discriminator
 /// - Filters properties to only [Configuration] for IConfigurable types
 /// - Allows all properties for plain value objects
+/// - Writes a [JsonExtensionData] property, which holds the keys a type read without a property of its own, back unfiltered
+/// - Reads a key that names a property without [Configuration] into the [JsonExtensionData] property of an IConfigurable
+///   type that has one, instead of reading it without effect
 /// - Creates IConfigurable types that have no parameterless constructor through the service provider
 /// - Names every property by its declared name when the naming is <see cref="ConfigurationNaming.CSharpProperty"/>
 /// </summary>
@@ -77,6 +80,12 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
             typeInfo.CreateObject = () => ActivatorUtilities.CreateInstance(_serviceProvider, type);
         }
 
+        if (typeInfo.Kind == JsonTypeInfoKind.Object && typeof(IConfigurable).IsAssignableFrom(type) &&
+            typeInfo.Properties.Any(property => property.IsExtensionData))
+        {
+            RemovePropertiesWithoutConfiguration(typeInfo);
+        }
+
         // Filter [Configuration] properties for all object types
         if (typeInfo.Kind == JsonTypeInfoKind.Object)
         {
@@ -88,6 +97,11 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                 if (_naming == ConfigurationNaming.CSharpProperty)
                 {
                     property.Name = propertyName;
+                }
+
+                if (property.IsExtensionData)
+                {
+                    continue;
                 }
 
                 var ignoreNulls = options.DefaultIgnoreCondition == JsonIgnoreCondition.WhenWritingNull;
@@ -108,17 +122,28 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                     }
 
                     // For non-subject types (value objects) or subjects without registry, fall back to reflection
-                    var hasConfigurationAttribute = property.AttributeProvider?
-                        .GetCustomAttributes(typeof(ConfigurationAttribute), true)
-                        .Any() ?? false;
-
-                    return hasConfigurationAttribute;
+                    return HasConfigurationAttribute(property);
                 };
             }
         }
 
         return typeInfo;
     }
+
+    private static void RemovePropertiesWithoutConfiguration(JsonTypeInfo typeInfo)
+    {
+        for (var index = typeInfo.Properties.Count - 1; index >= 0; index--)
+        {
+            var property = typeInfo.Properties[index];
+            if (!property.IsExtensionData && !HasConfigurationAttribute(property))
+            {
+                typeInfo.Properties.RemoveAt(index);
+            }
+        }
+    }
+
+    private static bool HasConfigurationAttribute(JsonPropertyInfo property) =>
+        property.AttributeProvider?.GetCustomAttributes(typeof(ConfigurationAttribute), true).Length > 0;
 
     private static bool IsAbstractConfigurableClass(Type type) =>
         type is { IsClass: true, IsAbstract: true } && typeof(IConfigurable).IsAssignableFrom(type);

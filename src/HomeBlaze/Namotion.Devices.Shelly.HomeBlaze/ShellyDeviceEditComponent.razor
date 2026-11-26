@@ -1,7 +1,9 @@
 @using Namotion.Interceptor
+@using global::HomeBlaze.Abstractions.Discovery
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(ShellyDevice))]
 @implements ISubjectEditComponent
+@implements ISubjectDiscoveryComponent
 
 <MudForm>
     <MudTextField @bind-Value="_name"
@@ -82,6 +84,9 @@
     [Parameter]
     public bool IsCreating { get; set; }
 
+    [Parameter]
+    public IDiscoveryResult? DiscoveryResult { get; set; }
+
     private ShellyDevice? DeviceSubject => Subject as ShellyDevice;
 
     private string _name = string.Empty;
@@ -121,6 +126,18 @@
             _originalPassword = _password;
             _originalPollingIntervalSeconds = _pollingIntervalSeconds;
             _originalRetryIntervalSeconds = _retryIntervalSeconds;
+
+            // A device picked on the Discover page fills in the form; the originals stay, so the values count as unsaved.
+            if (IsCreating && DiscoveryResult is ShellyDiscoveredDevice discovered)
+            {
+                _hostAddress = discovered.HostAddress;
+
+                // Without a user-given name the subject's title falls back to the name the device reports.
+                if (string.IsNullOrWhiteSpace(_name) && discovered.Name is not null)
+                {
+                    _name = discovered.Name;
+                }
+            }
         }
     }
 
@@ -136,6 +153,7 @@
         {
             DeviceSubject.Name = _name;
             DeviceSubject.HostAddress = _hostAddress;
+
             DeviceSubject.Password = _password;
             DeviceSubject.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
             DeviceSubject.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);

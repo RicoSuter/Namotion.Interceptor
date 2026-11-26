@@ -1,5 +1,6 @@
 @using Microsoft.AspNetCore.WebUtilities
 @using HomeBlaze.Abstractions.Metadata
+@using HomeBlaze.Services.Metadata
 @using Namotion.Interceptor.Registry.Attributes
 @using Namotion.Interceptor.Registry.Paths
 
@@ -18,6 +19,7 @@
 @* The panes take the height the breadcrumbs leave, which wrap on a narrow view. 66px is the top padding of the main
    content below the app bar plus 2px of slack. *@
 <div style="display: flex; flex-direction: column; height: calc(100vh - 66px);">
+    <PathsChangeListener OnPathsChanged="OnPathsChanged" />
     <MudStack Row="true" AlignItems="AlignItems.Center" Class="browser-toolbar mb-2" Style="flex-shrink: 0;">
         <MudBreadcrumbs Items="_breadcrumbs" />
         <MudSpacer />
@@ -51,8 +53,9 @@
             var isFirst = i == 0;
             var selectedChild = i < _panes.Count - 1 ? _panes[i + 1].Subject : null;
 
-            // A local and not i: the panel reads its parameters when MudPaper renders its content, after the loop.
-            var highlightedProperty = i == _panes.Count - 1 ? _highlightedProperty : null;
+            // A local and not i: the panel reads its parameters when MudPaper renders its content, after the loop. A
+            // pending path has not reached the subject of the highlighted property yet.
+            var highlightedProperty = i == _panes.Count - 1 && !_isPathPending ? _highlightedProperty : null;
 
             @* Keyed by path: a subject that is reachable from itself can be in the row twice. *@
             <div @key="pane.Path" data-testid="subject-pane" class="pb-4"
@@ -114,7 +117,16 @@
     private readonly List<SubjectPane> _panes = [];
     private readonly List<BreadcrumbItem> _breadcrumbs = [];
 
-    private string? _lastNavigatedUrl;
+    // The URLs this component navigated to that OnLocationChanged has not seen yet, oldest first. A navigation is
+    // reported only after a round trip to the browser, so a handler that navigates twice, such as a delete or a click
+    // during one, starts the second before the first is reported. Bounded, so that a URL the browser never reports
+    // back in the same form is not kept for the life of the circuit.
+    private readonly Queue<string> _unreportedNavigations = new();
+    private const int MaxUnreportedNavigations = 8;
+
+    // Whether Path reaches subjects that do not exist yet, such as while the storage loads after a restart. Until the
+    // user changes the panes, Path alone decides them on each change of the paths, like a reload of the page would.
+    private bool _isPathPending;
     private bool _scrollToLastPane;
     private int _placeholderCount;
     private int _scrollVersion;
@@ -220,9 +232,8 @@
         _highlightedProperty = highlightedProperty;
 
         // Skip if this is our own programmatic navigation
-        if (_lastNavigatedUrl != null && uri.AbsolutePath == _lastNavigatedUrl)
+        if (IsOwnNavigation(uri.AbsolutePath))
         {
-            _lastNavigatedUrl = null;
             if (isHighlightChanged)
             {
                 InvokeAsync(StateHasChanged);
@@ -236,35 +247,67 @@
         {
             var decodedSegments = segments.Skip(1).Select(Uri.UnescapeDataString);
             Path = string.Join("/", decodedSegments);
-           
+
+            // A link to the subject of the last pane, such as to one of its properties, still scrolls to it.
             RebuildFromPath();
-            
+            ScrollToLastPaneAfterRender();
+
             InvokeAsync(StateHasChanged);
         }
     }
 
-    private void RebuildFromPath()
+    // Shows the panes that Path reaches. Returns whether a pane changed.
+    private bool RebuildFromPath()
     {
-        var previousPaneCount = _panes.Count + _placeholderCount;
-        BuildPanesFromPath();
+        var panes = new List<SubjectPane>();
+        _isPathPending = !BuildPanesFromPath(panes);
 
-        // A shorter path leaves placeholders behind like closed panes do, see RemovePanesFrom.
-        _placeholderCount = Math.Max(0, previousPaneCount - _panes.Count);
-        ScrollToLastPaneAfterRender();
+        // The panes that show the same subject at the same path stay, so that a pane an awaited handler holds is still
+        // found. Their title can change without a change of the paths.
+        var keptCount = 0;
+        var hasRenamedPane = false;
+        while (keptCount < panes.Count && keptCount < _panes.Count &&
+               ReferenceEquals(panes[keptCount].Subject, _panes[keptCount].Subject) &&
+               panes[keptCount].Path == _panes[keptCount].Path)
+        {
+            if (_panes[keptCount].DisplayName != panes[keptCount].DisplayName)
+            {
+                _panes[keptCount].DisplayName = panes[keptCount].DisplayName;
+                hasRenamedPane = true;
+            }
+
+            keptCount++;
+        }
+
+        if (keptCount < panes.Count || keptCount < _panes.Count)
+        {
+            // A shorter path leaves placeholders behind like closed panes do, see RemovePanesFrom, and new panes take
+            // them.
+            var previousPaneCount = _panes.Count + _placeholderCount;
+            _panes.RemoveRange(keptCount, _panes.Count - keptCount);
+            _panes.AddRange(panes.GetRange(keptCount, panes.Count - keptCount));
+            _placeholderCount = Math.Max(0, previousPaneCount - _panes.Count);
+            ScrollToLastPaneAfterRender();
+        }
+        else if (!hasRenamedPane)
+        {
+            return false;
+        }
+
+        RebuildBreadcrumbs();
+        return true;
     }
 
-    private void BuildPanesFromPath()
+    // Adds the panes that Path reaches to the empty list. Returns whether it reaches all of Path.
+    private bool BuildPanesFromPath(List<SubjectPane> panes)
     {
-        _panes.Clear();
-        _breadcrumbs.Clear();
-
-        if (Root == null) return;
+        if (Root == null) return false;
 
         // Get registry from root's context
         _subjectRegistry = RootContext?.GetService<ISubjectRegistry>();
 
         // Always show root as first pane
-        _panes.Add(new SubjectPane
+        panes.Add(new SubjectPane
         {
             Subject = Root,
             DisplayName = "Root",
@@ -273,10 +316,8 @@
             Index = null
         });
 
-        _breadcrumbs.Add(new BreadcrumbItem("Root", "/browser"));
-
         if (string.IsNullOrEmpty(Path))
-            return;
+            return true;
 
         // Use RoutePathResolver to navigate the path and build panes
         var pathSegments = Path.Split('/', StringSplitOptions.RemoveEmptyEntries)
@@ -284,7 +325,6 @@
             .ToArray();
 
         IInterceptorSubject currentSubject = Root;
-        var currentPathParts = new List<string>();
         var currentPath = "/";
         var i = 0;
 
@@ -308,21 +348,16 @@
                         var child = SubjectPathResolverExtensions.FindChildByIndex(property, childKey);
                         if (child != null)
                         {
-                            currentPathParts.Add(childKey);
                             currentPath = $"{currentPath}{childKey}/";
-                            var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
                             var childDisplayName = GetChildDisplayName(property, child, childKey);
-                            _breadcrumbs.Add(new BreadcrumbItem(childDisplayName, breadcrumbPath));
-                            _panes.Add(new SubjectPane { Subject = child, DisplayName = childDisplayName, Path = currentPath.TrimEnd('/'), PropertyName = inlinePathsPropertyName, Index = childKey });
+                            panes.Add(new SubjectPane { Subject = child, DisplayName = childDisplayName, Path = currentPath.TrimEnd('/'), PropertyName = inlinePathsPropertyName, Index = childKey });
                             currentSubject = child;
                             continue;
                         }
                     }
                 }
-                break;
+                return false;
             }
-
-            currentPathParts.Add(propertyName);
 
             // Check for collections/dictionaries BEFORE subject references
             // because IDictionary<string, IInterceptorSubject> is an interface (IsSubjectReference would be true)
@@ -331,40 +366,37 @@
             {
                 // Collection/Dictionary - next segment is the index/key
                 if (i >= pathSegments.Length)
-                    break;
+                    return false;
 
                 var indexStr = pathSegments[i++];
                 var child = SubjectPathResolverExtensions.FindChildByIndex(property, indexStr);
                 if (child == null)
-                    break;
+                    return false;
 
-                currentPathParts.Add(indexStr);
                 currentPath = $"{currentPath}{propertyName}/{indexStr}/";
-                var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
                 var displayName = GetChildDisplayName(property, child, indexStr);
-                _breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
-                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = indexStr });
+                panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = indexStr });
                 currentSubject = child;
             }
             else if (property.IsSubjectReference)
             {
                 // Direct subject property
                 if (property.GetValue() is not IInterceptorSubject child)
-                    break;
+                    return false;
 
                 currentPath = $"{currentPath}{propertyName}/";
-                var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
                 var displayName = GetChildDisplayName(property, child, index: null);
-                _breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
-                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = null });
+                panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = null });
                 currentSubject = child;
             }
             else
             {
                 // Unknown property type with children - shouldn't happen
-                break;
+                return false;
             }
         }
+
+        return true;
     }
 
     private void OnPropertyClick(SubjectPane clickedPane, string propertyName, object? index, IInterceptorSubject subject)
@@ -402,6 +434,9 @@
         // The new pane takes the place of the first pane it replaced.
         _placeholderCount = Math.Max(0, _placeholderCount - 1);
         ScrollToLastPaneAfterRender();
+
+        // The clicked list can be older than a replacement of the subject that OnPathsChanged has already handled.
+        FollowReplacedSubjects();
         UpdateUrl();
         StateHasChanged();
     }
@@ -447,6 +482,14 @@
         if (confirmed != true)
             return;
 
+        // A delete is a change of the panes by the user. It ends a pending path before the paths change, so that the
+        // delete's own change and the panes it closes are handled as for any other path.
+        if (_isPathPending)
+        {
+            UpdateUrl();
+            StateHasChanged();
+        }
+
         try
         {
             await deleteOperation.InvokeAsync(null, ServiceProvider, CancellationToken.None);
@@ -469,56 +512,69 @@
         }
     }
 
-    private void UpdateUrl()
+    private bool IsOwnNavigation(string url)
     {
-        var pathParts = new List<string>();
-
-        // Skip the first pane (root) when building path
-        foreach (var pane in _panes.Skip(1))
+        if (!_unreportedNavigations.Contains(url))
         {
-            // For [InlinePaths] properties, only add the index (key), not the property name
-            var parentPane = _panes[_panes.IndexOf(pane) - 1];
-            var isInlinePathsProperty = pane.PropertyName != null &&
-                InlinePathsAttribute.IsInlinePathsProperty(parentPane.Subject.GetType(), pane.PropertyName);
-
-            if (isInlinePathsProperty && pane.Index != null)
-            {
-                // Only add the key for [InlinePaths] properties
-                pathParts.Add(PathExtensions.FormatPathIndex(pane.Index));
-            }
-            else
-            {
-                // Add property name
-                if (pane.PropertyName != null)
-                {
-                    pathParts.Add(pane.PropertyName);
-                }
-
-                // Add index/key if present (for collections/dictionaries)
-                if (pane.Index != null)
-                {
-                    pathParts.Add(PathExtensions.FormatPathIndex(pane.Index));
-                }
-            }
+            // A navigation of the user can overtake one of this component that is still on its way, which the browser
+            // then applies after it. Its report is read as the user's, so that the panes show the URL the browser ends on.
+            _unreportedNavigations.Clear();
+            return false;
         }
 
-        var url = BrowserUrls.Create(pathParts);
+        // Earlier navigations that are never reported, such as one a navigation lock canceled, leave with this one.
+        while (_unreportedNavigations.Dequeue() != url)
+        {
+        }
+
+        return true;
+    }
+
+    private void UpdateUrl()
+    {
+        // A delete that ends after the page was left would navigate back to it.
+        if (_disposed)
+        {
+            return;
+        }
+
+        RebuildBreadcrumbs();
+
+        // The last breadcrumb links to the last pane.
+        var url = _breadcrumbs[^1].Href!;
 
         // Store the URL so OnLocationChanged knows to ignore this navigation
-        _lastNavigatedUrl = url;
-        NavigationManager.NavigateTo(url, replace: true);
+        if (_unreportedNavigations.Count == MaxUnreportedNavigations)
+        {
+            _unreportedNavigations.Dequeue();
+        }
 
-        // Rebuild breadcrumbs
+        _unreportedNavigations.Enqueue(url);
+        _isPathPending = false;
+
+        // The URL has no property to highlight, and the last pane changed before OnLocationChanged learns of it.
+        _highlightedProperty = null;
+        NavigationManager.NavigateTo(url, replace: true);
+    }
+
+    private void RebuildBreadcrumbs()
+    {
         _breadcrumbs.Clear();
-        _breadcrumbs.Add(new BreadcrumbItem("Root", "/browser"));
+        if (_panes.Count == 0)
+        {
+            return;
+        }
+
+        _breadcrumbs.Add(new BreadcrumbItem("Root", BrowserUrls.Root));
 
         var breadcrumbParts = new List<string>();
-        foreach (var pane in _panes.Skip(1))
+        for (var i = 1; i < _panes.Count; i++)
         {
+            var pane = _panes[i];
+
             // For [InlinePaths] properties, only add the index (key), not the property name
-            var parentPane = _panes[_panes.IndexOf(pane) - 1];
             var isInlinePathsProp = pane.PropertyName != null &&
-                InlinePathsAttribute.IsInlinePathsProperty(parentPane.Subject.GetType(), pane.PropertyName);
+                InlinePathsAttribute.IsInlinePathsProperty(_panes[i - 1].Subject.GetType(), pane.PropertyName);
 
             if (isInlinePathsProp && pane.Index != null)
             {
@@ -540,6 +596,101 @@
             _breadcrumbs.Add(new BreadcrumbItem(pane.DisplayName, BrowserUrls.Create(breadcrumbParts)));
         }
     }
+
+    // Renders the browser only when one of its panes changed, not on every change of the paths in the graph.
+    private void OnPathsChanged()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        // A pending path shows what it reaches now, not the subjects that its panes showed before, such as an item that
+        // moved to another index.
+        if (_isPathPending)
+        {
+            if (RebuildFromPath())
+            {
+                StateHasChanged();
+            }
+
+            return;
+        }
+
+        var paneCount = _panes.Count;
+        if (!FollowReplacedSubjects())
+        {
+            return;
+        }
+
+        // Closed like a deleted subject's pane, so that the URL and a reload show what is left.
+        if (_panes.Count < paneCount)
+        {
+            UpdateUrl();
+        }
+        else
+        {
+            RebuildBreadcrumbs();
+        }
+
+        StateHasChanged();
+    }
+
+    // Replaces the subject of each pane that its property and index no longer reach, and closes the panes from the first
+    // that no longer resolves. Returns whether a pane changed.
+    private bool FollowReplacedSubjects()
+    {
+        var hasChanged = false;
+        for (var i = 1; i < _panes.Count; i++)
+        {
+            var pane = _panes[i];
+            var property = _panes[i - 1].Subject.TryGetRegisteredSubject()?.TryGetProperty(pane.PropertyName!);
+            if (property is not { CanContainSubjects: true })
+            {
+                RemovePanesFrom(i);
+                return true;
+            }
+
+            var subject = FindChild(property, pane.Index);
+            if (ReferenceEquals(subject, pane.Subject) || pane.Index is not null && ContainsChild(property, pane.Subject))
+            {
+                // A subject that moved to another index of a collection, after an item before it was removed, is the
+                // one the pane shows, not the subject that now has its index.
+                continue;
+            }
+
+            if (subject is null)
+            {
+                RemovePanesFrom(i);
+                return true;
+            }
+
+            // The same pane and so the same element: the row keeps its scroll position.
+            pane.Subject = subject;
+            pane.DisplayName = GetChildDisplayName(property, subject, pane.Index);
+            hasChanged = true;
+        }
+
+        return hasChanged;
+    }
+
+    private static bool ContainsChild(RegisteredSubjectProperty property, IInterceptorSubject subject)
+    {
+        foreach (var child in property.Children)
+        {
+            if (ReferenceEquals(child.Subject, subject))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IInterceptorSubject? FindChild(RegisteredSubjectProperty property, object? index)
+        => index is not null
+            ? SubjectPathResolverExtensions.FindChildByIndex(property, PathExtensions.FormatPathIndex(index))
+            : property.GetValue() as IInterceptorSubject;
 
     // Breadcrumbs and pane titles use the same label as the child list of the parent pane.
     private static string GetChildDisplayName(RegisteredSubjectProperty property, IInterceptorSubject child, object? index)
@@ -581,9 +732,9 @@
 
     private class SubjectPane
     {
-        public required IInterceptorSubject Subject { get; init; }
+        public required IInterceptorSubject Subject { get; set; }
 
-        public string DisplayName { get; init; } = "";
+        public string DisplayName { get; set; } = "";
         
         public string Path { get; init; } = "";
         

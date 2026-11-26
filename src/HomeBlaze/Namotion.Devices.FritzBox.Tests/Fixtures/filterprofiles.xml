@@ -1,0 +1,4 @@
+<List>
+<FilterProfile><FilterProfileID>filtprof1</FilterProfileID><Name>Standard</Name><FilterProfileType>Standard</FilterProfileType><Monday>0</Monday><Tuesday>0</Tuesday><Wednesday>0</Wednesday><Thursday>0</Thursday><Friday>0</Friday><Saturday>0</Saturday><Sunday>0</Sunday><Shared>0</Shared><TimeTable></TimeTable></FilterProfile>
+<FilterProfile><FilterProfileID>filtprof2</FilterProfileID><Name>Gast</Name><FilterProfileType>Guest</FilterProfileType><Monday>0</Monday><Tuesday>0</Tuesday><Wednesday>0</Wednesday><Thursday>0</Thursday><Friday>0</Friday><Saturday>0</Saturday><Sunday>0</Sunday><Shared>0</Shared><TimeTable><TimeValue><Time>90</Time><Action>0</Action></TimeValue><TimeValue><Time>1860</Time><Action>1</Action></TimeValue></TimeTable></FilterProfile>
+</List>

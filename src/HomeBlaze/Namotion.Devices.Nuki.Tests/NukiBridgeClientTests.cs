@@ -12,14 +12,14 @@ public class NukiBridgeClientTests
 {
     private const string Token = "123456";
 
-    private static NukiBridgeClient CreateClient(FakeNukiBridge bridge, NukiTokenMode tokenMode, string hostAddress = "192.168.1.50")
+    private static NukiBridgeClient CreateClient(FakeNukiBridge bridge, NukiTokenMode tokenMode, string hostAddress = "192.0.2.50")
         => new(bridge.CreateClient(), hostAddress, Token, tokenMode);
 
     [Theory]
-    [InlineData("192.168.1.50", "http://192.168.1.50:8080/info?token=123456")]
-    [InlineData("192.168.1.50:8081", "http://192.168.1.50:8081/info?token=123456")]
-    [InlineData("http://192.168.1.50/", "http://192.168.1.50:8080/info?token=123456")]
-    [InlineData("HTTP://192.168.1.50:8081/", "http://192.168.1.50:8081/info?token=123456")]
+    [InlineData("192.0.2.50", "http://192.0.2.50:8080/info?token=123456")]
+    [InlineData("192.0.2.50:8081", "http://192.0.2.50:8081/info?token=123456")]
+    [InlineData("http://192.0.2.50/", "http://192.0.2.50:8080/info?token=123456")]
+    [InlineData("HTTP://192.0.2.50:8081/", "http://192.0.2.50:8081/info?token=123456")]
     [InlineData("[fe80::1]", "http://[fe80::1]:8080/info?token=123456")]
     [InlineData("[fe80::1]:8081", "http://[fe80::1]:8081/info?token=123456")]
     [InlineData("[fe80::1]:65535", "http://[fe80::1]:65535/info?token=123456")]
@@ -148,18 +148,18 @@ public class NukiBridgeClientTests
     }
 
     [Theory]
-    [InlineData("192.168.1.50/info", "without a path")]
-    [InlineData("192.168.1.50?token=1", "without a path")]
-    [InlineData("192.168.1.50#top", "without a path")]
-    [InlineData("user@192.168.1.50", "without a path")]
-    [InlineData("192.168.1.50\\share", "without a path")]
+    [InlineData("192.0.2.50/info", "without a path")]
+    [InlineData("192.0.2.50?token=1", "without a path")]
+    [InlineData("192.0.2.50#top", "without a path")]
+    [InlineData("user@192.0.2.50", "without a path")]
+    [InlineData("192.0.2.50\\share", "without a path")]
     [InlineData("nuki local", "without a path")]
     [InlineData("[fe80::1", "without a path")]
     [InlineData("[fe80::1]8080", "without a path")]
     [InlineData(":8080", "without a path")]
     [InlineData("[]", "without a path")]
     [InlineData("", "without a path")]
-    [InlineData("192.168.1.50:80:90", "without a path")]
+    [InlineData("192.0.2.50:80:90", "without a path")]
     [InlineData("[not-an-ip]:8080", "without a path")]
     [InlineData("[fe80::1%@evil.com/64]", "without a path")]
     [InlineData("fe80::1%@evil.com/64", "without a path")]
@@ -170,12 +170,12 @@ public class NukiBridgeClientTests
     [InlineData("fe80::1%x\\evil", "without a path")]
     [InlineData("nuki\u0001.local", "without a path")]
     [InlineData("ftp://x", "without a path")]
-    [InlineData("https://192.168.1.50", "no HTTPS")]
-    [InlineData(" HTTPS://192.168.1.50:8081/", "no HTTPS")]
-    [InlineData("192.168.1.50:0", "from 1 to 65535")]
-    [InlineData("192.168.1.50:65536", "from 1 to 65535")]
-    [InlineData("192.168.1.50:", "from 1 to 65535")]
-    [InlineData("192.168.1.50:+80", "from 1 to 65535")]
+    [InlineData("https://192.0.2.50", "no HTTPS")]
+    [InlineData(" HTTPS://192.0.2.50:8081/", "no HTTPS")]
+    [InlineData("192.0.2.50:0", "from 1 to 65535")]
+    [InlineData("192.0.2.50:65536", "from 1 to 65535")]
+    [InlineData("192.0.2.50:", "from 1 to 65535")]
+    [InlineData("192.0.2.50:+80", "from 1 to 65535")]
     [InlineData("[fe80::1]:0", "from 1 to 65535")]
     public void WhenHostAddressIsInvalid_ThenTheClientCannotBeCreatedAndTheReasonIsReported(string hostAddress, string expectedReason)
     {

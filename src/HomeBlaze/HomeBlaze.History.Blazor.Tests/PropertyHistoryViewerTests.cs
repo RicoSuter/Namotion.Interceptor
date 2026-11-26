@@ -25,7 +25,7 @@ public class PropertyHistoryViewerTests
         var context = CreateContext();
         var subject = new ChartTargetSubject(context);
         var property = subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
-        var viewer = new PropertyHistoryViewer(null!, new SubjectPathResolver(() => subject), context);
+        var viewer = new PropertyHistoryViewer(null!, new SubjectPathResolver(context, () => subject), context);
 
         // Act
         var canShow = viewer.CanShow(property);
@@ -42,7 +42,7 @@ public class PropertyHistoryViewerTests
         var root = new ChartTargetSubject(context);
         var detached = new ChartTargetSubject(context);
         var property = detached.TryGetRegisteredSubject()!.TryGetProperty(nameof(ChartTargetSubject.Temperature))!;
-        var viewer = new PropertyHistoryViewer(null!, new SubjectPathResolver(() => root), context);
+        var viewer = new PropertyHistoryViewer(null!, new SubjectPathResolver(context, () => root), context);
 
         // Act
         var canShow = viewer.CanShow(property);

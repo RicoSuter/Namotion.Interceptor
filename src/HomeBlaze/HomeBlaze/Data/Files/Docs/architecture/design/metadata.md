@@ -25,7 +25,7 @@ Docs (folder)                        HomeBlaze:Metadata             = { title, o
 - **Added on demand.** The property or attribute is added only once an entry exists. The registry cannot remove a property, so removed metadata sets the value to null, and null means no metadata.
 - **One step with its file.** Setting a value and reading the file it comes from are one step under a lock of the subject that only the metadata writers take, so a subject that attaches during a write takes the new value.
 - **Readers.** Navigation, the browser and the order of children read the known keys (`MetadataKeys`) through `SubjectNavigationExtensions` and `ChildOrdering`. The path picker does not list the metadata.
-- **Code.** The contracts `IMetadataStore`, `IMetadataContainer` and `MetadataKeys` are in the namespace `HomeBlaze.Storage.Abstractions.Metadata`, the readers and the search in `HomeBlaze.Services.Metadata`, and the files, applying and writing of a storage and the notes in `HomeBlaze.Storage.Metadata`. A storage is the `IMetadataStore` of what it holds and hands the work to its `StorageMetadataStore`.
+- **Code.** The contracts `IMetadataStore`, `IMetadataContainer`, `IMetadataNotesFormat` and `MetadataKeys` are in the namespace `HomeBlaze.Storage.Abstractions.Metadata`, the readers, the search and `MetadataLinkResolver` in `HomeBlaze.Services.Metadata`, and the files, applying and writing of a storage and the notes in `HomeBlaze.Storage.Metadata`. The components `MetadataSummary`, `MetadataEditDialog`, `MetadataSummaryDialog` and `MetadataTagFilterDialog` are in `HomeBlaze.Components.Metadata`, with `MetadataEditing`, which finds the store that edits the metadata of a subject and tells whether it is connected, and `MarkdownField` is in `HomeBlaze.Components.Inputs`. A storage is the `IMetadataStore` of what it holds and hands the work to its `StorageMetadataStore`.
 
 ## Files and Applying [Implemented]
 
@@ -46,7 +46,7 @@ Docs (folder)                        HomeBlaze:Metadata             = { title, o
 
 - **Known keys.** `notes`, `links` and `tags` are keys of `MetadataKeys`. Their rules are in [Notes, Links and Tags](../../administration/metadata.md#notes-links-and-tags).
 - **Checked on write.** `StorageMetadataWriter` refuses a write that breaks the rules, from the browser and from agents alike. The read helpers of `MetadataDictionaryExtensions` leave out what breaks them in a file edited by hand.
-- **Display.** `MetadataNotes` checks and renders notes, and `MetadataLinkResolver` resolves a `MetadataLink` to what the browser opens. `MetadataSummary` shows notes, links and tags in the pane, in the dialog of the **Metadata** button and in the tooltip of the row of a property.
+- **Display.** `MetadataNotes` checks and renders notes, and components reach it through `IMetadataNotesFormat`, which `HomeBlaze.Storage` implements with it. `MetadataLinkResolver` resolves a `MetadataLink` to what the browser opens. `MetadataSummary` shows notes, links and tags in the pane, in the dialog of the **Metadata** button, in the tooltip of the row of a property and on the page of an automation. `MetadataEditDialog` edits notes in a `MarkdownField`, the Markdown source beside a live preview.
 
 ## Search [Implemented]
 

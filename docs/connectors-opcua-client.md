@@ -136,7 +136,11 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | Property | Default | Description |
 |----------|---------|-------------|
 | `ApplicationName` | "Namotion.Interceptor.Client" | Application name for identification and certificate generation |
-| `UseSecurity` | false | Enable signing and encryption (see [Transport Security](#transport-security)) |
+| `MinimumSecurityMode` | None | Minimum security mode of the endpoint: `None`, `Sign` or `SignAndEncrypt` (see [Transport Security](#transport-security)) |
+| `AutoAcceptUntrustedCertificates` | false | Accept server certificates that are not in the trusted store |
+| `AutoCreateApplicationCertificate` | true | Create a self-signed client certificate for secured connections, and replace it once it has expired or no longer matches the application URI |
+| `ApplicationUri` | null | Application URI the client certificate carries (derived from host and application name when null) |
+| `ApplicationCertificateLifetimeInMonths` | 12 | Lifetime of a certificate the client creates, at least 1 |
 | `CreateUserIdentity` | null | Async factory for user credentials (see [Authentication](#authentication)) |
 | `CertificateStoreBasePath` | "pki" | Base directory for certificate stores |
 | `SessionFactory` | null | Custom session factory (uses `DefaultSessionFactory` when null) |
@@ -191,12 +195,50 @@ Both limits are backstops against a server that never stops handing out work, an
 var config = new OpcUaClientConfiguration
 {
     ServerUrl = "opc.tcp://plc.factory.com:4840",
-    UseSecurity = true,  // Enable signing and encryption (recommended for production)
+    MinimumSecurityMode = MessageSecurityMode.SignAndEncrypt, // connect only to an encrypted endpoint
     // ... other settings
 };
 ```
 
-When `UseSecurity = true`, the client prefers secure endpoints with message signing and encryption. The default is `false` for development convenience.
+With `MinimumSecurityMode = None`, the default, the client prefers an unsecured endpoint and uses a secured one only when the server offers nothing else; `Sign` requires signing and `SignAndEncrypt` encryption. Among secured endpoints it picks the most secure one with a supported policy (Basic256Sha256, Aes128_Sha256_RsaOaep or Aes256_Sha256_RsaPss with the default RSA certificate). If none qualifies, connecting fails and the error lists the server's endpoints.
+
+#### Certificate Stores
+
+The client and the [server](connectors-opcua-server.md#certificates) use these folders under `CertificateStoreBasePath`:
+
+| Folder | Content |
+|---|---|
+| `own` | Certificate in `certs/{name}.der`, private key in `private/{name}.pfx` or `.pem`, same base name |
+| `trusted/certs` | Trusted peer certificates, and the root authority certificate of a CA-issued peer |
+| `issuer/certs` | Issuing authorities of a CA-issued certificate, own or peer; without them its chain is incomplete |
+| `rejected/certs` | Untrusted peer certificates |
+
+Both default to `pki`, so a client and a server in one process share their stores: a certificate trusted for one is trusted for the other, and the server's `CleanCertificateStore` deletes the client's certificate. Give each its own base path. Processes sharing a store need different application names or certificates that are never replaced.
+
+#### Client Certificate
+
+Only secured connections need one. With `AutoCreateApplicationCertificate = true`, the default, the client creates a self-signed certificate on its first secured connect; otherwise a missing certificate fails the connection. A provisioned certificate must carry the application URI `urn:{host name}:Namotion.Interceptor:{ApplicationName}` or the value of `ApplicationUri`, and should have the subject `CN={ApplicationName}, O=Namotion`. A password-protected key needs a `CertificatePasswordProvider` (see [Custom Application Configuration](#custom-application-configuration)).
+
+The default application URI contains the host name, so after a rename, such as a recreated container, the stored certificate no longer matches. A self-signed one is then replaced, as described below, and the server has to trust the new one; any other fails every connect. Set `ApplicationUri` where the host name can change.
+
+#### Certificate Expiry
+
+When the client or the server loads its certificate:
+
+- within 30 days of expiry, it logs a warning;
+- an expired self-signed certificate, created or provisioned, is replaced with a warning, and peers have to trust the new one;
+- so is a self-signed certificate that does not carry the application URI or, for the server, does not cover the host of `BaseAddress`;
+- a CA-issued certificate, any certificate while automatic creation is off, and one an override provides (see [Custom Application Configuration](#custom-application-configuration)) are never replaced.
+
+The client loads it each time it creates a secured session itself, on the initial connect and on manual reconnects (see [Connection Loss Recovery](#connection-loss-recovery)). A session that outlives the certificate fails once the server rejects it, and the next connect replaces it.
+
+#### Trust
+
+With `AutoAcceptUntrustedCertificates = false`, the default, an unknown server certificate is rejected and written to `rejected/certs`; move it to `trusted/certs`, or provision it there. The check runs on secured connections, and on unsecured ones before a login is encrypted: always for username and certificate logins, and for anonymous logins when the server's anonymous token policy names a security policy. The server trusts the client certificate the same way through its own stores.
+
+#### Errors
+
+A failed connection attempt, including a failed certificate load, is reported in `Diagnostics.LastError` (see [Diagnostics](#diagnostics)) and retried. Certificate errors name the certificate at fault and the folder or option that resolves it.
 
 ### Authentication
 
@@ -241,21 +283,34 @@ CreateUserIdentity = _ =>
 Override `CreateApplicationInstanceAsync()` in a derived configuration class for full control over OPC UA application settings (certificates, transport quotas, security policies):
 
 ```csharp
+using System.Text;
+using Namotion.Interceptor.OpcUa.Client;
+using Opc.Ua;
+using Opc.Ua.Configuration;
+
 public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
 {
+    public required string CertificatePassword { get; init; }
+
     public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
         var application = await base.CreateApplicationInstanceAsync();
 
         // Customize the application configuration
         var config = application.ApplicationConfiguration;
-        config.SecurityConfiguration.AutoAcceptUntrustedCertificates = false;
+        config.SecurityConfiguration.RejectSHA1SignedCertificates = true;
+        config.SecurityConfiguration.CertificatePasswordProvider = new CertificatePasswordProvider(Encoding.UTF8.GetBytes(CertificatePassword));
         config.TransportQuotas.MaxMessageSize = 64_000_000;
+
+        // Changed security settings take effect only through UpdateAsync.
+        await config.CertificateValidator.UpdateAsync(config);
 
         return application;
     }
 }
 ```
+
+A certificate the override sets on `SecurityConfiguration.ApplicationCertificate.Certificate` with its private key, for example from a hardware security module, is used as is and never validated or replaced. So is one that `UpdateAsync` loads with its key from another store type, such as the Windows certificate store.
 
 ## Monitoring & Subscriptions
 
@@ -359,6 +414,7 @@ var config = new OpcUaClientConfiguration
 - Only triggers for properties where `SamplingInterval = 0` was revised to > 0
 - Multiple rapid writes are coalesced into a single read
 - Reads are batched for efficiency
+- A read value is skipped when the property already holds a value with the same or a newer source timestamp, checked and applied atomically with the notifications of the property's current subscription
 - Circuit breaker prevents repeated failures from overwhelming the server
 - Logged when activated so you can verify which properties need this fallback
 
@@ -456,6 +512,10 @@ builder.Services.AddOpcUaSubjectClientSource(
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
+### Responses for a Different Request
+
+The client detects when one of its own writes or value reads receives the response to a different request of this client: the request handle the server echoes must match the one the request was sent with, and a response of another service type counts as a mismatch too. This is a detection, not a complete defense: a misdelivered fault, or a response from a server that does not echo request handles (it answers with zero, which the client accepts), cannot be told apart from a genuine one. On a detected mismatch nothing from that response is applied. A write fails and its changes are retried like any other failed write, and a read fails like any other failed read. Because the received response belonged to another request, possibly one carrying subscription notifications, the client also schedules a full state read on the next health check with a healthy session. Repeated mismatches coalesce into one read, at most once every 30 seconds.
+
 ### Connection Loss Recovery
 
 The client handles connection loss through two cooperating mechanisms: the OPC UA SDK's built-in `SessionReconnectHandler` (automatic) and a health check loop that performs manual reconnection when the SDK handler fails or is insufficient.
@@ -464,12 +524,14 @@ The client handles connection loss through two cooperating mechanisms: the OPC U
 
 #### Reconnection Flows
 
-**Flow A: SDK reconnection with subscription transfer**
+**Flow A: SDK reconnection with a new session**
 
-When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts to reconnect automatically. If it succeeds and transfers existing subscriptions to the new session:
+When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts to reconnect automatically. It first tries to reactivate the existing session, which leads to Flow B; on connection errors it keeps retrying that until its estimate of the session timeout runs out. When reactivation fails, it creates a new session and carries the client's subscriptions over, by transfer or by creating them fresh. If the session or a subscription cannot be created, the whole attempt fails and the handler retries.
+
+A transfer needs the server to still hold the subscription, which it does only until the subscription's lifetime expires without publish requests. A server built on the OPC Foundation SDK also transfers an anonymous user's subscriptions only over a signed channel, so with security off it refuses the transfer and the SDK recreates them. With this client's defaults, stall detection (`MaxReconnectDuration`, 30 s) resets the SDK handler long before its session timeout estimate (120 s) runs out, so after a plain network partition the new-session path is reached only when reactivation fails with a status the handler does not retry, such as `BadSessionIdInvalid` after a server restart.
 
 1. Keep-alive detects dead connection and triggers the SDK reconnect handler
-2. SDK creates a new session and transfers subscriptions via `TransferSubscriptions`
+2. SDK creates a new session, transfers the subscriptions the server still holds via `TransferSubscriptions` and recreates the others
 3. `OnReconnectComplete` accepts the new session and sets a `NeedsFullStateSync` flag
 4. The health check loop detects the flag on the next iteration:
    - Starts buffering incoming subscription notifications
@@ -477,9 +539,9 @@ When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts t
    - Applies server values, replays the buffer, resumes normal operation
 5. Full consistency is restored
 
-**Flow B: SDK reconnection fails or returns a preserved session**
+**Flow B: SDK reconnection returns a preserved or unusable session**
 
-If the SDK handler cannot transfer subscriptions (e.g., server restarted and old subscriptions are gone), or if it returns the same session object ("preserved session"), the client abandons the session entirely:
+If the SDK handler reactivates the existing session and returns the same session object ("preserved session"), returns no session, or returns a new session without subscriptions (which happens when the client had none), the client abandons the session entirely:
 
 1. `OnReconnectComplete` calls `AbandonCurrentSession()` (session nulled, transport killed, and incoming notifications buffered so stale values from the abandoned subscription are not applied during the gap before manual reconnection)
 2. The health check loop detects the dead session and triggers manual reconnection
@@ -496,6 +558,8 @@ If the session dies without the SDK handler being active (e.g., after `KillAsync
 2. Triggers manual reconnection: fresh session, new subscriptions, full state read
 3. Full consistency is restored
 
+In every flow, the connector's own value reads and writes still in flight on a session that is abandoned, replaced or cleared are canceled instead of waiting for `OperationTimeout`. A canceled write fails and is parked in the write retry queue. Other calls on the session, including calls made through `CurrentSession`, are not canceled this way and can wait until `OperationTimeout`.
+
 #### Stall Detection
 
 When the SDK's reconnection handler gets stuck (e.g., server never responds), the client automatically detects the stall and forces a reconnection reset. Configure via `MaxReconnectDuration` (default: 30 seconds). If the SDK reconnection hasn't succeeded within this duration, a full session reset and manual reconnection is triggered.
@@ -508,7 +572,7 @@ When the SDK's reconnection handler gets stuck (e.g., server never responds), th
 
 Between the SDK's `OnReconnectComplete` (step 3) and the health check's full state read (step 4), there is a window of up to one health check interval (~5 seconds by default) where:
 
-- Subscription notifications from the transfer may apply partially (some notifications may have been lost due to server-side queue overflow or subscription lifetime expiration)
+- Subscription notifications after the reconnect may apply partially (some notifications may have been lost due to server-side queue overflow or subscription lifetime expiration)
 - Property values may temporarily reflect incomplete state
 
 This window is bounded and self-correcting: the health check's full state read overwrites all values with the server's current state. For most industrial applications, this brief window is acceptable. If tighter consistency is required, reduce `SubscriptionHealthCheckInterval`.
@@ -691,7 +755,7 @@ When a batch write to the OPC UA server partially fails, the client throws an `O
 
 `OpcUaClientDiagnostics` derives from `SourceDiagnostics`, whose members, buffer semantics and read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to this client.
 
-**`IsOperational` here means the client has a live session with its subscriptions set up.** This built-in client implements liveness monitoring, but `IsOperational` is `null` before its first protocol-specific observation. It then publishes false for the whole address space browse and subscription creation, which on a large server still takes a while: the browse costs a batched call per level of the address space, and subscription creation grows with the number of monitored items. Which step raises it depends on how the session came about: the first health check tick on an initial connect, the completed subscription transfer on an SDK reconnect, and the completed state reload on a manual reconnect. It drops whenever the session is lost, killed or torn down, and whenever a connect attempt ends, so a client sitting in its retry delay reports an explicit false rather than serving.
+**`IsOperational` here means the client has a live session with its subscriptions set up.** This built-in client implements liveness monitoring, but `IsOperational` is `null` before its first protocol-specific observation. It then publishes false for the whole address space browse and subscription creation, which on a large server still takes a while: the browse costs a batched call per level of the address space, and subscription creation grows with the number of monitored items. Which step raises it depends on how the session came about: the first health check tick on an initial connect, the SDK reconnect completing with a new session, and the completed state reload on a manual reconnect. It drops whenever the session is lost, killed or torn down, and whenever a connect attempt ends, so a client sitting in its retry delay reports an explicit false rather than serving.
 
 It is not a claim that the model is in sync, and the two are not ordered against each other: the initial value read can run either side of the rise on an initial connect, and on a manual reconnect the reload always finishes first. While that read runs, `ISubjectSource.State` is `Synchronizing`, so reading it together with `IsOperational` is how a dropped network is told apart from a connected client that is still loading. See [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
 
@@ -714,7 +778,7 @@ This built-in client registers the `ClaimedPropertyCount` gauge, so it reports t
 | `Reconnects.TotalAttempts` | Attempts started. Once all in-flight attempts resolve, this equals the three below summed. |
 | `Reconnects.TotalSucceeded` | Attempts that produced a usable session. |
 | `Reconnects.TotalFailed` | Attempts that ended with a genuine fault, meaning an exception raised while the attempt was still live. |
-| `Reconnects.TotalAbandoned` | Attempts that ended without a usable session and without a fault: a null session, a failed transfer, a preserved session after a server restart, a stall reset, or a cancellation from a kill or from the listen attempt being torn down, which happens both when the source stops and when the retry loop ends an attempt. |
+| `Reconnects.TotalAbandoned` | Attempts that ended without a usable session and without a fault: a null session, a new session without subscriptions, a preserved session, a stall reset, or a cancellation from a kill or from the listen attempt being torn down, which happens both when the source stops and when the retry loop ends an attempt. |
 
 `Polling` is `null` when the [polling fallback](#polling-fallback-for-unsupported-nodes) is off, no session has been set up yet, or the client is between connect attempts. That last case is not a startup-only condition: the block reads through the session manager and goes `null` as soon as that manager is disposed, which every way out of a connect attempt does, so it stays `null` for the whole retry delay. The totals underneath survive that and reappear at their previous values once a session exists again. Otherwise it reports:
 
@@ -754,7 +818,7 @@ if (source.CurrentSession is { } session)
 }
 ```
 
-**Lifecycle contract:** read `CurrentSession` immediately before each use. It may be `null` during reconnection and the instance changes after a manual reconnect (Flow C), a transferred-subscription failure (Flow B), or a stall reset. Never cache the reference. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below) or recreate on demand when calls fail with `BadSessionIdInvalid` / `BadSessionNotActivated`.
+**Lifecycle contract:** read `CurrentSession` immediately before each use. It may be `null` during reconnection and the instance changes after a manual reconnect (Flows B and C), an SDK reconnect with a new session (Flow A), or a stall reset. Never cache the reference. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below) or recreate on demand when calls fail with `BadSessionIdInvalid` / `BadSessionNotActivated`.
 
 ### Reacting to session swaps with `CurrentSessionChanged`
 

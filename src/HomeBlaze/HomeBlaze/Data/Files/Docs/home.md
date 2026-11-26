@@ -35,7 +35,9 @@ Setup, deployment, and runtime configuration for operators and administrators.
 - [Page Errors](administration/page-errors.md): Every error message of a markdown page with its cause and its fix
 - [Paths](administration/paths.md): Path syntax for referencing subjects
 - [Monitoring](administration/monitoring.md): Health endpoints, OpenTelemetry and Seq
+- [OPC UA](administration/opc-ua.md): OPC UA client and server subjects, their certificates and how to trust a peer
 - [AI Agents](administration/ai-agents.md): Built-in agents on a Claude subscription or the Anthropic API: triggers, chat, memory and permissions
+- [Automations](administration/automation.md): Rules on property conditions and events with named states, their page and their editor
 - [Version and Updates](administration/updates.md): Running version, build and update check
 
 ### Development
@@ -44,6 +46,7 @@ Guides for building custom subjects, plugins, and UI components.
 
 - [Building Subjects](development/building-subjects.md): Creating custom subject types
 - [Configurable Subjects](development/configurable-subject.md): Subject serialization and persistence
+- [Subject Discovery](development/subject-discovery.md): Finding devices on the network for the Discover page of the create dialog
 - [Notifications](development/notifications.md): Notification channel interface
 - [Aspire](development/aspire.md): Development environment with Seq
 - [Testing the AI Agents](development/testing-ai-agents.md): Fakes and the opt-in integration tests of the AI agents
@@ -55,6 +58,7 @@ Per-device documentation and setup guides.
 - [Ecowitt](devices/Ecowitt.md): Ecowitt weather station gateways (GW1000/GW2000 family)
 - [FRITZ!Box](devices/FritzBox.md): AVM FRITZ!Box routers over the local TR-064 interface, with clients and presence, mesh access points, internet connection and WLANs
 - [GPIO](devices/Gpio.md): Raspberry Pi / Linux GPIO with optional MCP3008 and ADS1115 ADCs
+- [Hyundai Bluelink](devices/Bluelink.md): Hyundai electric vehicles in Europe, with charging and climate commands
 - [Luxtronik](devices/Luxtronik.md): Luxtronik 2.1 heat pumps (Alpha Innotec, Novelan) via the Smart Home Interface, read only
 - [myStrom](devices/MyStrom.md): myStrom WiFi switches with power metering
 - [Nuki](devices/Nuki.md): Nuki smart locks, Smart Doors and Openers through the local bridge HTTP API
@@ -63,6 +67,7 @@ Per-device documentation and setup guides.
 - [Shelly](devices/Shelly.md): Shelly Gen2+ devices via the RPC API
 - [Sonos](devices/Sonos.md): Sonos households over the local UPnP API: rooms with their satellites, groups, playback, favorites and live events
 - [SunSpec](devices/SunSpec.md): SunSpec inverters, meters and batteries (SolarEdge and others) via Modbus TCP, read only
+- [Tesla](devices/Tesla.md): Tesla vehicles through the Owner API, read only and without waking the vehicle
 - [Wallbox](devices/Wallbox.md): Wallbox EV chargers via the cloud API
 
 ### Architecture

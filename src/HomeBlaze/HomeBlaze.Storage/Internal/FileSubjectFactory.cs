@@ -52,7 +52,8 @@ internal sealed class FileSubjectFactory
 
     /// <summary>
     /// Creates the subject of a JSON file from its text: the configurable subject it describes,
-    /// or a <see cref="JsonFile"/> when the text is plain or invalid JSON.
+    /// or a <see cref="JsonFile"/> when the text is plain or invalid JSON. Logs the values that cannot be read, see
+    /// <see cref="LogSkippedProperties"/>.
     /// </summary>
     public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json)
     {
@@ -63,9 +64,12 @@ internal sealed class FileSubjectFactory
 
         try
         {
+            var skipped = new List<SkippedConfigurationProperty>();
+
             // Every configurable type is a subject as well.
-            if (_serializer.Deserialize(json) is IInterceptorSubject subject)
+            if (_serializer.Deserialize(json, created: null, skipped.Add) is IInterceptorSubject subject)
             {
+                LogSkippedProperties(path, skipped);
                 return subject;
             }
         }
@@ -80,6 +84,19 @@ internal sealed class FileSubjectFactory
         }
 
         return new JsonFile(storage, path);
+    }
+
+    /// <summary>
+    /// Logs as a warning the properties that were skipped when the configuration of the file at the path was read.
+    /// </summary>
+    public void LogSkippedProperties(string path, IReadOnlyCollection<SkippedConfigurationProperty> skipped)
+    {
+        if (skipped.Count > 0)
+        {
+            _logger?.LogWarning(
+                "The configuration of {Path} has issues that saving it would lose; correct them in the file: {Issues}",
+                path, ConfigurableSubjectSerializer.DescribeSkippedProperties(skipped));
+        }
     }
 
     /// <summary>

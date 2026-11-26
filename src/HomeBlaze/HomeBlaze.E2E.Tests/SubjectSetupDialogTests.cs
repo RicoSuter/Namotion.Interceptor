@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using HomeBlaze.Components;
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.E2E.Tests.Models;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
@@ -21,7 +22,7 @@ namespace HomeBlaze.E2E.Tests;
 public class SubjectSetupDialogTests
 {
     private const int PageLoadTimeout = 30000;
-    private const int ElementVisibilityTimeout = 5000;
+    private const int ElementVisibilityTimeout = 30000;
     private const string MotorName = "Test motor";
 
     private readonly PlaywrightFixture _fixture;
@@ -93,7 +94,27 @@ public class SubjectSetupDialogTests
     internal static async Task PickTypeAsync(IPage page, string typeName)
     {
         await TypeRow(page, typeName).ClickAsync();
+        await ExpectConfigurePageAsync(page);
+    }
+
+    /// <summary>
+    /// Waits until the configure page of the picked type is shown and, on a device with a fine pointer, its name
+    /// field has taken the focus.
+    /// </summary>
+    internal static async Task ExpectConfigurePageAsync(IPage page)
+    {
         await Assertions.Expect(CreateButton(page)).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // The name field takes the focus one round trip to the server after the page is shown. When that lands while
+        // another field is filled, after the fill focused that field and before it typed, the text goes into the name
+        // field. The name field is rendered with the button, so a name field that is missing now does not come. The media
+        // query is the one hasFinePointer in SubjectSetupDialog.razor.js uses to decide whether to focus the name field.
+        var nameInput = page.Locator("[data-testid='create-name-input']");
+        if (await nameInput.CountAsync() > 0 &&
+            await page.EvaluateAsync<bool>("() => matchMedia('(hover: hover) and (pointer: fine)').matches"))
+        {
+            await Assertions.Expect(nameInput).ToBeFocusedAsync(new() { Timeout = ElementVisibilityTimeout });
+        }
     }
 
     /// <summary>
@@ -136,19 +157,6 @@ public class SubjectSetupDialogTests
         return dialog;
     }
 
-    private static bool FileContains(string filePath, string text)
-    {
-        try
-        {
-            return File.ReadAllText(filePath).Contains(text, StringComparison.Ordinal);
-        }
-        catch (IOException)
-        {
-            // The writer can still hold the file, or has not created it yet.
-            return false;
-        }
-    }
-
     [Fact]
     public void WhenTypesAreOfferedForCreation_ThenEveryIconNameResolves()
     {
@@ -182,9 +190,9 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(DialogTitle(page)).ToHaveTextAsync("Create subject");
         await Assertions.Expect(SearchInput(page)).ToBeFocusedAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(page.Locator("[data-testid='type-group-all']")).ToBeVisibleAsync();
-        await Assertions.Expect(page.Locator("[data-testid='create-name-input']")).ToHaveCountAsync(0);
-        await Assertions.Expect(CreateButton(page)).ToHaveCountAsync(0);
-        await Assertions.Expect(BackButton(page)).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator("[data-testid='create-name-input']")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(CreateButton(page)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(BackButton(page)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(page.Locator("[data-testid='cancel-button']")).ToBeVisibleAsync();
     }
 
@@ -202,7 +210,7 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(TypeRow(page, "tablayout")).ToBeVisibleAsync();
         foreach (var typeName in new[] { "tab", "valuerow", "expansionpanel", "valuemapcase" })
         {
-            await Assertions.Expect(TypeRow(page, typeName)).ToHaveCountAsync(0);
+            await Assertions.Expect(TypeRow(page, typeName)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
 
         await Assertions.Expect(Dialog(page).GetByText("Value tile", new() { Exact = true })).ToBeVisibleAsync();
@@ -210,7 +218,7 @@ public class SubjectSetupDialogTests
         // the names that the dialog would show for the excluded types.
         foreach (var displayName in new[] { "Tab", "Value row", "Expansion panel", "Value map case" })
         {
-            await Assertions.Expect(Dialog(page).GetByText(displayName, new() { Exact = true })).ToHaveCountAsync(0);
+            await Assertions.Expect(Dialog(page).GetByText(displayName, new() { Exact = true })).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
     }
 
@@ -278,11 +286,12 @@ public class SubjectSetupDialogTests
         Assert.Equal(["solid", "2px"], outline);
     }
 
+    // A phone shows fewer rows, because the toggle between the type list and the Discover page sits above the list.
     [Theory]
-    [InlineData(1300, 880)]
-    [InlineData(375, 812)]
-    [InlineData(812, 375)]
-    public async Task WhenTheViewportIsDesktopOrPhoneSized_ThenTheTypeListAndTheActionsStayInView(int width, int height)
+    [InlineData(1300, 880, 3)]
+    [InlineData(375, 812, 2)]
+    [InlineData(812, 375, 2)]
+    public async Task WhenTheViewportIsDesktopOrPhoneSized_ThenTheTypeListAndTheActionsStayInView(int width, int height, int minimumVisibleRows)
     {
         // Arrange - the navigation to the browser is in a drawer that a narrow viewport closes, so the
         // viewport is only resized once the pane is there.
@@ -311,13 +320,16 @@ public class SubjectSetupDialogTests
                     .filter(row => row.height > 0 && row.top >= list.top - 0.5 && row.bottom <= list.bottom + 0.5 && isInViewport(row));
                 const content = document.querySelector('.mud-dialog-content');
                 const cancel = document.querySelector("[data-testid='cancel-button']").getBoundingClientRect();
-                return [visibleRows.length, content.scrollHeight - content.clientHeight, isInViewport(cancel) ? 1 : 0];
+                const toggle = document.querySelector("[data-testid='picker-mode-toggle']");
+                const isToggleWhole = toggle !== null && toggle.clientHeight >= toggle.scrollHeight && isInViewport(toggle.getBoundingClientRect());
+                return [visibleRows.length, content.scrollHeight - content.clientHeight, isInViewport(cancel) ? 1 : 0, isToggleWhole ? 1 : 0];
             }
             """);
 
-        Assert.True(pickerLayout[0] >= 3, $"Only {pickerLayout[0]} type rows are completely visible in the list.");
+        Assert.True(pickerLayout[0] >= minimumVisibleRows, $"Only {pickerLayout[0]} type rows are completely visible in the list.");
         Assert.True(pickerLayout[1] <= 0, $"The dialog content scrolls by {pickerLayout[1]} pixels, although only the list should.");
         Assert.True(pickerLayout[2] == 1, "The cancel button is outside the viewport.");
+        Assert.True(pickerLayout[3] == 1, "The toggle between the type list and the Discover page is missing, clipped or outside the viewport.");
 
         // Act
         await PickTypeAsync(page, "shellydevice");
@@ -370,7 +382,7 @@ public class SubjectSetupDialogTests
 
         // Assert
         await Assertions.Expect(TypeRow(page, "gridlayout")).ToBeVisibleAsync();
-        await Assertions.Expect(SearchInput(page)).Not.ToBeFocusedAsync();
+        await Assertions.Expect(SearchInput(page)).Not.ToBeFocusedAsync(new() { Timeout = AssertionTimeouts.Absence });
         var focusedAfterOpening = await page.EvaluateAsync<string[]>("() => window.focusedTestIds");
         Assert.Contains("type-group-dashboard", focusedAfterOpening);
         Assert.DoesNotContain("type-search-input", focusedAfterOpening);
@@ -423,9 +435,9 @@ public class SubjectSetupDialogTests
 
         // Assert - the cell and node types only exist inside a layout, and the test root already has a plugin manager.
         await Assertions.Expect(TypeRow(page, "gridlayout")).ToBeVisibleAsync();
-        await Assertions.Expect(TypeRow(page, "gridcell")).ToHaveCountAsync(0);
-        await Assertions.Expect(TypeRow(page, "canvasnode")).ToHaveCountAsync(0);
-        await Assertions.Expect(TypeRow(page, "pluginmanager")).ToHaveCountAsync(0);
+        await Assertions.Expect(TypeRow(page, "gridcell")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(TypeRow(page, "canvasnode")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(TypeRow(page, "pluginmanager")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -534,7 +546,7 @@ public class SubjectSetupDialogTests
 
         // Assert
         await Assertions.Expect(TypeRow(page, "gridlayout")).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
-        await Assertions.Expect(TypeRow(page, "motor")).ToHaveCountAsync(0);
+        await Assertions.Expect(TypeRow(page, "motor")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(dashboardGroup).ToHaveAttributeAsync("aria-pressed", "true");
     }
 
@@ -578,6 +590,33 @@ public class SubjectSetupDialogTests
     }
 
     [Fact]
+    public async Task WhenATypeIsPickedBeforeThePointerIsKnown_ThenTheNameFieldTakesTheFocus()
+    {
+        // Arrange - the dialog asks the browser for its pointer once it has rendered, and holding back the module
+        // it asks with lets the type be picked before the answer arrives, as a busy machine does by chance.
+        var page = await _fixture.CreatePageAsync();
+        var heldModuleRequest = new TaskCompletionSource<IRoute>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // The module is served under a fingerprinted name, such as "SubjectSetupDialog.m938w0l6zk.razor.js".
+        await page.RouteAsync(url => url.Contains("/SubjectSetupDialog."), route =>
+        {
+            heldModuleRequest.TrySetResult(route);
+            return Task.CompletedTask;
+        });
+
+        await OpenDialogAsync(page);
+        var moduleRequest = await heldModuleRequest.Task.WaitAsync(TimeSpan.FromMilliseconds(PageLoadTimeout));
+
+        // Act - not PickTypeAsync, which waits for the focus that the held module holds back.
+        await TypeRow(page, "motor").ClickAsync();
+        await Assertions.Expect(CreateButton(page)).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await moduleRequest.ContinueAsync();
+
+        // Assert
+        await Assertions.Expect(NameInput(page)).ToBeFocusedAsync(new() { Timeout = ElementVisibilityTimeout });
+    }
+
+    [Fact]
     public async Task WhenGoingBack_ThenTheSearchIsPreservedAndAnotherTypeGetsItsOwnForm()
     {
         // Arrange
@@ -591,7 +630,7 @@ public class SubjectSetupDialogTests
         var inMemoryOnlyField = Dialog(page).GetByLabel("Max Points Per Property");
         var sqliteOnlyField = Dialog(page).GetByLabel("Database Path");
         await Assertions.Expect(inMemoryOnlyField).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
-        await Assertions.Expect(sqliteOnlyField).ToHaveCountAsync(0);
+        await Assertions.Expect(sqliteOnlyField).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await BackButton(page).ClickAsync();
@@ -664,7 +703,7 @@ public class SubjectSetupDialogTests
         // Assert
         await Assertions.Expect(DialogTitle(page)).ToHaveTextAsync("Create Motor");
         await Assertions.Expect(NameInput(page)).ToHaveValueAsync("Motor");
-        await Assertions.Expect(NameHelperText(page, "File name is required")).ToHaveCountAsync(0);
+        await Assertions.Expect(NameHelperText(page, "File name is required")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -711,7 +750,7 @@ public class SubjectSetupDialogTests
         // Assert - the required number is prefilled, so nothing has to be touched first.
         await Assertions.Expect(intervalInput).ToHaveValueAsync("5", new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
-        await Assertions.Expect(Dialog(page).GetByText("Required")).ToHaveCountAsync(0);
+        await Assertions.Expect(Dialog(page).GetByText("Required")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await intervalInput.FillAsync("");
@@ -811,7 +850,7 @@ public class SubjectSetupDialogTests
         // Assert
         await Assertions.Expect(editDialog.GetByLabel(argument, new() { Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
-        await Assertions.Expect(editDialog.GetByText(slot)).ToHaveCountAsync(0);
+        await Assertions.Expect(editDialog.GetByText(slot)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -910,10 +949,10 @@ public class SubjectSetupDialogTests
     [Fact]
     public async Task WhenTheNameOfAMotorIsClearedInTheEditDialog_ThenSaveIsDisabledUntilANameIsEntered()
     {
-        // Saving rewrites the motor file in the test output directory, which later runs reuse. Restoring it
-        // only restores the file: file watching is off in testRoot.json, so the live motor keeps the saved
-        // target speed for the rest of the host's life. Its name is entered again unchanged, because the
-        // property history tests find the motor by it.
+        // Saving rewrites the motor file in the test output directory, which later runs reuse, so the file is
+        // restored. File watching is off in testRoot.json, so a pass of the storage loads the restored file before
+        // the next test does it at a time of its own. Its name is entered again unchanged, because the property
+        // history tests find the motor by it.
         const string motorName = "Test Motor";
         const int targetSpeed = 1200;
         var motorFilePath = Path.Combine(AppContext.BaseDirectory, "TestData", "Demo", "Motor.json");
@@ -960,11 +999,11 @@ public class SubjectSetupDialogTests
             await Assertions.Expect(editDialog).ToHaveCountAsync(0, new() { Timeout = ElementVisibilityTimeout });
             Assert.Equal(motorName, motor.Name);
             Assert.Equal(targetSpeed, motor.TargetSpeed);
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => FileContains(motorFilePath, $"\"targetSpeed\": {targetSpeed}") &&
-                      FileContains(motorFilePath, $"\"name\": \"{motorName}\""),
-                TimeSpan.FromSeconds(10),
-                message: "The motor file does not contain the values that were saved in the edit dialog.");
+            await _fixture.WaitForFileTextAsync(
+                motorFilePath,
+                text => text.Contains($"\"targetSpeed\": {targetSpeed}", StringComparison.Ordinal) &&
+                        text.Contains($"\"name\": \"{motorName}\"", StringComparison.Ordinal),
+                "The motor file does not contain the values that were saved in the edit dialog.");
             isCompleted = true;
         }
         finally
@@ -972,6 +1011,7 @@ public class SubjectSetupDialogTests
             try
             {
                 await File.WriteAllBytesAsync(motorFilePath, originalMotorFile);
+                await _fixture.ReconcileStorageAsync();
             }
             catch (Exception exception) when (!isCompleted)
             {
@@ -1007,7 +1047,7 @@ public class SubjectSetupDialogTests
                 .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
             Assert.Equal("Original label", subject.Label);
             Assert.Equal(1, subject.Level);
-            await Assertions.Expect(editDialog.GetByText(externalChangeWarning)).ToHaveCountAsync(0);
+            await Assertions.Expect(editDialog.GetByText(externalChangeWarning)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
             // Act
             subject.Interval = 9;
@@ -1058,8 +1098,8 @@ public class SubjectSetupDialogTests
     public async Task WhenASubjectIsCreated_ThenItIsStoredUnderTheChosenName()
     {
         // The file is written to the test output directory, which later runs reuse, so it is removed again.
-        // File watching is off in testRoot.json, so the created motor stays in the live graph for the rest
-        // of the host's life, which is why the name is unique per run.
+        // File watching is off in testRoot.json, so a pass of the storage takes the created motor out of the
+        // live graph after its file is gone, before the next test does it at a time of its own.
         var name = $"CreatedMotor{Guid.NewGuid():N}";
         var motorName = $"Motor of {name}";
         var filePath = Path.Combine(AppContext.BaseDirectory, "TestData", $"{name}.json");
@@ -1085,19 +1125,16 @@ public class SubjectSetupDialogTests
 
             // The dialog persists nothing here, because its caller stores the subject. A notification of the
             // dialog would be shown by the time it has closed.
-            await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToHaveCountAsync(0);
-
-            await AsyncTestHelpers.WaitUntilAsync(() => File.Exists(filePath), TimeSpan.FromSeconds(10));
+            await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
             // The file holds the edits of the motor form only when they were applied before it was written.
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => FileContains(filePath, motorName),
-                TimeSpan.FromSeconds(10),
-                message: "The created file does not contain the motor name that was entered in the form.");
+            await _fixture.WaitForFileTextAsync(
+                filePath,
+                text => text.Contains(motorName, StringComparison.Ordinal),
+                "The created file does not contain the motor name that was entered in the form.");
 
             await AsyncTestHelpers.WaitUntilAsync(
                 () => FindCreatedMotor()?.Status == MotorStatus.Running,
-                TimeSpan.FromSeconds(10),
                 message: "The created motor is not in the graph or does not run.");
             var createdMotor = FindCreatedMotor();
 
@@ -1116,6 +1153,7 @@ public class SubjectSetupDialogTests
             try
             {
                 File.Delete(filePath);
+                await _fixture.ReconcileStorageAsync();
             }
             catch (Exception exception) when (!isCompleted)
             {
@@ -1123,6 +1161,194 @@ public class SubjectSetupDialogTests
                 _output.WriteLine($"Deleting {filePath} failed: {exception}");
             }
         }
+    }
+
+    [Fact]
+    public async Task WhenFoundDevicesAreCreatedFromAFolder_ThenEachStartsFromItsDeviceAndTheDialogReturnsToTheDiscoverPage()
+    {
+        // The files are written to the test output directory, which later runs reuse, so they are removed again.
+        var firstName = $"Discovered{Guid.NewGuid():N}";
+        var secondName = $"Discovered{Guid.NewGuid():N}";
+        var firstFilePath = Path.Combine(AppContext.BaseDirectory, "TestData", $"{firstName}.json");
+        var secondFilePath = Path.Combine(AppContext.BaseDirectory, "TestData", $"{secondName}.json");
+        var root = Assert.IsType<FluentStorageContainer>(_fixture.ServerServices.GetRequiredService<RootManager>().Root);
+        bool IsStored(string name, string hostAddress) =>
+            root.Children.TryGetValue(name, out var subject) && subject is DiscoverableTestSubject { HostAddress: var stored } && stored == hostAddress;
+
+        var isCompleted = false;
+        try
+        {
+            // Arrange
+            var page = await _fixture.CreatePageAsync();
+            await OpenDialogAsync(page);
+            await Dialog(page).GetByTestId("picker-mode-discover").ClickAsync();
+            var discoverPage = Dialog(page).GetByTestId("subject-discovery-page");
+            var firstRow = discoverPage.GetByTestId("discovery-row").Filter(new() { HasText = DiscoverableTestDiscovery.HostAddress });
+            var secondRow = discoverPage.GetByTestId("discovery-row").Filter(new() { HasText = DiscoverableTestDiscovery.SecondHostAddress });
+            await Assertions.Expect(firstRow).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(secondRow).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            var scanCount = DiscoverableTestDiscovery.ScanCount;
+
+            // Act
+            await firstRow.ClickAsync();
+            await ExpectConfigurePageAsync(page);
+
+            // Assert - the component and the name start from the device.
+            await Assertions.Expect(Dialog(page).GetByTestId("discoverable-host"))
+                .ToHaveTextAsync($"Host: {DiscoverableTestDiscovery.HostAddress}", new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(NameInput(page)).ToHaveValueAsync(DiscoverableTestDiscovery.DeviceName);
+
+            // Act
+            await NameInput(page).FillAsync(firstName);
+            await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+            await CreateButton(page).ClickAsync();
+
+            // Assert - the dialog stays open on the Discover page, where the device is now listed as added, after
+            // the devices that are not.
+            await Assertions.Expect(discoverPage).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(CreateButton(page)).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(page.GetByText($"Created \"{firstName}\"")).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(page.Locator("[data-testid='cancel-button']")).ToHaveTextAsync("Done");
+
+            var testDeviceRows = discoverPage.Locator("[data-testid^='discovery-row']").Filter(new()
+            {
+                HasTextRegex = new Regex($"{Regex.Escape(DiscoverableTestDiscovery.HostAddress)}|{Regex.Escape(DiscoverableTestDiscovery.SecondHostAddress)}")
+            });
+            await Assertions.Expect(testDeviceRows).ToHaveTextAsync(
+                [new Regex(Regex.Escape(DiscoverableTestDiscovery.SecondHostAddress)), new Regex($"{Regex.Escape(DiscoverableTestDiscovery.HostAddress)}, already added")],
+                new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(testDeviceRows.Nth(1)).ToHaveAttributeAsync("data-testid", "discovery-row-existing");
+
+            await _fixture.WaitForFileTextAsync(
+                firstFilePath,
+                text => text.Contains(DiscoverableTestDiscovery.HostAddress, StringComparison.Ordinal),
+                "The created file does not contain the host address of the found device.");
+
+            // Act - the second device is created from the same results, without a new scan.
+            await secondRow.ClickAsync();
+            await ExpectConfigurePageAsync(page);
+
+            // Assert - the name that was typed for the first device is not kept, and leaving the form is a cancel.
+            await Assertions.Expect(Dialog(page).GetByTestId("discoverable-host"))
+                .ToHaveTextAsync($"Host: {DiscoverableTestDiscovery.SecondHostAddress}", new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(NameInput(page)).ToHaveValueAsync(DiscoverableTestDiscovery.SecondDeviceName);
+            await Assertions.Expect(page.Locator("[data-testid='cancel-button']")).ToHaveTextAsync("Cancel");
+
+            // Act
+            await NameInput(page).FillAsync(secondName);
+            await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+            await CreateButton(page).ClickAsync();
+
+            // Assert
+            await Assertions.Expect(discoverPage.GetByTestId("discovery-row-existing").Filter(new() { HasText = DiscoverableTestDiscovery.SecondHostAddress }))
+                .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await _fixture.WaitForFileTextAsync(
+                secondFilePath,
+                text => text.Contains(DiscoverableTestDiscovery.SecondHostAddress, StringComparison.Ordinal),
+                "The second created file does not contain the host address of the second found device.");
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => IsStored(firstName, DiscoverableTestDiscovery.HostAddress) && IsStored(secondName, DiscoverableTestDiscovery.SecondHostAddress),
+                message: "The folder does not hold both created subjects.");
+            Assert.Equal(scanCount, DiscoverableTestDiscovery.ScanCount);
+
+            // Act - a new scan matches the found devices against the subjects that exist now, not when the dialog opened.
+            var matchCount = DiscoverableTestDiscovery.MatchedHostAddresses.Count;
+            var scanAgainButton = discoverPage.GetByTestId("discovery-scan-again-button");
+            await Assertions.Expect(scanAgainButton).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+            await scanAgainButton.ClickAsync();
+
+            // Assert - the rows before the new scan already show both devices as added, so the matches of the
+            // subject discovery tell that the new scan received the created subjects.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => DiscoverableTestDiscovery.MatchedHostAddresses.Skip(matchCount).Distinct().Count() == 2,
+                message: "The new scan did not match both found devices to the created subjects.");
+            await Assertions.Expect(testDeviceRows).ToHaveCountAsync(2, new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(testDeviceRows.Nth(0)).ToHaveAttributeAsync("data-testid", "discovery-row-existing");
+            await Assertions.Expect(testDeviceRows.Nth(1)).ToHaveAttributeAsync("data-testid", "discovery-row-existing");
+
+            // Act
+            await page.Locator("[data-testid='cancel-button']").ClickAsync();
+
+            // Assert
+            await Assertions.Expect(Dialog(page)).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            isCompleted = true;
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(firstFilePath);
+                File.Delete(secondFilePath);
+                await _fixture.ReconcileStorageAsync();
+            }
+            catch (Exception exception) when (!isCompleted)
+            {
+                // The failure of the test itself is the one to report.
+                _output.WriteLine($"Deleting {firstFilePath} or {secondFilePath} failed: {exception}");
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(1300, 880)]
+    [InlineData(375, 812)]
+    public async Task WhenTheExpanderOfAFoundDeviceIsClicked_ThenItsIncludedItemsAreShownAndAreNotSelectable(int width, int height)
+    {
+        // Arrange - the navigation to the browser is in a drawer that a narrow viewport closes, so the viewport is
+        // only resized once the pane is there.
+        var page = await _fixture.CreatePageAsync();
+        await OpenSubjectBrowserAsync(page);
+        await page.SetViewportSizeAsync(width, height);
+        await PaneCreateButton(page).ClickAsync();
+        await Assertions.Expect(TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Dialog(page).GetByTestId("picker-mode-discover").ClickAsync();
+
+        var hubRow = Dialog(page).Locator(".subject-discovery-row").Filter(new() { HasText = DiscoverableTestDiscovery.HubName });
+        var expander = hubRow.GetByTestId("discovery-row-expander");
+        var items = hubRow.GetByTestId("discovery-included-item");
+        await Assertions.Expect(expander).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(expander).ToHaveAttributeAsync("aria-expanded", "false");
+        await Assertions.Expect(expander).ToHaveAccessibleNameAsync("Show 2 included items");
+        await Assertions.Expect(items).ToHaveCountAsync(0);
+
+        // Act
+        await expander.ClickAsync();
+
+        // Assert
+        await Assertions.Expect(items).ToHaveTextAsync(
+            ["Kitchen speaker, Test model, 192.0.2.20", "Office speaker"], new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(expander).ToHaveAttributeAsync("aria-expanded", "true");
+        await Assertions.Expect(expander).ToHaveAccessibleNameAsync("Hide 2 included items");
+        await Assertions.Expect(hubRow.GetByTestId("discovery-included-items").Locator("button, a, [tabindex]")).ToHaveCountAsync(0);
+
+        // The select button and the expander are siblings on one line, both completely in view.
+        var layout = await hubRow.EvaluateAsync<double[]>(
+            """
+            row => {
+                const select = row.querySelector("[data-testid='discovery-row']").getBoundingClientRect();
+                const expander = row.querySelector("[data-testid='discovery-row-expander']").getBoundingClientRect();
+                const list = row.closest('.subject-type-list');
+                const isInViewport = box => box.left >= 0 && box.right <= innerWidth;
+                return [
+                    row.querySelector("[data-testid='discovery-row'] [data-testid='discovery-row-expander']") ? 1 : 0,
+                    select.right <= expander.left + 0.5 ? 1 : 0,
+                    isInViewport(select) && isInViewport(expander) ? 1 : 0,
+                    list.scrollWidth - list.clientWidth
+                ];
+            }
+            """);
+        Assert.Equal([0, 1, 1], layout[..3]);
+        Assert.True(layout[3] <= 0, $"The list scrolls sideways by {layout[3]} pixels.");
+
+        // Act - events of a circuit are handled in order, so once the second click of the expander has collapsed the
+        // items, the click on an item has been handled before it.
+        await items.First.ClickAsync();
+        await expander.ClickAsync();
+
+        // Assert - the item did not pick the device, which would have left the Discover page.
+        await Assertions.Expect(items).ToHaveCountAsync(0, new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(Dialog(page).GetByTestId("subject-discovery-page")).ToBeVisibleAsync();
+        await Assertions.Expect(CreateButton(page)).Not.ToBeVisibleAsync();
     }
 
     [Fact]
@@ -1148,7 +1374,7 @@ public class SubjectSetupDialogTests
             await Assertions.Expect(page.GetByText("Error applying configuration"))
                 .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
             await Assertions.Expect(Dialog(page)).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
-            await AsyncTestHelpers.WaitUntilAsync(() => File.Exists(filePath), TimeSpan.FromSeconds(10));
+            await AsyncTestHelpers.WaitUntilAsync(() => File.Exists(filePath));
         }
         finally
         {
@@ -1177,12 +1403,10 @@ public class SubjectSetupDialogTests
         await PickTypeAsync(page, "motor");
         await AsyncTestHelpers.WaitUntilAsync(
             () => GetFormMotors().Length == 1,
-            TimeSpan.FromSeconds(10),
             message: "The motor that backs the form was not attached to the graph.");
         var firstMotor = GetFormMotors().Single();
         await AsyncTestHelpers.WaitUntilAsync(
             () => firstMotor.Status == MotorStatus.Running,
-            TimeSpan.FromSeconds(10),
             message: "The motor that backs the form did not start.");
 
         await BackButton(page).ClickAsync();
@@ -1190,18 +1414,15 @@ public class SubjectSetupDialogTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => GetFormMotors().Length == 0,
-            TimeSpan.FromSeconds(10),
             message: "The motor of the type that was left with Back is still in the graph.");
         await AsyncTestHelpers.WaitUntilAsync(
             () => firstMotor.Status == MotorStatus.Stopped,
-            TimeSpan.FromSeconds(10),
             message: "The motor of the type that was left with Back still runs.");
 
         // Act - the second pick is abandoned with "Cancel"
         await PickTypeAsync(page, "motor");
         await AsyncTestHelpers.WaitUntilAsync(
             () => GetFormMotors().Length == 1,
-            TimeSpan.FromSeconds(10),
             message: "The motor that backs the second form was not attached to the graph.");
 
         await page.Locator("[data-testid='cancel-button']").ClickAsync();
@@ -1209,7 +1430,6 @@ public class SubjectSetupDialogTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => GetFormMotors().Length == 0,
-            TimeSpan.FromSeconds(10),
             message: "The motor of the dialog that was cancelled is still in the graph.");
     }
 
@@ -1256,7 +1476,7 @@ public class SubjectSetupDialogTests
             await PickTypeAsync(page, "inmemoryhistorystoresubject");
 
             // A grid cell has no name, so the dialog must not ask for one.
-            await Assertions.Expect(page.Locator("[data-testid='create-name-input']")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.Locator("[data-testid='create-name-input']")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
             var isEnabledCheckBox = page.GetByLabel("Enabled (auto-start on application startup)");
             await Assertions.Expect(isEnabledCheckBox).ToBeCheckedAsync(new() { Timeout = ElementVisibilityTimeout });
@@ -1296,6 +1516,7 @@ public class SubjectSetupDialogTests
             try
             {
                 await File.WriteAllBytesAsync(layoutFilePath, originalLayoutFile);
+                await _fixture.ReconcileStorageAsync();
             }
             catch (Exception exception) when (!isCompleted)
             {

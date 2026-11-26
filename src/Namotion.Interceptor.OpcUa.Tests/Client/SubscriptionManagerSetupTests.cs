@@ -93,7 +93,8 @@ public class SubscriptionManagerSetupTests
         var survivorItem = harness.TrackMonitoredItem(clientHandle: 1, survivorProperty);
         var detachedItem = harness.TrackMonitoredItem(clientHandle: 2, detachedProperty);
 
-        harness.Manager.CompleteSetup([survivorItem, detachedItem]);
+        using var subscription = SubscriptionManagerTestHarness.CreateSubscription(survivorItem, detachedItem);
+        harness.Manager.CompleteSetup([subscription]);
 
         // Assert: the detached subject's handle (2) is gone and the survivor's (1) remains, and the
         // count agrees with the dictionary.
@@ -120,7 +121,8 @@ public class SubscriptionManagerSetupTests
         // Act: the whole completion sequence, so reordering sweep and registration fails the test.
         // The item list still contains both handles, as in production, where it comes from the SDK
         // subscriptions and the sweep only prunes the manager's own dictionary.
-        harness.Manager.CompleteSetup([survivorItem, detachedItem]);
+        using var subscription = SubscriptionManagerTestHarness.CreateSubscription(survivorItem, detachedItem);
+        harness.Manager.CompleteSetup([subscription]);
 
         // Assert: the sweep removed the detached subject's handle (2) and kept the survivor (1)
         Assert.False(harness.Manager.IsTrackingForTesting(2));

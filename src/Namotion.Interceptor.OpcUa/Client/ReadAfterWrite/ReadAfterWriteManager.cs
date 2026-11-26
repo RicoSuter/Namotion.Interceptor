@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 /// </summary>
 internal sealed class ReadAfterWriteManager : IAsyncDisposable
 {
-    private readonly Func<ISession?> _sessionProvider;
+    private readonly Func<(ISession? Session, CancellationToken Lifetime)> _sessionProvider;
     private readonly ISubjectSource _source;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
@@ -25,14 +25,16 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     private readonly ReadAfterWriteMetrics _metrics;
     private readonly Action<Exception> _reportError;
 
-    // NodeId -> (RevisedInterval, Property) for properties that need read-after-writes
-    private readonly Dictionary<NodeId, (TimeSpan RevisedInterval, RegisteredSubjectProperty Property)> _trackedProperties = new();
+    // Properties that need read-after-writes
+    private readonly Dictionary<NodeId, (TimeSpan RevisedInterval, RegisteredSubjectProperty Property, Lock ApplyLock)> _trackedProperties = new();
 
-    // NodeId -> (ReadAt, Property) for pending scheduled reads
-    private readonly Dictionary<NodeId, (DateTime ReadAt, RegisteredSubjectProperty Property)> _pendingReads = new();
+    // NodeId -> due time. The property and its apply lock are looked up when the read is due, so registering
+    // again with a new lock also covers reads already pending.
+    private readonly Dictionary<NodeId, DateTime> _pendingReads = new();
 
-    // Reusable list for due reads (avoids allocation per timer tick)
-    private readonly List<(NodeId NodeId, RegisteredSubjectProperty Property)> _dueReadsList = new();
+    // Reusable lists for due reads (avoid allocation per timer tick)
+    private readonly List<NodeId> _dueNodeIds = new();
+    private readonly List<(NodeId NodeId, RegisteredSubjectProperty Property, Lock ApplyLock)> _dueReadsList = new();
 
     private DateTime _earliestReadTime = DateTime.MaxValue;
     private ISession? _lastKnownSession;
@@ -59,14 +61,14 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     /// <summary>
     /// Creates a new read-after-write manager.
     /// </summary>
-    /// <param name="sessionProvider">Function to get current session.</param>
+    /// <param name="sessionProvider">Returns the current session with a token that is canceled once it stops being current.</param>
     /// <param name="source">The subject source for applying read values.</param>
     /// <param name="configuration">OPC UA client configuration.</param>
     /// <param name="metrics">The counters to report into.</param>
     /// <param name="reportError">Reports genuine background failures to the owning source.</param>
     /// <param name="logger">Logger instance.</param>
     public ReadAfterWriteManager(
-        Func<ISession?> sessionProvider,
+        Func<(ISession? Session, CancellationToken Lifetime)> sessionProvider,
         ISubjectSource source,
         OpcUaClientConfiguration configuration,
         ReadAfterWriteMetrics metrics,
@@ -90,32 +92,37 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
     /// <summary>
     /// Registers a property for read-after-writes if needed.
-    /// Only tracks properties where requested SamplingInterval=0 but server revised to non-zero.
+    /// Only tracks properties where requested SamplingInterval=0 but server revised to non-zero; a property
+    /// that no longer qualifies is unregistered.
     /// </summary>
     /// <param name="nodeId">The OPC UA node ID.</param>
     /// <param name="property">The property.</param>
     /// <param name="requestedSamplingInterval">The requested sampling interval (0 = exception-based).</param>
     /// <param name="revisedSamplingInterval">The server's revised sampling interval.</param>
+    /// <param name="applyLock">The lock under which notifications for this property are applied; a read
+    /// value is checked and applied under it. Register again when the property moves to another subscription.</param>
     public void RegisterProperty(
         NodeId nodeId,
         RegisteredSubjectProperty property,
         int? requestedSamplingInterval,
-        TimeSpan revisedSamplingInterval)
+        TimeSpan revisedSamplingInterval,
+        Lock applyLock)
     {
-        // Only track if: requested 0 (exception-based) but server revised to > 0
-        if (requestedSamplingInterval != 0 || revisedSamplingInterval <= TimeSpan.Zero)
-        {
-            return;
-        }
-
         if (Volatile.Read(ref _disposed) == 1)
         {
             return;
         }
 
+        // Only track if: requested 0 (exception-based) but server revised to > 0
+        if (requestedSamplingInterval != 0 || revisedSamplingInterval <= TimeSpan.Zero)
+        {
+            UnregisterProperty(nodeId);
+            return;
+        }
+
         lock (_lock)
         {
-            _trackedProperties[nodeId] = (revisedSamplingInterval, property);
+            _trackedProperties[nodeId] = (revisedSamplingInterval, property, applyLock);
 
             _logger.LogDebug(
                 "Property {PropertyName} registered for read-after-writes: " +
@@ -144,6 +151,23 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     }
 
     /// <summary>
+    /// Moves a tracked property to the lock of the subscription that now holds it, keeping its revised
+    /// interval. Does nothing for a property that is not tracked.
+    /// </summary>
+    /// <param name="nodeId">The OPC UA node ID.</param>
+    /// <param name="applyLock">The lock under which notifications for this property are now applied.</param>
+    public void UpdateApplyLock(NodeId nodeId, Lock applyLock)
+    {
+        lock (_lock)
+        {
+            if (_trackedProperties.TryGetValue(nodeId, out var tracked))
+            {
+                _trackedProperties[nodeId] = tracked with { ApplyLock = applyLock };
+            }
+        }
+    }
+
+    /// <summary>
     /// Notifies that a property was successfully written. Schedules a read-after-write if needed.
     /// </summary>
     /// <param name="nodeId">The OPC UA node ID that was written.</param>
@@ -155,7 +179,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         }
 
         // Get session outside lock to avoid calling external code while holding lock
-        var currentSession = _sessionProvider();
+        var currentSession = _sessionProvider().Session;
         lock (_lock)
         {
             if (Volatile.Read(ref _disposed) == 1)
@@ -190,7 +214,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 _metrics.RecordScheduled();
             }
 
-            _pendingReads[nodeId] = (readAt, tracked.Property);
+            _pendingReads[nodeId] = readAt;
             UpdatePendingReadCountLocked();
 
             // Only reschedule timer if this is earlier than current earliest
@@ -283,18 +307,24 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         {
             _dueReadsList.Clear();
 
-            foreach (var kvp in _pendingReads)
+            foreach (var (nodeId, readAt) in _pendingReads)
             {
-                if (kvp.Value.ReadAt <= utcNow)
+                if (readAt <= utcNow)
                 {
-                    _dueReadsList.Add((kvp.Key, kvp.Value.Property));
+                    _dueNodeIds.Add(nodeId);
                 }
             }
 
-            foreach (var (nodeId, _) in _dueReadsList)
+            foreach (var nodeId in _dueNodeIds)
             {
                 _pendingReads.Remove(nodeId);
+                if (_trackedProperties.TryGetValue(nodeId, out var tracked))
+                {
+                    _dueReadsList.Add((nodeId, tracked.Property, tracked.ApplyLock));
+                }
             }
+
+            _dueNodeIds.Clear();
 
             UpdatePendingReadCountLocked();
             RecalculateEarliestLocked();
@@ -307,7 +337,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             return;
         }
 
-        var session = _sessionProvider();
+        var (session, sessionLifetime) = _sessionProvider();
         if (session is null || !session.Connected)
         {
             _logger.LogDebug("Skipping read-after-writes - session not connected.");
@@ -316,72 +346,91 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         }
 
         var successCount = 0;
-        var failedCount = 0;
         var skippedCount = 0;
 
         try
         {
             try
             {
-                var readValues = new ReadValueIdCollection(dueCount);
-                for (var i = 0; i < dueCount; i++)
+                var chunkSize = OpcUaValueReader.GetNodesPerRead(session, dueCount);
+                var readValues = new ReadValueIdCollection(chunkSize);
+                for (var offset = 0; offset < dueCount; offset += chunkSize)
                 {
-                    readValues.Add(new ReadValueId
+                    var count = Math.Min(chunkSize, dueCount - offset);
+
+                    // Reused across chunks: the previous read has completed, so the SDK no longer holds it.
+                    readValues.Clear();
+                    for (var i = 0; i < count; i++)
                     {
-                        NodeId = _dueReadsList[i].NodeId,
-                        AttributeId = Opc.Ua.Attributes.Value
-                    });
-                }
-
-                ReadResponse response;
-                try
-                {
-                    response = await session.ReadAsync(
-                        requestHeader: null,
-                        maxAge: 0,
-                        timestampsToReturn: TimestampsToReturn.Source,
-                        readValues,
-                        _cts.Token).ConfigureAwait(false);
-                }
-                catch (Exception) when (_cts.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                var receivedTimestamp = DateTimeOffset.UtcNow;
-
-                for (var i = 0; i < response.Results.Count && i < dueCount; i++)
-                {
-                    var result = response.Results[i];
-                    if (!StatusCode.IsGood(result.StatusCode))
-                    {
-                        failedCount++;
-                        continue;
+                        readValues.Add(new ReadValueId
+                        {
+                            NodeId = _dueReadsList[offset + i].NodeId,
+                            AttributeId = Opc.Ua.Attributes.Value
+                        });
                     }
 
-                    var (_, property) = _dueReadsList[i];
-                    var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
-
-                    // Skip if property already has a newer value from subscription notification
-                    var currentWriteTimestamp = property.Reference.TryGetWriteTimestamp();
-                    if (currentWriteTimestamp.HasValue && currentWriteTimestamp.Value >= sourceTimestamp)
+                    DataValueCollection results;
+                    try
                     {
-                        skippedCount++;
-                        continue;
+                        results = await OpcUaValueReader.ReadAsync(
+                            session, sessionLifetime, readValues, TimestampsToReturn.Source, _cts.Token).ConfigureAwait(false);
+                    }
+                    catch (Exception exception) when (_cts.IsCancellationRequested && exception is not OpcUaResponseMismatchException)
+                    {
+                        return;
+                    }
+                    catch (Exception exception) when (sessionLifetime.IsCancellationRequested && exception is not OpcUaResponseMismatchException)
+                    {
+                        // Not a read failure: every session change is followed by a full state read.
+                        _logger.LogDebug(exception, "Skipped {Count} read-after-writes because their session is no longer current.", dueCount - offset);
+                        return;
                     }
 
-                    var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
-                    property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
-                    successCount++;
+                    var receivedTimestamp = DateTimeOffset.UtcNow;
+
+                    for (var i = 0; i < results.Count; i++)
+                    {
+                        var result = results[i];
+                        if (!StatusCode.IsGood(result.StatusCode))
+                        {
+                            continue;
+                        }
+
+                        var (_, property, applyLock) = _dueReadsList[offset + i];
+                        var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
+
+                        // Skips a result that is already stale without converting it; the check under the lock decides.
+                        if (IsStale(property, sourceTimestamp))
+                        {
+                            skippedCount++;
+                            continue;
+                        }
+
+                        var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
+
+                        // Checked and applied under the notifications' lock: a notification landing between a separate
+                        // check and apply would be overwritten by this older read until the value next changes on the server.
+                        lock (applyLock)
+                        {
+                            if (IsStale(property, sourceTimestamp))
+                            {
+                                skippedCount++;
+                                continue;
+                            }
+
+                            property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
+                        }
+
+                        successCount++;
+                    }
                 }
             }
             catch (Exception ex)
             {
                 // Every due read that did not succeed or get skipped failed, including those a
                 // thrown batch never processed.
-                failedCount = dueCount - successCount - skippedCount;
                 _metrics.RecordExecuted(successCount);
-                _metrics.RecordFailed(failedCount);
+                _metrics.RecordFailed(dueCount - successCount - skippedCount);
                 ReportErrorIfRunning(ex);
                 if (_circuitBreaker.RecordFailure())
                 {
@@ -396,9 +445,8 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             }
 
             // A response can carry fewer results than requested; the unanswered remainder failed.
-            failedCount = dueCount - successCount - skippedCount;
             _metrics.RecordExecuted(successCount);
-            _metrics.RecordFailed(failedCount);
+            _metrics.RecordFailed(dueCount - successCount - skippedCount);
             _circuitBreaker.RecordSuccess();
 
             // Logging provider failures are not read failures. Let them propagate to the timer callback's
@@ -411,6 +459,12 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         {
             RescheduleTimer();
         }
+    }
+
+    private static bool IsStale(RegisteredSubjectProperty property, DateTimeOffset sourceTimestamp)
+    {
+        var currentWriteTimestamp = property.Reference.TryGetWriteTimestamp();
+        return currentWriteTimestamp.HasValue && currentWriteTimestamp.Value >= sourceTimestamp;
     }
 
     private void ReportErrorIfRunning(Exception error)
@@ -460,11 +514,11 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         }
 
         var earliest = DateTime.MaxValue;
-        foreach (var pending in _pendingReads.Values)
+        foreach (var readAt in _pendingReads.Values)
         {
-            if (pending.ReadAt < earliest)
+            if (readAt < earliest)
             {
-                earliest = pending.ReadAt;
+                earliest = readAt;
             }
         }
         _earliestReadTime = earliest;

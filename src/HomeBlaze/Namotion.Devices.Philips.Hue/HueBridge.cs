@@ -413,7 +413,9 @@ public partial class HueBridge : BackgroundService,
                 // Enumerated inside the try: the interface returns IEnumerable, so a lazy locator
                 // would otherwise throw past the catch that exists to contain it.
                 var bridges = await locator.LocateBridgesAsync(locatorCancellation.Token);
-                bridge = bridges.FirstOrDefault(locatedBridge => locatedBridge.BridgeId == BridgeId);
+                // Locators and the mDNS announcement differ in the case of the ID.
+                bridge = bridges.FirstOrDefault(locatedBridge =>
+                    string.Equals(locatedBridge.BridgeId, BridgeId, StringComparison.OrdinalIgnoreCase));
             }
             catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
             {

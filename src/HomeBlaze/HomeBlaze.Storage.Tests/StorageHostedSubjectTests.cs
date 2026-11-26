@@ -17,7 +17,7 @@ namespace HomeBlaze.Storage.Tests;
 /// runs here, so the storage is started by the hosted service handler as in the application, and a device is
 /// started when it enters the context and stopped when it leaves it.
 /// </summary>
-public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
+public class StorageHostedSubjectTests : StorageTestBase
 {
     private readonly ManualTimeProvider _timeProvider = new();
     private readonly LifecycleRecorder _recorder = new();
@@ -29,14 +29,14 @@ public class StorageHostedSubjectTests : StorageTestBase, IAsyncLifetime
         RecordingDevice.Reset();
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
-
-    public async Task DisposeAsync()
+    public override async Task DisposeAsync()
     {
         if (_host != null)
         {
             await _host.StopAsync(CancellationToken.None);
         }
+
+        await base.DisposeAsync();
     }
 
     [Fact]

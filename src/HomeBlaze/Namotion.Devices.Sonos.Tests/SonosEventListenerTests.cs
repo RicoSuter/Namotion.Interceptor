@@ -13,7 +13,39 @@ namespace Namotion.Devices.Sonos.Tests;
 
 public class SonosEventListenerTests
 {
-    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(10);
+    [Fact]
+    public void WhenTheEventSequenceWrapsFromItsMaximumToOne_ThenNoEventIsMissed()
+    {
+        // Arrange
+        var subscription = new SonosEventSubscription("RINCON_X/AVTransport", new Uri("http://127.0.0.1:1400/"), _ => { });
+        subscription.RecordSequence(uint.MaxValue - 1);
+        subscription.TakeMissedEvents();
+        subscription.RecordSequence(uint.MaxValue);
+
+        // Act
+        subscription.RecordSequence(1);
+
+        // Assert
+        Assert.False(subscription.TakeMissedEvents());
+    }
+
+    [Fact]
+    public void WhenMissedEventsAreTaken_ThenTheReportIsCleared()
+    {
+        // Arrange
+        var subscription = new SonosEventSubscription("RINCON_X/AVTransport", new Uri("http://127.0.0.1:1400/"), _ => { });
+        subscription.RecordSequence(5);
+
+        // Act
+        var first = subscription.TakeMissedEvents();
+        var second = subscription.TakeMissedEvents();
+
+        // Assert
+        Assert.True(first);
+        Assert.False(second);
+    }
+
+    private static readonly TimeSpan WaitTimeout = TestTimeouts.Default;
     private static readonly TimeSpan NegativeCheckDuration = TimeSpan.FromMilliseconds(300);
 
     private static SonosEventListener CreateListener(HttpClient httpClient, ILogger? logger = null, Action? firstEventReceived = null) =>
@@ -307,10 +339,16 @@ public class SonosEventListenerTests
         LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
 
         // Act
+        var before = TimeProvider.System.GetTimestamp();
         var subscription = await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
+        var after = TimeProvider.System.GetTimestamp();
 
-        // Assert
-        Assert.InRange(TimeUntil(subscription.RenewAt), TimeSpan.FromSeconds(25), TimeSpan.FromSeconds(31));
+        // Assert: bracketed by the call rather than measured from the assertion, so a stalled runner cannot fail it.
+        var renewalDelay = TimeSpan.FromSeconds(30);
+        Assert.InRange(
+            subscription.RenewAt,
+            TimeProvider.System.AddToTimestamp(before, renewalDelay),
+            TimeProvider.System.AddToTimestamp(after, renewalDelay));
     }
 
     [Fact]
@@ -378,11 +416,10 @@ public class SonosEventListenerTests
         // Arrange
         using var httpClient = new HttpClient();
         await using var listener = CreateListener(httpClient);
-        LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
+        var port = LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() =>
-            listener.Start("127.0.0.1", LoopbackPorts.GetFreePort(), listenHost: "127.0.0.1"));
+        Assert.Throws<InvalidOperationException>(() => listener.Start("127.0.0.1", port, listenHost: "127.0.0.1"));
     }
 
     [Fact]
@@ -586,12 +623,11 @@ public class SonosEventListenerTests
         // Arrange
         using var httpClient = new HttpClient();
         var listener = CreateListener(httpClient);
-        LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
+        var port = LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         await listener.DisposeAsync();
 
         // Act & Assert
-        Assert.Throws<ObjectDisposedException>(() =>
-            listener.Start("127.0.0.1", LoopbackPorts.GetFreePort(), listenHost: "127.0.0.1"));
+        Assert.Throws<ObjectDisposedException>(() => listener.Start("127.0.0.1", port, listenHost: "127.0.0.1"));
         await Assert.ThrowsAsync<ObjectDisposedException>(() =>
             listener.SubscribeAsync("RINCON_X/AVTransport", new Uri("http://127.0.0.1:1/Event"), _ => { }, CancellationToken.None));
     }
@@ -609,6 +645,32 @@ public class SonosEventListenerTests
         Assert.Throws<HttpListenerException>(() => second.Start("127.0.0.1", port, listenHost: "127.0.0.1"));
         LoopbackPorts.StartOnFreePort(candidate => second.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         Assert.True(second.IsListening);
+    }
+
+    [Fact]
+    public async Task WhenClosingTheListenerLosesThePendingAccept_ThenDisposeStillCompletes()
+    {
+        // Arrange
+        using var httpClient = new HttpClient();
+        var listener = CreateListener(httpClient);
+        var acceptStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // The managed HttpListener on Linux and macOS never completes an accept that starts while Close runs.
+        var lostAccept = new TaskCompletionSource<HttpListenerContext>(TaskCreationOptions.RunContinuationsAsynchronously);
+        listener.AcceptContextAsync = _ =>
+        {
+            acceptStarted.TrySetResult();
+            return lostAccept.Task;
+        };
+        LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
+        await acceptStarted.Task.WaitAsync(WaitTimeout);
+
+        // Act
+        var dispose = listener.DisposeAsync().AsTask();
+
+        // Assert
+        await dispose.WaitAsync(WaitTimeout);
+        Assert.False(listener.IsListening);
     }
 
     [Fact]

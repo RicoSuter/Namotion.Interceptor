@@ -11,6 +11,9 @@ public partial class HomeBlazeInstallation
 {
     private const string TimeoutMessage = "GitHub did not answer in time.";
 
+    // CI publishes the image of a release about 15 minutes after the release; offering it earlier ends as UpToDate.
+    private const int ReleaseImageDelayMinutes = 30;
+
     private readonly SemaphoreSlim _updateSignal = new(0, 1);
     private readonly UpdateSchedule _updateSchedule = new();
 
@@ -53,16 +56,16 @@ public partial class HomeBlazeInstallation
     }
 
     /// <summary>
-    /// Runs one update check, writes its result and returns the delay before the next attempt after a failure, or
-    /// null after a success, when the configured interval applies.
+    /// Runs one update check, writes its result and returns the delay before the next attempt after a failure or while a
+    /// release is held back, or null after another success, when the configured interval applies.
     /// </summary>
     internal async Task<TimeSpan?> CheckForUpdatesCoreAsync(CancellationToken cancellationToken)
     {
         var gitHubClient = _gitHubClient ?? throw new InvalidOperationException(_updateCheckUnavailableReason);
         try
         {
-            var status = Channel == InstallationChannel.Edge
-                ? await CompareWithBranchAsync(gitHubClient, cancellationToken)
+            var (status, nextCheckDelay) = Channel == InstallationChannel.Edge
+                ? (await CompareWithBranchAsync(gitHubClient, cancellationToken), null)
                 : await CompareWithLatestReleaseAsync(gitHubClient, cancellationToken);
 
             LastUpdateCheck = _timeProvider.GetUtcNow();
@@ -71,7 +74,7 @@ public partial class HomeBlazeInstallation
             Volatile.Write(ref _gitHubWait, null);
 
             _updateSchedule.ResetBackoff();
-            return null;
+            return nextCheckDelay;
         }
         catch (GitHubRequestException exception)
         {
@@ -92,18 +95,33 @@ public partial class HomeBlazeInstallation
     }
 
     /// <summary>
-    /// Writes the latest release and whether it is newer than the running version, and returns null.
+    /// Writes the latest release and whether it is newer than the running version. A newer release published less than
+    /// <see cref="ReleaseImageDelayMinutes"/> ago is not written yet, so the release found before stays offered; then
+    /// it returns a status saying so and the time until the new release is due.
     /// </summary>
-    private async Task<string?> CompareWithLatestReleaseAsync(GitHubRepositoryClient gitHubClient, CancellationToken cancellationToken)
+    private async Task<(string? Status, TimeSpan? NextCheckDelay)> CompareWithLatestReleaseAsync(GitHubRepositoryClient gitHubClient, CancellationToken cancellationToken)
     {
         var release = await gitHubClient.GetLatestReleaseAsync(cancellationToken);
+        var isNewer = _runningVersion is not null && release is not null && IsNewer(release.Version, _runningVersion);
+        var imageWait = isNewer ? GetReleaseImageWait(release!) : TimeSpan.Zero;
+        if (imageWait > TimeSpan.Zero)
+        {
+            UpdateAvailable ??= false;
+            return ($"Release {release!.Version} is offered {ReleaseImageDelayMinutes} minutes after it was published, once its image exists.", imageWait);
+        }
 
         LatestVersion = release?.Version;
         LatestReleaseDate = release?.PublishedAt;
         LatestReleaseUrl = release?.Url;
-        UpdateAvailable = _runningVersion is null ? null : release is not null && IsNewer(release.Version, _runningVersion);
-        return null;
+        UpdateAvailable = _runningVersion is null ? null : isNewer;
+        return (null, null);
     }
+
+    // Measured on GitHub's clock, so a local clock that is off neither holds a release forever nor offers it early.
+    private static TimeSpan GetReleaseImageWait(LatestRelease release) =>
+        release is { PublishedAt: { } publishedAt, AnsweredAt: { } answeredAt }
+            ? publishedAt.AddMinutes(ReleaseImageDelayMinutes) - answeredAt
+            : TimeSpan.Zero;
 
     /// <summary>
     /// Writes how many commits the branch of the edge build has that its commit lacks, and returns why the commit

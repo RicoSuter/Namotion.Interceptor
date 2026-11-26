@@ -54,6 +54,9 @@ internal sealed class McpAccessPathProvider : PathProviderBase
         return false;
     }
 
+    /// <inheritdoc />
+    public override long Version => _inner.Version;
+
     public override char PathSeparator => _inner.PathSeparator;
 
     public override char IndexOpen => _inner.IndexOpen;

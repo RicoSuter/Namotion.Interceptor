@@ -39,12 +39,12 @@ public class HostedServiceStartDeferralTests
         {
             subject.AttachHostedService(deferred);
             proceed.SetResult();
-            await independentFlow.WaitAsync(TimeSpan.FromSeconds(10));
+            await independentFlow.WaitAsync(TestTimeouts.Default);
 
             // Assert
             Assert.False(deferred.Started.Task.IsCompleted);
         }
-        await deferred.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await deferred.Started.Task.WaitAsync(TestTimeouts.Default);
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class HostedServiceStartDeferralTests
         }
 
         // Assert
-        Assert.Equal("configured", await service.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("configured", await service.Started.Task.WaitAsync(TestTimeouts.Default));
     }
 
     [Theory]
@@ -88,12 +88,12 @@ public class HostedServiceStartDeferralTests
 
         // Act
         await fixture.Handler.StartAsync(CancellationToken.None);
-        await fixture.Handler.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        await fixture.Handler.StopAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         // Assert
         foreach (var attachment in attachments)
         {
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => attachment.WaitAsync(TimeSpan.FromSeconds(10)));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => attachment.WaitAsync(TestTimeouts.Default));
         }
         Assert.Equal(count, fixture.CompletionDeferralReleased);
         Assert.All(services, service => Assert.False(service.Started.Task.IsCompleted));
@@ -112,7 +112,7 @@ public class HostedServiceStartDeferralTests
         var blocking = new ProbeService(() => "blocking", startup: releaseStart.Task,
             starting: token => token.Register(() => subject.DetachHostedService(deferred)));
         subject.AttachHostedService(blocking);
-        await blocking.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await blocking.Started.Task.WaitAsync(TestTimeouts.Default);
         using var deferral = fixture.Context.DeferHostedServiceStarts();
         subject.AttachHostedService(deferred);
         Task? stopping = null;
@@ -123,13 +123,13 @@ public class HostedServiceStartDeferralTests
             stopping = fixture.Handler.StopAsync(CancellationToken.None);
 
             // Assert
-            await stopped.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await stopped.Task.WaitAsync(TestTimeouts.Default);
             Assert.False(deferred.Started.Task.IsCompleted);
         }
         finally
         {
             releaseStart.TrySetResult();
-            await (stopping ?? fixture.Handler.StopAsync(CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(10));
+            await (stopping ?? fixture.Handler.StopAsync(CancellationToken.None)).WaitAsync(TestTimeouts.Default);
         }
         Assert.Equal(2, fixture.CompletionDeferralReleased);
     }
@@ -149,7 +149,7 @@ public class HostedServiceStartDeferralTests
         var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var blocking = new ProbeService(() => "blocking", startup: releaseStart.Task);
         subject.AttachHostedService(blocking);
-        await blocking.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await blocking.Started.Task.WaitAsync(TestTimeouts.Default);
         using var deferral = fixture.Context.DeferHostedServiceStarts();
         var deferred = new ProbeService(() => "deferred", () => stopped.TrySetResult());
         var attachment = subject.AttachHostedServiceAsync(deferred, CancellationToken.None);
@@ -161,7 +161,7 @@ public class HostedServiceStartDeferralTests
             if (shutdown == "Stop")
             {
                 stopping = fixture.Handler.StopAsync(CancellationToken.None);
-                await stopped.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                await stopped.Task.WaitAsync(TestTimeouts.Default);
             }
             else if (shutdown == "Dispose")
             {
@@ -178,15 +178,15 @@ public class HostedServiceStartDeferralTests
             Assert.Null(exception);
             Assert.Equal(2, fixture.CompletionDeferred);
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => subject.AttachHostedServiceAsync(
-                new ProbeService(() => "late"), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)));
+                new ProbeService(() => "late"), CancellationToken.None).WaitAsync(TestTimeouts.Default));
             Assert.Equal(2, fixture.CompletionDeferred);
         }
         finally
         {
             releaseStart.TrySetResult();
-            await (stopping ?? fixture.Handler.StopAsync(CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(10));
+            await (stopping ?? fixture.Handler.StopAsync(CancellationToken.None)).WaitAsync(TestTimeouts.Default);
         }
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => attachment.WaitAsync(TimeSpan.FromSeconds(10)));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => attachment.WaitAsync(TestTimeouts.Default));
         Assert.Equal(2, fixture.CompletionDeferralReleased);
         Assert.False(deferred.Started.Task.IsCompleted);
     }
@@ -213,18 +213,18 @@ public class HostedServiceStartDeferralTests
             {
                 secondAttachment = subject.AttachHostedServiceAsync(service, CancellationToken.None);
             }
-            await detachment.WaitAsync(TimeSpan.FromSeconds(10));
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => firstAttachment.WaitAsync(TimeSpan.FromSeconds(10)));
+            await detachment.WaitAsync(TestTimeouts.Default);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => firstAttachment.WaitAsync(TestTimeouts.Default));
             await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref fixture.CompletionDeferralReleased) == 1);
             Assert.False(service.Started.Task.IsCompleted);
         }
         if (secondAttachment is not null)
         {
-            await secondAttachment.WaitAsync(TimeSpan.FromSeconds(10));
+            await secondAttachment.WaitAsync(TestTimeouts.Default);
         }
         // A queued independent start is a barrier for all previously eligible actions.
         await subject.AttachHostedServiceAsync(new ProbeService(() => "barrier"), CancellationToken.None)
-            .WaitAsync(TimeSpan.FromSeconds(10));
+            .WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(reattach ? new[] { "stop", "start" } : new[] { "stop" }, events);
@@ -255,8 +255,8 @@ public class HostedServiceStartDeferralTests
             Assert.Equal(2, fixture.CompletionDeferred);
             Assert.Equal(0, fixture.CompletionDeferralReleased);
         }
-        await Task.WhenAll(attachments).WaitAsync(TimeSpan.FromSeconds(10));
-        await fixture.AllCompletionDeferralsReleased.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.WhenAll(attachments).WaitAsync(TestTimeouts.Default);
+        await fixture.AllCompletionDeferralsReleased.Task.WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(new[] { "first", "second" }, events);
@@ -292,10 +292,10 @@ public class HostedServiceStartDeferralTests
         {
             await fixture.Handler.StartAsync(CancellationToken.None);
             proceed.SetResult();
-            await independentFlow.WaitAsync(TimeSpan.FromSeconds(10));
+            await independentFlow.WaitAsync(TestTimeouts.Default);
 
             // Assert
-            Assert.Equal("child", await child.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal("child", await child.Started.Task.WaitAsync(TestTimeouts.Default));
         }
     }
 
@@ -327,10 +327,10 @@ public class HostedServiceStartDeferralTests
 
         // Assert
         Assert.Null(irregular);
-        Assert.Equal("captured", await captured.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("captured", await captured.Started.Task.WaitAsync(TestTimeouts.Default));
 
         var later = new ProbeService(() => "later");
-        await subject.AttachHostedServiceAsync(later, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        await subject.AttachHostedServiceAsync(later, CancellationToken.None).WaitAsync(TestTimeouts.Default);
     }
 
     [Fact]
@@ -343,12 +343,12 @@ public class HostedServiceStartDeferralTests
         var releaseStart = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var detached = new ProbeService(() => "detached", () => stopped.TrySetResult());
-        await subject.AttachHostedServiceAsync(detached, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        await subject.AttachHostedServiceAsync(detached, CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         // Occupies the loop, so the stop queued below is still waiting when shutdown begins.
         var blocking = new ProbeService(() => "blocking", startup: releaseStart.Task);
         subject.AttachHostedService(blocking);
-        await blocking.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await blocking.Started.Task.WaitAsync(TestTimeouts.Default);
         subject.DetachHostedService(detached);
 
         // Act
@@ -356,8 +356,8 @@ public class HostedServiceStartDeferralTests
         releaseStart.SetResult();
 
         // Assert
-        await stopped.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await stopping.WaitAsync(TimeSpan.FromSeconds(10));
+        await stopped.Task.WaitAsync(TestTimeouts.Default);
+        await stopping.WaitAsync(TestTimeouts.Default);
     }
 
     [Fact]
@@ -375,11 +375,11 @@ public class HostedServiceStartDeferralTests
         {
             await subject.AttachHostedServiceAsync(new ProbeService(() => "first"), CancellationToken.None);
             subject.AttachHostedService(next);
-            return next.Started.Task.Wait(TimeSpan.FromSeconds(5));
+            return next.Started.Task.Wait(TestTimeouts.Default);
         });
 
         // Assert
-        Assert.True(await attaching.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(await attaching.WaitAsync(TestTimeouts.Default));
     }
 
     private sealed class Fixture : IAsyncDisposable, IStartupCompletion

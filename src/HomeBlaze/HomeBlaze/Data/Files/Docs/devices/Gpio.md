@@ -19,13 +19,15 @@ The GPIO device provides access to GPIO pins on various Linux-based single-board
 | `Mcp3008` | Mcp3008Configuration | null | Optional MCP3008 ADC configuration |
 | `Ads1115` | Ads1115Configuration | null | Optional ADS1115 ADC configuration |
 | `Pins` | Dictionary&lt;int, GpioPin&gt; | - | Auto-discovered GPIO pins (persisted) |
-| `AnalogChannels` | Dictionary&lt;int, AnalogChannel&gt; | - | ADC channels (0-7 MCP3008, 8-11 ADS1115) |
+| `AnalogChannels` | Dictionary&lt;int, AnalogChannel&gt; | - | ADC channels (0-7 MCP3008, 8-11 ADS1115), read-only |
+| `Status` | ServiceStatus | - | Status of the GPIO controller, read-only |
+| `StatusMessage` | string? | - | Error or info message, read-only |
 
 ### GpioSubject Operations
 
 | Operation | Description |
 |-----------|-------------|
-| `SetRaspberryPiPinNames` | Sets friendly names for Raspberry Pi GPIO pins based on their common functions (I2C, SPI, UART, PWM) |
+| `ApplyRaspberryPiDefaults` | Names the pins with a fixed function (I2C, SPI, UART, PWM, HAT EEPROM) and applies the power-on pull of a [board with the Raspberry Pi register driver](#raspberry-pi-register-driver) (pull-up for GPIO 0 to 8, pull-down for GPIO 9 to 27), both only to unconfigured pins: those without a name in plain `Input` mode or in the mode of their power-on pull, as new pins on a Raspberry Pi start. Other pins and the pins of a configured MCP3008 are not changed, so applying it again changes nothing. Saves the configuration when a pin changed. Check the defaults before using it on a Raspberry Pi 5. |
 
 ### JSON Configuration Example
 
@@ -35,22 +37,14 @@ The GPIO device provides access to GPIO pins on various Linux-based single-board
   "useSimulation": false,
   "pollingInterval": "00:00:05",
   "retryInterval": "00:00:30",
-  "mcp3008": {
-    "clockPin": 11,
-    "mosiPin": 10,
-    "misoPin": 9,
-    "chipSelectPin": 8
-  },
-  "ads1115": {
-    "i2cBus": 1,
-    "address": 72
-  },
   "pins": {
-    "17": { "name": "LED", "mode": "Output" },
-    "18": { "name": "Button", "mode": "InputPullUp" }
+    "5": { "name": "Relay", "mode": "Output", "isInverted": true },
+    "18": { "name": "Button", "mode": "InputPullUp", "isInverted": true, "debounceTime": "00:00:00.05" }
   }
 }
 ```
+
+To add an ADC, see [Analog Input (ADC)](#analog-input-adc).
 
 ## Simulation Mode
 
@@ -74,9 +68,28 @@ sudo apt install libgpiod3
 
 On older distributions, the package may be named `libgpiod2`.
 
+### Docker
+
+The container image has no libgpiod, so GPIO works in Docker on a [board with the Raspberry Pi register driver](#raspberry-pi-register-driver): it reads and writes the pins through `/dev/gpiomem` and registers for pin changes through sysfs. A container mounts sysfs read-only, so map the device and make the GPIO part of sysfs writable, as the commented lines in the compose file do:
+
+```yaml
+    volumes:
+      - /sys/class/gpio:/sys/class/gpio
+      - /sys/devices/platform/soc:/sys/devices/platform/soc
+    devices:
+      - /dev/gpiomem
+```
+
+Both volumes are needed: the pin folders that `/sys/class/gpio` lists live under `/sys/devices/platform/soc`. They give the container, which runs as root, write access to the sysfs entries of the system-on-chip devices. Without them every pin shows `Unavailable` with `Read-only file system : '/sys/class/gpio/export'`. Raspberry Pi 5 and other boards need libgpiod and are not supported in the container.
+
+### Raspberry Pi register driver
+
+On a Raspberry Pi 3, 4, 400, Zero 2 W or Compute Module 3 or 4, HomeBlaze uses the Raspberry Pi register driver, which reads and writes the pins through `/dev/gpiomem`. On these boards new pins start with the power-on pull (see [Configuration Persistence](#configuration-persistence)) and an output keeps its level when HomeBlaze starts (see [Output Pins](#output-pins)). Other boards, including the Raspberry Pi 5, use libgpiod.
+
 ### Supported Platforms
 
 - **Raspberry Pi 3/4/5** - Full GPIO support (pin count detected automatically)
+- **Raspberry Pi Zero 2 W** - Supported with a 64-bit OS (`linux-arm64`). The original Raspberry Pi Zero W has an ARMv6 CPU, which .NET does not support
 - **Orange Pi** - Supported via libgpiod
 - **BeagleBone** - Supported via libgpiod
 - **ODROID** - Supported via libgpiod
@@ -95,52 +108,135 @@ Each GPIO pin supports four modes:
 | `InputPullDown` | Digital input with internal pull-down resistor |
 | `Output` | Digital output |
 
+A pin that drives an LED or a relay is an `Output`, not an input. Turn On, Turn Off, Toggle and Set Value switch only an output pin that is running; on an input they are disabled because its value follows the hardware, so set Mode to `Output` to use them.
+
 ### GpioPin Properties
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `PinNumber` | int | BCM pin number |
+| `PinNumber` | int | BCM pin number (read-only) |
 | `Name` | string? | Optional friendly name (persisted) |
 | `Mode` | GpioPinMode | Pin operating mode (persisted) |
-| `Value` | bool | Current value (true=high, false=low) |
-| `Status` | ServiceStatus | Pin availability status |
-| `StatusMessage` | string? | Error or info message |
+| `IsInverted` | bool | `Value` is the inverse of the pin level (persisted, default `false`), see [Inversion](#inversion) |
+| `DebounceTime` | TimeSpan | Time an input ignores further edges after a change (persisted, default 50 ms, zero disables it), see [Debouncing](#debouncing) |
+| `Value` | bool | Current logical value: the pin level (true=high), inverted when `IsInverted` is set (read-only) |
+| `Status` | ServiceStatus | Pin availability status (read-only) |
+| `StatusMessage` | string? | Error or info message (read-only) |
+
+`PinNumber`, `Value`, `Status` and `StatusMessage` are state: only the library changes them. `Name`, `Mode`, `IsInverted` and `DebounceTime` are configuration.
+
+### GpioPin Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `TurnOn`, `TurnOff`, `Toggle` | Switch an output pin |
+| `SetValue` | Sets the logical value of an output pin, such as from an automation expression |
+
+The state of a pin is read-only; an output changes only through these operations. They are disabled while the pin is not an output or not running, and `TurnOn` and `TurnOff` also while the output already has that value. They throw on an input pin, whose value follows the hardware.
 
 ### Pin Status
 
 Pins report their status via `ServiceStatus`:
 
 - **Running** - Pin is operational
-- **Unavailable** - Pin reserved by system (I2C, SPI) or platform not supported
+- **Unavailable** - Pin reserved by system (I2C, SPI), used by a configured ADC (see [Pins of an ADC](#pins-of-an-adc)) or platform not supported
 - **Error** - Hardware fault detected (e.g., write verification failed)
 
 ## Hardware Synchronization
 
 ### Output Pins
 
-When you set `Value = true` on an output pin:
-1. The value is written to GPIO hardware
+When the GPIO controller starts, an output is opened at the level the pin has, and `Value` follows from it: after a restart of HomeBlaze the level it drove, so a restart does not switch outputs, and after a reboot of the Pi its power-on pull. This applies to the [Raspberry Pi register driver](#raspberry-pi-register-driver). With libgpiod 1.x (package `libgpiod2`), which cannot read a pin before it is opened, an output starts low and `Value` is read back from it. With libgpiod 2.x (package `libgpiod3`) or sysfs, an output keeps its level, but a high level can drop low for a moment while the pin becomes an output, at startup and when the mode changes to `Output`, because these drivers set the direction before the level. This is not verified on hardware. A configuration change does not reopen an output that stays an output, so it keeps its level with every driver (see [Configuration Persistence](#configuration-persistence)). On a [board with the Raspberry Pi register driver](#raspberry-pi-register-driver), GPIO 9 to 27 are pulled down while the Pi boots, so an active-low relay on one of them can switch on during boot and then stays on when HomeBlaze starts: connect an active-low relay to GPIO 4, 5 or 6, which are pulled up at boot, or add an external pull-up.
+
+When `TurnOn` or `SetValue` sets an output pin to true:
+1. The level is written to GPIO hardware (low for an inverted pin)
 2. A read-back verification confirms the write succeeded
 3. If verification fails, `Status` is set to `Error` with a message indicating possible short circuit or external driver conflict
 
 ### Input Pins
 
 Input pins use interrupt-driven updates:
-- Rising/falling edge triggers update the `Value` property
+- Rising/falling edge triggers update the `Value` property, with [inversion](#inversion) and [debouncing](#debouncing) applied
+- At startup, an input reads its level with inversion applied
 - Polling verification runs every `PollingInterval` to catch missed interrupts
 - Mode changes automatically register/unregister interrupt handlers
 - Interrupts are only registered for input pins (not output)
+
+### Inversion
+
+`IsInverted` makes `Value` the inverse of the pin level, both for reading and for writing. Use it for active-low hardware:
+
+- **Active-low relay boards** switch on when the pin is low. With `IsInverted`, `TurnOn` turns the relay on, and `IsOn`, the icon and automations show the state of the relay.
+- **Buttons to ground** on an `InputPullUp` pin read low while pressed. With `IsInverted`, pressed is `true`.
+
+Changing `IsInverted` at runtime keeps the pin level and reads `Value` again, so `Value` flips and an output is never switched.
+
+### Debouncing
+
+A mechanical contact, such as a button, switch, reed contact or relay, bounces for a few milliseconds when it closes or opens, so the pin sees several edges for one press. After a change of `Value`, an input ignores further edges for `DebounceTime`, then reads the level again and corrects `Value` if the contact settled differently. A press therefore changes `Value` at once and only once.
+
+- The default of 50 ms suits buttons and switches. A pulse shorter than `DebounceTime` still shows as `true` and then `false`, but changes closer together than `DebounceTime` merge.
+- Set it to zero for inputs that change faster than that and do not bounce.
+- Outputs ignore it.
+- A negative value, or one above `GpioPin.MaximumDebounceTime` (10 seconds), is rejected with `ArgumentOutOfRangeException`, so a configuration file with one fails to load.
+
+### Common Wiring
+
+| Use case | Mode | IsInverted | DebounceTime |
+|----------|------|------------|--------------|
+| Button or switch to ground | `InputPullUp` | `true` | 50 ms |
+| Reed contact to ground | `InputPullUp` | `true` | 50 ms |
+| PIR or other electronic sensor | `Input` | `false` | 0 |
+| Pulse meter (S0) | `InputPullUp` | `true` | short or 0 |
+| Active-low relay board | `Output` | `true` | not used |
+| Active-high relay, MOSFET or LED | `Output` | `false` | not used |
+
+The pin editor shows this table and hints for the selected mode.
 
 ### Configuration Persistence
 
 Pin configurations are persisted and restored on restart:
 - When `GpioSubject` loads, existing pin configurations from JSON are reused
-- New pins (not in configuration) default to `Input` mode
-- Runtime changes to `Name` and `Mode` are persisted automatically
+- New pins (not in configuration) start with the power-on pull of the board on a [board with the Raspberry Pi register driver](#raspberry-pi-register-driver) (`InputPullUp` for GPIO 0 to 8, `InputPullDown` for GPIO 9 to 27), so an unconnected pin does not float; higher pins, such as those of a Compute Module 3 or 4, start as plain `Input`. On other boards, a Raspberry Pi 5 and in simulation mode they start as `Input`. Pins in the configuration keep their mode, also a plain `Input`
+- Changes to `Name`, `Mode`, `IsInverted` and `DebounceTime` made in the pin editor or with a control on a page are saved, and `ApplyRaspberryPiDefaults` saves the changes it makes; changes made from code are not saved by themselves
+- A change of the GPIO configuration, in the JSON file or in an editor, applies while HomeBlaze runs and restarts the GPIO handling with the new settings: an output that stays an output is not reopened and keeps its level on the hardware (with a changed `IsInverted`, `Value` follows that level), inputs and pins whose mode changes are reopened, a pin missing from the file starts like a new pin, and the configured ADCs are recreated. A reopened input reads its level again, so a change during that moment is picked up, but a pulse shorter than that moment can be missed. When `UseSimulation` changes, every pin is reopened on the new driver and an output opens at the level of its pin there, as at startup
 
 ## Analog Input (ADC)
 
 The GPIO device supports two ADC chips. Both can be configured simultaneously.
+
+### Pins of an ADC
+
+The pins a configured ADC uses are not opened as GPIO pins, at startup and when the configuration changes, so that opening them does not take them from the ADC. They stay in `Pins` with their pin number, `Status` `Unavailable` and a `StatusMessage`:
+
+| ADC | Pins | StatusMessage |
+|-----|------|---------------|
+| MCP3008 | `ClockPin`, `MosiPin`, `MisoPin` and `ChipSelectPin` | `Used by the MCP3008` |
+| ADS1115 on `I2cBus` 1 of a Raspberry Pi, any model including the Raspberry Pi 5 | GPIO 2 (SDA) and 3 (SCL), where the Pi has I2C bus 1 | `Used by I2C (ADS1115)` |
+
+A configured ADC, the MCP3008 and the ADS1115 alike, starts after the GPIO pins when the GPIO controller starts, so both need working GPIO support, and is recreated whenever the GPIO configuration changes. A pin that was opened as a GPIO pin before, such as GPIO 2 and 3 before the ADS1115 was added, may need a reboot of the board to get its I2C function back.
+
+An ADC that fails to start has no channels in `AnalogChannels`, and the `StatusMessage` of the GPIO device shows `MCP3008 init failed: ...` or `ADS1115 init failed: ...`. It is started again the next time the configuration is applied, such as after the GPIO JSON file changed, or when the GPIO device starts again.
+
+Both ADCs in the GPIO JSON file:
+
+```json
+{
+  "$type": "Namotion.Devices.Gpio.GpioSubject",
+  "mcp3008": {
+    "clockPin": 11,
+    "mosiPin": 10,
+    "misoPin": 9,
+    "chipSelectPin": 8
+  },
+  "ads1115": {
+    "i2cBus": 1,
+    "address": 72
+  }
+}
+```
+
+To remove an ADC in the file, set it to null, such as `"mcp3008": null` or `"ads1115": null`. A reload applies only the keys the file has, so deleting the block keeps the ADC until HomeBlaze restarts.
 
 ### Channel Indexing
 
@@ -158,6 +254,9 @@ The GPIO device supports two ADC chips. Both can be configured simultaneously.
 | `Value` | double | Normalized value (0.0 to 1.0) |
 | `RawValue` | int | Raw ADC value |
 | `Status` | ServiceStatus | Channel status |
+| `StatusMessage` | string? | Error or info message |
+
+`Value`, `RawValue`, `Status` and `StatusMessage` are read-only state that the library updates while polling. `Source` and `ChannelNumber` are set when the channel is created.
 
 ### MCP3008
 
@@ -171,6 +270,8 @@ The GPIO device supports two ADC chips. Both can be configured simultaneously.
 | `ChipSelectPin` | 8 | SPI chip select GPIO pin (BCM) |
 
 Raw values: 0-1023 (10-bit resolution)
+
+An MCP3008 has no presence check: without a connected chip, its channels show meaningless values instead of an error.
 
 ### ADS1115
 
@@ -197,17 +298,24 @@ if (pin.Status == ServiceStatus.Running)
 
     // Set as output and turn on
     pin.Mode = GpioPinMode.Output;
-    pin.Value = true;
+    await pin.TurnOnAsync(CancellationToken.None);
 
-    // Read an input pin
+    // Read an input pin with a button to ground
     var buttonPin = gpioSubject.Pins[18];
     buttonPin.Name = "Power Button";
     buttonPin.Mode = GpioPinMode.InputPullUp;
-    bool isPressed = !buttonPin.Value; // Pull-up means LOW when pressed
+    buttonPin.IsInverted = true; // Pull-up reads low while pressed, so pressed is true
+    bool isPressed = buttonPin.Value;
 }
 
-// Set Raspberry Pi standard pin names
-gpioSubject.SetRaspberryPiPinNames();
+// Apply Raspberry Pi names and power-on pulls to unconfigured pins
+await gpioSubject.ApplyRaspberryPiDefaultsAsync(CancellationToken.None);
+
+// Active-low relay
+var relayPin = gpioSubject.Pins[5];
+relayPin.IsInverted = true;
+relayPin.Mode = GpioPinMode.Output;
+await relayPin.TurnOnAsync(CancellationToken.None); // Drives the pin low
 
 // Read MCP3008 analog value (channels 0-7)
 if (gpioSubject.AnalogChannels.TryGetValue(0, out var mcp3008Channel))
@@ -228,19 +336,23 @@ await gpioSubject.ApplyConfigurationAsync(CancellationToken.None);
 
 ## Troubleshooting
 
-### "No supported libgpiod library file found"
+### "GPIO not supported on this platform"
 
-Install the libgpiod library:
+A board without the [Raspberry Pi register driver](#raspberry-pi-register-driver) needs the libgpiod library. Without it, the GPIO subject shows `Unavailable` with "GPIO not supported on this platform", or `Error` when the kernel has no `/sys/class/gpio`, and a Raspberry Pi 5 shows `Error` with "Couldn't find the default GPIO chip". Install the library:
 ```bash
 sudo apt install libgpiod3
 ```
+
+An `Error` is retried on its own. An `Unavailable` subject is not checked again, so restart HomeBlaze or change the GPIO configuration.
 
 ### Pin shows "Unavailable" status
 
 Common causes:
 - Pin reserved for I2C (GPIO 2, 3) or SPI (GPIO 7-11) on Raspberry Pi
+- `Used by the MCP3008` or `Used by I2C (ADS1115)`: the pin belongs to a configured ADC, see [Pins of an ADC](#pins-of-an-adc)
 - Pin in use by another process
 - Hardware-specific pin reservation
+- In Docker, `Read-only file system : '/sys/class/gpio/export'`: the two `/sys` volumes are missing, see [Docker](#docker)
 
 ### No pins available (empty Pins dictionary)
 
@@ -250,6 +362,10 @@ This occurs when:
 - No GPIO chip detected on the system
 
 **Solution**: Enable `UseSimulation = true` for development/testing.
+
+### Input switches between true and false on its own
+
+An unconnected or high-impedance input is floating, so its level is random. New pins on a [board with the Raspberry Pi register driver](#raspberry-pi-register-driver) start with the power-on pull, so this mainly happens for a pin set to plain `Input`. Give the pin a defined level with `InputPullUp` or `InputPullDown`, or run the `ApplyRaspberryPiDefaults` operation ("Apply Raspberry Pi Defaults"), which sets the power-on pull on unconfigured pins. A pin that drives something, such as an LED, should be an `Output`.
 
 ### Write verification failed
 
@@ -290,7 +406,3 @@ The following features are not yet implemented but may be added in future versio
 ### PWM (Pulse Width Modulation)
 
 Hardware PWM output for controlling LED brightness, motor speed, and servo position. Raspberry Pi has 2 hardware PWM channels (GPIO 12/13 and 18/19).
-
-### Input Debouncing
-
-Software debouncing for mechanical switches and buttons. Configurable debounce time to filter out contact bounce noise from physical switches.

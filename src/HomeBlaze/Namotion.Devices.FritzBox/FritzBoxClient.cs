@@ -3,22 +3,30 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Networking;
 using HomeBlaze.Abstractions.Sensors;
+using Namotion.Devices.FritzBox.Client;
 using Namotion.Devices.FritzBox.Parsing;
+using Namotion.Devices.Upnp;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Devices.FritzBox;
 
 /// <summary>
-/// A device in the FRITZ!Box host list, such as a computer or a phone, keyed by its MAC address.
+/// A device in the FRITZ!Box host list, such as a computer or a phone, keyed by its MAC address. Its internet access
+/// can be blocked and allowed in debug builds; both require confirmation in the operations panel and cannot be called
+/// by agents or over MCP.
 /// </summary>
 [InterceptorSubject]
 public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitleProvider, IIconProvider
 {
+    // A field, not a property: a subject reference in a property would attach the router under its own client.
+    private readonly FritzBox _router;
     private readonly bool _isPrivateMacAddress;
 
-    public FritzBoxClient(string macAddress)
+    public FritzBoxClient(FritzBox router, string macAddress)
     {
+        _router = router;
         MacAddress = macAddress;
         _isPrivateMacAddress = MacAddresses.IsLocallyAdministered(macAddress);
         HostName = null;
@@ -33,6 +41,9 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
         Port = null;
         LinkSpeed = null;
         DevicePath = null;
+        HasInternetAccess = null;
+        IsInternetAccessBlocked = null;
+        AccessProfile = null;
     }
 
     [State(Position = 400)]
@@ -114,6 +125,30 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     public bool IsPrivateMacAddress => _isPrivateMacAddress;
 
     /// <summary>
+    /// Whether the router lets the device reach the internet, as decided by <see cref="IsInternetAccessBlocked"/> and
+    /// the rules of its <see cref="AccessProfile"/>; null when the router does not report it.
+    /// </summary>
+    [State(Position = 410)]
+    [Category("Internet")]
+    public partial bool? HasInternetAccess { get; internal set; }
+
+    /// <summary>
+    /// Whether the internet access of the device is blocked on its own, regardless of its access profile; null when the
+    /// router does not report it. Not blocked does not mean access: the access profile may still deny it, see
+    /// <see cref="HasInternetAccess"/>.
+    /// </summary>
+    [State(Position = 411)]
+    [Category("Internet")]
+    public partial bool? IsInternetAccessBlocked { get; internal set; }
+
+    /// <summary>
+    /// The name of the access profile (filter profile) of the device, null when the router does not report it.
+    /// </summary>
+    [State(Position = 412)]
+    [Category("Internet")]
+    public partial string? AccessProfile { get; internal set; }
+
+    /// <summary>
     /// Whether the router no longer lists the device, see <see cref="Depart"/>.
     /// </summary>
     internal bool IsDeparted { get; private set; }
@@ -127,7 +162,18 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
     [Derived]
     public string? IconColor => IsPresent == true ? "Success" : null;
 
-    internal void Update(HostEntry host, ClientPosition? position)
+    [Derived]
+    [PropertyAttribute("BlockInternetAccess", KnownAttributes.IsEnabled)]
+    public bool BlockInternetAccess_IsEnabled => _router.IsInternetAccessControlAvailable;
+
+    [Derived]
+    [PropertyAttribute("AllowInternetAccess", KnownAttributes.IsEnabled)]
+    public bool AllowInternetAccess_IsEnabled => _router.IsInternetAccessControlAvailable;
+
+    /// <param name="host">The host list entry of the device.</param>
+    /// <param name="position">Where the mesh list places the device, null when it does not.</param>
+    /// <param name="filterProfiles">The names of the filter profiles by ID as last read, null when the router never returned them.</param>
+    internal void Update(HostEntry host, ClientPosition? position, IReadOnlyDictionary<string, string>? filterProfiles)
     {
         var interfaceType = FritzBoxInterfaceTypes.Parse(host.InterfaceType);
 
@@ -144,7 +190,47 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
         Band = position?.Band;
         Port = GetPort(host, position);
         LinkSpeed = GetLinkSpeed(host, position);
+        AccessProfile = GetAccessProfile(host, filterProfiles);
     }
+
+    /// <summary>
+    /// Takes the internet access from the host list entry. Separate from <see cref="Update"/>, because a block or allow
+    /// command that completed during the poll keeps its result instead.
+    /// </summary>
+    internal void UpdateInternetAccess(HostEntry host)
+    {
+        HasInternetAccess = host.HasWanAccess;
+        IsInternetAccessBlocked = host.IsWanAccessDisallowed;
+    }
+
+    /// <summary>
+    /// Blocks the internet access of the device, regardless of its access profile, by the IP address the router
+    /// currently lists for <see cref="MacAddress"/>. The router applies it asynchronously, so
+    /// <see cref="HasInternetAccess"/> may follow only with the next poll.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The build is not a debug build, or the router is not connected, no longer lists the device, lists it without an IP address, or lists its last IP address for another device.</exception>
+    /// <exception cref="FritzBoxServiceUnavailableException">The router does not offer the host filter service.</exception>
+    /// <exception cref="HttpRequestException">The request to the router failed.</exception>
+    /// <exception cref="TimeoutException">The router did not answer in time.</exception>
+    /// <exception cref="UpnpFaultException">The router refused the command, for example for a FRITZ! device.</exception>
+    /// <exception cref="FritzBoxCertificateException">The router presented a key other than the trusted one.</exception>
+    [Operation(RequiresConfirmation = true)]
+    public Task BlockInternetAccessAsync(CancellationToken cancellationToken) =>
+        _router.SetInternetAccessBlockedAsync(this, true, cancellationToken);
+
+    /// <summary>
+    /// Lifts the block of <see cref="BlockInternetAccessAsync"/>. The access profile may still deny internet access, see
+    /// <see cref="HasInternetAccess"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The build is not a debug build, or the router is not connected, no longer lists the device, lists it without an IP address, or lists its last IP address for another device.</exception>
+    /// <exception cref="FritzBoxServiceUnavailableException">The router does not offer the host filter service.</exception>
+    /// <exception cref="HttpRequestException">The request to the router failed.</exception>
+    /// <exception cref="TimeoutException">The router did not answer in time.</exception>
+    /// <exception cref="UpnpFaultException">The router refused the command, for example for a FRITZ! device.</exception>
+    /// <exception cref="FritzBoxCertificateException">The router presented a key other than the trusted one.</exception>
+    [Operation(RequiresConfirmation = true)]
+    public Task AllowInternetAccessAsync(CancellationToken cancellationToken) =>
+        _router.SetInternetAccessBlockedAsync(this, false, cancellationToken);
 
     /// <summary>
     /// Marks the device as no longer listed by the router. It becomes absent like a listed absent device and keeps its
@@ -160,6 +246,11 @@ public partial class FritzBoxClient : IPresenceSensor, INetworkAdapter, ITitlePr
         Port = null;
         LinkSpeed = null;
     }
+
+    private static string? GetAccessProfile(HostEntry host, IReadOnlyDictionary<string, string>? filterProfiles) =>
+        host.FilterProfileId is { } id && filterProfiles is not null && filterProfiles.TryGetValue(id.Trim(), out var name)
+            ? name
+            : null;
 
     private static bool? GetIsWireless(FritzBoxInterfaceType interfaceType, ClientPosition? position)
     {

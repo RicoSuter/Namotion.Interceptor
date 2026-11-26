@@ -43,6 +43,7 @@ public class LlmAgentBaseConcurrencyTests
                 };
             },
             timeProvider: time);
+        test.ReleaseOnDispose(release);
         test.Agent.RunNow();
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Requests.Count == 1);
 
@@ -355,9 +356,10 @@ public class LlmAgentBaseConcurrencyTests
     }
 
     /// <summary>Starts an agent whose turn leaves a call of <paramref name="toolSource"/> running when it returns.</summary>
-    private static Task<AgentTestContext<FakeAgent>> StartWithRunningToolCallAsync(
-        BlockingToolSource toolSource, TimeProvider time, RecordingLogger? logger) =>
-        AgentTestContext<FakeAgent>.StartAsync(
+    private static async Task<AgentTestContext<FakeAgent>> StartWithRunningToolCallAsync(
+        BlockingToolSource toolSource, TimeProvider time, RecordingLogger? logger)
+    {
+        var test = await AgentTestContext<FakeAgent>.StartAsync(
             services => new FakeAgent(
                 new AgentServices(toolSource, services.TokenRegistry, services.EndpointAddress, services.TimeProvider), logger),
             agent =>
@@ -374,6 +376,9 @@ public class LlmAgentBaseConcurrencyTests
                 };
             },
             timeProvider: time);
+        test.ReleaseOnDispose(toolSource.Release);
+        return test;
+    }
 
     private static async Task<AgentTurnResult> WaitForCancellationAsync(
         AgentTurnRequest request, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)

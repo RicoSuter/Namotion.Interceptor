@@ -802,7 +802,10 @@ internal sealed class StorageReconciler
             // Can attach nested subjects, see the creation of a subject from JSON.
             using (ExecutionContext.SuppressFlow())
             {
-                _serializer.UpdateConfiguration(entry.Subject, json);
+                var skipped = new List<SkippedConfigurationProperty>();
+                // Replaced rather than updated: a key that the file no longer has gets its default, as after a restart.
+                _serializer.ReplaceConfiguration(entry.Subject, json, skipped.Add);
+                _subjectFactory.LogSkippedProperties(entry.Path, skipped);
             }
 
             await configurable.ApplyConfigurationAsync(cancellationToken);

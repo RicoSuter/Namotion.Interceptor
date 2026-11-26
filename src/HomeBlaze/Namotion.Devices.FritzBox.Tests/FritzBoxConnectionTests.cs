@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.FritzBox.Client;
 using Namotion.Devices.FritzBox.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace Namotion.Devices.FritzBox.Tests;
@@ -191,7 +192,11 @@ public class FritzBoxConnectionTests
     {
         // Arrange
         await using var fake = await FakeFritzBox.StartAsync();
-        var options = new FritzBoxConnectionOptions("127.0.0.1", fake.Username, password, null) { DescriptionPort = fake.HttpPort };
+        var options = new FritzBoxConnectionOptions("127.0.0.1", fake.Username, password, null)
+        {
+            DescriptionPort = fake.HttpPort,
+            RequestTimeout = TestTimeouts.Default
+        };
         using var connection = await FritzBoxConnection.OpenAsync(options, NullLogger.Instance, CancellationToken.None);
 
         // Act
@@ -330,6 +335,6 @@ public class FritzBoxConnectionTests
         new("127.0.0.1", fake.Username, password ?? fake.Password, pin)
         {
             DescriptionPort = fake.HttpPort,
-            RequestTimeout = requestTimeout ?? TimeSpan.FromSeconds(5)
+            RequestTimeout = requestTimeout ?? TestTimeouts.Default
         };
 }

@@ -41,13 +41,13 @@ public class NavigationItemResolverTests
 
         _resolver = new NavigationItemResolver(
             _componentRegistry,
-            new SubjectPathResolver(() => _root),
+            new SubjectPathResolver(_context, () => _root),
             _timeProvider);
     }
 
     // A resolver for a tree whose root is a folder, which has an order of its own, unlike the default root.
     private NavigationItemResolver CreateResolver(IInterceptorSubject root)
-        => new(_componentRegistry, new SubjectPathResolver(() => root), _timeProvider);
+        => new(_componentRegistry, new SubjectPathResolver(_context, () => root), _timeProvider);
 
     private NavigationTestFolder CreateFolder(
         Dictionary<string, IInterceptorSubject> children, ImmutableArray<string> childOrder = default)

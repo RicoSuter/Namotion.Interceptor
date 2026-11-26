@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Tracking.Transactions.Writers;
 using Xunit;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors;
@@ -67,14 +68,17 @@ public class RandomValueMutationStrategyTests
             new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = false },
             NullLogger.Instance);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        using var cts = new CancellationTokenSource();
 
         // Act
-        try { await strategy.RunAsync(cts.Token); }
-        catch (OperationCanceledException) { }
+        var run = strategy.RunAsync(cts.Token);
 
-        // Assert: at least one mutation completed in 50ms at 1000/s.
-        Assert.True(counters.ValueMutationCount >= 1);
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => counters.ValueMutationCount >= 1, message: "The unpaused strategy should mutate a value.");
+        await cts.CancelAsync();
+        try { await run; }
+        catch (OperationCanceledException) { }
     }
 
     [Fact]
@@ -90,7 +94,7 @@ public class RandomValueMutationStrategyTests
 
         // Act
         var run = strategy.RunAsync(cts.Token);
-        await AsyncTestHelpers.WaitUntilAsync(() => counters.SourceWriteFailedCommitCount >= 1, timeout: TimeSpan.FromSeconds(10));
+        await AsyncTestHelpers.WaitUntilAsync(() => counters.SourceWriteFailedCommitCount >= 1);
         await cts.CancelAsync();
         await run;
 
@@ -112,7 +116,7 @@ public class RandomValueMutationStrategyTests
 
         // Act
         var run = strategy.RunAsync(cts.Token);
-        await AsyncTestHelpers.WaitUntilAsync(() => counters.UnexpectedFailedCommitCount >= 1, timeout: TimeSpan.FromSeconds(10));
+        await AsyncTestHelpers.WaitUntilAsync(() => counters.UnexpectedFailedCommitCount >= 1);
         await cts.CancelAsync();
         await run;
 

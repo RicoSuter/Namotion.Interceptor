@@ -8,8 +8,6 @@ namespace Namotion.Interceptor.Connectors.Tests;
 
 public class WriteRetryQueueTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
-
     [Fact]
     public async Task WhenRetryOwnershipIsDisposedWithACurrentWriteWaiting_ThenBothCompleteAndAreCountedOnce()
     {
@@ -40,7 +38,7 @@ public class WriteRetryQueueTests
             });
         queue.Enqueue(CreateChanges(1, startId: 0));
         var olderFlush = queue.FlushAsync(source.Object, CancellationToken.None).AsTask();
-        await olderWriteStarted.Task.WaitAsync(TestTimeout);
+        await olderWriteStarted.Task.WaitAsync(TestTimeouts.Default);
         var currentWrite = queue.WriteAsync(
             source.Object,
             CreateChanges(1, startId: 1),
@@ -51,10 +49,10 @@ public class WriteRetryQueueTests
             // Act
             queue.Dispose();
             releaseOlderWrite.TrySetResult();
-            await olderFlush.WaitAsync(TestTimeout);
+            await olderFlush.WaitAsync(TestTimeouts.Default);
             await AsyncTestHelpers.WaitUntilAsync(
                 () => currentWrite.IsCompleted,
-                timeout: TestTimeout,
+                timeout: TestTimeouts.Default,
                 message: "The registered waiter should complete after the semaphore holder exits.");
             await currentWrite;
 
@@ -66,7 +64,7 @@ public class WriteRetryQueueTests
         {
             releaseOlderWrite.TrySetResult();
             await waiterCancellation.CancelAsync();
-            await Task.WhenAll(olderFlush, currentWrite).WaitAsync(TestTimeout);
+            await Task.WhenAll(olderFlush, currentWrite).WaitAsync(TestTimeouts.Default);
             queue.Dispose();
         }
     }
@@ -137,7 +135,7 @@ public class WriteRetryQueueTests
             });
         queue.Enqueue(CreateChanges(3));
         var flush = queue.FlushAsync(source.Object, CancellationToken.None);
-        await writeStarted.Task.WaitAsync(TestTimeout);
+        await writeStarted.Task.WaitAsync(TestTimeouts.Default);
 
         // Act
         queue.Retire();
@@ -145,7 +143,7 @@ public class WriteRetryQueueTests
         // Assert
         Assert.Equal(3, diagnostics.TotalDropped);
         releaseWrite.TrySetResult();
-        Assert.True(await flush.AsTask().WaitAsync(TestTimeout));
+        Assert.True(await flush.AsTask().WaitAsync(TestTimeouts.Default));
         Assert.Equal(3, diagnostics.TotalDropped);
     }
 
@@ -169,7 +167,7 @@ public class WriteRetryQueueTests
             });
         queue.Enqueue(CreateChanges(1));
         var flush = queue.FlushAsync(source.Object, CancellationToken.None);
-        await writeStarted.Task.WaitAsync(TestTimeout);
+        await writeStarted.Task.WaitAsync(TestTimeouts.Default);
         queue.Enqueue(CreateChanges(2));
 
         // Act
@@ -180,7 +178,7 @@ public class WriteRetryQueueTests
         Assert.Equal(0, queue.PendingWriteCount);
         Assert.Equal(3, diagnostics.TotalDropped);
         releaseWrite.TrySetResult();
-        Assert.True(await flush.AsTask().WaitAsync(TestTimeout));
+        Assert.True(await flush.AsTask().WaitAsync(TestTimeouts.Default));
         Assert.Equal(3, diagnostics.TotalDropped);
     }
 
@@ -222,12 +220,12 @@ public class WriteRetryQueueTests
             });
         queue.Enqueue(CreateChanges(3));
         var flush = queue.FlushAsync(source.Object, CancellationToken.None);
-        await writeStarted.Task.WaitAsync(TestTimeout);
+        await writeStarted.Task.WaitAsync(TestTimeouts.Default);
         queue.Retire();
 
         // Act
         releaseWrite.TrySetResult();
-        var result = await flush.AsTask().WaitAsync(TestTimeout);
+        var result = await flush.AsTask().WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.False(result);
@@ -263,12 +261,12 @@ public class WriteRetryQueueTests
         queue.Enqueue(CreateChanges(3));
         Assert.False(await queue.FlushAsync(source.Object, CancellationToken.None));
         var flush = queue.FlushAsync(source.Object, CancellationToken.None);
-        await writeStarted.Task.WaitAsync(TestTimeout);
+        await writeStarted.Task.WaitAsync(TestTimeouts.Default);
 
         // Act
         queue.Retire();
         releaseWrite.TrySetResult();
-        var result = await flush.AsTask().WaitAsync(TestTimeout);
+        var result = await flush.AsTask().WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.True(result);
@@ -370,7 +368,7 @@ public class WriteRetryQueueTests
             source.Object,
             CreateChanges(1),
             CancellationToken.None).AsTask();
-        await writeStarted.Task.WaitAsync(TestTimeout);
+        await writeStarted.Task.WaitAsync(TestTimeouts.Default);
 
         // Act
         var flush = queue.FlushAsync(source.Object, CancellationToken.None).AsTask();
@@ -380,15 +378,15 @@ public class WriteRetryQueueTests
             // Assert
             Assert.False(flush.IsCompleted);
             releaseWrite.TrySetResult();
-            await currentWrite.WaitAsync(TestTimeout);
-            Assert.True(await flush.WaitAsync(TestTimeout));
+            await currentWrite.WaitAsync(TestTimeouts.Default);
+            Assert.True(await flush.WaitAsync(TestTimeouts.Default));
             Assert.Equal(2, writeAttempts);
             Assert.True(queue.IsEmpty);
         }
         finally
         {
             releaseWrite.TrySetResult();
-            await Task.WhenAll(currentWrite, flush).WaitAsync(TestTimeout);
+            await Task.WhenAll(currentWrite, flush).WaitAsync(TestTimeouts.Default);
         }
     }
 

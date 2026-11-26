@@ -445,7 +445,7 @@ flowchart TD
 
 The library is fully standalone with no application-specific dependencies. It uses the NuGet SDK (`NuGet.Protocol`, `NuGet.Frameworks`) for package resolution and download, and .NET's `AssemblyLoadContext` (collectible) for isolation and unloading.
 
-Transitive dependencies are resolved recursively using the NuGet V3 API. For each package, the loader reads its dependency groups, selects the group matching the host's target framework, and resolves each dependency to the highest version satisfying the declared version range. When multiple packages require the same transitive dependency, the highest resolved version is used.
+Transitive dependencies are resolved recursively using the NuGet V3 API. For each package, the loader reads its dependency groups, selects the group matching the host's target framework, and resolves each dependency to the highest version satisfying the declared version range that supports the host's target framework, so a dependency release for a newer framework only is skipped. When multiple packages require the same transitive dependency, the highest resolved version is used.
 
 ### Dependency Classification
 

@@ -57,6 +57,47 @@ internal static class UpnpEventParser
     internal static string? ParseZoneGroupState(string body) =>
         ParseProperties(body).GetValueOrDefault("ZoneGroupState");
 
+    /// <remarks>Throws <see cref="XmlException"/> when the body is malformed.</remarks>
+    internal static ContentDirectoryChange ParseContentDirectory(string body)
+    {
+        var properties = ParseProperties(body);
+        var containerUpdateIds = properties.GetValueOrDefault("ContainerUpdateIDs");
+        return new ContentDirectoryChange(
+            properties.GetValueOrDefault("FavoritesUpdateID"),
+            containerUpdateIds,
+            GetContainerUpdateId(containerUpdateIds, Client.SonosConnection.FavoritesContainerId),
+            properties.GetValueOrDefault("SystemUpdateID"));
+    }
+
+    /// <summary>
+    /// Returns the update id of the container from a ContainerUpdateIDs value, a comma separated list of container
+    /// ids each followed by its update id, or null when the container is not listed.
+    /// </summary>
+    internal static string? GetContainerUpdateId(string? containerUpdateIds, string containerId)
+    {
+        var remaining = containerUpdateIds.AsSpan();
+        while (remaining.IndexOf(',') is var idEnd and >= 0)
+        {
+            var id = remaining[..idEnd];
+            remaining = remaining[(idEnd + 1)..];
+            var valueEnd = remaining.IndexOf(',');
+            var value = valueEnd < 0 ? remaining : remaining[..valueEnd];
+            if (id.SequenceEqual(containerId))
+            {
+                return value.ToString();
+            }
+
+            if (valueEnd < 0)
+            {
+                break;
+            }
+
+            remaining = remaining[(valueEnd + 1)..];
+        }
+
+        return null;
+    }
+
     private static Dictionary<string, string> ParseProperties(string body)
     {
         var properties = new Dictionary<string, string>(StringComparer.Ordinal);

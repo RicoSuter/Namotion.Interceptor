@@ -35,7 +35,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         _configureClient = configureClient;
     }
 
-    // waitForInitialSync = false returns as soon as the host is running instead of waiting for
+    // waitUntilConnected = false returns as soon as the host is running instead of waiting for
     // subscriptions and the first property sync. Tests that have to interfere with the very first
     // load need this: that load is what the readiness wait waits for, so waiting here would mean
     // waiting for the thing the test is about to break.
@@ -44,7 +44,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         Func<TRoot, bool> isConnected,
         string serverUrl = DefaultServerUrl,
         string? certificateStoreBasePath = null,
-        bool waitForInitialSync = true)
+        bool waitUntilConnected = true)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var builder = Host.CreateApplicationBuilder();
@@ -122,9 +122,8 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         await _host.StartAsync();
         _logger.Log($"Client host started in {sw.ElapsedMilliseconds}ms");
 
-        if (!waitForInitialSync)
+        if (!waitUntilConnected)
         {
-            sw.Stop();
             return;
         }
 

@@ -1,4 +1,5 @@
 using HomeBlaze.Components.Controls;
+using HomeBlaze.Components.Inputs;
 using HomeBlaze.History.Blazor;
 using HomeBlaze.Host.Preferences;
 using HomeBlaze.Host.Services;
@@ -40,6 +41,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<BrowserPreferences>();
         services.AddScoped<CurrentClientConnection>();
         services.AddScoped<PropertyWriter>();
+
+        // One ticker per circuit: every live preview of the circuit is refreshed by the same timer in one dispatch.
+        services.AddScoped<PreviewTicker>();
 
         // Value widgets open the history of their property through it.
         services.AddPropertyHistoryViewer();

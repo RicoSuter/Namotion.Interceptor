@@ -26,6 +26,16 @@ public abstract class PathProviderBase : IPathProvider
     /// </summary>
     public virtual char IndexClose => ']';
 
+    /// <summary>
+    /// Gets a number that increases after every change of the answers of <see cref="TryGetPropertySegment"/> and
+    /// <see cref="TryGetPropertyFromSegment"/>, and never decreases. 0, the default, means the answers never change.
+    /// </summary>
+    /// <remarks>
+    /// A provider whose answers change while it is in use overrides it and raises it after each change: caches of paths
+    /// serve an entry only while it is unchanged.
+    /// </remarks>
+    public virtual long Version => 0;
+
     internal PathCharacters GetCharacters() => new(PathSeparator, IndexOpen, IndexClose);
 
     /// <inheritdoc />

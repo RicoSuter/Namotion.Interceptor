@@ -69,7 +69,10 @@ public class HistoryChartWidgetTests
         var page = await _fixture.CreatePageAsync();
         await page.SetViewportSizeAsync(width, 900);
         await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/{pageName}");
-        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        // The tabs and the charts are prerendered: a click before the circuit renders the page is lost, and its first render
+        // replaces the elements that a test measures.
+        await page.WaitUntilInteractiveAsync(Timeout);
         return page;
     }
 
@@ -241,8 +244,8 @@ public class HistoryChartWidgetTests
             .ToHaveCountAsync(2, new() { Timeout = Timeout });
         await Assertions.Expect(chart.GetByTestId("history-chart-legend-value").First)
             .Not.ToHaveTextAsync(MissingText, new() { Timeout = Timeout });
-        await Assertions.Expect(chart.GetByTestId("history-chart-legend-note")).ToHaveCountAsync(0);
-        await Assertions.Expect(chart.GetByTestId("history-chart-query-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(chart.GetByTestId("history-chart-legend-note")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(chart.GetByTestId("history-chart-query-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -425,7 +428,7 @@ public class HistoryChartWidgetTests
 
         // A hidden tab is not rendered, so the chart is first drawn when its tab is shown.
         await Assertions.Expect(page.GetByTestId("tab-layout").GetByRole(AriaRole.Tab, new() { Name = "Speed" })).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(chart).ToHaveCountAsync(0);
+        await Assertions.Expect(chart).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
 
         // Act
         await page.GetByTestId("tab-layout").GetByRole(AriaRole.Tab, new() { Name = "Speed" }).ClickAsync();
@@ -503,8 +506,8 @@ public class HistoryChartWidgetTests
             $"The legend ends at {legend.Bottom} px, below the top of the band header at {header.Top} px");
         await Assertions.Expect(chart.GetByTestId("history-chart-band-header").GetByTestId("history-chart-legend-entry"))
             .ToContainTextAsync("Chart status");
-        await Assertions.Expect(chart.GetByTestId("history-chart-legend").GetByText("Chart status")).ToHaveCountAsync(0);
-        await Assertions.Expect(chart.GetByTestId("history-chart-range")).ToHaveCountAsync(0);
+        await Assertions.Expect(chart.GetByTestId("history-chart-legend").GetByText("Chart status")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(chart.GetByTestId("history-chart-range")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Theory]
@@ -626,7 +629,7 @@ public class HistoryChartWidgetTests
         // Assert
         await Assertions.Expect(GetHistoryDialog(page, "Chart status").GetByTestId("property-history-dialog"))
             .ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(GetHistoryDialog(page, "Chart speed")).ToHaveCountAsync(0);
+        await Assertions.Expect(GetHistoryDialog(page, "Chart speed")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -644,7 +647,7 @@ public class HistoryChartWidgetTests
         // Assert
         await Assertions.Expect(GetHistoryDialog(page, "Pair target").GetByTestId("property-history-dialog"))
             .ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(GetHistoryDialog(page, "Pair speed")).ToHaveCountAsync(0);
+        await Assertions.Expect(GetHistoryDialog(page, "Pair speed")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -666,7 +669,7 @@ public class HistoryChartWidgetTests
 
         // Assert
         await Assertions.Expect(page.Locator(".subject-component-wrapper.selected").GetByTestId("history-chart")).ToHaveCountAsync(1);
-        await Assertions.Expect(page.GetByTestId("property-history-dialog")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("property-history-dialog")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -674,7 +677,6 @@ public class HistoryChartWidgetTests
     {
         // Arrange
         var page = await OpenBarsPageAsync();
-        await page.WaitUntilInteractiveAsync(Timeout);
 
         // Act
         await page.GetByRole(AriaRole.Tab, new() { Name = "Bars tab" }).ClickAsync();
@@ -694,7 +696,7 @@ public class HistoryChartWidgetTests
             }
             """,
             await view.ElementHandleAsync(),
-            new() { Timeout = 10000 });
+            new() { Timeout = Timeout });
     }
 
     [Fact]
@@ -760,7 +762,7 @@ public class HistoryChartWidgetTests
         // A bar is a vertical path from the axis to its value, and the store recorded the counter today.
         var heights = await bars.EvaluateAllAsync<double[]>("paths => paths.map(path => path.getBBox().height)");
         Assert.True(heights[^1] > 0, $"The bar of today has no height: {string.Join(", ", heights)}");
-        await Assertions.Expect(view.GetByTestId("history-chart-legend-note")).ToHaveCountAsync(0);
+        await Assertions.Expect(view.GetByTestId("history-chart-legend-note")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -779,7 +781,7 @@ public class HistoryChartWidgetTests
         Assert.True(ends[3] > ends[1], $"The bar of today does not reach down from the axis: {string.Join(", ", ends)}");
         var legendValue = view.GetByTestId("history-chart-legend-entry").Filter(new() { HasText = "Fed in" })
             .GetByTestId("history-chart-legend-value");
-        await Assertions.Expect(legendValue).Not.ToHaveTextAsync(new System.Text.RegularExpressions.Regex("^-"));
+        await Assertions.Expect(legendValue).Not.ToHaveTextAsync(new System.Text.RegularExpressions.Regex("^-"), new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Theory]
@@ -830,7 +832,7 @@ public class HistoryChartWidgetTests
 
         // Assert
         await Assertions.Expect(GetHistoryDialog(page, "Fed in")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(GetHistoryDialog(page, "Taken")).ToHaveCountAsync(0);
+        await Assertions.Expect(GetHistoryDialog(page, "Taken")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -878,7 +880,7 @@ public class HistoryChartWidgetTests
 
         // Assert
         await Assertions.Expect(GetHistoryDialog(page, "Mean speed")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(GetHistoryDialog(page, "Peak speed")).ToHaveCountAsync(0);
+        await Assertions.Expect(GetHistoryDialog(page, "Peak speed")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -938,7 +940,7 @@ public class HistoryChartWidgetTests
             // Assert
             await Assertions.Expect(bandEntry).ToContainTextAsync("Chart status");
             await Assertions.Expect(bandEntry.GetByTestId("history-chart-legend-value")).Not.ToHaveTextAsync(MissingText);
-            await Assertions.Expect(chart.GetByTestId("history-chart-legend").GetByText("Chart status")).ToHaveCountAsync(0);
+            await Assertions.Expect(chart.GetByTestId("history-chart-legend").GetByText("Chart status")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         }
         finally
         {
@@ -1058,10 +1060,10 @@ public class HistoryChartWidgetTests
 
         var bands = GetChart(page, "Only a band");
         await Assertions.Expect(bands.GetByTestId("history-chart-band")).ToBeVisibleAsync(new() { Timeout = GetRemainingMilliseconds(deadline) });
-        await Assertions.Expect(bands.GetByTestId("history-chart-lines")).ToHaveCountAsync(0);
+        await Assertions.Expect(bands.GetByTestId("history-chart-lines")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(bands.GetByTestId("history-chart-range")).ToBeVisibleAsync();
-        await Assertions.Expect(page.GetByTestId("widget-argument-error")).ToHaveCountAsync(0);
-        await Assertions.Expect(page.GetByTestId("history-chart-query-error")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("widget-argument-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(page.GetByTestId("history-chart-query-error")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     // Before a chart is measured: every chart on the page that shows lines has drawn them, and the page no longer grows,

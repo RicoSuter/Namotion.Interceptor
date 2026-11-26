@@ -22,7 +22,7 @@ public interface IOpcUaSubjectClientSource : IHostedService
     /// </summary>
     /// <remarks>
     /// Read immediately before each use. The session can be null and the instance can change
-    /// (manual reconnect, transferred-subscription failure, stall reset). Do not cache the reference.
+    /// (manual reconnect, SDK reconnect with a new session, stall reset). Do not cache the reference.
     /// Subscribe to <see cref="CurrentSessionChanged"/> to react to swaps.
     /// </remarks>
     ISession? CurrentSession { get; }

@@ -118,7 +118,7 @@ Power and energy values are marked as estimated. The controller calculates them 
 {
   "$type": "Namotion.Devices.Luxtronik.LuxtronikHeatPump",
   "name": "Heat Pump",
-  "hostAddress": "192.168.1.50",
+  "hostAddress": "192.0.2.50",
   "port": 502,
   "pollingInterval": "00:00:30"
 }

@@ -54,6 +54,13 @@ Tracks the implementation status of building blocks described in [Architecture O
 | MCP server (HomeBlaze extensions) | Implemented | Subject enrichment, type discovery, `list_methods`, `invoke_query`, `invoke_operation` via `McpServerConfiguration` extension points |
 | Built-in agents | Implemented | `ClaudeCliAgent` (Claude subscription through the local CLI) and `AnthropicAgent` (API key) with triggers, chat, memory and per-agent tool permissions. See [AI Agents](../administration/ai-agents.md) and [AI Integration](design/ai.md) |
 
+## Automation
+
+| Building Block | Status | Notes |
+|---|---|---|
+| Automations | Implemented | `HomeBlaze.Automation` with rules on property conditions and events, named states, dry runs, Test now and a checkpoint, and `HomeBlaze.Automation.Blazor` with the page, the widget and the editor. See [Automations](../administration/automation.md) |
+| Authorization of automations | Planned | Roles and rules for the principal of an automation |
+
 ## Platform
 
 | Building Block | Status | Notes |

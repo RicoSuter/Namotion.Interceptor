@@ -172,9 +172,17 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
-        _sessionManager = new SessionManager(
+        var sessionManager = new SessionManager(
             this, propertyWriter, _configuration, PollingMetrics, ReadAfterWriteMetrics, _logger);
-        _writer = new OutboundWriter(_sessionManager, _configuration, OpcUaNodeIdKey, OutgoingThroughput, _logger);
+        _sessionManager = sessionManager;
+        _writer = new OutboundWriter(
+            () => sessionManager.CurrentSessionWithLifetime,
+            sessionManager.ReadAfterWriteManager,
+            sessionManager.ScheduleFullStateSyncAfterResponseMismatch,
+            _configuration,
+            OpcUaNodeIdKey,
+            OutgoingThroughput,
+            _logger);
 
         try
         {
@@ -259,27 +267,40 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return null;
         }
 
-        var session = _sessionManager?.CurrentSession;
+        var (session, sessionLifetime) = _sessionManager?.CurrentSessionWithLifetime ?? default;
         if (session is null)
         {
             throw new InvalidOperationException("No active OPC UA session available.");
         }
 
         var itemCount = ownedProperties.Count;
-        var nodesToRead = new ReadValueIdCollection(itemCount);
-        foreach (var (_, nodeId) in ownedProperties)
-        {
-            nodesToRead.Add(new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.Value });
-        }
-
-        var readResults = await session.ReadNodesAsync(nodesToRead, TimestampsToReturn.Source, _logger, cancellationToken).ConfigureAwait(false);
-
+        var nodesPerRead = OpcUaValueReader.GetNodesPerRead(session, itemCount);
+        var readValues = new ReadValueIdCollection(nodesPerRead);
         var result = new Dictionary<RegisteredSubjectProperty, DataValue>(itemCount);
-        for (var i = 0; i < itemCount; i++)
+        for (var offset = 0; offset < itemCount; offset += nodesPerRead)
         {
-            if (StatusCode.IsGood(readResults[i].StatusCode))
+            // Reused across reads: the previous read has completed, so the SDK no longer holds it.
+            readValues.Clear();
+            var take = Math.Min(nodesPerRead, itemCount - offset);
+            for (var i = 0; i < take; i++)
             {
-                result[ownedProperties[i].Property] = readResults[i];
+                readValues.Add(new ReadValueId
+                {
+                    NodeId = ownedProperties[offset + i].NodeId,
+                    AttributeId = Opc.Ua.Attributes.Value
+                });
+            }
+
+            // A mismatch fails the whole load, whose callers reload on failure, so the session is resynced anyway.
+            var results = await OpcUaValueReader.ReadAsync(
+                session, sessionLifetime, readValues, TimestampsToReturn.Source, cancellationToken).ConfigureAwait(false);
+
+            for (var i = 0; i < results.Count; i++)
+            {
+                if (StatusCode.IsGood(results[i].StatusCode))
+                {
+                    result[ownedProperties[offset + i].Property] = results[i];
+                }
             }
         }
 
@@ -331,7 +352,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     /// <summary>
     /// Creates MonitoredItems for reconnection from owned properties.
     /// This recreates SDK objects on demand instead of holding them in memory.
-    /// Called by SessionManager when subscription transfer fails after server restart.
+    /// Used when a manual reconnect creates fresh subscriptions.
     /// </summary>
     private IReadOnlyList<MonitoredItem> CreateMonitoredItemsForReconnection()
     {
@@ -422,6 +443,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
         await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
             sessionManager.Subscriptions,
+            sessionManager.SubscriptionManager.RegisterRecoveredItems,
             cancellationToken).ConfigureAwait(false);
 
         await sessionManager.SubscriptionManager

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.FritzBox.Client;
 using Namotion.Devices.FritzBox.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace Namotion.Devices.FritzBox.Tests;
@@ -36,6 +37,7 @@ public class FritzBoxPollerTests
         Assert.Equal(5, snapshot.Wlans[1].ClientCount);
         Assert.Equal(5, snapshot.Hosts.Count);
         Assert.NotNull(snapshot.Mesh);
+        Assert.Equal("Standard", snapshot.FilterProfiles!["filtprof1"]);
     }
 
     [Fact]
@@ -111,6 +113,55 @@ public class FritzBoxPollerTests
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidDataException>(() => FritzBoxPoller.PollAsync(connection, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenTheFilterProfileListIsMalformed_ThenTheSnapshotHasNoFilterProfilesButHostsAreRead()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.FilterProfilesXml = "<List><FilterProfile>";
+        using var connection = await OpenAsync(fake);
+
+        // Act
+        var snapshot = await FritzBoxPoller.PollAsync(connection, CancellationToken.None);
+
+        // Assert
+        Assert.Null(snapshot.FilterProfiles);
+        Assert.Equal(5, snapshot.Hosts.Count);
+    }
+
+    [Fact]
+    public async Task WhenTheFilterProfilesAreRefused_ThenTheSnapshotHasNoFilterProfiles()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        fake.Faults["GetFilterProfiles"] = 401;
+        using var connection = await OpenAsync(fake);
+
+        // Act
+        var snapshot = await FritzBoxPoller.PollAsync(connection, CancellationToken.None);
+
+        // Assert
+        Assert.Null(snapshot.FilterProfiles);
+        Assert.Equal(5, snapshot.Hosts.Count);
+    }
+
+    [Fact]
+    public async Task WhenTheHostFilterServiceIsNotOffered_ThenTheFilterProfilesAreNotAskedFor()
+    {
+        // Arrange
+        await using var fake = await FakeFritzBox.StartAsync();
+        var hostFilterService = fake.DescriptionXml.Split('\n').Single(line => line.Contains(Tr64Services.HostFilter, StringComparison.Ordinal));
+        fake.DescriptionXml = fake.DescriptionXml.Replace(hostFilterService, string.Empty, StringComparison.Ordinal);
+        using var connection = await OpenAsync(fake);
+
+        // Act
+        var snapshot = await FritzBoxPoller.PollAsync(connection, CancellationToken.None);
+
+        // Assert
+        Assert.Null(snapshot.FilterProfiles);
+        Assert.DoesNotContain("GetFilterProfiles", fake.Actions);
     }
 
     [Fact]
@@ -329,7 +380,11 @@ public class FritzBoxPollerTests
     private static async Task<FritzBoxConnection> OpenAsync(FakeFritzBox fake)
     {
         var connection = await FritzBoxConnection.OpenAsync(
-            new FritzBoxConnectionOptions("127.0.0.1", fake.Username, fake.Password, null) { DescriptionPort = fake.HttpPort },
+            new FritzBoxConnectionOptions("127.0.0.1", fake.Username, fake.Password, null)
+            {
+                DescriptionPort = fake.HttpPort,
+                RequestTimeout = TestTimeouts.Default
+            },
             NullLogger.Instance,
             CancellationToken.None);
         await connection.ResolveInternetServiceAsync(CancellationToken.None);

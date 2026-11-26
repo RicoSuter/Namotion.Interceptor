@@ -53,7 +53,7 @@ internal sealed class StorageMetadataStore
             throw new ArgumentException("values must be a JSON object, for example {\"navTitle\": \"Hall light\"}.", nameof(values));
         }
 
-        var subject = FluentStorageContainer.ResolveMetadataPath(_storage, path)
+        var subject = MetadataSearch.ResolvePath(_storage, path)
             ?? throw new ArgumentException(FluentStorageContainer.GetNoSubjectMessage(path));
         var store = subject.FindMetadataStore()
             ?? throw new ArgumentException("The subject is in no storage.", nameof(path));

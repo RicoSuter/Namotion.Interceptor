@@ -2,6 +2,7 @@ using HomeBlaze.AI;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.ClaudeCli;
 using HomeBlaze.AI.Mcp;
+using HomeBlaze.Automation;
 using HomeBlaze.Components;
 using HomeBlaze.History.Blazor;
 using HomeBlaze.History.InMemory.Blazor;
@@ -35,6 +36,10 @@ using Namotion.Devices.SunSpec;
 using Namotion.Devices.SunSpec.HomeBlaze;
 using Namotion.Devices.Wallbox;
 using Namotion.Devices.Wallbox.HomeBlaze;
+using Namotion.Devices.Tesla;
+using Namotion.Devices.Tesla.HomeBlaze;
+using Namotion.Devices.Hyundai;
+using Namotion.Devices.Hyundai.HomeBlaze;
 using Namotion.Devices.Ecowitt;
 using Namotion.Devices.Ecowitt.HomeBlaze;
 using Namotion.Devices.Luxtronik;
@@ -71,6 +76,7 @@ builder.Services.AddHomeBlazeMcpToolProvider(context => new HistoryMcpToolProvid
     context.PathProvider,
     context.Services.GetRequiredService<ILoggerFactory>().CreateLogger<HistoryMcpToolProvider>()));
 builder.Services.AddHomeBlazeAgents();
+builder.Services.AddHomeBlazeAutomation();
 
 // The external MCP server at /mcp (default: off, enabled in Development). The built-in agents do not use it.
 var mcpEnabled = builder.Configuration.GetValue("McpServer:Enabled", false);
@@ -82,8 +88,7 @@ if (mcpEnabled)
 }
 
 // Add services to the container.
-builder.Services
-    .AddHttpClient();
+builder.Services.AddHomeBlazeHttpClients();
 
 builder.Services
     .AddRazorComponents()
@@ -139,6 +144,10 @@ typeProvider
     .AddAssembly(typeof(SunSpecDeviceWidget).Assembly)
     .AddAssembly(typeof(WallboxCharger).Assembly)
     .AddAssembly(typeof(WallboxChargerWidget).Assembly)
+    .AddAssembly(typeof(TeslaAccount).Assembly)
+    .AddAssembly(typeof(TeslaAccountWidget).Assembly)
+    .AddAssembly(typeof(BluelinkAccount).Assembly)
+    .AddAssembly(typeof(BluelinkAccountWidget).Assembly)
     .AddAssembly(typeof(EcowittGateway).Assembly)
     .AddAssembly(typeof(EcowittGatewayWidget).Assembly)
     .AddAssembly(typeof(HomeBlaze.History.InMemory.InMemoryHistoryStoreSubject).Assembly)   // HomeBlaze.History.InMemory
@@ -154,6 +163,8 @@ typeProvider
     .AddAssembly(typeof(SonosSystemWidget).Assembly)                                        // Namotion.Devices.Sonos.HomeBlaze
     .AddAssembly(typeof(FritzBox).Assembly)                                                 // Namotion.Devices.FritzBox
     .AddAssembly(typeof(FritzBoxWidget).Assembly)                                           // Namotion.Devices.FritzBox.HomeBlaze
+    .AddAssembly(typeof(HomeBlaze.Automation.Automation).Assembly)                          // HomeBlaze.Automation
+    .AddAssembly(typeof(HomeBlaze.Automation.Blazor.AutomationPage).Assembly)               // HomeBlaze.Automation.Blazor
     .AddAssembly(typeof(ClaudeCliAgent).Assembly)                                           // HomeBlaze.AI
     .AddAssembly(typeof(HomeBlaze.AI.Blazor.AgentPage).Assembly);                           // HomeBlaze.AI.Blazor
 
@@ -192,6 +203,7 @@ if (mcpEnabled)
 
 app.MapDefaultEndpoints();
 app.MapStaticAssets();
+app.MapStorageFiles();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

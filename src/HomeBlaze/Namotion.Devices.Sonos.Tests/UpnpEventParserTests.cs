@@ -9,6 +9,43 @@ public class UpnpEventParserTests
 {
     private const string SpotifyUri = TestFixtures.SpotifyConnectUri;
 
+    [Theory]
+    [InlineData("FV:2,5", "5")]
+    [InlineData("R:0,3,FV:2,3", "3")]
+    [InlineData("R:,1", null)]
+    [InlineData("Q:0,3,FV:2,7", "7")]
+    [InlineData("FV:2,7,Q:0,3", "7")]
+    [InlineData("SFV:2,4", null)]
+    [InlineData("Q:0,3", null)]
+    [InlineData("FV:2", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void WhenContainerUpdateIdsAreRead_ThenOnlyTheUpdateIdOfTheFavoritesContainerIsTaken(string? containerUpdateIds, string? expected)
+    {
+        // Act
+        var updateId = UpnpEventParser.GetContainerUpdateId(containerUpdateIds, "FV:2");
+
+        // Assert
+        Assert.Equal(expected, updateId);
+    }
+
+    [Fact]
+    public void WhenContentDirectoryEventIsParsed_ThenTheFavoritesIdsAreRead()
+    {
+        // Arrange
+        var body = SonosEventBodies.Properties(
+            ("SystemUpdateID", "8"), ("ContainerUpdateIDs", "R:0,3,FV:2,3"), ("FavoritesUpdateID", "RINCON_000E58A0F00D01400,13"),
+            ("RadioFavoritesUpdateID", "RINCON_000E58A0F00D01400,13"));
+
+        // Act
+        var change = UpnpEventParser.ParseContentDirectory(body);
+
+        // Assert
+        Assert.Equal("RINCON_000E58A0F00D01400,13", change.FavoritesUpdateId);
+        Assert.Equal("3", change.FavoritesContainerUpdateId);
+        Assert.Equal("8", change.SystemUpdateId);
+    }
+
     [Fact]
     public void WhenAvTransportEventHasSpotifyTrack_ThenAllFieldsAreRead()
     {
@@ -129,18 +166,21 @@ public class UpnpEventParserTests
         Assert.Equal(new GroupRenderingControlChange(35, false), change);
     }
 
-    [Fact]
-    public void WhenTopologyEvent_ThenZoneGroupStateIsReturned()
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void WhenTopologyEvent_ThenZoneGroupStateIsReturned(string lineEnding)
     {
         // Arrange
-        var zoneGroupState = TestFixtures.Read("zone-group-state.xml");
-        var body = SonosEventBodies.Properties(("ZoneGroupState", zoneGroupState), ("ThirdPartyMediaServersX", "x"));
+        var zoneGroupState = TestFixtures.Read("zone-group-state.xml").ReplaceLineEndings(lineEnding);
+        var body = SonosEventBodies.Properties(("ZoneGroupState", zoneGroupState), ("ThirdPartyMediaServersX", "x"))
+            .ReplaceLineEndings(lineEnding);
 
         // Act
         var result = UpnpEventParser.ParseZoneGroupState(body);
 
         // Assert
-        Assert.Equal(zoneGroupState, result);
+        Assert.Equal(zoneGroupState.ReplaceLineEndings("\n"), result);
     }
 
     [Fact]

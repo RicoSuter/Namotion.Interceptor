@@ -230,8 +230,8 @@ The speeds of the last hour as lines, and the status of the compressor as a band
 
 :::: HomeBlaze.Components.Card Title="Host CPU and Memory, Last Hour" Icon=Computer
 ::::: HomeBlaze.History.Blazor.HistoryChart#hosttrends Range=1h Height=200
-:::::: Series Path=/Servers/HostSystem/CpuUsage Label="CPU"
-:::::: Series Path=/Servers/HostSystem/MemoryUsage Label="Memory"
+:::::: Series Path=/Services/HostSystem/CpuUsage Label="CPU"
+:::::: Series Path=/Services/HostSystem/MemoryUsage Label="Memory"
 ::::
 
 Widgets of this tab: [HistoryChart](../Docs/administration/widgets/history-chart.md) and [Card](../Docs/administration/widgets/card.md).

@@ -68,6 +68,25 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenKeyIsRemovedFromConfigurationFile_ThenReloadSetsItsDefaultAndKeepsTheInstance()
+    {
+        // Arrange
+        var type = typeof(Samples.Motor).FullName;
+        WriteFile("Motor.json", $$"""{ "$type": "{{type}}", "name": "Pump", "simulationInterval": "00:00:05" }""");
+        var storage = await ConnectAsync();
+        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
+        WriteFile("Motor.json", $$"""{ "$type": "{{type}}", "name": "Pump" }""");
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Same(motor, storage.Children["Motor"]);
+        Assert.Equal("Pump", motor.Name);
+        Assert.Equal(TimeSpan.FromSeconds(1), motor.SimulationInterval);
+    }
+
+    [Fact]
     public async Task WhenFilesWereReloadedOnce_ThenLaterPassesOpenNoFile()
     {
         // Arrange
@@ -211,7 +230,7 @@ public class StorageReconcilerTests : StorageTestBase
         var storage = await ConnectAsync();
         var house = Assert.IsType<VirtualFolder>(storage.Children["House"]);
         var device = Assert.IsType<InjectedDevice>(((VirtualFolder)house.Children["Kitchen"]).Children["Dishwasher"]);
-        var resolver = new SubjectPathResolver(() => storage);
+        var resolver = new SubjectPathResolver(Context!, () => storage);
 
         // Act
         File.Move(GetFullPath("House/Kitchen/Dishwasher.json"), GetFullPath("House/Dishwasher.json"));

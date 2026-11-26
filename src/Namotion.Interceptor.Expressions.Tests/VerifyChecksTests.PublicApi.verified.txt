@@ -48,7 +48,9 @@ namespace Namotion.Interceptor.Expressions
             where TContext :  struct, Namotion.Interceptor.Expressions.IExpressionContext { }
         public Namotion.Interceptor.Expressions.ExpressionValue EvaluateWithoutPipes<TContext>(ref TContext context)
             where TContext :  struct, Namotion.Interceptor.Expressions.IExpressionContext { }
+        public bool TryGetVariable(string path, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? variable, out string? memberPath) { }
         public static bool TryParse(string text, char pathSeparator, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.ParsedExpression? expression, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+        public static bool TryParse(string text, char pathSeparator, System.Collections.Immutable.ImmutableArray<string> variables, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.ParsedExpression? expression, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
     }
     public sealed class TextTemplate
     {
@@ -57,5 +59,6 @@ namespace Namotion.Interceptor.Expressions
         public string Render<TContext>(ref TContext context)
             where TContext :  struct, Namotion.Interceptor.Expressions.IExpressionContext { }
         public static bool TryParse(string text, char pathSeparator, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.TextTemplate? template, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+        public static bool TryParse(string text, char pathSeparator, System.Collections.Immutable.ImmutableArray<string> variables, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Expressions.TextTemplate? template, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
     }
 }

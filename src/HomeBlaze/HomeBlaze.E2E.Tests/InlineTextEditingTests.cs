@@ -371,8 +371,8 @@ public class InlineTextEditingTests
 
         // Assert: the menu opens after the server handled the key down, which would have opened the dialog of the card.
         await Assertions.Expect(page.GetByTestId("insert-text-item")).ToBeVisibleAsync(new() { Timeout = Timeout });
-        await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0);
-        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -799,7 +799,7 @@ public class InlineTextEditingTests
 
         // Assert: the dialog of the text opened, not the one of the card.
         await page.ExpectTextEditorValueAsync("Card body text.");
-        await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(1);
     }
 
@@ -816,7 +816,7 @@ public class InlineTextEditingTests
 
         // Assert
         await page.ExpectTextEditorValueAsync("Card body text.");
-        await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(1);
         Assert.Equal(string.Empty, await page.EvaluateAsync<string>("() => window.getSelection()?.toString() ?? ''"));
     }
@@ -859,7 +859,7 @@ public class InlineTextEditingTests
 
         // Assert: the server handles the switch to Inline after the double click, so a dialog that it opened is open by then.
         await page.SwitchToInlineModeAsync();
-        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -899,7 +899,7 @@ public class InlineTextEditingTests
 
         // Assert
         await Assertions.Expect(paragraph).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
-        await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("create-subject-dialog")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Theory]
@@ -1050,7 +1050,7 @@ public class InlineTextEditingTests
 
         // Assert
         await Assertions.Expect(cardWrapper).ToHaveClassAsync(new Regex(@"\bselected\b"), new() { Timeout = Timeout });
-        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected.text-block")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".subject-component-wrapper.selected.text-block")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
     }
 
     [Fact]
@@ -1084,8 +1084,7 @@ public class InlineTextEditingTests
         await SelectTextAsync(page, "First paragraph");
         await page.GetWidgetActionBar().GetByTestId("delete-block-button").FocusAsync();
         await page.Keyboard.PressAsync("Enter");
-        var confirm = page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true });
-        await confirm.FocusAsync();
+        await ExpectTheFocusOnTheDeleteButtonOfTheDialogAsync(page);
 
         // Act
         await page.Keyboard.PressAsync("Enter");
@@ -1105,8 +1104,7 @@ public class InlineTextEditingTests
         await SelectTextAsync(page, "Card body text");
         await page.GetWidgetActionBar().GetByTestId("delete-block-button").FocusAsync();
         await page.Keyboard.PressAsync("Enter");
-        var confirm = page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true });
-        await confirm.FocusAsync();
+        await ExpectTheFocusOnTheDeleteButtonOfTheDialogAsync(page);
 
         // Act
         await page.Keyboard.PressAsync("Enter");
@@ -1247,9 +1245,15 @@ public class InlineTextEditingTests
         await insertButton.ClickAsync();
         await page.GetByTestId("insert-text-item").ClickAsync();
         await page.ExpectTextEditorValueAsync(string.Empty);
-        await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0);
+        await Assertions.Expect(page.GetByTestId("subject-edit-dialog-type")).ToHaveCountAsync(0, new() { Timeout = AssertionTimeouts.Absence });
         await Assertions.Expect(page.GetByRole(AriaRole.Dialog)).ToHaveCountAsync(1);
     }
+
+    // The dialog moves the focus once it has rendered, through its own element to its Delete button last, so a focus set
+    // on the button before then would move away again, and an Enter pressed in between would not delete.
+    private static Task ExpectTheFocusOnTheDeleteButtonOfTheDialogAsync(IPage page) =>
+        Assertions.Expect(page.GetByRole(AriaRole.Dialog).GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }))
+            .ToBeFocusedAsync(new() { Timeout = Timeout });
 
     private static ILocator GetCardWrapper(IPage page, string title) =>
         page.Locator(".subject-component-wrapper.selectable:has(> [data-testid='card'])")

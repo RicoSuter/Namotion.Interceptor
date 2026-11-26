@@ -60,17 +60,23 @@ public struct PropertyWriteContext<TProperty>
     /// </summary>
     internal long Revision;
 
+    // Set only for a recalculation published by derived property change detection, where NewValue is the
+    // committed value its guards paired with CurrentValue, so GetFinalValue returns NewValue. Re-invoking the
+    // getter at publish time could return a later value that never coexisted with CurrentValue.
+    internal readonly bool FinalValueIsNewValue;
+
     /// <summary>
-    /// Set by the cascade re-entry constructor, where <see cref="NewValue"/> is already the
-    /// stabilized getter output. Stops <see cref="GetFinalValue"/> from re-invoking the getter,
-    /// which would run user code at publish time and could return a value that never paired
-    /// atomically with this change's old value.
-    ///
-    /// The published value is therefore <see cref="NewValue"/> as of publish time, not as of entry.
-    /// <see cref="NewValue"/> is publicly settable, so an interceptor that rewrites it on a derived
-    /// recalculation now changes what is published; the getter re-read used to mask such a rewrite.
+    /// Gets whether this write publishes a derived property's calculated value, which is already committed
+    /// and returned by the getter. An interceptor must not veto or throw for this write; it may only drop it as
+    /// unchanged when <see cref="NewValue"/> equals <see cref="CurrentValue"/>.
     /// </summary>
-    internal bool FinalValueIsNewValue;
+    /// <remarks>
+    /// Skipping the next interceptor skips the terminal write, lifecycle reconciliation of subject values and the
+    /// recalculation of dependent derived properties, not only the change notification. On a recalculation published
+    /// by derived property change detection, <see cref="GetFinalValue"/> returns <see cref="NewValue"/>, so an
+    /// interceptor that rewrites it changes the published value.
+    /// </remarks>
+    public bool IsDerivedRecalculation { get; }
 
     /// <summary>
     /// Gets the property to write a value to.
@@ -129,24 +135,24 @@ public struct PropertyWriteContext<TProperty>
     }
 
     /// <summary>
-    /// Internal constructor for cascade re-entry: pre-populates the cache with the trigger's
-    /// already-resolved raw timestamp, so the dependent's write does not need to lazy-resolve
-    /// (and therefore does not need an active <c>WithChangedTimestamp</c> scope to share state
-    /// with the trigger). Pass 0 to leave the cache uninitialized (the default lazy behavior).
+    /// Internal constructor for publishing a derived property's calculated value, so it sets
+    /// <see cref="IsDerivedRecalculation"/>. A recalculation cascade passes the trigger's already-resolved
+    /// raw timestamp, so the dependent's write does not need to lazy-resolve (and therefore does not need
+    /// an active <c>WithChangedTimestamp</c> scope to share state with the trigger). Pass 0 to leave the
+    /// cache uninitialized (the default lazy behavior). <paramref name="finalValueIsNewValue"/> makes
+    /// <see cref="GetFinalValue"/> return the new value (see <see cref="FinalValueIsNewValue"/>).
     /// Like the other constructor, this consumes the thread-static pending origin stamp for
     /// this property (see <see cref="PendingOrigin"/>) as a side effect of construction.
-    ///
-    /// Cascade re-entry is only ever reached with a new value that is already the stabilized getter
-    /// output, so <see cref="FinalValueIsNewValue"/> is set here rather than passed in.
     /// </summary>
-    internal PropertyWriteContext(InterceptorExecutor executor, PropertyReference property, TProperty currentValue, TProperty newValue, long rawTimestamp)
+    internal PropertyWriteContext(InterceptorExecutor executor, PropertyReference property, TProperty currentValue, TProperty newValue, long rawTimestamp, bool finalValueIsNewValue)
     {
         Executor = executor;
         Property = property;
         CurrentValue = currentValue;
         NewValue = newValue;
         IsWritten = false;
-        FinalValueIsNewValue = true;
+        IsDerivedRecalculation = true;
+        FinalValueIsNewValue = finalValueIsNewValue;
         _writeTimestamp = rawTimestamp;
         PendingOrigin.TryConsume(in property, out _attempted);
     }
@@ -233,13 +239,8 @@ public struct PropertyWriteContext<TProperty>
     /// <summary>
     /// Reads the current property value (might be different from <see cref="NewValue"/> if the property is derived).
     /// Must only be used after the 'next()' call in the write interceptor.
-    ///
-    /// One exception: on a derived property's own recalculation, <see cref="NewValue"/> is already the
-    /// stabilized getter output, so this returns it directly instead of invoking the getter again. That
-    /// keeps the published new value paired with the old value it was compared against, and keeps user
-    /// code off the publish path, where a throwing getter used to suppress the notification entirely.
-    /// An interceptor that rewrites <see cref="NewValue"/> on that path therefore changes what is
-    /// published, which the previous getter re-read would have masked.
+    /// On a recalculation published by derived property change detection it returns <see cref="NewValue"/>
+    /// without invoking the getter.
     /// </summary>
     /// <returns>The property value.</returns>
     public TProperty GetFinalValue()
