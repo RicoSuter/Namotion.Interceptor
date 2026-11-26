@@ -920,6 +920,37 @@ public class SecretConversionTests : StorageTestBase
         Assert.Equal(content, TryReadText("Gateway.md"));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenThePageHoldsAPlaintextSecretAndTheSecretStoreCannotBeWritten_ThenABlockWriteOrStructureEditThrowsAndTheFileIsUnchanged(bool isStructureEdit)
+    {
+        // Arrange
+        UseSecretStore();
+        WriteFile("Gateway.md", $"# Gateway\n\n:: {DeviceType}#other Host=10.0.0.1\n::\n");
+        var storage = await ConnectAsync();
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Gateway.md"]);
+        var content = $"# Gateway\n\n:: {DeviceType}#other Host=10.0.0.1\n::\n\n:: {DeviceType}#gateway Password=s3cr3t\n::\n";
+        WriteFile("Gateway.md", content);
+
+        // The read after the refusal takes the plaintext in, which only the storage converts.
+        var refused = await page.InsertTextAsync(page, null, "Text.", CancellationToken.None);
+        Directory.CreateDirectory(SecretsPath!);
+        var other = Assert.IsType<EmbeddedSecretDevice>(page.Children["other"]);
+        other.Host = "10.0.0.2";
+
+        // Act
+        var failure = await Record.ExceptionAsync(() => isStructureEdit
+            ? page.InsertTextAsync(page, null, "Text.", CancellationToken.None)
+            : page.WriteConfigurationAsync(other, CancellationToken.None));
+
+        // Assert
+        Assert.False(refused.IsWritten);
+        Assert.True(failure is IOException or UnauthorizedAccessException, failure?.ToString());
+        Assert.Equal(content, TryReadText("Gateway.md"));
+        Assert.Equal(content, page.Content);
+    }
+
     [Fact]
     public async Task WhenAMetadataFileIsWritten_ThenItIsNotConverted()
     {
