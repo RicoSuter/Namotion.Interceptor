@@ -147,8 +147,8 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         return Root;
     }
 
-    // Root.json is outside the storage, so its plaintext secrets are moved here. A store that cannot be written leaves the
-    // file as it is. The target of a symbolic link is replaced, so the link stays. A file mounted on its own cannot be replaced.
+    // Root.json is outside the storage, so its plaintext secrets are moved here. The target of a symbolic link is replaced,
+    // so the link stays. A failure, such as for a file mounted on its own, which cannot be replaced, leaves the file as it is.
     private async Task<string> ConvertSecretsAsync(string json, CancellationToken cancellationToken)
     {
         try
