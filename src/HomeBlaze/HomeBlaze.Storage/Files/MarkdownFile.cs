@@ -1115,6 +1115,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 return MarkdownEditResult.Refused(sizeRefusal);
             }
 
+            if (IsRefusedUntilReadAgain(change.Write))
+            {
+                return MarkdownEditResult.Refused(ReloadRefusal);
+            }
+
             var publishRefusal = await PublishAndWriteAsync(snapshot, ConvertSecrets(change.Write), change.ChangedBlock, changedPageRefusal);
             return publishRefusal is null
                 ? MarkdownEditResult.WrittenFor(FindResultSubject(change))
@@ -1189,7 +1194,15 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         try
         {
             write = MarkdownBlockReconciler.TryWrite(page, snapshot.BlockSubjects, blockIndex, _serializer, out refusal);
-            write = write is null ? null : ConvertSecrets(write);
+            if (write is not null)
+            {
+                if (IsRefusedUntilReadAgain(write))
+                {
+                    return false;
+                }
+
+                write = ConvertSecrets(write);
+            }
         }
         catch
         {
@@ -1244,20 +1257,32 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
     }
 
+    // Under _writeLock, after the graph was read and before anything is published: the blocks were compared with slot
+    // values that a reload may have changed since the snapshot was parsed. Callers check before they convert the text,
+    // which stores secrets that a refused write would never reference. A full fence, because a volatile read lets the
+    // earlier reads of the graph pass it (see OnFileChangedAsync).
+    private bool IsRefusedUntilReadAgain(MarkdownBlockWrite write)
+    {
+        Thread.MemoryBarrier();
+        if (write.HasInsertedOrRemovedBlocks && _isGraphAheadOfSnapshot)
+        {
+            _parser.LogRefusedWrite(FullPath, ReloadRefusal);
+            return true;
+        }
+
+        return false;
+    }
+
     // Under _writeLock: publishes the write as the snapshot that follows `snapshot` and writes its text, which the caller
     // has converted. Returns why nothing was written, or null. `changedBlock` is the block of the snapshot whose text
     // changed, null for the page.
     private async Task<string?> PublishAndWriteAsync(
         MarkdownParseResult snapshot, MarkdownBlockWrite write, MarkdownBlock? changedBlock, string changedPageRefusal)
     {
-        // After the graph was read and before anything is published: the blocks were compared with slot values
-        // that a reload may have changed since the snapshot was parsed. A reload that published since then fails
-        // the exchange below. A full fence, because a volatile read lets the earlier reads of the graph pass it
-        // (see OnFileChangedAsync).
-        Thread.MemoryBarrier();
-        if (write.HasInsertedOrRemovedBlocks && _isGraphAheadOfSnapshot)
+        // Checked again: a reload may have begun while the caller converted the text. A reload that published since
+        // the snapshot fails the exchange below.
+        if (IsRefusedUntilReadAgain(write))
         {
-            _parser.LogRefusedWrite(FullPath, ReloadRefusal);
             return ReloadRefusal;
         }
 
