@@ -698,8 +698,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// <see cref="DeleteBlockAsync"/> is.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of
-    /// this page; or a block type of the new text has a secret configuration property that is not a string property of a
-    /// subject, and nothing is written.</exception>
+    /// this page; or a block type has a secret configuration property that is not a string property of a subject, and nothing
+    /// is written.</exception>
     /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
     /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     public Task<MarkdownEditResult> ReplaceTextBlockAsync(
@@ -741,8 +741,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Markdig, and as <see cref="DeleteBlockAsync"/> is.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of
-    /// this page; or a block type of the text has a secret configuration property that is not a string property of a
-    /// subject, and nothing is written.</exception>
+    /// this page; or a block type has a secret configuration property that is not a string property of a subject, and nothing
+    /// is written.</exception>
     /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
     /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     public Task<MarkdownEditResult> InsertTextAsync(
@@ -910,8 +910,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Refused as <see cref="AddWidgetToSlotAsync"/> and <see cref="InsertTextAsync"/> are.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The call comes from work on the worker of the storage or from within a write of
-    /// this page; or a block type of the text has a secret configuration property that is not a string property of a
-    /// subject, and nothing is written.</exception>
+    /// this page; or a block type has a secret configuration property that is not a string property of a subject, and nothing
+    /// is written.</exception>
     /// <exception cref="IOException">The secret store cannot be written. Nothing is written.</exception>
     /// <exception cref="UnauthorizedAccessException">The secret store cannot be written. Nothing is written.</exception>
     public Task<MarkdownEditResult> AddTextToSlotAsync(
@@ -1230,10 +1230,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return ReloadRefusal;
         }
 
-        // The snapshot can hold plaintext that the storage did not convert, such as from the read after a refusal. Written
-        // as it is, its hash would be recorded as current, and no later pass would convert the file. The conversion only
-        // changes head lines and fences, so the blocks and their indexes stay, and the published page is the written text,
-        // which the reload inside the write needs to keep the subjects of the snapshot.
+        // The text that an edit adds is converted by the edit, before its size is checked. The snapshot can still hold
+        // plaintext that the storage did not convert, such as from the read after a refusal. Written as it is, its hash
+        // would be recorded as current, and no later pass would convert the file. The conversion only changes head lines
+        // and fences, so the blocks and their indexes stay, and the published page is the written text, which the reload
+        // inside the write needs to keep the subjects of the snapshot.
         if (ConvertSecrets(write.Page.Source) is var converted && !ReferenceEquals(converted, write.Page.Source))
         {
             write = write with { Page = MarkdownPageParser.Parse(converted) };
