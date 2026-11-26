@@ -34,7 +34,7 @@ internal sealed class SecretReferences
     private readonly ILogger? _logger;
 
     // The secret properties that hold each key, by subject, weak so that a collected subject does not count. A property
-    // lets go of a key when it moves to another key or its subject is released, and collected holders are dropped when
+    // is removed from the holders of a key when it moves to another key or its subject is released, and collected holders are dropped when
     // the key is used again. A list stays once created, so there are as many as keys were read or written. Each list is
     // locked while it is used.
     private readonly ConcurrentDictionary<string, List<Holder>> _holders = new();
@@ -176,14 +176,14 @@ internal sealed class SecretReferences
         }
     }
 
-    /// <summary>Lets go of the keys that the secret properties of the subject hold, for a subject that is released.</summary>
+    /// <summary>Removes the secret properties of a released subject from the holders of their keys. The stored secrets stay.</summary>
     public void Release(IInterceptorSubject subject)
     {
         foreach (var (dataKey, data) in subject.Data)
         {
             if (dataKey.key == RememberedKeyDataKey && data is RememberedKey remembered)
             {
-                LetGo(remembered.Key, subject, dataKey.property!);
+                RemoveHolder(remembered.Key, subject, dataKey.property!);
             }
         }
     }
@@ -199,18 +199,18 @@ internal sealed class SecretReferences
         }
         else
         {
-            Hold(remembered.Key, owner, propertyName);
+            AddHolder(remembered.Key, owner, propertyName);
             owner.Data.TryGetValue(dataKey, out previous);
             owner.Data[dataKey] = remembered;
         }
 
         if (previous is RememberedKey previousKey && previousKey.Key != remembered?.Key)
         {
-            LetGo(previousKey.Key, owner, propertyName);
+            RemoveHolder(previousKey.Key, owner, propertyName);
         }
     }
 
-    private void Hold(string key, IInterceptorSubject subject, string propertyName)
+    private void AddHolder(string key, IInterceptorSubject subject, string propertyName)
     {
         var holders = _holders.GetOrAdd(key, static _ => []);
         lock (holders)
@@ -222,7 +222,7 @@ internal sealed class SecretReferences
         }
     }
 
-    private void LetGo(string key, IInterceptorSubject subject, string propertyName)
+    private void RemoveHolder(string key, IInterceptorSubject subject, string propertyName)
     {
         if (_holders.TryGetValue(key, out var holders))
         {

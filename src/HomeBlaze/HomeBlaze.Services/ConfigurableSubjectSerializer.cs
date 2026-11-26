@@ -330,7 +330,7 @@ public class ConfigurableSubjectSerializer
     /// <summary>
     /// Releases a subject that <see cref="Deserialize(string, ConfigurationNaming)"/> created and that is not used
     /// after all: detaches it and the subjects in its properties from the context, which stops their hosted
-    /// services, and lets go of their secret keys, see <see cref="ReleaseSecrets"/>. A hosted service that was not
+    /// services, and removes them from the holders of their secret keys, see <see cref="ReleaseSecrets"/>. A hosted service that was not
     /// started yet is stopped without having been started.
     /// </summary>
     /// <remarks>
@@ -355,9 +355,9 @@ public class ConfigurableSubjectSerializer
     }
 
     /// <summary>
-    /// Lets go of the secret keys that the subject and the subjects in its configuration hold, for a subject that is no
-    /// longer used, so that another subject that holds one of them keeps it when it changes its value. A subject in its
-    /// configuration that something else references keeps its keys.
+    /// Removes the subject and the subjects in its configuration from the holders of their secret keys, for a subject that
+    /// is no longer used, so that another subject that holds one of them keeps it when it changes its value. A subject in
+    /// its configuration that something else references keeps its keys. The stored secrets are not removed.
     /// </summary>
     /// <remarks>Call it before the subject is detached from the context.</remarks>
     public void ReleaseSecrets(IInterceptorSubject subject)

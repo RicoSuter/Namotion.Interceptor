@@ -47,7 +47,7 @@ public class SubjectFactory
 
     /// <summary>
     /// Detaches a subject created by this factory that was never handed over to a parent: it leaves the registry
-    /// and, when it is a hosted service, is stopped. It and the subjects in its configuration let go of their secret keys. Does nothing for a subject that was created detached.
+    /// and, when it is a hosted service, is stopped. It and the subjects in its configuration stop holding their secret keys. Does nothing for a subject that was created detached.
     /// </summary>
     public void DiscardSubject(IInterceptorSubject subject)
     {
