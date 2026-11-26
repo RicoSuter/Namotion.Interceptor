@@ -112,6 +112,7 @@ internal sealed class SecretPageConverter
             return;
         }
 
+        // A key given twice keeps its last value, as the parser applies it, and both arguments then get its reference.
         var arguments = new JsonObject();
         foreach (var argument in head.Arguments)
         {
