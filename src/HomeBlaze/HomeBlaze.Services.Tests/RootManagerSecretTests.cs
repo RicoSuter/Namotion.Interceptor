@@ -38,6 +38,33 @@ public class RootManagerSecretTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenRootJsonIsASymbolicLinkWithAPlaintextSecret_ThenTheTargetIsConvertedAndTheLinkStays()
+    {
+        // Creating a symbolic link needs a privilege on Windows.
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // Arrange
+        var targetPath = Path.Combine(_directory, "Target.json");
+        await File.WriteAllTextAsync(targetPath, RootJson("s3cr3t"));
+        File.CreateSymbolicLink(RootPath, targetPath);
+        var (rootManager, _) = CreateRootManager(new SecretStore(SecretsPath));
+
+        // Act
+        await rootManager.StartAsync(CancellationToken.None);
+        var root = (SecretTestDevice)await rootManager.RootLoaded.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.NotNull(new FileInfo(RootPath).LinkTarget);
+        var text = await File.ReadAllTextAsync(targetPath);
+        Assert.DoesNotContain("s3cr3t", text);
+        Assert.Contains("$secret:", text);
+        Assert.Equal("s3cr3t", root.Password);
+    }
+
+    [Fact]
     public async Task WhenRootJsonHoldsNoPlaintextSecret_ThenItIsNotRewritten()
     {
         // Arrange
