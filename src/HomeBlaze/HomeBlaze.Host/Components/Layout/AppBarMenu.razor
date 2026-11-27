@@ -49,6 +49,14 @@
     <MudDivider/>
     <MudMenuItem Icon="@Icons.Material.Filled.Home" Href="/" data-testid="app-bar-menu-home">Home</MudMenuItem>
     <MudMenuItem Icon="@Icons.Material.Filled.Refresh" OnClick="@Reload" data-testid="app-bar-menu-reload">Reload</MudMenuItem>
+    @* Hidden by app.css except inside the desktop app, whose desktop-shell.js marks the page and handles the click. *@
+    <MudMenuItem Icon="@Icons.Material.Filled.SwapHoriz" Class="desktop-shell-only"
+                 data-desktop-shell-action="settings" data-testid="app-bar-menu-desktop-settings">
+        <span class="d-flex align-center justify-space-between gap-4">
+            <span>Switch folder or instance</span>
+            <kbd class="desktop-shell-settings-shortcut"></kbd>
+        </span>
+    </MudMenuItem>
 </MudMenu>
 
 @code {

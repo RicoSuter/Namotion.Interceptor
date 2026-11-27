@@ -8,3 +8,22 @@ h1[tabindex="-1"]:focus {
 pre.mermaid[data-mermaid-state="pending"] {
     visibility: hidden;
 }
+
+/* desktop-shell.js marks the page with desktop-shell (and desktop-shell-mac on macOS) inside the desktop app only. */
+html:not(.desktop-shell) .desktop-shell-only {
+    display: none !important;
+}
+
+.desktop-shell-settings-shortcut {
+    font-family: inherit;
+    font-size: 0.8em;
+    opacity: 0.6;
+}
+
+.desktop-shell-settings-shortcut::after {
+    content: "Ctrl+,";
+}
+
+html.desktop-shell-mac .desktop-shell-settings-shortcut::after {
+    content: "\2318,";
+}

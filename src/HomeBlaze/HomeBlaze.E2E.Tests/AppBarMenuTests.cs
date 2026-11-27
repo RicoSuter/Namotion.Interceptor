@@ -165,9 +165,49 @@ public class AppBarMenuTests
         await Assertions.Expect(page.DarkModeMenuEntry()).ToBeVisibleAsync();
     }
 
-    private async Task<IPage> OpenAsync(string path)
+    [Fact]
+    public async Task WhenTheMenuIsOpenedInABrowser_ThenItHasNoDesktopAppEntry()
+    {
+        // Arrange
+        var page = await OpenAsync("pages/Dashboard.md");
+
+        // Act
+        await page.OpenAppBarMenuAsync();
+
+        // Assert
+        await Assertions.Expect(page.GetByTestId("app-bar-menu-desktop-settings")).ToBeHiddenAsync(new() { Timeout = AssertionTimeouts.Absence });
+    }
+
+    [Fact]
+    public async Task WhenTheDesktopAppEntryIsClicked_ThenTheDesktopAppIsAskedToShowItsSettings()
+    {
+        // Arrange
+        // Stands in for the desktop app's web view, which is the only place window.external.sendMessage exists.
+        var page = await OpenAsync(
+            "pages/Dashboard.md",
+            "window.external.sendMessage = message => (window.desktopShellMessages ??= []).push(message);");
+        await page.OpenAppBarMenuAsync();
+        var entry = page.GetByTestId("app-bar-menu-desktop-settings");
+        await Assertions.Expect(entry).ToContainTextAsync("Switch folder or instance", new() { Timeout = Timeout });
+
+        // Act
+        await entry.ClickAsync();
+
+        // Assert
+        await page.WaitForFunctionAsync(
+            "() => window.desktopShellMessages?.includes('shell:settings')",
+            null,
+            new() { Timeout = Timeout });
+    }
+
+    private async Task<IPage> OpenAsync(string path, string? initScript = null)
     {
         var page = await _fixture.CreatePageAsync();
+        if (initScript is not null)
+        {
+            await page.AddInitScriptAsync(initScript);
+        }
+
         await page.GotoAsync($"{_fixture.ServerAddress}{path}");
         await page.WaitUntilInteractiveAsync(Timeout);
         return page;
