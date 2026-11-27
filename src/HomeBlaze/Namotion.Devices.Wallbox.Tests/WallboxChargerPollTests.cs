@@ -12,12 +12,50 @@ public class WallboxChargerPollTests
         return new WallboxCharger(httpClientFactory, NullLogger<WallboxCharger>.Instance);
     }
 
+    // Connection
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(163)]
+    public void WhenChargerIsOffline_ThenItIsNotConnectedAndItsPlugStateIsUnknown(int statusId)
+    {
+        // Arrange
+        var charger = CreateCharger();
+        var status = new ChargerStatusResponse { StatusId = statusId, IsFinished = false };
+
+        // Act
+        charger.ApplyStatus(status);
+
+        // Assert
+        Assert.False(charger.IsConnected);
+        Assert.Equal("Charger is offline", charger.StatusMessage);
+        Assert.Null(charger.IsPluggedIn);
+        Assert.Null(charger.IsCharging);
+    }
+
+    [Theory]
+    [InlineData(161)]  // Ready
+    [InlineData(194)]  // Charging
+    [InlineData(999)]  // Unknown
+    public void WhenChargerIsOnline_ThenItIsConnected(int statusId)
+    {
+        // Arrange
+        var charger = CreateCharger();
+        charger.ApplyStatus(new ChargerStatusResponse { StatusId = 0 });
+
+        // Act
+        charger.ApplyStatus(new ChargerStatusResponse { StatusId = statusId });
+
+        // Assert
+        Assert.True(charger.IsConnected);
+        Assert.Null(charger.StatusMessage);
+        Assert.NotNull(charger.IsPluggedIn);
+    }
+
     // IsPluggedIn
 
     [Theory]
-    [InlineData(0, false, false)]   // Disconnected status → not plugged in regardless of Finished
     [InlineData(161, false, false)]  // Ready status → not plugged in regardless of Finished
-    [InlineData(163, false, false)]  // Disconnected (163) → not plugged in
     [InlineData(193, false, true)]   // Charging, Finished=false → plugged in
     [InlineData(193, true, false)]   // Charging, Finished=true → not plugged in (API says finished)
     [InlineData(178, false, true)]   // Paused, Finished=false → plugged in
@@ -29,7 +67,7 @@ public class WallboxChargerPollTests
         var status = new ChargerStatusResponse { StatusId = statusId, IsFinished = finished };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Equal(expectedPluggedIn, charger.IsPluggedIn);
@@ -44,7 +82,6 @@ public class WallboxChargerPollTests
     [InlineData(196, true)]   // Discharging
     [InlineData(178, false)]  // Paused → not charging
     [InlineData(161, false)]  // Ready → not charging
-    [InlineData(0, false)]    // Disconnected → not charging
     [InlineData(180, false)]  // WaitingForCarDemand → not charging
     public void WhenStatusReceived_ThenIsChargingDerivedCorrectly(int statusId, bool expectedCharging)
     {
@@ -53,7 +90,7 @@ public class WallboxChargerPollTests
         var status = new ChargerStatusResponse { StatusId = statusId };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Equal(expectedCharging, charger.IsCharging);
@@ -75,7 +112,7 @@ public class WallboxChargerPollTests
         };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Equal(16m, charger.ChargingCurrent);
@@ -95,7 +132,7 @@ public class WallboxChargerPollTests
         };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert — 7360 / 230 = 32.0A
         Assert.Equal(32.0m, charger.ChargingCurrent);
@@ -115,7 +152,7 @@ public class WallboxChargerPollTests
         };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert — 11040 / (230 × 3) = 16.0A
         Assert.Equal(16.0m, charger.ChargingCurrent);
@@ -135,7 +172,7 @@ public class WallboxChargerPollTests
         };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Equal(0m, charger.ChargingCurrent);
@@ -151,7 +188,7 @@ public class WallboxChargerPollTests
         var status = new ChargerStatusResponse { StatusId = 193, ChargingPowerInKw = 7.36m };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Equal(7360m, charger.ChargingPower);
@@ -167,7 +204,7 @@ public class WallboxChargerPollTests
         var status = new ChargerStatusResponse { StatusId = 193, MaxAvailablePower = 16m, CurrentMode = 3 };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert — 16A × 230V × 3 phases = 11040W
         Assert.Equal(11040m, charger.MaximumChargingPower);
@@ -182,7 +219,7 @@ public class WallboxChargerPollTests
         var status = new ChargerStatusResponse { StatusId = 193, MaxAvailablePower = 16m, CurrentMode = 0 };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Null(charger.MaximumChargingPower);
@@ -197,7 +234,7 @@ public class WallboxChargerPollTests
         var status = new ChargerStatusResponse { StatusId = 193, MaxAvailablePower = 0m };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Null(charger.MaximumChargingPower);
@@ -218,7 +255,7 @@ public class WallboxChargerPollTests
         };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Equal(12m, charger.MaximumChargingCurrent);
@@ -240,7 +277,7 @@ public class WallboxChargerPollTests
         };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Equal(expected, charger.IsLocked);
@@ -254,7 +291,7 @@ public class WallboxChargerPollTests
         var status = new ChargerStatusResponse { StatusId = 193 };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Null(charger.IsLocked);
@@ -270,7 +307,7 @@ public class WallboxChargerPollTests
         var status = new ChargerStatusResponse { StatusId = 193, StateOfCharge = 75 };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Equal(0.75m, charger.Session.ChargeLevel);
@@ -285,7 +322,7 @@ public class WallboxChargerPollTests
         var status = new ChargerStatusResponse { StatusId = 193, StateOfCharge = null };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Null(charger.Session.ChargeLevel);
@@ -308,7 +345,7 @@ public class WallboxChargerPollTests
         };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Equal(5500m, charger.Session.AddedEnergy);
@@ -332,7 +369,7 @@ public class WallboxChargerPollTests
         };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert — cost not yet calculated by API during active session
         Assert.Null(charger.Session.SessionCost);
@@ -351,7 +388,7 @@ public class WallboxChargerPollTests
         };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Equal(0m, charger.Session.SessionCost);
@@ -374,7 +411,7 @@ public class WallboxChargerPollTests
         };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.True(charger.IsEcoSmartEnabled);
@@ -396,7 +433,7 @@ public class WallboxChargerPollTests
         };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.False(charger.IsEcoSmartEnabled);
@@ -425,7 +462,7 @@ public class WallboxChargerPollTests
         };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Equal("5.5.10", charger.SoftwareVersion);
@@ -452,69 +489,13 @@ public class WallboxChargerPollTests
         };
 
         // Act
-        ApplyStatus(charger, status);
+        charger.ApplyStatus(status);
 
         // Assert
         Assert.Equal("5.6.0", charger.SoftwareVersion);
         Assert.Null(charger.AvailableSoftwareUpdate);
     }
 
-    // Helper: applies a ChargerStatusResponse to the charger's state
-    // by calling the same logic as PollAsync (without the HTTP call)
-    private static void ApplyStatus(WallboxCharger charger, ChargerStatusResponse status)
-    {
-        charger.ChargerStatus = status.Status;
-
-        charger.IsPluggedIn = charger.ChargerStatus is WallboxChargerStatus.Disconnected or WallboxChargerStatus.Ready
-            ? false
-            : status.IsFinished != true;
-
-        charger.IsCharging = charger.ChargerStatus is WallboxChargerStatus.Charging or WallboxChargerStatus.Discharging;
-        charger.ChargingPower = status.ChargingPowerInKw * 1000m;
-
-        charger.ChargingCurrent = status.ChargingCurrent > 0
-            ? status.ChargingCurrent
-            : status is { CurrentMode: { } phases and > 0, ChargingPowerInKw: { } powerInKw and > 0 }
-                ? Math.Round(powerInKw * 1000m / (230m * phases), 1)
-                : 0;
-
-        charger.MaximumAvailableChargingCurrent = status.MaxAvailablePower > 0
-            ? status.MaxAvailablePower
-            : null;
-
-        charger.MaximumChargingCurrent = status.ConfigData?.MaximumChargingCurrent;
-
-        charger.MaximumChargingPower = status.MaxAvailablePower > 0 && status.CurrentMode > 0
-            ? status.MaxAvailablePower * 230m * status.CurrentMode
-            : null;
-
-        charger.IsLocked = status.ConfigData?.Locked switch
-        {
-            1 => true,
-            0 => false,
-            _ => null
-        };
-
-        charger.Session.ChargeLevel = status.StateOfCharge.HasValue ? status.StateOfCharge.Value / 100m : null;
-        charger.Session.AddedEnergy = status.AddedEnergy * 1000m;
-        charger.Session.AddedGreenEnergy = status.AddedGreenEnergy * 1000m;
-        charger.Session.AddedGridEnergy = status.AddedGridEnergy * 1000m;
-        charger.Session.AddedRange = status.AddedRange;
-        charger.Session.ChargingTime = status.ChargingTime is { } chargingSeconds ? TimeSpan.FromSeconds(chargingSeconds) : null;
-        charger.Session.SessionCost = status.AddedEnergy > 0 && status.Cost == 0 ? null : status.Cost;
-
-        charger.IsEcoSmartEnabled = status.ConfigData?.Ecosmart?.IsEnabled;
-        charger.EcoSmartMode = status.ConfigData?.Ecosmart is { } eco
-            ? eco.IsEnabled ? (WallboxEcoSmartMode)eco.Mode : WallboxEcoSmartMode.Disabled
-            : null;
-
-        charger.SoftwareVersion = status.ConfigData?.Software?.CurrentVersion;
-        charger.AvailableSoftwareUpdate = status.ConfigData?.Software?.IsUpdateAvailable == true
-            ? status.ConfigData.Software.LatestVersion
-            : null;
-
-        charger.ProductCode = status.ConfigData?.PartNumber;
-    }
 
     private class TestHttpClientFactory : IHttpClientFactory
     {
