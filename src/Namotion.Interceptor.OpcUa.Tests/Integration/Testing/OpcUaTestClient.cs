@@ -35,6 +35,10 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         _configureClient = configureClient;
     }
 
+    // waitUntilConnected = false returns as soon as the host is running instead of waiting for
+    // subscriptions and the first property sync. Tests that have to interfere with the very first
+    // load need this: that load is what the readiness wait waits for, so waiting here would mean
+    // waiting for the thing the test is about to break.
     public async Task StartAsync(
         Func<IInterceptorSubjectContext, TRoot> createRoot,
         Func<TRoot, bool> isConnected,

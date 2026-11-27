@@ -285,6 +285,9 @@ public class SubscriptionNotificationOrderingTests
             var manager = new SubscriptionManager(
                 source, propertyWriter, pollingManager: null, readAfterWriteManager: null,
                 configuration, error => { lock (errors) { errors.Add(error); } }, NullLogger.Instance);
+
+            // Notifications are dropped until subscription setup completes; open the gate as a real setup would.
+            manager.CompleteSetup([]);
             return new Harness(source, propertyWriter, manager, errors);
         }
 

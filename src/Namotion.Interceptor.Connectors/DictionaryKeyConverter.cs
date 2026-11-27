@@ -1,13 +1,13 @@
 using System.Globalization;
 using System.Text.Json;
 
-namespace Namotion.Interceptor.Connectors.Updates.Internal;
+namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
 /// Converts dictionary keys to their target types.
 /// Handles JsonElement deserialization, enum parsing, and general type conversion.
 /// </summary>
-internal static class DictionaryKeyConverter
+public static class DictionaryKeyConverter
 {
     /// <summary>
     /// Converts a dictionary key to the specified target type.
@@ -15,6 +15,8 @@ internal static class DictionaryKeyConverter
     /// <param name="key">The key to convert.</param>
     /// <param name="targetKeyType">The target type for the key.</param>
     /// <returns>The converted key.</returns>
+    /// <exception cref="FormatException">The key does not convert to <paramref name="targetKeyType"/>.</exception>
+    /// <exception cref="ArgumentException">The key names no member of the enum <paramref name="targetKeyType"/>.</exception>
     public static object Convert(object key, Type targetKeyType)
     {
         if (targetKeyType.IsInstanceOfType(key))

@@ -53,6 +53,10 @@ namespace Namotion.Interceptor.Connectors
         public System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject?> CreateSubjectCollection(System.Type propertyType, [System.Runtime.CompilerServices.ParamCollection] System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject?> children) { }
         public System.Collections.IDictionary CreateSubjectDictionary(System.Type propertyType, System.Collections.Generic.IDictionary<object, Namotion.Interceptor.IInterceptorSubject> entries) { }
     }
+    public static class DictionaryKeyConverter
+    {
+        public static object Convert(object key, System.Type targetKeyType) { }
+    }
     public enum FaultType
     {
         Kill = 0,
@@ -129,6 +133,10 @@ namespace Namotion.Interceptor.Connectors
     {
         public static Namotion.Interceptor.IInterceptorSubject CreateCollectionSubject(this Namotion.Interceptor.Connectors.ISubjectFactory subjectFactory, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, object? index) { }
         public static Namotion.Interceptor.IInterceptorSubject CreateSubject(this Namotion.Interceptor.Connectors.ISubjectFactory subjectFactory, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Key",
+                "Value"})]
+        public static System.ValueTuple<System.Type, System.Type> GetDictionaryKeyAndValueTypes(this System.Type propertyType) { }
     }
     public sealed class SubjectPropertyWriter
     {
