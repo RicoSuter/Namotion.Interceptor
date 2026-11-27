@@ -128,6 +128,57 @@ internal sealed class WriteRetryQueue : IDisposable
     }
 
     /// <summary>
+    /// Flushes pending writes to <paramref name="source"/>, reconciling them instead when
+    /// <see cref="SubjectSourceBase.IsReconcileDue"/>.
+    /// </summary>
+    /// <returns>True when nothing was left to send or the flush succeeded.</returns>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    public async ValueTask<bool> FlushOrReconcileAsync(SubjectSourceBase source, CancellationToken cancellationToken)
+    {
+        if (!await TryEnterFlushAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        try
+        {
+            return await FlushOrReconcileCoreAsync(source, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _flushSemaphore.Release();
+        }
+    }
+
+    /// <summary>
+    /// Drains every pending write, lets <paramref name="source"/> decide each one against its current state,
+    /// and flushes the writes it keeps for sending. Holds the flush gate throughout, so no other flush or write
+    /// runs meanwhile; <see cref="Enqueue"/>, which does not take the gate, can still add writes.
+    /// </summary>
+    /// <param name="source">The source to reconcile against and flush to.</param>
+    /// <param name="onlyWhenDue">Whether to do nothing unless <see cref="SubjectSourceBase.IsReconcileDue"/>.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public async ValueTask ReconcileAsync(SubjectSourceBase source, bool onlyWhenDue, CancellationToken cancellationToken)
+    {
+        if (!await TryEnterFlushAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        try
+        {
+            if (!onlyWhenDue || source.IsReconcileDue)
+            {
+                await ReconcileCoreAsync(source, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _flushSemaphore.Release();
+        }
+    }
+
+    /// <summary>
     /// Flushes older pending writes, then attempts the supplied writes while retaining exact ownership
     /// until they are confirmed, parked for retry, or counted as dropped.
     /// </summary>
@@ -164,7 +215,7 @@ internal sealed class WriteRetryQueue : IDisposable
 
         try
         {
-            if (!await FlushCoreAsync(source, cancellationToken).ConfigureAwait(false))
+            if (!await FlushOrReconcileCoreAsync(source, cancellationToken).ConfigureAwait(false))
             {
                 _metrics.AddDropped(SettleWrite(changes.Span, changes.Length, append: true).Dropped);
                 return;
@@ -194,6 +245,29 @@ internal sealed class WriteRetryQueue : IDisposable
         {
             _flushSemaphore.Release();
         }
+    }
+
+    // Under the flush gate, so that whichever path flushes first in a synchronized period reconciles, and only
+    // that one. Only a SubjectSourceBase reconciles; any other source is flushed as is.
+    private ValueTask<bool> FlushOrReconcileCoreAsync(ISubjectSource source, CancellationToken cancellationToken) =>
+        source is SubjectSourceBase { IsReconcileDue: true } owner
+            ? ReconcileCoreAsync(owner, cancellationToken)
+            : FlushCoreAsync(source, cancellationToken);
+
+    // Under the flush gate.
+    private async ValueTask<bool> ReconcileCoreAsync(SubjectSourceBase source, CancellationToken cancellationToken)
+    {
+        // Before the drain: a load that lands after this is ranked against by the next reconcile.
+        source.MarkReconciled();
+
+        var drained = DrainForLocalReapply();
+        if (drained.Length == 0 || source.ReconcileParkedChanges(drained) is not { Length: > 0 } toSend)
+        {
+            return true;
+        }
+
+        Enqueue(toSend);
+        return await FlushCoreAsync(source, cancellationToken).ConfigureAwait(false);
     }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
@@ -241,8 +315,23 @@ internal sealed class WriteRetryQueue : IDisposable
                 Volatile.Write(ref _count, _pendingWrites.Count);
             }
 
-            var memory = new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count);
-            var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
+            // A later local commit carries the settled value in a superseded write's place, so sending the
+            // older one would only flap the peer; it settles as confirmed. Same rule as the processor's dequeue.
+            // Revision 0 orders against nothing and skips the lookup.
+            var sendCount = 0;
+            for (var i = 0; i < count; i++)
+            {
+                ref readonly var change = ref _scratchBuffer[i];
+                if (change.Revision == 0 || ChangeDeliveryFilter.IsCurrent(in change, SubjectSourceBase.DeliveryRule))
+                {
+                    _scratchBuffer[sendCount++] = change;
+                }
+            }
+
+            var result = sendCount == 0
+                ? WriteResult.Success
+                : await source.WriteChangesInBatchesAsync(
+                    new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, sendCount), cancellationToken).ConfigureAwait(false);
             Array.Clear(_scratchBuffer, 0, count);
             if (result.Error is not null)
             {
@@ -273,7 +362,7 @@ internal sealed class WriteRetryQueue : IDisposable
                 return true;
             }
 
-            totalFlushed += count;
+            totalFlushed += sendCount;
         }
 
         if (_hasFlushWarnings)
