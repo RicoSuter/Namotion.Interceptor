@@ -55,15 +55,39 @@ Every contract carries `[SubjectAbstraction]` and a `[Description]`, and reading
 | Contract | Members | Position | Shared by |
 |---|---|---|---|
 | `Sensors/ICarbonDioxideSensor` | `decimal? CarbonDioxide` (`StateUnit.PartsPerMillion`) | 280 | Ecowitt WH45, Z-Wave sensor type CO₂, Zigbee and Matter CO₂ measurement |
-| `Sensors/IParticulateMatterSensor` | `decimal? FineParticulateMatter` (PM2.5, `StateUnit.MicrogramPerCubicMeter`) | 285 | Ecowitt WH41/WH45, Zigbee and Matter PM2.5 measurement. PM10 joins once a device reports it |
+| `Sensors/IPm25Sensor` | `decimal? Pm25` (`StateUnit.MicrogramPerCubicMeter`) | 285 | Ecowitt WH41/WH45, Zigbee and Matter PM2.5 measurement |
 | `Sensors/IWaterLeakSensor` | `bool? IsLeakDetected` (`IsDiscrete`) | 290 | Ecowitt WH55, Z-Wave Notification Water, Zigbee IAS Zone, Matter Water Leak Detector |
 | `Sensors/ITamperSensor` | `bool? IsTampered` (`IsDiscrete`) | 295 | Z-Wave Home Security tampering, Zigbee IAS Zone tamper bit |
 | `Sensors/ISmokeSensor` | `bool? IsSmokeDetected` (`IsDiscrete`) | 180 | Z-Wave Notification Smoke, Zigbee IAS fire, Matter Smoke CO Alarm |
 | `Sensors/ICarbonMonoxideSensor` | `bool? IsCarbonMonoxideDetected` (`IsDiscrete`) | 181 | Z-Wave Notification CO, Zigbee IAS CO, Matter Smoke CO Alarm |
-| `Devices/IPairingController` | `bool IsPairing` (state), `StartPairingAsync`, `StopPairingAsync` (operations) | 190 | Z-Wave inclusion, Zigbee permit join, Matter commissioning window, a later Hue light search |
+| `Devices/IPairingController` | `bool IsPairing` (state), `StartPairingAsync(TimeSpan? duration)`, `StopPairingAsync` (operations) | 190 | Z-Wave inclusion, Zigbee permit join, a later Hue light search. A `null` duration uses the default of the hub |
 | `Inputs/IMultiPressButtonDevice : IButtonDevice` | `int? PressCount`: the number of presses of the sequence that ended with `Release`, `null` while the button is idle | 151 | Hue `double_short_release`, Z-Wave Central Scene 2x to 5x, Matter Switch MultiPressComplete |
 
-The smoke and carbon monoxide contracts follow the `I{Concept}Sensor` naming of the other sensors. A carbon monoxide concentration in ppm, as Matter reports it, would later be added to `ICarbonMonoxideSensor` as a second member.
+The smoke and carbon monoxide contracts follow the `I{Concept}Sensor` naming of the other sensors. Particulate matter has one contract per particle size, as Matter (one cluster per size), Zigbee and Home Assistant (`pm1`, `pm25`, `pm10`) have, so that a device implements only the sizes it measures; `IPm25Sensor` uses the established name of the quantity because no plain English name exists for PM2.5, PM10 or PM1.
+
+The XML documentation of each contract states its semantics, so that every integration maps its protocol the same way:
+
+- `IsSmokeDetected` and `IsCarbonMonoxideDetected` are true for every alarm level (Matter Warning and Critical, Z-Wave detected events), false when the device reports normal, and `null` when unknown. Test, fault and end-of-life states are not alarms.
+- `IsTampered` is true from the tamper event until the device reports idle. A device that never reports idle resets it after a timeout that its implementation documents.
+- `IsLeakDetected` is true while the device reports a leak, also for a leak at an unknown location.
+- `PressCount` is set together with the final `ButtonState.Release` of a press sequence and is `null` while the button is idle; `ButtonEvent.PressCount` carries the same count.
+- `IsPairing` is true while the hub accepts new devices; it turns false when the window closes on its own, after a device was added or when `StopPairingAsync` is called.
+
+### Fit with Other Ecosystems
+
+Each new contract was checked against Matter, Zigbee (ZCL clusters and the actions zigbee2mqtt exposes), Home Assistant device classes and Z-Wave:
+
+| Contract | Matter | Zigbee | Home Assistant | Z-Wave |
+|---|---|---|---|---|
+| `ICarbonDioxideSensor` | CO₂ Concentration Measurement | CO₂ measurement cluster | `carbon_dioxide` | Multilevel Sensor CO₂ |
+| `IPm25Sensor` | PM2.5 Concentration Measurement | PM2.5 measurement cluster | `pm25` | (none) |
+| `IWaterLeakSensor` | Water Leak Detector | IAS Zone water | `moisture` | Notification Water |
+| `ITamperSensor` | (vendor specific) | IAS Zone tamper bit | `tamper` | Notification Home Security |
+| `ISmokeSensor` | Smoke CO Alarm `SmokeState` | IAS Zone fire | `smoke` | Notification Smoke |
+| `ICarbonMonoxideSensor` | Smoke CO Alarm `COState` | IAS Zone CO | `carbon_monoxide` | Notification CO |
+| `IPairingController` | (code based, see the checklist) | Permit join | (none) | Inclusion |
+| `IMultiPressButtonDevice` | Switch MultiPressComplete | Single, double and triple actions | Event entity | Central Scene |
+| `IBatteryState.IsBatteryLow` | Power Source charge level | Battery alarm | `battery` | Battery 0xFF |
 
 ### Changes to Existing Contracts
 
@@ -73,7 +97,7 @@ The smoke and carbon monoxide contracts follow the `I{Concept}Sensor` naming of 
 
 ### Retrofits
 
-- **Ecowitt**: `EcowittCo2Sensor` implements `ICarbonDioxideSensor` (`Co2` becomes `CarbonDioxide`, `Co2Avg24h` becomes `CarbonDioxideDailyAverage`), `EcowittPm25Sensor` implements `IParticulateMatterSensor` (`Pm25` becomes `FineParticulateMatter`, `Pm25Avg24h` becomes `FineParticulateMatterDailyAverage`) and `EcowittLeakSensor` implements `IWaterLeakSensor` (`IsLeaking` becomes `IsLeakDetected`).
+- **Ecowitt**: `EcowittCo2Sensor` implements `ICarbonDioxideSensor` (`Co2` becomes `CarbonDioxide`, `Co2Avg24h` becomes `CarbonDioxideDailyAverage`), `EcowittPm25Sensor` implements `IPm25Sensor` (`Pm25` keeps its name, `Pm25Avg24h` becomes `Pm25DailyAverage`) and `EcowittLeakSensor` implements `IWaterLeakSensor` (`IsLeaking` becomes `IsLeakDetected`).
 - **Hue**: `HueButton` implements `IMultiPressButtonDevice` and maps `double_short_release` to `Release` with `PressCount` 2. Single releases report 1.
 
 These renames change the paths of the properties, so history recorded under the old names is not continued and automations or pages that use them must be updated. The pull request lists each rename as a breaking change with its migration step.
@@ -85,8 +109,9 @@ Concepts that Matter, Zigbee or a v1 migration will need, not added until an int
 - Thermostat (`IThermostatState`, `IThermostatController`: setpoint, mode, operating state)
 - Valve (`IValveState`, `IValveController`), with the migration of the Gardena irrigation valves and Z-Wave or Matter water valves
 - Radio signal and link quality of mesh devices (`INetworkAdapter.SignalStrength` assumes an IP adapter)
-- Coarse particulate matter (PM10), volatile organic compounds and air quality indexes
-- Carbon monoxide concentration in ppm
+- `IPm10Sensor` and `IPm1Sensor`, volatile organic compounds and air quality indexes
+- Carbon monoxide concentration in ppm (`ICarbonMonoxideConcentrationSensor`), as Matter measures it next to the alarm
+- Pairing with a setup code (`ISetupCodePairingController`), for Matter commissioning and Z-Wave S2 or SmartStart
 
 ## Change 2: Z-Wave SDK (Sub-Project 1)
 
