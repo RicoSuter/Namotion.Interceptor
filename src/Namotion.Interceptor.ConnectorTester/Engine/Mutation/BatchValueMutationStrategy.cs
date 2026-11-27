@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -10,7 +11,7 @@ namespace Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 /// Used for load profiles (NumberOfBatches > 0).
 /// Mutates ValueMutationRate nodes per second, spread across NumberOfBatches
 /// batches with even distribution via a PeriodicTimer at 110% tick rate.
-/// Each participant mutates a single fixed property (participantIndex % 4)
+/// Each participant mutates a single fixed property (participantIndex % TestNode.ValuePropertyCount)
 /// to avoid OPC UA subscription coalescing.
 /// When UseTransactions is enabled, each batch is wrapped in a transaction
 /// (sequential, since transactions are not thread-safe with Parallel.For).
@@ -23,11 +24,13 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
     private readonly MutationCounters _counters;
     private readonly ILogger _logger;
     private readonly string _participantName;
+    private readonly WriteDurabilityLedger? _ledger;
     private readonly bool _useTransactions;
     private readonly int _valueMutationRate;
     private readonly int _numberOfBatches;
     private readonly int _participantIndex;
 
+    /// <summary>When <paramref name="ledger"/> is given, records every applied write in it.</summary>
     public BatchValueMutationStrategy(
         KnownNodeGraph graph,
         TestCycleCoordinator coordinator,
@@ -36,7 +39,8 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
         ParticipantConfiguration participantConfiguration,
         int numberOfBatches,
         int participantIndex,
-        ILogger logger)
+        ILogger logger,
+        WriteDurabilityLedger? ledger = null)
     {
         _graph = graph;
         _coordinator = coordinator;
@@ -44,6 +48,7 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
         _counters = counters;
         _logger = logger;
         _participantName = participantConfiguration.Name;
+        _ledger = ledger;
         _useTransactions = participantConfiguration.UseTransactions;
         _valueMutationRate = participantConfiguration.ValueMutationRate;
         _numberOfBatches = numberOfBatches;
@@ -70,7 +75,7 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
         var nodeIndex = 0;
         var mutationsThisSecond = 0;
         var cycleStart = Stopwatch.GetTimestamp();
-        var property = _participantIndex % 4;
+        var property = _participantIndex % TestNode.ValuePropertyCount;
 
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
@@ -132,15 +137,21 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
         using var transaction = await _context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort);
 
+        var uncommittedWrites = _ledger is null ? null : new List<(TestNode Node, int Property, long Counter)>(count);
         using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
         {
             for (var j = 0; j < count; j++)
             {
-                MutateNode(nodes[(nodeIndex + j) % nodeCount], property);
+                MutateNode(nodes[(nodeIndex + j) % nodeCount], property, uncommittedWrites);
             }
         }
 
-        await CommitFailureClassifier.CommitAndRecordAsync(transaction, _counters, _logger, _participantName, cancellationToken);
+        var failure = await CommitFailureClassifier.CommitAndRecordAsync(
+            transaction, _counters, _logger, _participantName, cancellationToken);
+        if (uncommittedWrites is not null)
+        {
+            _ledger!.RecordCommit(uncommittedWrites, failure);
+        }
     }
 
     private void MutateBatchParallel(
@@ -159,24 +170,19 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
         });
     }
 
-    private void MutateNode(TestNode node, int property)
+    private void MutateNode(
+        TestNode node, int property, List<(TestNode Node, int Property, long Counter)>? uncommittedWrites = null)
     {
         var counter = GlobalMutationCounter.Next();
+        TestNode.WriteValueProperty(node, property, counter);
 
-        switch (property)
+        if (uncommittedWrites is null)
         {
-            case 0:
-                node.StringValue = counter.ToString("x8");
-                break;
-            case 1:
-                node.DecimalValue = counter / 100m;
-                break;
-            case 2:
-                node.IntValue = (int)(counter % int.MaxValue);
-                break;
-            case 3:
-                node.LongValue = counter;
-                break;
+            _ledger?.Record(node, property, counter);
+        }
+        else
+        {
+            uncommittedWrites.Add((node, property, counter));
         }
 
         _counters.IncrementValue();

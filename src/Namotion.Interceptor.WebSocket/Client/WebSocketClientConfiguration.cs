@@ -43,7 +43,8 @@ public class WebSocketClientConfiguration
     public TimeSpan BufferTime { get; set; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
-    /// Retry time for failed writes. Default: 10 seconds
+    /// Gets or sets the delay before the connection loop retries a failed connect, and the interval at which writes
+    /// queued for retry are retried while the source is synchronized. Default is 10 seconds.
     /// </summary>
     public TimeSpan RetryTime { get; set; } = TimeSpan.FromSeconds(10);
 

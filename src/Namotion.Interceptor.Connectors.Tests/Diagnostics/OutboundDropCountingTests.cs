@@ -51,7 +51,7 @@ public class OutboundDropCountingTests
         });
 
         // Act
-        await source.ReconcileRetryQueueAsync(CancellationToken.None);
+        await source.ReconcileRetryQueueAsync(onlyWhenDue: false, CancellationToken.None);
 
         // Assert
         Assert.Equal(1, source.Diagnostics.OutboundRetries.TotalDropped);
@@ -79,7 +79,7 @@ public class OutboundDropCountingTests
         });
 
         // Act
-        await source.ReconcileRetryQueueAsync(CancellationToken.None);
+        await source.ReconcileRetryQueueAsync(onlyWhenDue: false, CancellationToken.None);
 
         // Assert
         Assert.Equal(1, source.Diagnostics.OutboundRetries.TotalDropped);

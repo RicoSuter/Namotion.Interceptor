@@ -10,11 +10,14 @@ namespace Namotion.Interceptor.ConnectorTester.Engine.Verification;
 
 /// <summary>
 /// Top-level orchestrator. Runs repeating mutate/converge cycles.
-/// When a cycle fails to converge or has an unexpected commit failure, exits the process with non-zero exit code.
+/// When a cycle fails to converge, has an unexpected commit failure or loses a write, exits the process with non-zero
+/// exit code.
 /// </summary>
 public class VerificationEngine : BackgroundService
 {
     private static readonly TimeSpan SnapshotPollInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan SourceSynchronizationTimeout = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan SourceSynchronizationPollInterval = TimeSpan.FromSeconds(1);
 
     private readonly CsvFile<CycleCsvRow> _cyclesCsv;
     private readonly CsvFile<ChaosEventCsvRow> _chaosEventsCsv;
@@ -98,13 +101,21 @@ public class VerificationEngine : BackgroundService
 
         LogStartupInformation();
 
+        if (_configuration.VerifyWriteDurability)
+        {
+            await WaitForSynchronizedSourcesAsync(stoppingToken);
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             _cycleNumber++;
             _coordinator.SetCycle(_cycleNumber);
 
             foreach (var engine in _mutationEngines)
+            {
                 engine.ResetCounters();
+                engine.ResetDurabilityLedger();
+            }
             foreach (var engine in _chaosEngines)
                 engine.ResetCounters();
 
@@ -136,9 +147,14 @@ public class VerificationEngine : BackgroundService
             var outcome = await _convergenceChecker.WaitForConvergenceAsync(stoppingToken);
             cycleStopwatch.Stop();
 
-            if (CycleVerdict.Decide(outcome.Converged, _mutationEngines) == CycleResult.Pass)
+            List<WriteDurabilityResult> durabilityResults = outcome.Converged
+                ? _mutationEngines.Select(engine => engine.VerifyWriteDurability()).ToList()
+                : [];
+            LogInconclusiveDurability(durabilityResults);
+
+            if (CycleVerdict.Decide(outcome.Converged, _mutationEngines, durabilityResults) == CycleResult.Pass)
             {
-                _findingsLog.AppendIfAny(outcome.Snapshots, outcome.Elapsed);
+                _findingsLog.AppendIfAny(outcome.Snapshots, outcome.Elapsed, durabilityResults);
                 _cycleStatistics.RecordPass(_cycleNumber, cycleStopwatch.Elapsed, outcome.Elapsed, activeProfileName);
                 var (subjects, properties) = SnapshotComparer.CountSubjectsAndProperties(outcome.Snapshots[0].Snapshot);
                 _logger.LogInformation(
@@ -152,8 +168,26 @@ public class VerificationEngine : BackgroundService
 
             if (outcome.Converged)
             {
-                _logger.LogError("=== Cycle {Cycle}: FAIL ({Count} unexpected commit failures, see the logged errors) ===",
-                    _cycleNumber, _mutationEngines.Sum(engine => engine.UnexpectedFailedCommitCount));
+                var unexpectedFailedCommitCount = _mutationEngines.Sum(engine => engine.UnexpectedFailedCommitCount);
+                if (unexpectedFailedCommitCount > 0)
+                {
+                    _logger.LogError("=== Cycle {Cycle}: FAIL ({Count} unexpected commit failures, see the logged errors) ===",
+                        _cycleNumber, unexpectedFailedCommitCount);
+                }
+
+                var durabilityViolations = durabilityResults
+                    .Where(result => result.IsFailure)
+                    .SelectMany(result => result.Violations)
+                    .ToList();
+                if (durabilityViolations.Count > 0)
+                {
+                    _logger.LogError("=== Cycle {Cycle}: FAIL ({Count} write-durability violation(s)) ===",
+                        _cycleNumber, durabilityViolations.Count);
+                    foreach (var violation in durabilityViolations)
+                    {
+                        _logger.LogError("  {Violation}", violation);
+                    }
+                }
             }
             else
             {
@@ -169,6 +203,32 @@ public class VerificationEngine : BackgroundService
             _failed = true;
             _applicationLifetime.StopApplication();
             return;
+        }
+    }
+
+    private async Task WaitForSynchronizedSourcesAsync(CancellationToken stoppingToken)
+    {
+        var unsynchronized = await SourceSynchronization.WaitAsync(
+            _mutationEngines, SourceSynchronizationTimeout, SourceSynchronizationPollInterval, stoppingToken);
+        if (unsynchronized.Count > 0)
+        {
+            _logger.LogWarning(
+                "Sources of {Participants} are not synchronized after {Timeout}, so the write-durability check of cycle 1 may report writes they discarded before claiming their properties",
+                string.Join(", ", unsynchronized), SourceSynchronizationTimeout);
+        }
+    }
+
+    private void LogInconclusiveDurability(IEnumerable<WriteDurabilityResult> durabilityResults)
+    {
+        foreach (var result in durabilityResults.Where(result => result.IsInconclusive))
+        {
+            _logger.LogWarning(
+                "Cycle {Cycle}: write durability of {Participant} is inconclusive: {ViolationCount} write(s) lost, but its source's full retry queue dropped {DroppedCount} write(s) in the cycle",
+                _cycleNumber, result.Participant, result.Violations.Count, result.DroppedWriteCount);
+            foreach (var violation in result.Violations)
+            {
+                _logger.LogWarning("  {Violation}", violation);
+            }
         }
     }
 
@@ -190,6 +250,11 @@ public class VerificationEngine : BackgroundService
         {
             _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
                 engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate);
+        }
+
+        if (_configuration.VerifyWriteDurability)
+        {
+            _logger.LogInformation("  Write-durability oracle: enabled");
         }
 
         if (_configuration.ChaosProfiles.Count > 0)

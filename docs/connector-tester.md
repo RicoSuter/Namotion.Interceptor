@@ -19,6 +19,10 @@ dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile o
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-chaos --configuration Release
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-chaos --configuration Release
 
+# Write-durability test: the chaos profile plus the write-durability oracle
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-durability --configuration Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-durability --configuration Release
+
 # Load test: throughput and latency at 20k changes/sec
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load --configuration Release
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-load --configuration Release
@@ -88,7 +92,23 @@ Each test cycle has two phases:
 
 2. **Converge phase**: The VerificationEngine pauses all engines via the TestCycleCoordinator, recovers any active chaos disruptions, waits a grace period (20s for OPC UA) for reconnection, then polls snapshots every 5 seconds. `SnapshotComparer.Capture` produces a normalized, deterministic JSON per participant. Structural property timestamps (Collection, Dictionary, Object) are stripped since they reflect local creation time. Value property timestamps are preserved and must converge. A null timestamp on either side matches any value (legitimate after server rebuild or when the equality interceptor suppresses a redundant write).
 
-A cycle **passes** when all participant snapshots match. It **fails** if the convergence timeout expires. On failure, the process writes per-participant JSON snapshots to disk, logs per-property diffs with write timestamps, runs a re-sync diagnostic, gracefully shuts down all hosted services, and exits with code 1.
+A cycle **passes** when all participant snapshots match and, with the [write-durability oracle](#write-durability-oracle) enabled, every participant still holds its own writes. It **fails** if the convergence timeout expires, a commit fails unexpectedly (see [Mutation Engines](#mutation-engines)), or the oracle reports a lost write. When it did not converge, the process writes per-participant JSON snapshots to disk, logs per-property diffs with write timestamps and runs a re-sync diagnostic. On any failure, it gracefully shuts down all hosted services and exits with code 1.
+
+### Write-Durability Oracle
+
+The snapshot comparison checks that participants agree, not that their writes survived. A write lost on both sides, for example because a connection dropped after the client sent it but before the server applied it, leaves every participant agreeing on the older value, and the cycle passes.
+
+`VerifyWriteDurability: true` adds a check for that, and it combines with either mutation engine, with or without chaos. Each participant records the last value it wrote to each node. A write in a transaction counts once its commit applied it, so a failed commit records only the changes it applied, which for a conflict is none. After a cycle converges, `VerificationEngine` checks that every participant's own model still holds those values, and reports a recorded node the model no longer contains, for example because a connector replaced the subject instance, as lost too, by its property name alone since a detached node has no path. A mismatch fails the cycle, skips the snapshot diagnostics, since the participants agree, and logs the participant, the property path, the written value and the value the model holds. Before the first cycle, `VerificationEngine` waits up to two minutes until every client's source has been synchronized once, because a write made before a source claims its properties is discarded without being counted ([known limitation](connectors.md#known-limitations)); when a source is still not synchronized then, it logs a warning and starts anyway. A `--participant` run has no verification engine, so it ignores the option and skips its validation.
+
+The check fails on any lost write except one: a client's [write retry queue](connectors.md#write-retry-queue) drops its oldest writes when it is full. When a client's `Diagnostics.OutboundRetries.TotalDropped` changed in a cycle, a mismatch on that client is inconclusive instead: it is logged as a warning with the change, recorded as a `durability-inconclusive` finding, and does not fail the cycle. One dropped write makes all of that client's violations in the cycle inconclusive, because the check cannot tell which writes the queue dropped. Every other loss fails it, including the [known limitation](connectors.md#known-limitations) [#362](https://github.com/RicoSuter/Namotion.Interceptor/issues/362), where a connector-internal reconnect neither reconciles nor flushes parked writes, until that is fixed. The retry queue outlives a chaos kill, but writes parked before the kill are sent only by a later flush, which that limitation can withhold.
+
+The check is sound only when each property has a single writer, because another participant's later write looks exactly like a loss. The option therefore pins each RandomMutationEngine participant to the `TestNode` value property at its participant index, which the BatchMutationEngine does anyway, and startup rejects it with more than four participants or a `StructuralMutationRate` above 0. With `UseTransactions`, a BestEffort commit that times out can be reported as failed although the source accepted the write, and the check may report that write as a loss. With the BatchMutationEngine, recording takes a lock on every write, so load numbers from such a run are not benchmark numbers.
+
+`opcua-durability` is `opcua-chaos` and `websocket-durability` is `websocket-chaos`, each with the option on, and a test checks that they differ in nothing else. The chaos profiles keep their overlapping writers, which only the agreement check covers. To enable it on another profile, set it as an environment variable, which overrides the profile's `appsettings` file:
+
+```bash
+ConnectorTester__VerifyWriteDurability=true dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-load --configuration Release
+```
 
 ### Chaos via IFaultInjectable
 
@@ -169,7 +189,7 @@ Total mutations: 17,200 | Total chaos events: 7
   server: kill at 21:08:38 (5.4s)
 ```
 
-**Failure**: Prints `FAIL`, runs failure diagnostics, then exits with code 1. A cycle that converged but had an unexpected commit failure prints `FAIL (N unexpected commit failures, see the logged errors)` instead and skips the diagnostics:
+**Failure**: Prints `FAIL`, runs failure diagnostics, then exits with code 1. A cycle that converged but had an unexpected commit failure prints `FAIL (N unexpected commit failures, see the logged errors)` instead and skips the diagnostics. One that converged but lost a write under the [write-durability oracle](#write-durability-oracle) prints `FAIL (N write-durability violation(s))`, followed by one line per lost write such as `client-a: Collection[3].DecimalValue: wrote '12.34', model holds '12.3'`, and skips the diagnostics too:
 
 ```
 === Cycle 3: FAIL (did not converge within 00:01:00) ===
@@ -183,10 +203,11 @@ The per-cycle JSON files are formatted (indented) and can be diffed with any tex
 
 ### Findings Log
 
-`logs/{run}/findings.log` records non-failure observations during passing cycles. Two finding types:
+`logs/{run}/findings.log` records non-failure observations during passing cycles. Three finding types:
 
 - **`slow-convergence`**: convergence took >10s with no chaos active. May indicate a performance regression.
 - **`null-timestamp`**: the null-timestamp rule forgave a mismatch (one participant had a write timestamp, the other did not). Typically happens after a server rebuild or when the equality interceptor suppressed a redundant write. Not a failure, but worth investigating if frequent.
+- **`durability-inconclusive`**: the [write-durability oracle](#write-durability-oracle) found lost writes on a client whose retry queue dropped writes in the same cycle, so the loss may be one the write contract allows. A frequent finding means the queue is too small for the outage length.
 
 ### Chaos Events Log
 
@@ -253,6 +274,7 @@ See `appsettings.opcua-chaos.json` and `appsettings.opcua-load.json` for example
 | `Clients[].Chaos.IntervalMin/Max` | `00:01:00`/`00:05:00` | Time between disruptions |
 | `Clients[].Chaos.DurationMin/Max` | `00:00:05`/`00:00:30` | Disruption hold time |
 | `ChaosProfiles` | `[]` | Named profiles that rotate round-robin. Empty = all chaos always active |
+| `VerifyWriteDurability` | `false` | Enables the [write-durability oracle](#write-durability-oracle) and fixes each participant to its own `TestNode` value property. At most four participants and no structural mutations |
 | `OpcUa.MinimumSecurityMode` | `"None"` | `"None"`, `"Sign"` or `"SignAndEncrypt"`, see [OPC UA secured](#connector-specific-behaviors) |
 
 Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfiguration.cs`, `ChaosConfiguration.cs`, and `OpcUaConfiguration.cs`. Chaos intervals must be shorter than `MutatePhaseDuration`. Set `IntervalMax` to at most half of `MutatePhaseDuration`.
@@ -305,6 +327,8 @@ The snapshot comparison **reliably detects**:
 - Collection/dictionary structural mismatches
 - Object reference integrity breaks
 - Data loss that isn't recovered within the convergence window
+
+The [write-durability oracle](#write-durability-oracle), when enabled, also detects a write lost on every participant, which leaves them agreeing on the older value and passes the snapshot comparison.
 
 The snapshot comparison **does not detect** (by design):
 - Transient state changes lost to merging (ChangeQueueProcessor collapses each flush to one change per property within its buffer window, and drops a commit that a later commit has already superseded)

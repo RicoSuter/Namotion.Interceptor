@@ -1,7 +1,10 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors.Diagnostics;
+using Namotion.Interceptor.Connectors.Tests.Models;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
@@ -793,6 +796,57 @@ public class WriteRetryQueueTests
         // Assert
         Assert.Empty(drained);
         Assert.True(queue.IsEmpty);
+    }
+
+    [Fact]
+    public async Task WhenAQueuedWriteIsSupersededByALaterQueuedWrite_ThenOnlyTheLaterWriteIsSentAndBothSettle()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+        var person = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        person.FirstName = "One";
+        person.FirstName = "Three";
+        var firstNameChanges = new List<SubjectPropertyChange>();
+        while (subscription.TryDequeueImmediate(out var change))
+        {
+            if (change.Property.Name == nameof(Person.FirstName))
+            {
+                firstNameChanges.Add(change);
+            }
+        }
+
+        Assert.Equal(2, firstNameChanges.Count);
+
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        using var queue = new WriteRetryQueue(100, NullLogger.Instance, metrics);
+        var sentValues = new List<string?>();
+        var source = new Mock<ISubjectSource>();
+        source.Setup(item => item.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                foreach (var change in changes.Span)
+                {
+                    sentValues.Add(change.GetNewValue<string?>());
+                }
+
+                return ValueTask.FromResult(WriteResult.Success);
+            });
+        queue.Enqueue(firstNameChanges.ToArray());
+
+        // Act
+        var result = await queue.FlushAsync(source.Object, CancellationToken.None);
+
+        // Assert
+        Assert.True(result);
+        Assert.Equal(["Three"], sentValues);
+        Assert.True(queue.IsEmpty);
+        Assert.Equal(0, diagnostics.TotalDropped);
     }
 
     private static SubjectPropertyChange CreateChange(int id)

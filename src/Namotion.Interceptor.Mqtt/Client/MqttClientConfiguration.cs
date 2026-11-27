@@ -131,7 +131,8 @@ public class MqttClientConfiguration
     public TimeSpan BufferTime { get; init; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
-    /// Gets or sets the time between retry attempts for failed writes. Default is 10 seconds.
+    /// Gets the delay before the connection loop retries a failed connect, and the interval at which writes
+    /// queued for retry are retried while the source is synchronized. Default is 10 seconds.
     /// </summary>
     public TimeSpan RetryTime { get; init; } = TimeSpan.FromSeconds(10);
 

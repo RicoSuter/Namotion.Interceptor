@@ -34,8 +34,9 @@ public static class CommitFailureClassifier
     /// <summary>
     /// Counts the commit of <paramref name="transaction"/>, commits it and records a
     /// <see cref="SubjectTransactionException"/> it throws (see <see cref="Record"/>); other exceptions propagate.
+    /// Returns the recorded exception, or <c>null</c> when the commit succeeded.
     /// </summary>
-    public static async ValueTask CommitAndRecordAsync(
+    public static async ValueTask<SubjectTransactionException?> CommitAndRecordAsync(
         SubjectTransaction transaction,
         MutationCounters counters,
         ILogger logger,
@@ -46,10 +47,12 @@ public static class CommitFailureClassifier
         try
         {
             await transaction.CommitAsync(cancellationToken);
+            return null;
         }
         catch (SubjectTransactionException exception)
         {
             Record(exception, counters, logger, participantName);
+            return exception;
         }
     }
 

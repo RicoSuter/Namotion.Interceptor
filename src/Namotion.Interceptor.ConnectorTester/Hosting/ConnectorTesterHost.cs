@@ -93,6 +93,12 @@ public sealed class ConnectorTesterHost
         }
 
         var runModeSelection = RunModeSelector.Select(args, configuration);
+        var verifyWriteDurability = configuration.VerifyWriteDurability && runModeSelection.Mode == RunMode.Verify;
+        if (verifyWriteDurability)
+        {
+            configuration.ValidateVerifyWriteDurability();
+        }
+
         var connectorFactory = ConnectorFactoryRegistry.Resolve(configuration, runDirectory);
 
         var participants = new Dictionary<string, TestNode>();
@@ -149,10 +155,14 @@ public sealed class ConnectorTesterHost
             // Mutation engine stays in the main host so it shares the verification coordinator
             // graph; its logger category already encodes the participant name explicitly.
             var mutationLogger = sharedLoggerFactory.CreateLogger($"MutationEngine/{participantConfiguration.Name}");
+            var source = verifyWriteDurability
+                ? ParticipantSourceResolver.Resolve(bundle.Connectors, root, participantConfiguration.Name, isServer)
+                : null;
             var mutationEngine = configuration.NumberOfBatches > 0
                 ? MutationEngine.CreateBatch(root, participantConfiguration, coordinator, mutationLogger,
-                    configuration.NumberOfBatches, participantConfiguration.Index)
-                : MutationEngine.CreateRandom(root, participantConfiguration, coordinator, mutationLogger);
+                    configuration.NumberOfBatches, participantConfiguration.Index, verifyWriteDurability, source)
+                : MutationEngine.CreateRandom(root, participantConfiguration, coordinator, mutationLogger,
+                    verifyWriteDurability, source);
             mutationEngines.Add(mutationEngine);
             builder.Services.AddSingleton<IHostedService>(mutationEngine);
         }
