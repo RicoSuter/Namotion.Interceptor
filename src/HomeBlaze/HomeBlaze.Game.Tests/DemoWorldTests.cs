@@ -1,4 +1,5 @@
 using HomeBlaze.Game.Tests.Testing;
+using HomeBlaze.Game.Tools;
 using HomeBlaze.Game.World;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -28,7 +29,7 @@ public class DemoWorldTests
     public DemoWorldTests()
     {
         var typeProvider = new TypeProvider();
-        typeProvider.AddTypes([typeof(Game), typeof(GamePlayer), typeof(Wall), typeof(Door), typeof(Tree), typeof(Animal), typeof(WallTool), typeof(TreeTool)]);
+        typeProvider.AddTypes([typeof(Game), typeof(GamePlayer), typeof(Wall), typeof(Door), typeof(Tree), typeof(Animal), typeof(WallTool), typeof(TreeTool), typeof(EmoteTool)]);
         var serializer = new ConfigurableSubjectSerializer(typeProvider, new ServiceCollection().AddLogging().BuildServiceProvider());
         _game = Assert.IsType<Game>(serializer.Deserialize(File.ReadAllText(RepositoryPaths.Get(DemoWorldPath))));
     }
@@ -55,6 +56,7 @@ public class DemoWorldTests
         Assert.Equal(Enumerable.Range(0, Tree.VariantCount), forest.Select(tree => tree.Variant).Distinct().Order());
         Assert.IsType<WallTool>(_game.Tools["wall-tool"]);
         Assert.IsType<TreeTool>(_game.Tools["tree-tool"]);
+        Assert.IsType<EmoteTool>(_game.Tools["emote-tool"]);
     }
 
     [Fact]

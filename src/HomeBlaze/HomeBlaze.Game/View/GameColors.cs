@@ -7,17 +7,30 @@ internal static class GameColors
     /// <summary>
     /// Gets a color that stays the same for the id across sessions and processes.
     /// </summary>
-    public static string FromId(string id)
+    public static string FromId(string id) => FromHsl(Hash(id) % 360, 0.65, 0.55);
+
+    /// <summary>
+    /// Gets the stored color in lower case when it is a <c>#rrggbb</c> color, else the color of the id.
+    /// </summary>
+    public static string Resolve(string? stored, string id) =>
+        stored is { Length: 7 } && stored[0] == '#' && !stored.AsSpan(1).ContainsAnyExcept("0123456789abcdefABCDEF")
+            ? stored.ToLowerInvariant()
+            : FromId(id);
+
+    /// <summary>
+    /// Gets a hash that stays the same across sessions and processes.
+    /// </summary>
+    internal static uint Hash(string value)
     {
         // FNV-1a, because string.GetHashCode differs per process.
         var hash = 2166136261u;
-        foreach (var character in id)
+        foreach (var character in value)
         {
             hash ^= character;
             hash *= 16777619u;
         }
 
-        return FromHsl(hash % 360, 0.65, 0.55);
+        return hash;
     }
 
     private static string FromHsl(double hue, double saturation, double lightness)

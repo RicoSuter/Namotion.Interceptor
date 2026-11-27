@@ -2,7 +2,7 @@
   "$type": "HomeBlaze.Game.Game",
   "name": "Demo world",
   "players": {},
-  "tools": {"wall-tool": {"$type": "HomeBlaze.Game.Buildings.WallTool"}, "tree-tool": {"$type": "HomeBlaze.Game.Nature.TreeTool"}},
+  "tools": {"wall-tool": {"$type": "HomeBlaze.Game.Buildings.WallTool"}, "tree-tool": {"$type": "HomeBlaze.Game.Nature.TreeTool"}, "emote-tool": {"$type": "HomeBlaze.Game.Tools.EmoteTool"}},
   "regions": {
     "-1_-1": {
       "objects": {

@@ -100,6 +100,7 @@ public partial class Game : BackgroundService, IConfigurable, ITitleProvider, II
         _simulation.AddTickHandler(_world.PublishSnapshot);
         _simulation.AddTickHandler(UpdateVoiceLoop);
         _simulation.AddTickHandler(UpdateVolumeTable);
+        _simulation.AddTickHandler(_world.ExpireAnimations);
         _simulation.AddTickHandler(PublishWhenDue);
         _simulation.AddTickHandler(StartSaveWhenDue);
         _simulation.AddTickHandler(CompleteWrittenPlacements);

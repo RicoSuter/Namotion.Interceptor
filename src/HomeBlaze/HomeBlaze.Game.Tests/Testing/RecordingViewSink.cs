@@ -43,6 +43,12 @@ internal sealed class RecordingViewSink : IGameViewSink
     /// </summary>
     public GamePanelState Panel => Deliveries[^1].Panel;
 
+    /// <summary>
+    /// Gets the newest upserted entry of the page's own player.
+    /// </summary>
+    public GameViewEntry LastSelf() =>
+        Deliveries.SelectMany(delivery => delivery.Update.Upserted).Last(entry => entry.IsSelf);
+
     public void Clear()
     {
         lock (_lock)

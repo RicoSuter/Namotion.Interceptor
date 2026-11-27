@@ -1,3 +1,4 @@
+using HomeBlaze.Game.Abstractions;
 using HomeBlaze.Game.Clients;
 using HomeBlaze.Game.Simulation;
 using HomeBlaze.Game.Voice;
@@ -239,6 +240,37 @@ public class GameWorldStateTests
     }
 
     [Fact]
+    public void WhenPlayersAreTakenOverAfterARestart_ThenKeptPlayersTakeTheirSubjectsAppearance()
+    {
+        // Arrange
+        var player = Join("tab-1");
+        player.Subject.Character = "male-shirt";
+        player.Subject.Color = "#112233";
+        var players = new Dictionary<string, GamePlayer> { ["tab-1"] = player.Subject };
+
+        // Act
+        _world.TakeOverPlayers(players, isRestart: true);
+
+        // Assert
+        Assert.Equal(("male-shirt", "#112233"), (player.Character, player.Color));
+    }
+
+    [Fact]
+    public void WhenAnAppearanceWriteResolvesToTheSameValue_ThenASaveIsStillRequested()
+    {
+        // Arrange
+        var player = Join("tab-1");
+        player.Subject.Character = "robot";
+        _world.IsSaveRequested = false;
+
+        // Act
+        _world.RefreshAppearance(player.Subject);
+
+        // Assert
+        Assert.True(_world.IsSaveRequested);
+    }
+
+    [Fact]
     public void WhenPlayersAreTakenOverAfterARestart_ThenKeptPlayersTakeTheirSubjectsPositionWithTheirVoiceOff()
     {
         // Arrange
@@ -276,5 +308,33 @@ public class GameWorldStateTests
         // Assert
         Assert.Equal(1, player.MicrophonePageId);
         Assert.True(player.IsMicrophoneOn);
+    }
+
+    [Fact]
+    public void WhenPlayersAreTakenOverAfterARestart_ThenKeptPlayersLoseTheirAnimation()
+    {
+        // Arrange
+        var player = Join("tab-1");
+        player.StartAnimation("Sitting", GameVisualAnimationMode.Loop, _timeProvider.GetTimestamp());
+
+        // Act
+        _world.TakeOverPlayers(new Dictionary<string, GamePlayer> { ["tab-1"] = player.Subject }, isRestart: true);
+
+        // Assert
+        Assert.Null(player.Animation);
+    }
+
+    [Fact]
+    public void WhenPlayersAreTakenOverWithoutARestart_ThenKeptPlayersKeepTheirAnimation()
+    {
+        // Arrange
+        var player = Join("tab-1");
+        player.StartAnimation("Sitting", GameVisualAnimationMode.Loop, _timeProvider.GetTimestamp());
+
+        // Act
+        _world.TakeOverPlayers(new Dictionary<string, GamePlayer> { ["tab-1"] = player.Subject });
+
+        // Assert
+        Assert.Equal("Sitting", player.Animation);
     }
 }

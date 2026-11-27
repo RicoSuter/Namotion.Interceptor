@@ -229,6 +229,29 @@ public class GameSerializationTests
     }
 
     [Fact]
+    public void WhenAPlayerWithAPersonAndColorRoundTrips_ThenItKeepsBothAndNoAnimationIsSaved()
+    {
+        // Arrange
+        var game = new Game(Microsoft.Extensions.Logging.Abstractions.NullLogger<Game>.Instance)
+        {
+            Players = new Dictionary<string, GamePlayer>
+            {
+                ["kitchen"] = new GamePlayer { Character = "female-casual", Color = "#aa5500", Animation = "Clapping" }
+            }
+        };
+
+        // Act
+        var json = _serializer.Serialize(game);
+        var loaded = Assert.IsType<Game>(_serializer.Deserialize(json));
+
+        // Assert
+        var player = loaded.Players["kitchen"];
+        Assert.Equal(("female-casual", "#aa5500"), (player.Character, player.Color));
+        Assert.Null(player.Animation);
+        Assert.DoesNotContain("animation", json);
+    }
+
+    [Fact]
     public void WhenAPlayerHasItsVoiceOn_ThenTheTogglesAreNotSaved()
     {
         // Arrange

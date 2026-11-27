@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 
-namespace HomeBlaze.Host.Preferences;
+namespace HomeBlaze.Components.Preferences;
 
 /// <summary>
 /// Preferences that a browser remembers, one cookie per key. The prerendered page and the interactive circuit read the same values.
@@ -14,7 +14,7 @@ public sealed class BrowserPreferences : IAsyncDisposable
 {
     private const string CookiePrefix = "homeblaze.";
     private const string StateKey = "browser-preferences";
-    private const string ModulePath = "./_content/HomeBlaze.Host/js/cookies.js";
+    private const string ModulePath = "./_content/HomeBlaze.Components/js/cookies.js";
 
     private readonly IJSRuntime _jsRuntime;
     private readonly ILogger<BrowserPreferences> _logger;

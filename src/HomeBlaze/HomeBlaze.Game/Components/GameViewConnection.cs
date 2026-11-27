@@ -38,9 +38,14 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     private bool _isBroken;
     private bool _isDisposed;
 
-    public GameViewConnection(IJSRuntime jsRuntime, Game game)
+    /// <param name="jsRuntime">The runtime of the page's circuit.</param>
+    /// <param name="game">The game the view shows.</param>
+    /// <param name="graphicsPreference">The graphics choice the view starts with, as <see cref="GameGraphics.ToPreference"/>
+    /// writes it, or null for Auto.</param>
+    public GameViewConnection(IJSRuntime jsRuntime, Game game, string? graphicsPreference)
     {
         _jsRuntime = jsRuntime;
+        GraphicsPreference = graphicsPreference;
         Game = game;
         _lifetimeToken = _lifetime.Token;
     }
@@ -56,6 +61,12 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     public Game Game { get; }
 
     /// <summary>
+    /// The graphics choice of the view, as <see cref="GameGraphics.ToPreference"/> writes it: the one it started with, or
+    /// the last one <see cref="SetGraphicsAsync"/> applied.
+    /// </summary>
+    public string? GraphicsPreference { get; private set; }
+
+    /// <summary>
     /// The panel state of the last update the page took from its view session.
     /// </summary>
     public GamePanelState PanelState { get; private set; } = GamePanelState.Empty;
@@ -69,7 +80,8 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     bool IGameViewSink.IsBusy => Volatile.Read(ref _isBusy) == 1 || Volatile.Read(ref _isClosed) == 1;
 
     /// <summary>
-    /// Starts the view in the browser; a disposal meanwhile makes the module release the view.
+    /// Starts the view in the browser at <see cref="GraphicsPreference"/>; a disposal meanwhile makes the module release
+    /// the view.
     /// </summary>
     public async Task<StartResult> StartAsync(ElementReference canvas, ElementReference pad, object dotNetReference)
     {
@@ -82,7 +94,7 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
         }
 
         _module = module;
-        var options = new { viewId = ViewId, pad, stepIntervalMs = (int)Game.StepInterval.TotalMilliseconds, baseUrl = BaseUrl };
+        var options = new { viewId = ViewId, pad, stepIntervalMs = (int)Game.StepInterval.TotalMilliseconds, baseUrl = BaseUrl, graphics = GraphicsPreference };
         return await module.InvokeAsync<StartResult>("start", _lifetimeToken, canvas, dotNetReference, options);
     }
 
@@ -170,6 +182,53 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
     }
 
     /// <summary>
+    /// Applies a graphics preset in the browser, or with <see cref="GameGraphics.Custom"/> changes the setting
+    /// <paramref name="setting"/>, named as in the JSON of <see cref="GameGraphics"/>, to <paramref name="value"/>. Returns
+    /// the graphics in effect, or null when the view is gone.
+    /// </summary>
+    public async Task<GameGraphics?> SetGraphicsAsync(string preset, string? setting = null, object? value = null)
+    {
+        var choice = new Dictionary<string, object?> { ["preset"] = preset };
+        if (setting is not null)
+        {
+            choice[setting] = value;
+        }
+
+        var graphics = await InvokeGraphicsAsync("setGraphics", choice);
+        if (graphics is not null)
+        {
+            GraphicsPreference = graphics.ToPreference();
+        }
+
+        return graphics;
+    }
+
+    /// <summary>
+    /// Returns the graphics in effect in the browser, or null when the view is gone.
+    /// </summary>
+    public Task<GameGraphics?> GetGraphicsAsync() => InvokeGraphicsAsync("getGraphics", null);
+
+    private async Task<GameGraphics?> InvokeGraphicsAsync(string identifier, Dictionary<string, object?>? choice)
+    {
+        if (_isDisposed || _module is not { } module)
+        {
+            return null;
+        }
+
+        try
+        {
+            return choice is null
+                ? await module.InvokeAsync<GameGraphics?>(identifier, _lifetimeToken, ViewId)
+                : await module.InvokeAsync<GameGraphics?>(identifier, _lifetimeToken, ViewId, choice);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or JSDisconnectedException or JSException)
+        {
+            // The page went away, or the module dropped the view.
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Ends the view session in the game, which then delivers nothing more; does not wait for the game or the browser.
     /// </summary>
     public void Close()
@@ -227,5 +286,8 @@ internal sealed class GameViewConnection : IGameViewSink, IThreadPoolWorkItem, I
         }
     }
 
+    /// <summary>
+    /// The outcome of a start.
+    /// </summary>
     public sealed record StartResult(bool IsStarted, string? Error);
 }

@@ -20,6 +20,16 @@ public partial class Game
     internal const int StepBurst = 3;
 
     /// <summary>
+    /// The animations a player may start at once after a pause; one more each <see cref="AnimationInterval"/>.
+    /// </summary>
+    internal const int AnimationBurst = 3;
+
+    /// <summary>
+    /// The time a player waits between two animation starts it may make beyond the burst.
+    /// </summary>
+    internal static readonly TimeSpan AnimationInterval = TimeSpan.FromSeconds(1);
+
+    /// <summary>
     /// The time a player waits between two messages it sends.
     /// </summary>
     internal static readonly TimeSpan MessageInterval = TimeSpan.FromSeconds(1);
@@ -43,6 +53,11 @@ public partial class Game
     /// The message with which sending is refused for a caller that is not a connected player of this game.
     /// </summary>
     internal const string NoSenderMessage = "Only a player in the game can send messages.";
+
+    /// <summary>
+    /// The message with which playing an animation is refused for a caller that is not a connected player of this game.
+    /// </summary>
+    internal const string NoAnimationActorMessage = "Only a player in the game can play animations.";
 
     // Touched only on the simulation thread: the objects whose OnAddedToWorld runs.
     private readonly List<GameObject> _addedObjects = [];
@@ -155,6 +170,42 @@ public partial class Game
         var schedule = new PendingSchedule(gameObject, delay, action);
         _simulation.Post(() => schedule.Register(this));
         return schedule;
+    }
+
+    /// <inheritdoc />
+    public void PlayAnimation(GameCaller? caller, string animation, GameVisualAnimationMode mode)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(animation);
+        if (animation is "Idle" or "Walk")
+        {
+            throw new ArgumentException("Idle and Walk are played by the game.", nameof(animation));
+        }
+
+        if (!Enum.IsDefined(mode))
+        {
+            throw new ArgumentOutOfRangeException(nameof(mode));
+        }
+
+        if (caller is null || GetActor(caller) is null)
+        {
+            throw new InvalidOperationException(NoAnimationActorMessage);
+        }
+
+        var clientId = caller.ClientId;
+        _simulation.Post(() =>
+        {
+            if (_world.Players.TryGetValue(clientId, out var player) && player.IsConnected)
+            {
+                player.AnimationRateLimiter ??= new RateLimiter(_timeProvider, AnimationInterval, AnimationBurst);
+                if (!player.AnimationRateLimiter.TryTake())
+                {
+                    return;
+                }
+
+                player.StartAnimation(animation, mode, _timeProvider.GetTimestamp());
+                _world.OnAnimationChanged(player);
+            }
+        });
     }
 
     // Called from another thread, the task waits until the object set with the new objects is written, so their World

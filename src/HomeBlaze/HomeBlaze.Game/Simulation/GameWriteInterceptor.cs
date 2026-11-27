@@ -58,6 +58,7 @@ internal sealed class GameWriteInterceptor : IWriteInterceptor
             case nameof(GamePlayer.IsConnected):
             case nameof(GamePlayer.IsMicrophoneOn):
             case nameof(GamePlayer.IsAudioOn):
+            case nameof(GamePlayer.Animation):
                 return true;
             default:
                 return false;

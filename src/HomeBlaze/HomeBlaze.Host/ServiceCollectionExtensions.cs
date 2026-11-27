@@ -1,7 +1,7 @@
 using HomeBlaze.Components.Controls;
 using HomeBlaze.Components.Inputs;
+using HomeBlaze.Components.Preferences;
 using HomeBlaze.History.Blazor;
-using HomeBlaze.Host.Preferences;
 using HomeBlaze.Host.Services;
 using HomeBlaze.Host.TimeZones;
 using HomeBlaze.Services;

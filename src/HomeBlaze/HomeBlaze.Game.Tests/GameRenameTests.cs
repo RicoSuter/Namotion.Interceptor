@@ -52,8 +52,8 @@ public class GameRenameTests
             () => _context.Game.RenameAsync(null, "Kitchen", CancellationToken.None));
         var withStranger = await Assert.ThrowsAsync<InvalidOperationException>(
             () => _context.Game.RenameAsync(stranger, "Kitchen", CancellationToken.None));
-        Assert.Equal(Game.NoRenameActorMessage, withoutCaller.Message);
-        Assert.Equal(Game.NoRenameActorMessage, withStranger.Message);
+        Assert.Equal(Game.NoPlayerActorMessage, withoutCaller.Message);
+        Assert.Equal(Game.NoPlayerActorMessage, withStranger.Message);
         Assert.False(GetClient("tab-1").IsNamed);
         Assert.Null(_context.Game.GetClientName(null));
     }

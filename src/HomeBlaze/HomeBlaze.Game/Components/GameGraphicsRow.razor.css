@@ -1,0 +1,30 @@
+.game-graphics-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--mud-palette-lines-default);
+}
+
+.game-graphics-text {
+    flex: 1 1 200px;
+    min-width: 0;
+}
+
+.game-graphics-caption {
+    font-size: 12px;
+    color: var(--mud-palette-text-secondary);
+}
+
+.game-graphics-control {
+    display: flex;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+}
+
+/* MudToggleGroup splits its width evenly, so a fixed width keeps the longest label inside its item. */
+.game-graphics-control ::deep .mud-toggle-group {
+    width: 264px;
+}

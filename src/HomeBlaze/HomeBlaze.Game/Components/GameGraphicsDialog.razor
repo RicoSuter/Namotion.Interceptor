@@ -1,0 +1,166 @@
+@using HomeBlaze.Components.Preferences
+@inject BrowserPreferences Preferences
+
+@* Every change applies to the view at once, so the frame rate shows its cost, and is stored for the next start. *@
+<MudDialog data-testid="game-graphics-dialog">
+    <DialogContent>
+        <MudToggleGroup T="string" Value="_graphics.Preset" ValueChanged="SelectPresetAsync" Size="Size.Small" Color="Color.Primary"
+                        Class="mb-3" data-testid="game-graphics-preset">
+            @foreach (var (preset, label) in Presets)
+            {
+                <MudToggleItem T="string" Value="@preset" Text="@label" />
+            }
+            @if (_graphics.Preset == GameGraphics.Custom)
+            {
+                <MudToggleItem T="string" Value="@GameGraphics.Custom" Text="Custom" Disabled="true" />
+            }
+        </MudToggleGroup>
+        <GameGraphicsRow Title="Resolution" Caption="The largest cost: the work grows with the pixels.">
+            <MudToggleGroup T="double" Value="_graphics.Resolution" Size="Size.Small" data-testid="game-graphics-resolution"
+                            ValueChanged="@(value => ChangeAsync("resolution", value))">
+                <MudToggleItem T="double" Value="1" Text="1x" />
+                <MudToggleItem T="double" Value="1.5" Text="1.5x" />
+                <MudToggleItem T="double" Value="2" Text="2x" />
+                <MudToggleItem T="double" Value="0" Text="Device" />
+            </MudToggleGroup>
+        </GameGraphicsRow>
+        <GameGraphicsRow Title="Frame cap" Caption="30 halves the work of 60; unlimited renders every display frame.">
+            <MudToggleGroup T="int" Value="_graphics.FrameCap" Size="Size.Small" data-testid="game-graphics-frame-cap"
+                            ValueChanged="@(value => ChangeAsync("frameCap", value))">
+                <MudToggleItem T="int" Value="30" Text="30" />
+                <MudToggleItem T="int" Value="60" Text="60" />
+                <MudToggleItem T="int" Value="0" Text="Unlimited" />
+            </MudToggleGroup>
+        </GameGraphicsRow>
+        <GameGraphicsRow Title="Shadows" Caption="Draws every object a second time, from the sun; soft edges sample the map more often.">
+            <MudToggleGroup T="string" Value="_graphics.Shadows" Size="Size.Small" data-testid="game-graphics-shadows"
+                            ValueChanged="@(value => ChangeAsync("shadows", value))">
+                <MudToggleItem T="string" Value="@("off")" Text="Off" />
+                <MudToggleItem T="string" Value="@("hard")" Text="Hard" />
+                <MudToggleItem T="string" Value="@("soft")" Text="Soft" />
+            </MudToggleGroup>
+        </GameGraphicsRow>
+        <GameGraphicsRow Title="Corner shading" Caption="Several full-screen passes over the geometry pass; half runs them at half size.">
+            <MudToggleGroup T="double" Value="_graphics.AmbientOcclusion" Size="Size.Small" data-testid="game-graphics-ambient-occlusion"
+                            ValueChanged="@(value => ChangeAsync("ambientOcclusion", value))">
+                <MudToggleItem T="double" Value="0" Text="Off" />
+                <MudToggleItem T="double" Value="0.5" Text="Half" />
+                <MudToggleItem T="double" Value="1" Text="Full" />
+            </MudToggleGroup>
+        </GameGraphicsRow>
+        <GameGraphicsRow Title="Outlines" Caption="One full-screen pass, and a geometry pass of every object unless corner shading draws it.">
+            <MudSwitch T="bool" Value="_graphics.Outlines" Color="Color.Primary" data-testid="game-graphics-outlines"
+                       ValueChanged="@(value => ChangeAsync("outlines", value))" />
+        </GameGraphicsRow>
+        <GameGraphicsRow Title="Multisampling" Caption="Four samples per pixel smooth the edges of the scene.">
+            <MudSwitch T="bool" Value="_graphics.Multisampling" Color="Color.Primary" data-testid="game-graphics-multisampling"
+                       ValueChanged="@(value => ChangeAsync("multisampling", value))" />
+        </GameGraphicsRow>
+        <GameGraphicsRow Title="Sharpen" Caption="One full-screen pass.">
+            <MudSwitch T="bool" Value="_graphics.Sharpen" Color="Color.Primary" data-testid="game-graphics-sharpen"
+                       ValueChanged="@(value => ChangeAsync("sharpen", value))" />
+        </GameGraphicsRow>
+        <GameGraphicsRow Title="Wind" Caption="Off stands the trees still; the shader work for the sway stays.">
+            <MudSwitch T="bool" Value="_graphics.Wind" Color="Color.Primary" data-testid="game-graphics-wind"
+                       ValueChanged="@(value => ChangeAsync("wind", value))" />
+        </GameGraphicsRow>
+        <GameGraphicsRow Title="Sightline fade" Caption="A ray test against the objects in view ten times a second.">
+            <MudSwitch T="bool" Value="_graphics.Fade" Color="Color.Primary" data-testid="game-graphics-fade"
+                       ValueChanged="@(value => ChangeAsync("fade", value))" />
+        </GameGraphicsRow>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="ResetAsync" Disabled="@(_graphics.Preset != GameGraphics.Custom)" data-testid="game-graphics-reset">
+            Reset to @GetLabel(_resetPreset)
+        </MudButton>
+        <MudButton Color="Color.Primary" OnClick="Close" data-testid="game-graphics-close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly (string Preset, string Label)[] Presets =
+        [(GameGraphics.Auto, "Auto"), ("low", "Low"), ("medium", "Medium"), ("high", "High")];
+
+    private GameGraphics _graphics = null!;
+    // The preset that the settings started from, which the reset returns to.
+    private string _resetPreset = GameGraphics.Auto;
+
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    /// <summary>
+    /// The view and its graphics when the dialog opens.
+    /// </summary>
+    [Parameter, EditorRequired] public Session Target { get; set; } = null!;
+
+    protected override void OnInitialized()
+    {
+        _graphics = Target.Graphics;
+        _resetPreset = _graphics.Preset == GameGraphics.Custom ? GameGraphics.Auto : _graphics.Preset;
+    }
+
+    private static string GetLabel(string preset) => Presets.FirstOrDefault(entry => entry.Preset == preset).Label ?? "Auto";
+
+    private Task SelectPresetAsync(string preset)
+    {
+        if (preset == GameGraphics.Custom)
+        {
+            return Task.CompletedTask;
+        }
+
+        _resetPreset = preset;
+        return ApplyAsync(preset);
+    }
+
+    // Only the changed setting goes to the view, which merges it into the settings in effect, so a change that was sent
+    // before the previous one answered does not undo it.
+    private Task ChangeAsync(string setting, object value) => ApplyAsync(GameGraphics.Custom, setting, value);
+
+    private Task ResetAsync() => ApplyAsync(_resetPreset);
+
+    private async Task ApplyAsync(string preset, string? setting = null, object? value = null)
+    {
+        if (await Target.View.SetGraphicsAsync(preset, setting, value) is { } graphics)
+        {
+            _graphics = graphics;
+            await Preferences.SetAsync(GameGraphics.PreferenceKey, graphics.ToPreference());
+        }
+    }
+
+    private void Close() => MudDialog?.Close();
+
+    /// <summary>
+    /// Shows the graphics of <paramref name="view"/>, which the dialog applies and stores on every change until it closes;
+    /// returns the dialog, or null when the view is gone.
+    /// </summary>
+    internal static async Task<IDialogReference?> ShowAsync(IDialogService dialogService, GameViewConnection view)
+    {
+        if (await view.GetGraphicsAsync() is not { } graphics)
+        {
+            return null;
+        }
+
+        var parameters = new DialogParameters<GameGraphicsDialog>
+        {
+            { x => x.Target, new Session(view, graphics) },
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        return await dialogService.ShowAsync<GameGraphicsDialog>("Graphics", parameters, options);
+    }
+
+    /// <summary>
+    /// The view the dialog changes and its graphics when the dialog opens; public only because a component parameter
+    /// must be.
+    /// </summary>
+    public sealed class Session
+    {
+        internal Session(GameViewConnection view, GameGraphics graphics)
+        {
+            View = view;
+            Graphics = graphics;
+        }
+
+        internal GameViewConnection View { get; }
+
+        internal GameGraphics Graphics { get; }
+    }
+}

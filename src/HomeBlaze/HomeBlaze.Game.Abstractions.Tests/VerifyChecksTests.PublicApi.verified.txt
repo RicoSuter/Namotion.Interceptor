@@ -179,6 +179,7 @@ namespace HomeBlaze.Game.Abstractions
         HomeBlaze.Game.Abstractions.GameSpot GetSpotInFront(HomeBlaze.Game.Abstractions.GameCaller? caller, int across, int along);
         bool IsFree(HomeBlaze.Game.Abstractions.GameArea area, HomeBlaze.Game.Abstractions.GameObject? except = null);
         System.Threading.Tasks.Task PlaceAsync(HomeBlaze.Game.Abstractions.GameObject gameObject, System.Threading.CancellationToken cancellationToken);
+        void PlayAnimation(HomeBlaze.Game.Abstractions.GameCaller? caller, string animation, HomeBlaze.Game.Abstractions.GameVisualAnimationMode mode);
         System.Threading.Tasks.Task RemoveAsync(HomeBlaze.Game.Abstractions.GameObject gameObject, System.Threading.CancellationToken cancellationToken);
         System.Threading.Tasks.Task ReplaceAsync(HomeBlaze.Game.Abstractions.GameObject gameObject, System.Collections.Generic.IReadOnlyList<HomeBlaze.Game.Abstractions.GameObject> replacements, System.Threading.CancellationToken cancellationToken);
         System.IDisposable Schedule(HomeBlaze.Game.Abstractions.GameObject gameObject, System.TimeSpan delay, System.Action action);
