@@ -1,0 +1,54 @@
+<MudDialog data-testid="game-name-dialog">
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Immediate="true" AutoFocus="true" MaxLength="@Game.MaximumNameLength"
+                      OnKeyDown="OnKeyDown" data-testid="game-name-input" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" data-testid="game-name-cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Disabled="@string.IsNullOrWhiteSpace(_name)" OnClick="Save"
+                   data-testid="game-name-save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+
+    /// <summary>
+    /// The name the field starts with, null for an empty field.
+    /// </summary>
+    [Parameter] public string? Name { get; set; }
+
+    private string? _name;
+
+    protected override void OnInitialized() => _name = Name;
+
+    private void OnKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            Save();
+        }
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+
+    private void Save()
+    {
+        if (!string.IsNullOrWhiteSpace(_name))
+        {
+            MudDialog?.Close(DialogResult.Ok(_name.Trim()));
+        }
+    }
+
+    /// <summary>
+    /// Asks for a name, starting from <paramref name="name"/>; returns the trimmed name, or null when canceled.
+    /// </summary>
+    public static async Task<string?> ShowAsync(IDialogService dialogService, string? name)
+    {
+        var parameters = new DialogParameters<GameNameDialog> { { x => x.Name, name } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseButton = true };
+        var dialog = await dialogService.ShowAsync<GameNameDialog>("Change my name", parameters, options);
+        var result = await dialog.Result;
+        return result is { Canceled: false, Data: string value } ? value : null;
+    }
+}

@@ -1,0 +1,186 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace HomeBlaze.Game.Abstractions
+{
+    public readonly struct GameArea : System.IEquatable<HomeBlaze.Game.Abstractions.GameArea>
+    {
+        public GameArea(int X, int Y, int Width, int Depth) { }
+        public int Depth { get; init; }
+        public long Right { get; }
+        public long Top { get; }
+        public int Width { get; init; }
+        public int X { get; init; }
+        public int Y { get; init; }
+        public bool Contains(long x, long y) { }
+        public bool Intersects(HomeBlaze.Game.Abstractions.GameArea other) { }
+        public bool TryMove(int offsetX, int offsetY, out HomeBlaze.Game.Abstractions.GameArea moved) { }
+    }
+    public static class GameAssets
+    {
+        public const string ContentPrefix = "_content/";
+        public static string Url(System.Type type, string path) { }
+    }
+    public sealed class GameCaller
+    {
+        public GameCaller(string clientId) { }
+        public string ClientId { get; }
+    }
+    public enum GameDirection
+    {
+        North = 0,
+        NorthEast = 1,
+        East = 2,
+        SouthEast = 3,
+        South = 4,
+        SouthWest = 5,
+        West = 6,
+        NorthWest = 7,
+    }
+    public static class GameDirectionExtensions
+    {
+        public static int GetOffsetX(this HomeBlaze.Game.Abstractions.GameDirection direction) { }
+        public static int GetOffsetY(this HomeBlaze.Game.Abstractions.GameDirection direction) { }
+        public static int GetRotation(this HomeBlaze.Game.Abstractions.GameDirection direction) { }
+        public static bool IsDiagonal(this HomeBlaze.Game.Abstractions.GameDirection direction) { }
+    }
+    public static class GameMessages
+    {
+        public const string Blocked = "Something is in the way.";
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public abstract class GameObject : HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Game.Abstractions.IGameObjectLifecycle, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        public const int MaximumSize = 1024;
+        protected GameObject() { }
+        public GameObject(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public HomeBlaze.Game.Abstractions.GameArea Area { get; }
+        public HomeBlaze.Game.Abstractions.GameVisual DefaultVisual { get; }
+        public virtual int Depth { get; set; }
+        public virtual int Height { get; set; }
+        public virtual bool IsMovementBlocking { get; }
+        public virtual bool IsSoundBlocking { get; }
+        public virtual bool IsVisible { get; }
+        public virtual HomeBlaze.Game.Abstractions.GameVisual Visual { get; }
+        public virtual int Width { get; set; }
+        protected HomeBlaze.Game.Abstractions.IGameWorld World { get; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int X { get; set; }
+        [HomeBlaze.Abstractions.Attributes.Configuration]
+        public int Y { get; set; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public virtual System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected virtual void OnAddedToWorld() { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        protected bool TryGetWorld([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HomeBlaze.Game.Abstractions.IGameWorld? world) { }
+    }
+    public readonly struct GameSpot : System.IEquatable<HomeBlaze.Game.Abstractions.GameSpot>
+    {
+        public GameSpot(int X, int Y, int Width, int Depth, HomeBlaze.Game.Abstractions.GameDirection Facing) { }
+        public HomeBlaze.Game.Abstractions.GameArea Area { get; }
+        public int Depth { get; init; }
+        public HomeBlaze.Game.Abstractions.GameDirection Facing { get; init; }
+        public int Width { get; init; }
+        public int X { get; init; }
+        public int Y { get; init; }
+    }
+    public sealed class GameStoppedException : System.InvalidOperationException
+    {
+        public GameStoppedException() { }
+        public GameStoppedException(string? message) { }
+        public GameStoppedException(string? message, System.Exception? innerException) { }
+    }
+    [Namotion.Interceptor.Attributes.InterceptorSubject]
+    public abstract class GameTool : HomeBlaze.Abstractions.IConfigurable, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    {
+        protected GameTool() { }
+        public GameTool(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        protected HomeBlaze.Game.Abstractions.IGameWorld World { get; }
+        public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        public virtual System.Threading.Tasks.Task ApplyConfigurationAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata>? GetInstanceProperties() { }
+        protected TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
+        protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
+        protected void RaisePropertyChanged(string propertyName) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+    }
+    public sealed class GameVisual : System.IEquatable<HomeBlaze.Game.Abstractions.GameVisual>
+    {
+        public const string DefaultColor = "#8d8577";
+        public const double MaximumExtent = 1024D;
+        public const int MaximumParts = 16;
+        public GameVisual(System.Collections.Immutable.ImmutableArray<HomeBlaze.Game.Abstractions.GameVisualPart> parts) { }
+        public System.Collections.Immutable.ImmutableArray<HomeBlaze.Game.Abstractions.GameVisualPart> Parts { get; }
+        public bool Equals(HomeBlaze.Game.Abstractions.GameVisual? other) { }
+        public override int GetHashCode() { }
+        public static HomeBlaze.Game.Abstractions.GameVisual Box(double width, double height, double depth, string color = "#8d8577") { }
+    }
+    public enum GameVisualAnimationMode
+    {
+        Loop = 0,
+        Once = 1,
+    }
+    public sealed class GameVisualCache<TKey>
+        where TKey : System.IEquatable<TKey>
+    {
+        public GameVisualCache() { }
+        public HomeBlaze.Game.Abstractions.GameVisual Get(TKey key, System.Func<TKey, HomeBlaze.Game.Abstractions.GameVisual> create) { }
+    }
+    public enum GameVisualEffect
+    {
+        None = 0,
+        Wind = 1,
+    }
+    public sealed class GameVisualPart : System.IEquatable<HomeBlaze.Game.Abstractions.GameVisualPart>
+    {
+        public GameVisualPart() { }
+        public string? Animation { get; init; }
+        public HomeBlaze.Game.Abstractions.GameVisualAnimationMode AnimationMode { get; init; }
+        public string? Color { get; init; }
+        public HomeBlaze.Game.Abstractions.GameVisualEffect Effect { get; init; }
+        public string? Model { get; init; }
+        public HomeBlaze.Game.Abstractions.GameVisualVector Offset { get; init; }
+        public HomeBlaze.Game.Abstractions.GameVisualPoint Pivot { get; init; }
+        public double Rotation { get; init; }
+        public HomeBlaze.Game.Abstractions.GameVisualShape Shape { get; init; }
+        public HomeBlaze.Game.Abstractions.GameVisualVector Size { get; init; }
+        public string? Texture { get; init; }
+        public double TextureScale { get; init; }
+    }
+    public readonly struct GameVisualPoint : System.IEquatable<HomeBlaze.Game.Abstractions.GameVisualPoint>
+    {
+        public GameVisualPoint(double X, double Z) { }
+        public double X { get; init; }
+        public double Z { get; init; }
+    }
+    public enum GameVisualShape
+    {
+        Box = 0,
+        Model = 1,
+    }
+    public readonly struct GameVisualVector : System.IEquatable<HomeBlaze.Game.Abstractions.GameVisualVector>
+    {
+        public GameVisualVector(double X, double Y, double Z) { }
+        public double X { get; init; }
+        public double Y { get; init; }
+        public double Z { get; init; }
+    }
+    public interface IGameObjectLifecycle
+    {
+        void OnAddedToWorld();
+    }
+    public interface IGameWorld
+    {
+        HomeBlaze.Game.Abstractions.GameSpot GetSpotInFront(HomeBlaze.Game.Abstractions.GameCaller? caller, int across, int along);
+        bool IsFree(HomeBlaze.Game.Abstractions.GameArea area, HomeBlaze.Game.Abstractions.GameObject? except = null);
+        System.Threading.Tasks.Task PlaceAsync(HomeBlaze.Game.Abstractions.GameObject gameObject, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task RemoveAsync(HomeBlaze.Game.Abstractions.GameObject gameObject, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task ReplaceAsync(HomeBlaze.Game.Abstractions.GameObject gameObject, System.Collections.Generic.IReadOnlyList<HomeBlaze.Game.Abstractions.GameObject> replacements, System.Threading.CancellationToken cancellationToken);
+        System.IDisposable Schedule(HomeBlaze.Game.Abstractions.GameObject gameObject, System.TimeSpan delay, System.Action action);
+    }
+}

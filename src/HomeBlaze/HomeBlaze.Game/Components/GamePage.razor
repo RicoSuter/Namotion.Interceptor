@@ -1,0 +1,149 @@
+@attribute [SubjectComponent(SubjectComponentType.Page, typeof(Game))]
+@implements ISubjectComponent
+@implements IAsyncDisposable
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Services.Clients
+@using Microsoft.Extensions.Logging
+@inject IJSRuntime JsRuntime
+@inject CurrentClientConnection CurrentConnection
+@inject IDialogService DialogService
+@inject IServiceProvider ServiceProvider
+@inject ILogger<GamePage> Logger
+
+@* Renewed when the page leaves a game, so that a start for another game gets a new canvas: the view of the former game
+   lost the WebGL context of its canvas when it was disposed. *@
+<div class="game-layout" @key="_layoutKey">
+    <div class="game-stage">
+        <canvas @ref="_canvas" class="game-canvas" data-testid="game-canvas"></canvas>
+        <div class="game-fps" data-game-fps aria-hidden="true"></div>
+        @if (_error is not null)
+        {
+            <div class="game-message"><MudAlert Severity="Severity.Error" data-testid="game-error">@_error</MudAlert></div>
+        }
+        else if (!_isStarted)
+        {
+            <div class="game-message"><MudProgressCircular Indeterminate="true" /></div>
+        }
+        else if (_player is null)
+        {
+            <div class="game-message"><MudAlert Severity="Severity.Info" data-testid="game-joining">@JoiningMessage</MudAlert></div>
+        }
+    </div>
+    <aside @ref="_panel" class="game-panel" data-testid="game-panel">
+        <div class="game-panel-top">
+            <section class="game-position">
+                <h5>Position</h5>
+                <div data-testid="game-position">@_positionText</div>
+            </section>
+            <section class="game-voice">
+                <h5>Voice</h5>
+                <div class="game-voice-buttons">
+                    @* Native titles instead of popover tooltips: at the panel's edge a popover overflowed the page, and after a tap
+                       on touch devices it stayed open over the neighboring button. The span keeps the title on a disabled button. *@
+                    <span title="@MicrophoneTooltip">
+                        <MudIconButton Icon="@(IsMicrophoneOn ? Icons.Material.Filled.Mic : Icons.Material.Filled.MicOff)"
+                                       Variant="Variant.Filled"
+                                       Color="@(IsMicrophoneOn ? Color.Primary : Color.Default)"
+                                       Size="Size.Small" Disabled="@IsMicrophoneDisabled"
+                                       aria-label="Microphone" aria-pressed="@(IsMicrophoneOn ? "true" : "false")" aria-keyshortcuts="M"
+                                       data-game-voice data-testid="game-microphone" OnClick="ToggleMicrophoneAsync" />
+                    </span>
+                    <span title="@AudioTooltip">
+                        <MudIconButton Icon="@(IsAudioOn ? Icons.Material.Filled.VolumeUp : Icons.Material.Filled.VolumeOff)"
+                                       Variant="Variant.Filled"
+                                       Color="@(IsAudioOn ? Color.Primary : Color.Default)"
+                                       Size="Size.Small" Disabled="@IsAudioDisabled"
+                                       aria-label="Speaker" aria-pressed="@(IsAudioOn ? "true" : "false")" aria-keyshortcuts="N"
+                                       data-game-voice data-testid="game-audio" OnClick="ToggleAudioAsync" />
+                    </span>
+                </div>
+            </section>
+            @* game-input.js handles the presses without a round trip, and sets aria-pressed on the turn button itself. *@
+            <div @ref="_pad" class="game-pad" data-testid="game-pad">
+                @foreach (var button in PadButtons)
+                {
+                    if (button.Move is { } move)
+                    {
+                        <button type="button" tabindex="-1" class="@(button.IsDiagonal ? "game-pad-button game-pad-diagonal" : "game-pad-button")"
+                                data-game-move="@move" aria-label="@button.Label" data-testid="game-pad-@move">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">@((MarkupString)Icons.Material.Filled.KeyboardArrowUp)</svg>
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" tabindex="-1" class="game-pad-button game-pad-turn"
+                                data-game-turn aria-label="@button.Label" title="@button.Label" data-testid="game-pad-turn">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">@((MarkupString)Icons.Material.Filled.RotateRight)</svg>
+                        </button>
+                    }
+                }
+            </div>
+        </div>
+        @if (VoiceMessage is { } voiceMessage)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="game-voice-message" data-testid="game-voice-message">@voiceMessage</MudAlert>
+        }
+        @* The operations of the game and its tools come first, so they keep their place while targets come and go. *@
+        <section>
+            <h5>Actions</h5>
+            @foreach (var action in _actions)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Class="game-action"
+                           Disabled="@(_isInvoking || _player is null)" data-testid="game-action"
+                           OnClick="@(() => InvokeActionAsync(action.Subject, action.Method))">@action.Method.Title</MudButton>
+            }
+        </section>
+        @if (_targets.Count > 0)
+        {
+            <section data-testid="game-looking-at">
+                <h5>Looking at</h5>
+                @foreach (var target in _targets)
+                {
+                    <div class="game-target-title" data-testid="game-target-title">@target.Title</div>
+                    @foreach (var action in target.Actions)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Class="game-action"
+                                   Disabled="_isInvoking" data-testid="game-target-action"
+                                   OnClick="@(() => InvokeActionAsync(target.Subject, action.Method))">
+                            @if (action.Key > 0)
+                            {
+                                <span class="game-key">@action.Key</span>
+                            }
+                            @action.Method.Title
+                        </MudButton>
+                    }
+                }
+            </section>
+        }
+        <section>
+            <h5>Nearby</h5>
+            @foreach (var player in _nearby)
+            {
+                <div class="@(player.IsSelf || IsAudioOn ? "game-nearby" : "game-nearby game-nearby-dimmed")" data-testid="game-nearby-player">
+                    <span class="game-dot" style="background: @player.Color"></span>
+                    <span class="game-nearby-title">@(player.IsSelf ? $"{player.Title} (you)" : player.Title)</span>
+                    @if (player.IsSelf)
+                    {
+                        <span class="game-nearby-icon" title="@RenameTitle">
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Class="game-nearby-rename"
+                                           Disabled="@_isRenaming" aria-label="@RenameTitle"
+                                           data-testid="game-rename" OnClick="RenameAsync" />
+                        </span>
+                    }
+                    @if (!player.IsMicrophoneOn)
+                    {
+                        <span class="game-nearby-icon" title="Microphone off" data-testid="game-nearby-microphone-off">
+                            <MudIcon Icon="@Icons.Material.Filled.MicOff" Size="Size.Small" />
+                        </span>
+                    }
+                    @if (!player.IsAudioOn)
+                    {
+                        <span class="game-nearby-icon" title="Speaker off" data-testid="game-nearby-audio-off">
+                            <MudIcon Icon="@Icons.Material.Filled.VolumeOff" Size="Size.Small" />
+                        </span>
+                    }
+                </div>
+            }
+        </section>
+    </aside>
+</div>
