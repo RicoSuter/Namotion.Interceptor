@@ -22,14 +22,15 @@ internal static class OpcUaSessionExtensions
     /// <summary>
     /// Batch size for browse calls: the per-call operation limit, capped by the server's
     /// continuation-point quota when <paramref name="maxReferencesPerNode"/> is non-zero. At zero the
-    /// server returns every reference in the first response and issues no continuation point, so the
-    /// quota cannot bind.
+    /// client sets no limit, so only a server that pages by a limit of its own issues continuation
+    /// points, and the cap is skipped for the common server that returns everything at once.
     /// </summary>
     /// <remarks>
     /// A batch that opens more continuation points than the quota fails with
     /// <c>BadNoContinuationPoints</c> or has its oldest points evicted, and a same-size retry fails
-    /// identically. A server that under-reports or shrinks its quota is still caught by the
-    /// <c>BadNoContinuationPoints</c> split in <see cref="BrowseBatchAsync"/>.
+    /// identically. Both are caught in <see cref="BrowseBatchAsync"/>, which shrinks the batch: that is
+    /// what covers the uncapped batch against a server that pages anyway, and a server that
+    /// under-reports or shrinks its quota.
     /// </remarks>
     private static int GetBrowseBatchSize(ISession session, uint maxReferencesPerNode)
     {
@@ -240,7 +241,7 @@ internal static class OpcUaSessionExtensions
         var continuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
         try
         {
-            await MergeBrowseResultsAsync(session, "Browse", response.Results, count, i => nodeIds[offset + i], result, continuationPoints, logger).ConfigureAwait(false);
+            await MergeBrowseResultsAsync(session, "Browse", response.Results, count, i => nodeIds[offset + i], result, continuationPoints, null, logger).ConfigureAwait(false);
         }
         catch
         {
@@ -248,7 +249,26 @@ internal static class OpcUaSessionExtensions
             throw;
         }
 
-        await ProcessContinuationPointsAsync(session, continuationPoints, maxReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
+        // A server that evicts its oldest points instead of returning BadNoContinuationPoints fails
+        // their BrowseNext with BadContinuationPointInvalid. Those nodes are browsed again in batches
+        // of at most half this one, so the retry converges; a single node is never collected here, so
+        // its status aborts the load as transient instead.
+        var evictedNodeIds = count > 1 ? new List<NodeId>() : null;
+        await ProcessContinuationPointsAsync(session, continuationPoints, maxReferencesPerNode, maxContinuationRounds, result, evictedNodeIds, logger, cancellationToken).ConfigureAwait(false);
+
+        if (evictedNodeIds is { Count: > 0 })
+        {
+            logger.LogWarning(
+                "BrowseNextAsync lost the continuation points of {EvictedCount} of {Count} nodes ({StatusCode}). Browsing them again in smaller batches.",
+                evictedNodeIds.Count, count, (StatusCode)StatusCodes.BadContinuationPointInvalid);
+
+            var retryBatchSize = count / 2;
+            for (var retryOffset = 0; retryOffset < evictedNodeIds.Count; retryOffset += retryBatchSize)
+            {
+                var retryEnd = Math.Min(retryOffset + retryBatchSize, evictedNodeIds.Count);
+                await BrowseBatchAsync(session, evictedNodeIds, retryOffset, retryEnd, maxReferencesPerNode, maxContinuationRounds, result, logger, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     /// <summary>
@@ -286,6 +306,7 @@ internal static class OpcUaSessionExtensions
         uint maxReferencesPerNode,
         int maxContinuationRounds,
         Dictionary<NodeId, ReferenceDescriptionCollection> result,
+        List<NodeId>? evictedNodeIds,
         ILogger logger,
         CancellationToken cancellationToken)
     {
@@ -324,7 +345,7 @@ internal static class OpcUaSessionExtensions
                 for (var offset = 0; offset < current.Count; offset += batchSize)
                 {
                     var end = Math.Min(offset + batchSize, current.Count);
-                    await BrowseNextBatchAsync(session, current, offset, end, result, next, logger, cancellationToken).ConfigureAwait(false);
+                    await BrowseNextBatchAsync(session, current, offset, end, result, next, evictedNodeIds, logger, cancellationToken).ConfigureAwait(false);
                 }
 
                 (current, next) = (next, current);
@@ -420,6 +441,7 @@ internal static class OpcUaSessionExtensions
         int end,
         Dictionary<NodeId, ReferenceDescriptionCollection> result,
         List<(NodeId NodeId, byte[] ContinuationPoint)> next,
+        List<NodeId>? evictedNodeIds,
         ILogger logger,
         CancellationToken cancellationToken)
     {
@@ -443,14 +465,14 @@ internal static class OpcUaSessionExtensions
                 count, ex.StatusCode);
 
             var midpoint = offset + count / 2;
-            await BrowseNextBatchAsync(session, current, offset, midpoint, result, next, logger, cancellationToken).ConfigureAwait(false);
-            await BrowseNextBatchAsync(session, current, midpoint, end, result, next, logger, cancellationToken).ConfigureAwait(false);
+            await BrowseNextBatchAsync(session, current, offset, midpoint, result, next, evictedNodeIds, logger, cancellationToken).ConfigureAwait(false);
+            await BrowseNextBatchAsync(session, current, midpoint, end, result, next, evictedNodeIds, logger, cancellationToken).ConfigureAwait(false);
             return;
         }
 
         // Fresh continuation points go to `next`, which the caller releases on abort together with
         // the point still pending in `current` for a slot whose result is missing.
-        await MergeBrowseResultsAsync(session, "BrowseNext", nextResponse.Results, count, i => current[offset + i].NodeId, result, next, logger).ConfigureAwait(false);
+        await MergeBrowseResultsAsync(session, "BrowseNext", nextResponse.Results, count, i => current[offset + i].NodeId, result, next, evictedNodeIds, logger).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -459,7 +481,9 @@ internal static class OpcUaSessionExtensions
     /// status or a missing result slot throws <see cref="OpcUaTransientServiceException"/>. The
     /// continuation points of good in-range results are collected into
     /// <paramref name="continuationPoints"/> before any result is merged, so the caller can release
-    /// them when the merge throws; those of bad-status and extra results are released here.
+    /// them when the merge throws; those of bad-status and extra results are released here. When
+    /// <paramref name="evictedNodeIds"/> is non-null, a node whose continuation point the server no
+    /// longer knows is omitted and collected there for the caller to browse again, instead of thrown.
     /// </summary>
     private static async Task MergeBrowseResultsAsync(
         ISession session,
@@ -469,6 +493,7 @@ internal static class OpcUaSessionExtensions
         Func<int, NodeId> nodeIdAt,
         Dictionary<NodeId, ReferenceDescriptionCollection> result,
         List<(NodeId NodeId, byte[] ContinuationPoint)> continuationPoints,
+        List<NodeId>? evictedNodeIds,
         ILogger logger)
     {
         var actual = results.Count;
@@ -493,6 +518,14 @@ internal static class OpcUaSessionExtensions
             var browseResult = results[i];
             if (!StatusCode.IsGood(browseResult.StatusCode))
             {
+                if (evictedNodeIds is not null && browseResult.StatusCode.Code == StatusCodes.BadContinuationPointInvalid)
+                {
+                    // The pages collected so far are a prefix; the caller browses the node from the start.
+                    result.Remove(nodeId);
+                    evictedNodeIds.Add(nodeId);
+                    continue;
+                }
+
                 OpcUaStatusCodeClassifier.ThrowIfLoadMustRetry(browseResult.StatusCode, operation, nodeId);
                 logger.LogWarning(
                     "{Operation} returned permanent bad status for {NodeId} ({StatusCode}); omitting the node from this load.",

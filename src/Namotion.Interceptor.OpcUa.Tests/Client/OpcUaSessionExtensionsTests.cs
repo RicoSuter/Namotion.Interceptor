@@ -908,6 +908,137 @@ public class OpcUaSessionExtensionsTests
     }
 
     [Fact]
+    public async Task WhenServerEvictsOldestContinuationPoints_ThenEvictedNodesAreBrowsedAgainInSmallerBatches()
+    {
+        // Arrange: the server pages every node although the client sets no limit, keeps only its two
+        // newest continuation points and evicts the older ones, so their BrowseNext fails with
+        // BadContinuationPointInvalid. Retrying the same batch would fail identically forever.
+        var nodeIds = Enumerable.Range(1, 5).Select(index => new NodeId((uint)(1000 + index), 2)).ToArray();
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
+        var liveTokens = new List<byte>();
+        var browseBatchSizes = new List<int>();
+
+        static ReferenceDescription CreateChild(uint parentIdentifier, uint page) => new()
+        {
+            BrowseName = new QualifiedName($"Child{page}"),
+            NodeId = new ExpandedNodeId(new NodeId(parentIdentifier * 10 + page, 2))
+        };
+
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection descriptions, CancellationToken _) =>
+            {
+                browseBatchSizes.Add(descriptions.Count);
+                var results = new BrowseResultCollection();
+                foreach (var description in descriptions)
+                {
+                    var identifier = (uint)description.NodeId.Identifier;
+                    var token = (byte)(identifier - 1000);
+                    liveTokens.Add(token);
+                    if (liveTokens.Count > 2)
+                    {
+                        liveTokens.RemoveAt(0);
+                    }
+
+                    results.Add(new BrowseResult { References = [CreateChild(identifier, 1)], ContinuationPoint = [token] });
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        mockSession
+            .Setup(s => s.BrowseNextAsync(
+                It.IsAny<RequestHeader>(),
+                false,
+                It.IsAny<ByteStringCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, bool _, ByteStringCollection continuationPoints, CancellationToken _) =>
+            {
+                var results = new BrowseResultCollection();
+                foreach (var continuationPoint in continuationPoints)
+                {
+                    var token = continuationPoint[0];
+                    results.Add(liveTokens.Remove(token)
+                        ? new BrowseResult { References = [CreateChild(1000u + token, 2)] }
+                        : new BrowseResult { StatusCode = StatusCodes.BadContinuationPointInvalid, References = [] });
+                }
+                return new BrowseNextResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        mockSession
+            .Setup(s => s.BrowseNextAsync(
+                It.IsAny<RequestHeader>(),
+                true,
+                It.IsAny<ByteStringCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseNextResponse { Results = [], DiagnosticInfos = [] });
+
+        // Act
+        var result = await mockSession.Object.BrowseNodesAsync(
+            nodeIds,
+            maxReferencesPerNode: 0,
+            maxContinuationRounds: 100,
+            NullLogger<OpcUaSessionExtensionsTests>.Instance,
+            CancellationToken.None);
+
+        // Assert: the three evicted nodes are browsed again in batches of at most half the first one,
+        // and every node holds both of its pages exactly once, with no prefix left from the failed pass.
+        Assert.Equal([5, 2, 1], browseBatchSizes);
+        Assert.Equal(5, result.Count);
+        Assert.All(nodeIds, nodeId =>
+            Assert.Equal(["Child1", "Child2"], result[nodeId].Select(reference => reference.BrowseName.Name)));
+    }
+
+    [Fact]
+    public async Task WhenSingleNodeContinuationPointIsInvalid_ThenThrowsTransientServiceException()
+    {
+        // Arrange: one node cannot exceed a continuation-point quota, so there is no smaller batch to
+        // retry with and the status aborts the load like any other transient one.
+        var nodeId = new NodeId(1001, 2);
+        var mockSession = OpcUaSubjectLoaderTestsBase.CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseResponse
+            {
+                Results = [new BrowseResult { References = [], ContinuationPoint = [0x01] }],
+                DiagnosticInfos = []
+            });
+        mockSession
+            .Setup(s => s.BrowseNextAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<bool>(),
+                It.IsAny<ByteStringCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseNextResponse
+            {
+                Results = [new BrowseResult { StatusCode = StatusCodes.BadContinuationPointInvalid, References = [] }],
+                DiagnosticInfos = []
+            });
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<OpcUaTransientServiceException>(() =>
+            mockSession.Object.BrowseNodesAsync(
+                [nodeId],
+                maxReferencesPerNode: 0,
+                maxContinuationRounds: 100,
+                NullLogger<OpcUaSessionExtensionsTests>.Instance,
+                CancellationToken.None));
+
+        Assert.Equal("BrowseNext", exception.Operation);
+        Assert.Equal(nodeId, exception.NodeId);
+        Assert.Equal((StatusCode)StatusCodes.BadContinuationPointInvalid, exception.StatusCode);
+    }
+
+    [Fact]
     public async Task WhenBrowseReturnsMoreResultsThanRequested_ThenExtrasAreReleasedAndTheLoadContinues()
     {
         // Arrange: one node requested, two results returned. The extra result was never asked for,

@@ -276,7 +276,7 @@ internal sealed class OpcUaSubjectLoader
     {
         var attributeVariableNodes = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
         var pendingVariableSubjects = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
-        var pendingContainers = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
+        var pendingContainers = new List<(RegisteredSubjectProperty Property, NodeId NodeId, string BrowseName)>();
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>();
 
         // Two sibling references can map to the same structured property. Without this the
@@ -340,7 +340,7 @@ internal sealed class OpcUaSubjectLoader
                 {
                     if (TryReserveStructuredTarget(property, nodeReference, resolvedNodeId))
                     {
-                        pendingContainers.Add((property, resolvedNodeId));
+                        pendingContainers.Add((property, resolvedNodeId, nodeReference.BrowseName.Name));
                     }
                 }
                 else
@@ -526,7 +526,7 @@ internal sealed class OpcUaSubjectLoader
     }
 
     private async Task LoadCollectionsAndDictionariesAsync(
-        List<(RegisteredSubjectProperty Property, NodeId NodeId)> pendingContainers,
+        List<(RegisteredSubjectProperty Property, NodeId NodeId, string BrowseName)> pendingContainers,
         List<(ReferenceDescription Node, IInterceptorSubject Subject)> children,
         OpcUaLoadContext context)
     {
@@ -536,14 +536,14 @@ internal sealed class OpcUaSubjectLoader
         }
 
         var nodeIds = new List<NodeId>(pendingContainers.Count);
-        foreach (var (_, nodeId) in pendingContainers)
+        foreach (var (_, nodeId, _) in pendingContainers)
         {
             nodeIds.Add(nodeId);
         }
 
         var browseResults = await context.BrowseAsync(nodeIds).ConfigureAwait(false);
 
-        foreach (var (property, nodeId) in pendingContainers)
+        foreach (var (property, nodeId, browseName) in pendingContainers)
         {
             if (!browseResults.TryGetValue(nodeId, out var rawChildren))
             {
@@ -556,24 +556,18 @@ internal sealed class OpcUaSubjectLoader
                 continue;
             }
 
-            var isDictionary = property.IsSubjectDictionary;
-            var containerChildren = await ResolveChildSubjectsAsync(
-                property, context.DistinctByResolvedNodeId(rawChildren), isDictionary, context).ConfigureAwait(false);
-
+            var childNodes = context.DistinctByResolvedNodeId(rawChildren);
             object container;
-            if (isDictionary)
+            List<(ReferenceDescription Node, IInterceptorSubject Subject)> containerChildren;
+            if (property.IsSubjectDictionary)
             {
-                var keyType = property.Type.GetDictionaryKeyAndValueTypes().Key;
-                var entries = new Dictionary<object, IInterceptorSubject>(containerChildren.Count);
-                foreach (var (node, subject) in containerChildren)
-                {
-                    // Converts, because ResolveChildSubjectsAsync kept only children whose key does.
-                    entries[DictionaryKeyConverter.Convert(ExtractDictionaryKey(node.BrowseName.Name), keyType)] = subject;
-                }
+                var entries = new Dictionary<object, IInterceptorSubject>(childNodes.Count);
+                containerChildren = await ResolveChildSubjectsAsync(property, childNodes, browseName, entries, context).ConfigureAwait(false);
                 container = DefaultSubjectFactory.Instance.CreateSubjectDictionary(property.Type, entries);
             }
             else
             {
+                containerChildren = await ResolveChildSubjectsAsync(property, childNodes, browseName, null, context).ConfigureAwait(false);
                 container = DefaultSubjectFactory.Instance.CreateSubjectCollection(property.Type, containerChildren.Select(child => child.Subject));
             }
 
@@ -582,15 +576,18 @@ internal sealed class OpcUaSubjectLoader
         }
     }
 
-    // Reuses existing children when possible: dictionaries match by browse name,
+    // Reuses existing children when possible: dictionaries match by converted key,
     // collections match by index position (so server-side reordering between loads
-    // rebinds existing subjects to new items).
+    // rebinds existing subjects to new items). A non-null dictionaryEntries marks a
+    // dictionary and receives each kept child under its converted key.
     private async Task<List<(ReferenceDescription Node, IInterceptorSubject Subject)>> ResolveChildSubjectsAsync(
         RegisteredSubjectProperty property,
         List<(ReferenceDescription Reference, NodeId NodeId)> childNodes,
-        bool isDictionary,
+        string containerBrowseName,
+        Dictionary<object, IInterceptorSubject>? dictionaryEntries,
         OpcUaLoadContext context)
     {
+        var isDictionary = dictionaryEntries is not null;
         var existingChildren = property.Children;
         var keyType = isDictionary ? property.Type.GetDictionaryKeyAndValueTypes().Key : null;
         var existingByKey = new Dictionary<object, IInterceptorSubject?>(isDictionary ? existingChildren.Length : 0);
@@ -610,7 +607,6 @@ internal sealed class OpcUaSubjectLoader
         // its subject is created so it is never staged, claimed, or monitored (it would be
         // committed yet unreachable from the graph); the first reference wins, matching the
         // sibling dedup in ClassifyChildReferencesAsync.
-        HashSet<object>? seenKeys = isDictionary ? new(childNodes.Count) : null;
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childNodes.Count);
 
         for (var i = 0; i < childNodes.Count; i++)
@@ -622,7 +618,7 @@ internal sealed class OpcUaSubjectLoader
 
             if (isDictionary)
             {
-                if (!TryConvertDictionaryKey(childNode.BrowseName.Name, keyType!, out var key))
+                if (!TryConvertDictionaryKey(childNode.BrowseName.Name, containerBrowseName, keyType!, out var key))
                 {
                     _logger.LogWarning(
                         "Skipping OPC UA dictionary child '{BrowseName}' (NodeId: {NodeId}): its key does not convert to {KeyType}.",
@@ -630,7 +626,7 @@ internal sealed class OpcUaSubjectLoader
                     continue;
                 }
 
-                if (!seenKeys!.Add(key))
+                if (dictionaryEntries!.ContainsKey(key))
                 {
                     _logger.LogWarning(
                         "Skipping OPC UA dictionary child '{BrowseName}' (NodeId: {NodeId}): a sibling already produced the same dictionary key.",
@@ -663,16 +659,23 @@ internal sealed class OpcUaSubjectLoader
 
             context.SubjectsByNodeId.TryAdd(nodeId, childSubject);
             children.Add((childNode, childSubject));
+            dictionaryEntries?.Add(factoryIndex, childSubject);
         }
 
         return children;
     }
 
-    private static bool TryConvertDictionaryKey(string browseName, Type keyType, [NotNullWhen(true)] out object? key)
+    private static bool TryConvertDictionaryKey(string browseName, string containerBrowseName, Type keyType, [NotNullWhen(true)] out object? key)
     {
+        // Only a member named after its container carries its key in brackets; any other browse
+        // name is the key itself, which is how a dictionary published with its raw keys reads.
+        var rawKey = OpcUaBrowseName.TryGetMemberKey(browseName, containerBrowseName, out var memberKey)
+            ? memberKey.ToString()
+            : browseName;
+
         try
         {
-            key = DictionaryKeyConverter.Convert(ExtractDictionaryKey(browseName), keyType);
+            key = DictionaryKeyConverter.Convert(rawKey, keyType);
             return true;
         }
         catch (Exception exception) when (exception is FormatException or ArgumentException or InvalidCastException or OverflowException)
@@ -681,12 +684,4 @@ internal sealed class OpcUaSubjectLoader
             return false;
         }
     }
-
-    private static string ExtractDictionaryKey(string browseName)
-    {
-        return OpcUaBrowseName.TryGetBracketContent(browseName, out var content)
-            ? content.ToString()
-            : browseName;
-    }
-
 }

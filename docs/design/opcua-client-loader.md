@@ -44,7 +44,9 @@ Either way the block happens while the lifecycle lock is held, so it stalls ever
 
 ## The continuation-point cap is conditional
 
-`GetBrowseBatchSize` caps a browse batch by the server's continuation-point quota only when `MaxReferencesPerNode` is non-zero, because at zero the server returns every reference in the first response and issues no continuation point for the quota to bind on.
+`GetBrowseBatchSize` caps a browse batch by the server's continuation-point quota only when `MaxReferencesPerNode` is non-zero. At zero the client sets no limit, so most servers return every reference in the first response and issue no continuation point for the quota to bind on.
+
+A server may still page by a limit of its own, and then an uncapped batch can exceed the quota. The server either rejects the browse with `BadNoContinuationPoints` or evicts its oldest points, which fails their BrowseNext with `BadContinuationPointInvalid`. `BrowseBatchAsync` handles both by browsing again in batches of at most half the size, so the load converges instead of aborting. A single node is not retried that way, since one node cannot exceed a quota, and its status aborts the load as transient. Both statuses stay in the load-retry list for that case.
 
 That is not a theoretical saving. In the round-trip measurement on the 241-subject test address space, whose server reports a quota of 100 against an operation limit of 4000, capping unconditionally cost 7 of the 16 round-trips the same load then took. The measurement was taken before the loader browsed each level in one call, so the absolute numbers have moved; the reason the cap is conditional has not.
 

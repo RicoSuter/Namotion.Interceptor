@@ -319,8 +319,8 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
     [Fact]
     public async Task WhenObjectChildrenHaveStringBracketNames_ThenDictionaryPropertyIsCreated()
     {
-        // Arrange: an Object node's children use bracket-string naming (e.g., "Device[SensorA]")
-        // which classifies the parent as IReadOnlyDictionary<string, DynamicSubject>.
+        // Arrange: an Object node's children are named after it with a bracketed string key
+        // ("Devices[SensorA]"), which classifies the parent as IReadOnlyDictionary<string, DynamicSubject>.
         var devicesId = new NodeId(300, 2);
         var sensorAId = new NodeId(301, 2);
         var sensorBId = new NodeId(302, 2);
@@ -335,8 +335,8 @@ public class OpcUaSubjectLoaderBatchingTests : OpcUaSubjectLoaderTestsBase
             ],
             [devicesId] =
             [
-                CreateObjectReferenceDescription("Device[SensorA]", new ExpandedNodeId(sensorAId)),
-                CreateObjectReferenceDescription("Device[SensorB]", new ExpandedNodeId(sensorBId))
+                CreateObjectReferenceDescription("Devices[SensorA]", new ExpandedNodeId(sensorAId)),
+                CreateObjectReferenceDescription("Devices[SensorB]", new ExpandedNodeId(sensorBId))
             ],
             [sensorAId] = [CreateTestReferenceDescription("Value", new ExpandedNodeId(sensorAValueId))],
             [sensorBId] = [CreateTestReferenceDescription("Value", new ExpandedNodeId(sensorBValueId))]

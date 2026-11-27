@@ -716,10 +716,10 @@ The `OpcUaTypeResolver` maps OPC UA nodes to CLR types during dynamic discovery:
 
 - **Object nodes** become `DynamicSubject` (named sub-properties on the parent subject).
 - **Object nodes with `[numeric]` convention** (e.g., `People[0]`, `People[1]`) become `DynamicSubject[]` collections.
-- **Object nodes with `[string]` convention** (e.g., `Devices[SensorA]`) become `IReadOnlyDictionary<string, DynamicSubject>` dictionaries. The key of each entry is the bracket content of the child's browse name, so `Items[1]` yields the key `1`, and a child whose browse name has no brackets uses that full browse name as its key.
+- **Object nodes with `[string]` convention** (e.g., `Devices[SensorA]`) become `IReadOnlyDictionary<string, DynamicSubject>` dictionaries. A child named after its container with the key in brackets carries that key, so `Items[1]` under `Items` yields the key `1`. Any other child uses its full browse name as its key, which is how this library's OPC UA server publishes a dictionary, so a key such as `Pump[1]` stays whole.
 - **Variable nodes** are mapped to CLR types based on their OPC UA DataType. The resolver uses `session.TypeTree` to walk the type hierarchy, so custom DataType subtypes (e.g., a server-specific `LocalizedText` variant) are correctly resolved to their base built-in type.
 
-The classification of an Object node reads its first browsed child, and only when that child is itself an Object. The bracket convention is produced by this library's OPC UA server when exposing C# collections and dictionaries. Standard OPC UA servers typically use named children and are always treated as single subjects.
+The classification of an Object node reads its first browsed child, and only when that child is itself an Object. The bracket convention is produced by this library's OPC UA server when exposing C# collections, while its dictionary members are named by their raw keys. Standard OPC UA servers typically use named children and are always treated as single subjects.
 
 | OPC UA BuiltInType | CLR Type | Notes |
 |---|---|---|

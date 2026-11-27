@@ -202,6 +202,40 @@ public class OpcUaSubjectLoaderDictionaryReuseTests : OpcUaSubjectLoaderTestsBas
         // Assert
         Assert.Equal([1, 2], container.Items.Keys.Order());
     }
+
+    [Fact]
+    public async Task WhenDictionaryKeysEndInBracketsWithoutTheContainerPrefix_ThenFullBrowseNamesAreTheKeys()
+    {
+        // Arrange: a server that publishes a dictionary by its raw keys names "Pump[1]" and "Valve[1]"
+        // as they are. Only a child named after its container, "Items[a]", carries its key in brackets.
+        var rootId = new NodeId(1, 0);
+        var itemsId = new NodeId(100, 2);
+        var pumpId = new NodeId(101, 2);
+        var valveId = new NodeId(102, 2);
+        var prefixedId = new NodeId(103, 2);
+
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [rootId] = [CreateObjectReferenceDescription("Items", new ExpandedNodeId(itemsId))],
+            [itemsId] =
+            [
+                CreateObjectReferenceDescription("Pump[1]", new ExpandedNodeId(pumpId)),
+                CreateObjectReferenceDescription("Valve[1]", new ExpandedNodeId(valveId)),
+                CreateObjectReferenceDescription("Items[a]", new ExpandedNodeId(prefixedId))
+            ]
+        });
+
+        var container = new StringKeyDictionaryContainer(CreateSubjectContext());
+        var (loader, _, _) = CreateLoaderFor(container);
+
+        // Act
+        await loader.LoadSubjectAsync(container, CreateObjectReferenceDescription("Root", new ExpandedNodeId(rootId)), mockSession.Object, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(container.Items);
+        Assert.Equal(["Pump[1]", "Valve[1]", "a"], container.Items.Keys.Order(StringComparer.Ordinal));
+    }
 }
 
 [InterceptorSubject]
