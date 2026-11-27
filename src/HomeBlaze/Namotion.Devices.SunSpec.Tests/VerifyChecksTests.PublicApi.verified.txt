@@ -14,7 +14,7 @@ namespace Namotion.Devices.SunSpec
     [System.ComponentModel.Category("Energy")]
     [System.ComponentModel.Description("SunSpec device (inverter, meter, storage) via Modbus TCP, read only")]
     [System.ComponentModel.DisplayName("SunSpec device")]
-    public class SunSpecDevice : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkHost, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.Client.IModbusDiscovery, System.ComponentModel.INotifyPropertyChanged
+    public class SunSpecDevice : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.IMonitoredService, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Networking.IConnectionState, HomeBlaze.Abstractions.Networking.INetworkHost, Namotion.Interceptor.Hosting.IPrivateContextConfigurator, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.Client.IModbusDiscovery, System.ComponentModel.INotifyPropertyChanged
     {
         public const int MaximumPollingIntervalSeconds = 3600;
         public const int MinimumPollingIntervalSeconds = 1;
@@ -58,6 +58,8 @@ namespace Namotion.Devices.SunSpec
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         protected void RaisePropertyChanged(string propertyName) { }
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
+        public override System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class SunSpecLogicalDevice : HomeBlaze.Abstractions.Common.ISoftwareState, HomeBlaze.Abstractions.Devices.IDeviceInfo, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
@@ -90,7 +92,7 @@ namespace Namotion.Devices.SunSpec
     }
     public static class SunSpecServiceCollectionExtensions
     {
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddSunSpecDevice(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.SunSpec.SunSpecDevice>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddSunSpecDevice(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Devices.SunSpec.SunSpecDevice>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext>? contextResolver = null) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class SunSpecUnit : HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Modbus.IModbusUnitIdProvider, System.ComponentModel.INotifyPropertyChanged

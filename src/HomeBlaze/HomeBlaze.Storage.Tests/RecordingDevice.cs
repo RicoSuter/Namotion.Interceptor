@@ -33,7 +33,15 @@ public partial class RecordingDevice : BackgroundService, IConfigurable
 
     public static void Reset() => Instances.Clear();
 
+    public bool IsStarted => _started.Task.IsCompleted;
+
     public bool IsStopped => _stopped.Task.IsCompleted;
+
+    /// <summary>
+    /// Whether the device was started and not stopped since. A device that leaves the graph before the host
+    /// ran its start is never started, so it is never stopped either.
+    /// </summary>
+    public bool IsRunning => IsStarted && !IsStopped;
 
     public Task WhenStartedAsync() => _started.Task.WaitAsync(Timeout);
 

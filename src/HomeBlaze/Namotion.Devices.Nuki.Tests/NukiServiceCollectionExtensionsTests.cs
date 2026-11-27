@@ -9,7 +9,7 @@ namespace Namotion.Devices.Nuki.Tests;
 public class NukiServiceCollectionExtensionsTests
 {
     [Fact]
-    public void WhenAddNukiBridge_ThenTheConfiguredBridgeIsRegisteredAsSingletonAndHostedService()
+    public void WhenAddNukiBridge_ThenTheConfiguredBridgeIsRegisteredAsSingletonWithOneActivation()
     {
         // Arrange
         var services = new ServiceCollection();
@@ -29,6 +29,6 @@ public class NukiServiceCollectionExtensionsTests
         Assert.Equal(NukiTokenMode.Plain, bridge.TokenMode);
         Assert.Equal(NukiBridge.DefaultPollingInterval, bridge.PollingInterval);
         Assert.Same(bridge, serviceProvider.GetRequiredService<NukiBridge>());
-        Assert.Same(bridge, Assert.Single(serviceProvider.GetServices<IHostedService>()));
+        Assert.Single(serviceProvider.GetServices<IHostedService>());
     }
 }

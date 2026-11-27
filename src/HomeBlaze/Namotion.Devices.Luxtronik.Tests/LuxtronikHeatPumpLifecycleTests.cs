@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FluentModbus;
 using HomeBlaze.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,8 +10,11 @@ using Namotion.Devices.Luxtronik.Model;
 using Namotion.Devices.Luxtronik.Tests.Testing;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Hosting;
+using Namotion.Interceptor.Modbus.Client;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
@@ -20,8 +24,6 @@ namespace Namotion.Devices.Luxtronik.Tests;
 [Collection(LuxtronikIntegrationCollection.Name)]
 public class LuxtronikHeatPumpLifecycleTests
 {
-    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
-
     // Below the product minimum, so each test observes several polls within its wait timeouts.
     private static readonly TimeSpan TestPollingInterval = TimeSpan.FromSeconds(2);
 
@@ -37,7 +39,7 @@ public class LuxtronikHeatPumpLifecycleTests
         var heatPump = host.HeatPump;
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.IsConnected && heatPump.Status == ServiceStatus.Running && heatPump.LastUpdated is not null,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The hosted heat pump should connect and poll.");
 
         // Act
@@ -46,7 +48,7 @@ public class LuxtronikHeatPumpLifecycleTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => !heatPump.IsConnected && heatPump.Status == ServiceStatus.Error,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The heat pump should report the lost controller.");
 
         // Act
@@ -74,7 +76,7 @@ public class LuxtronikHeatPumpLifecycleTests
         {
             await AsyncTestHelpers.WaitUntilAsync(
                 () => host.HeatPump.IsConnected && host.HeatPump.Status == ServiceStatus.Running,
-                WaitTimeout,
+                TestTimeouts.Default,
                 message: "The hosted heat pump should connect.");
         }
         catch
@@ -109,7 +111,7 @@ public class LuxtronikHeatPumpLifecycleTests
         var heatPump = host.HeatPump;
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.Temperatures.Outside.Temperature == -4.5m,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The heat pump should read the first controller.");
 
         // Act
@@ -119,8 +121,138 @@ public class LuxtronikHeatPumpLifecycleTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.Temperatures.Outside.Temperature == 12.3m && heatPump.Status == ServiceStatus.Running,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The heat pump should restart and read the second controller.");
+    }
+
+    [Fact]
+    public async Task WhenConfigurationIsApplied_ThenTheOldSourceIsStoppedBeforeTheNewOneStarts()
+    {
+        // Arrange
+        using var firstServer = new LuxtronikTestServer(new Version(3, 92, 3));
+        firstServer.Start();
+        firstServer.SeedTypicalValues();
+
+        using var secondServer = new LuxtronikTestServer(new Version(3, 92, 3));
+        secondServer.Start();
+        secondServer.SeedTypicalValues();
+
+        await using var host = await HostedHeatPump.StartAsync("127.0.0.1", firstServer.Port);
+        var heatPump = host.HeatPump;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.IsConnected && heatPump.Status == ServiceStatus.Running,
+            TestTimeouts.Default,
+            message: "The heat pump should connect to the first controller.");
+        var oldSource = Assert.IsType<ModbusSubjectClientSource>(heatPump.Source);
+
+        // Act
+        heatPump.Port = secondServer.Port;
+        await heatPump.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        // Polled tightly: a restart that does not wait for the old stop publishes the new source while the old one runs.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.Source is { } newSource && !ReferenceEquals(newSource, oldSource),
+            TestTimeouts.Default,
+            pollInterval: TimeSpan.FromMilliseconds(1),
+            message: "A new source should replace the old one.");
+        Assert.Equal(SourceState.Stopped, oldSource.State);
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.IsConnected && heatPump.Status == ServiceStatus.Running,
+            TestTimeouts.Default,
+            message: "The heat pump should connect to the second controller.");
+    }
+
+    [Fact]
+    public async Task WhenTheHandlerStopsWhileASourceRuns_ThenTheSourceIsStoppedWithTheHeatPump()
+    {
+        // Arrange
+        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
+        server.Start();
+        server.SeedTypicalValues();
+
+        await using var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port);
+        var heatPump = host.HeatPump;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.IsConnected && heatPump.Status == ServiceStatus.Running,
+            TestTimeouts.Default,
+            message: "The heat pump should connect, or the stop below proves nothing.");
+        var source = Assert.IsType<ModbusSubjectClientSource>(heatPump.Source);
+
+        // Act - without a deadline, so a stop that waits on itself fails the bounded wait instead of
+        // being cut short.
+        await host.StopHandlerAsync(CancellationToken.None).WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Null(heatPump.Source);
+        Assert.Equal(SourceState.Stopped, source.State);
+        Assert.Equal(ServiceStatus.Stopped, heatPump.Status);
+        Assert.False(heatPump.IsConnected);
+    }
+
+    [Fact]
+    public async Task WhenHeatPumpLeavesAndReEntersTheGraph_ThenANewSourceRuns()
+    {
+        // Arrange
+        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
+        server.Start();
+        server.SeedTypicalValues();
+
+        await using var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port);
+        var heatPump = host.HeatPump;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.IsConnected && heatPump.Status == ServiceStatus.Running,
+            TestTimeouts.Default,
+            message: "The heat pump should connect.");
+        var firstSource = Assert.IsType<ModbusSubjectClientSource>(heatPump.Source);
+
+        // Act
+        host.Container.HeatPump = null;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.Status == ServiceStatus.Stopped && heatPump.Source is null,
+            TestTimeouts.Default,
+            message: "Leaving the graph should stop the heat pump and its source.");
+        host.Container.HeatPump = heatPump;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.IsConnected && heatPump.Status == ServiceStatus.Running && heatPump.Source is not null,
+            TestTimeouts.Default,
+            message: "Re-entering the graph should run a source again.");
+        Assert.Equal(SourceState.Stopped, firstSource.State);
+        Assert.NotSame(firstSource, heatPump.Source);
+    }
+
+    [Fact]
+    public async Task WhenHeatPumpEntersTheGraph_ThenItsSourceIsStartedBeforeStartupCompletes()
+    {
+        // Arrange
+        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
+        server.Start();
+        server.SeedTypicalValues();
+        var recorder = new StartupCompletionRecorder();
+
+        // Act
+        await using var host = await HostedHeatPump.StartAsync(
+            "127.0.0.1",
+            server.Port,
+            configureContext: context =>
+            {
+                context.AddService<IStartupCompletion>(recorder);
+                recorder.Probe = () => context.GetService<ISubjectRegistry>().KnownSubjects.Keys
+                    .OfType<LuxtronikHeatPump>().SingleOrDefault()?.Source is not null;
+            });
+        var heatPump = host.HeatPump;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.IsConnected && heatPump.Status == ServiceStatus.Running && recorder.Outstanding == 0,
+            TestTimeouts.Default,
+            message: "The heat pump should connect and every completion deferral should have been released.");
+
+        // Assert
+        // The heat pump's own completion deferral covers its start, which starts the source.
+        Assert.Equal(1, recorder.DeferralCount);
+        Assert.True(recorder.ProbeWhenFirstSettled);
     }
 
     [Fact]
@@ -138,7 +270,7 @@ public class LuxtronikHeatPumpLifecycleTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.StatusMessage == "No host address configured",
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The heat pump should report the missing host address.");
         Assert.Equal(ServiceStatus.Stopped, heatPump.Status);
         Assert.False(heatPump.IsConnected);
@@ -150,7 +282,7 @@ public class LuxtronikHeatPumpLifecycleTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.IsConnected && heatPump.Status == ServiceStatus.Running,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The heat pump should connect once a host address is applied.");
     }
 
@@ -162,16 +294,23 @@ public class LuxtronikHeatPumpLifecycleTests
         server.Start();
         server.SeedTypicalValues();
 
+        var logger = new RecordingLogger<LuxtronikHeatPump>();
+
         // Act
-        await using var host = await HostedHeatPump.StartAsync("127.0.0.1", port: 0);
+        await using var host = await HostedHeatPump.StartAsync("127.0.0.1", port: 0, logger);
         var heatPump = host.HeatPump;
 
         // Assert
+        // The message as well as the status: the two are separate writes.
         await AsyncTestHelpers.WaitUntilAsync(
-            () => heatPump.Status == ServiceStatus.Error,
-            WaitTimeout,
+            () => heatPump.Status == ServiceStatus.Error && heatPump.StatusMessage is not null,
+            TestTimeouts.Default,
             message: "The heat pump should report the invalid configuration.");
         Assert.Contains("Port", heatPump.StatusMessage);
+
+        // Rejected before any source is created, rather than reported once a source has failed on it.
+        var error = Assert.Single(logger.Errors);
+        Assert.Contains("invalid configuration", error);
 
         // Act
         heatPump.Port = server.Port;
@@ -180,7 +319,7 @@ public class LuxtronikHeatPumpLifecycleTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.IsConnected && heatPump.Status == ServiceStatus.Running,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The heat pump should connect once the configuration is fixed.");
     }
 
@@ -200,7 +339,7 @@ public class LuxtronikHeatPumpLifecycleTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.StatusMessage == "Heat pump error 715",
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The heat pump should report the controller error.");
         Assert.Equal(ServiceStatus.Running, heatPump.Status);
         Assert.True(heatPump.IsConnected);
@@ -218,7 +357,7 @@ public class LuxtronikHeatPumpLifecycleTests
         var heatPump = host.HeatPump;
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.IsConnected && heatPump.Functions.GetFunctionMask() is not null && heatPump.LastUpdated is not null,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The heat pump should connect and read the flags.");
 
         // Act
@@ -245,7 +384,7 @@ public class LuxtronikHeatPumpLifecycleTests
         var heatPump = host.HeatPump;
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.Functions.IsCoolingEnabled == false && heatPump.Temperatures.Outside.Temperature == -4.5m,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The heat pump should read the flags without cooling.");
         Assert.Null(heatPump.Cooling);
 
@@ -256,7 +395,7 @@ public class LuxtronikHeatPumpLifecycleTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.Cooling?.Status == LuxtronikModeStatus.Running,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "Cooling should appear and read its status.");
         Assert.Equal(discoveryCount + 1, heatPump.DiscoveryCount);
 
@@ -267,7 +406,7 @@ public class LuxtronikHeatPumpLifecycleTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.Cooling is null,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "Cooling should be removed once its flag is clear.");
         Assert.Equal(discoveryCount + 1, heatPump.DiscoveryCount);
     }
@@ -284,7 +423,7 @@ public class LuxtronikHeatPumpLifecycleTests
         var heatPump = host.HeatPump;
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.IsConnected && heatPump.Functions.IsHotWaterEnabled == true,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The heat pump should connect and read the flags.");
 
         // Act
@@ -293,7 +432,7 @@ public class LuxtronikHeatPumpLifecycleTests
             .ToArray());
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.Functions.IsHotWaterEnabled == false,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The heat pump should read the cleared hot water flag.");
         await WaitForPollsAsync(heatPump, 2);
 
@@ -314,7 +453,7 @@ public class LuxtronikHeatPumpLifecycleTests
         var heatPump = host.HeatPump;
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.IsConnected && heatPump.LastUpdated is not null,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The heat pump should connect.");
 
         // Act
@@ -333,7 +472,7 @@ public class LuxtronikHeatPumpLifecycleTests
             var lastUpdated = heatPump.LastUpdated;
             await AsyncTestHelpers.WaitUntilAsync(
                 () => heatPump.LastUpdated > lastUpdated,
-                WaitTimeout,
+                TestTimeouts.Default,
                 message: "The heat pump should keep polling.");
         }
     }
@@ -351,13 +490,13 @@ public class LuxtronikHeatPumpLifecycleTests
         var heatPump = host.HeatPump;
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.IsConnected && heatPump.Functions.IsCoolingEnabled == false,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The heat pump should read the flags without cooling.");
 
         server.Stop();
         await AsyncTestHelpers.WaitUntilAsync(
             () => !heatPump.IsConnected,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The heat pump should report the lost controller.");
         var discoveryCount = heatPump.DiscoveryCount;
 
@@ -377,7 +516,7 @@ public class LuxtronikHeatPumpLifecycleTests
             var lastUpdated = heatPump.LastUpdated;
             await AsyncTestHelpers.WaitUntilAsync(
                 () => heatPump.LastUpdated > lastUpdated,
-                WaitTimeout,
+                TestTimeouts.Default,
                 message: "The heat pump should keep polling.");
         }
 
@@ -400,7 +539,7 @@ public class LuxtronikHeatPumpLifecycleTests
         var heatPump = host.HeatPump;
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.MixingCircuit2 is not null && heatPump.Temperatures.Outside.Temperature == -4.5m,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "Mixing circuit 2 should exist for cooling.");
         var circuit = heatPump.MixingCircuit2!;
         Assert.Null(circuit.MinimumTarget);
@@ -411,7 +550,7 @@ public class LuxtronikHeatPumpLifecycleTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.MixingCircuit2?.MinimumTarget == 20.0m && heatPump.MixingCircuit2?.MaximumTarget == 45.0m,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The minimum and maximum targets should be read once the circuit heats.");
         Assert.Same(circuit, heatPump.MixingCircuit2);
     }
@@ -432,7 +571,7 @@ public class LuxtronikHeatPumpLifecycleTests
         var heatPump = host.HeatPump;
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.MixingCircuit2?.MinimumTarget == 20.0m && heatPump.MixingCircuit2?.MaximumTarget == 45.0m,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The minimum and maximum targets should be read while the circuit heats.");
         var circuit = heatPump.MixingCircuit2!;
 
@@ -442,7 +581,7 @@ public class LuxtronikHeatPumpLifecycleTests
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => circuit.MinimumTarget is null && circuit.MaximumTarget is null,
-            WaitTimeout,
+            TestTimeouts.Default,
             message: "The minimum and maximum targets should be cleared once the circuit only cools.");
         Assert.Same(circuit, heatPump.MixingCircuit2);
         Assert.Equal(35.0m, circuit.Target);
@@ -453,16 +592,24 @@ public class LuxtronikHeatPumpLifecycleTests
         private readonly ServiceProvider _provider;
         private readonly IHostedService _handler;
 
-        private HostedHeatPump(ServiceProvider provider, IHostedService handler, LuxtronikHeatPump heatPump)
+        private HostedHeatPump(ServiceProvider provider, IHostedService handler, LuxtronikHeatPump heatPump, TestHost container)
         {
             _provider = provider;
             _handler = handler;
             HeatPump = heatPump;
+            Container = container;
         }
 
         public LuxtronikHeatPump HeatPump { get; }
 
-        public static async Task<HostedHeatPump> StartAsync(string? hostAddress, int port, ILogger<LuxtronikHeatPump>? logger = null)
+        /// <summary>The graph root the heat pump sits in; clearing its property takes the heat pump out of the graph.</summary>
+        public TestHost Container { get; }
+
+        public static async Task<HostedHeatPump> StartAsync(
+            string? hostAddress,
+            int port,
+            ILogger<LuxtronikHeatPump>? logger = null,
+            Action<IInterceptorSubjectContext>? configureContext = null)
         {
             var services = new ServiceCollection()
                 .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
@@ -470,6 +617,7 @@ public class LuxtronikHeatPumpLifecycleTests
                 .WithFullPropertyTracking()
                 .WithRegistry()
                 .WithHostedServices(services);
+            configureContext?.Invoke(context);
             var provider = services.BuildServiceProvider();
             IHostedService handler;
             try
@@ -491,10 +639,14 @@ public class LuxtronikHeatPumpLifecycleTests
                 PollingInterval = TestPollingInterval
             };
 
-            var host = new HostedHeatPump(provider, handler, heatPump);
-            _ = new TestHost(context) { HeatPump = heatPump };
+            var container = new TestHost(context);
+            var host = new HostedHeatPump(provider, handler, heatPump, container);
+            container.HeatPump = heatPump;
             return host;
         }
+
+        /// <summary>Stops the hosting handler the way a host shutdown does, bounded by <paramref name="shutdownToken"/>.</summary>
+        public Task StopHandlerAsync(CancellationToken shutdownToken) => _handler.StopAsync(shutdownToken);
 
         public async ValueTask DisposeAsync()
         {

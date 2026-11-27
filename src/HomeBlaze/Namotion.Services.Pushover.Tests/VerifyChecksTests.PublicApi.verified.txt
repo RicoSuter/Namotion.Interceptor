@@ -48,7 +48,7 @@ namespace Namotion.Services.Pushover
     }
     public static class PushoverServiceCollectionExtensions
     {
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPushoverService(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Services.Pushover.PushoverService>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext?>? contextResolver = null) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPushoverService(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Namotion.Services.Pushover.PushoverService>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext>? contextResolver = null) { }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectIcon("Person")]
     [Namotion.Interceptor.Attributes.InterceptorSubject]
