@@ -428,8 +428,6 @@ public partial class WallboxCharger : BackgroundService,
                 await PollAsync(stoppingToken);
 
                 Status = ServiceStatus.Running;
-                StatusMessage = null;
-                IsConnected = true;
 
                 await RunPollingLoopAsync(stoppingToken);
             }
@@ -494,21 +492,20 @@ public partial class WallboxCharger : BackgroundService,
         }
     }
 
-    private async Task PollAsync(CancellationToken cancellationToken)
+    internal void ApplyStatus(ChargerStatusResponse status)
     {
-        if (_client is null)
-            return;
-
-        var status = await _client.GetChargerStatusAsync(SerialNumber, cancellationToken);
-
         // Charger status
         ChargerStatus = status.Status;
 
-        // Only override Finished flag for definitive "not plugged" states;
-        // all other statuses (including future ones) fall back to API's Finished flag.
-        IsPluggedIn = ChargerStatus is not (WallboxChargerStatus.Disconnected or WallboxChargerStatus.Ready) && status.IsFinished != true;
+        // Disconnected means the charger itself has no connection to the cloud (power or network loss);
+        // a charger without a car reports Ready. The other values are then the last ones it sent.
+        var isOnline = ChargerStatus is not WallboxChargerStatus.Disconnected;
+        IsConnected = isOnline;
+        StatusMessage = isOnline ? null : "Charger is offline";
 
-        IsCharging = ChargerStatus is WallboxChargerStatus.Charging or WallboxChargerStatus.Discharging;
+        // Ready overrides the Finished flag; all other statuses (including future ones) fall back to it.
+        IsPluggedIn = isOnline ? ChargerStatus is not WallboxChargerStatus.Ready && status.IsFinished != true : null;
+        IsCharging = isOnline ? ChargerStatus is WallboxChargerStatus.Charging or WallboxChargerStatus.Discharging : null;
         ChargingPower = status.ChargingPowerInKw * 1000m;
 
         // Workaround: Pulsar MAX firmware always returns charging_speed=0.
@@ -567,6 +564,16 @@ public partial class WallboxCharger : BackgroundService,
         AvailableSoftwareUpdate = status.ConfigData?.Software?.IsUpdateAvailable == true
             ? status.ConfigData.Software.LatestVersion
             : null;
+    }
+
+    private async Task PollAsync(CancellationToken cancellationToken)
+    {
+        if (_client is null)
+            return;
+
+        var status = await _client.GetChargerStatusAsync(SerialNumber, cancellationToken);
+
+        ApplyStatus(status);
 
         // Session energy aggregation per year. Completed years are fetched once
         // and cached for the service lifetime. Only the current year is re-fetched
@@ -613,8 +620,6 @@ public partial class WallboxCharger : BackgroundService,
         // AddedEnergy from status API is in kWh; add current session energy (not yet in sessions API)
         TotalConsumedEnergy = GetTotalConsumedEnergy(TotalConsumedEnergy, _cachedSessionEnergy,
             IsPluggedIn == true ? (status.AddedEnergy ?? 0) * 1000m : 0);
-
-        IsConnected = true;
     }
 
     /// <summary>
