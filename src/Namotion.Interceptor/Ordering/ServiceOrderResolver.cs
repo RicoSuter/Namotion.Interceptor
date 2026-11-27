@@ -248,6 +248,34 @@ internal static class ServiceOrderResolver
             middleTypes = ValidateFirstGroupDependencies(firstGroup, middleGroup, lastGroup);
         if (lastGroup != null)
             ValidateLastGroupDependencies(firstGroup, middleGroup, lastGroup, middleTypes);
+        if (middleGroup != null)
+            ValidateMiddleGroupDependencies(firstGroup, middleGroup, lastGroup);
+    }
+
+    private static void ValidateMiddleGroupDependencies<T>(T[]? firstGroup, T[] middleGroup, T[]? lastGroup)
+    {
+        HashSet<Type>? firstTypes = null;
+        HashSet<Type>? lastTypes = null;
+        foreach (var service in middleGroup)
+        {
+            var info = GetOrderInfo(service!.GetType());
+            foreach (var beforeType in info.RunsBefore)
+            {
+                firstTypes ??= GetTypes(firstGroup);
+                if (firstTypes.Contains(beforeType))
+                    throw new InvalidOperationException(
+                        $"Service {service.GetType().Name} cannot have [RunsBefore({beforeType.Name})] " +
+                        $"where {beforeType.Name} is [RunsFirst]");
+            }
+            foreach (var afterType in info.RunsAfter)
+            {
+                lastTypes ??= GetTypes(lastGroup);
+                if (lastTypes.Contains(afterType))
+                    throw new InvalidOperationException(
+                        $"Service {service.GetType().Name} cannot have [RunsAfter({afterType.Name})] " +
+                        $"where {afterType.Name} is [RunsLast]");
+            }
+        }
     }
 
     private static HashSet<Type>? ValidateFirstGroupDependencies<T>(T[] firstGroup, T[]? middleGroup, T[]? lastGroup)

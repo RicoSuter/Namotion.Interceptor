@@ -108,6 +108,8 @@ public class LateHandler : IWriteInterceptor { }
 - A service cannot have both `[RunsFirst]` and `[RunsLast]`
 - A `[RunsFirst]` service cannot have `[RunsAfter]` referencing Middle or Last group services
 - A `[RunsLast]` service cannot have `[RunsBefore]` referencing First or Middle group services
+- A Middle service cannot have `[RunsBefore]` referencing a `[RunsFirst]` service, or `[RunsAfter]` referencing a `[RunsLast]` service
+- Middle services may use `[RunsAfter]` on First services and `[RunsBefore]` on Last services
 
 ## Interceptor Pipeline
 
