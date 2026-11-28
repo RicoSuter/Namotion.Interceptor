@@ -29,6 +29,17 @@ namespace Namotion.ZWave
         public ZWaveConnectionException(string message) { }
         public ZWaveConnectionException(string message, System.Exception innerException) { }
     }
+    [System.Flags]
+    public enum ZWaveControllerCapabilities : byte
+    {
+        None = 0,
+        Secondary = 1,
+        OnOtherNetwork = 2,
+        SisPresent = 4,
+        WasRealPrimary = 8,
+        Suc = 16,
+        NoNodesIncluded = 32,
+    }
     public sealed class ZWaveControllerException : Namotion.ZWave.ZWaveException
     {
         public ZWaveControllerException() { }
@@ -48,6 +59,21 @@ namespace Namotion.ZWave
         public ZWaveException() { }
         public ZWaveException(string message) { }
         public ZWaveException(string message, System.Exception innerException) { }
+    }
+    public enum ZWaveLibraryType : byte
+    {
+        Unknown = 0,
+        StaticController = 1,
+        Controller = 2,
+        EnhancedEndNode = 3,
+        EndNode = 4,
+        Installer = 5,
+        RoutingEndNode = 6,
+        BridgeController = 7,
+        DeviceUnderTest = 8,
+        NotApplicable = 9,
+        AvRemote = 10,
+        AvDevice = 11,
     }
     public sealed class ZWaveTimeoutException : Namotion.ZWave.ZWaveException
     {
