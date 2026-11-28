@@ -334,10 +334,10 @@ namespace HomeBlaze.Abstractions.Devices
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=190)]
         [System.ComponentModel.Category("Pairing")]
         bool IsPairing { get; }
-        [HomeBlaze.Abstractions.Attributes.Operation(Description="Opens the window in which the hub accepts new devices.", Title="Start Pairing")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Opens the window in which the hub accepts new devices.", Icon="Add", Position=1, Title="Start Pairing")]
         [System.ComponentModel.Category("Pairing")]
         System.Threading.Tasks.Task StartPairingAsync(System.TimeSpan? duration, System.Threading.CancellationToken cancellationToken);
-        [HomeBlaze.Abstractions.Attributes.Operation(Description="Closes the window in which the hub accepts new devices.", Title="Stop Pairing")]
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Closes the window in which the hub accepts new devices.", Icon="Stop", Position=2, Title="Stop Pairing")]
         [System.ComponentModel.Category("Pairing")]
         System.Threading.Tasks.Task StopPairingAsync(System.Threading.CancellationToken cancellationToken);
     }
@@ -383,7 +383,7 @@ namespace HomeBlaze.Abstractions.Devices.Energy
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=340, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         decimal? BatteryLevel { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=341)]
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=344)]
         [Namotion.Interceptor.Attributes.Derived]
         bool? IsBatteryLow { get; }
     }

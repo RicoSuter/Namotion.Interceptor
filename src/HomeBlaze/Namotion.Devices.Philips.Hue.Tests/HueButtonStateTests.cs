@@ -239,6 +239,36 @@ public class HueButtonStateTests
     }
 
     [Fact]
+    public void WhenTheSameDoubleShortReleaseIsReportedAgain_ThenOnlyOneReleaseEventIsEmitted()
+    {
+        // Arrange
+        var buttonResource = TestHelpers.CreateButtonResource(null);
+        var buttonDevice = TestHelpers.CreateButtonDevice([buttonResource]);
+        var button = buttonDevice.Buttons[0];
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        var pressTimestamp = DateTimeOffset.UtcNow;
+        var pressResource = TestHelpers.CreateButtonResource(ButtonEvent.initial_press, pressTimestamp);
+        pressResource.Id = buttonResource.Id;
+        button.Update(pressResource, false);
+
+        var releaseTimestamp = pressTimestamp.AddMilliseconds(300);
+
+        // Act
+        for (var i = 0; i < 2; i++)
+        {
+            var releaseResource = TestHelpers.CreateButtonResource(ButtonEvent.double_short_release, releaseTimestamp);
+            releaseResource.Id = buttonResource.Id;
+            button.Update(releaseResource, false);
+        }
+
+        // Assert
+        var releaseEvent = Assert.Single(events, e => e.ButtonState == ButtonState.Release);
+        Assert.Equal(2, releaseEvent.PressCount);
+    }
+
+    [Fact]
     public void WhenShortRelease_ThenEventHasPressCountOneAndStateResetsToNone()
     {
         // Arrange

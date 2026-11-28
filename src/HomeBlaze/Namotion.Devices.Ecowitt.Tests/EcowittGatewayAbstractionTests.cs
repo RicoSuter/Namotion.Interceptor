@@ -1,3 +1,5 @@
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Sensors;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Ecowitt.Models;
@@ -35,6 +37,37 @@ public class EcowittGatewayAbstractionTests
         Assert.Equal(12.5m, pm25Sensor.Pm25);
         Assert.Equal(10m, gateway.Pm25Sensors[0].Pm25DailyAverage);
         Assert.True(leakSensor.IsLeakDetected);
+    }
+
+    [Fact]
+    public void WhenAirQualityAndLeakReadingsArrive_ThenTheRegisteredPropertiesCarryTheMetadataOfTheContracts()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        var data = new EcowittLiveData
+        {
+            Co2 = [new EcowittCo2Data { Channel = 1, Co2 = 612m }],
+            Pm25 = [new EcowittPm25Data { Channel = 1, Pm25 = 12.5m }],
+            Leaks = [new EcowittLeakData { Channel = 1, IsLeaking = true }]
+        };
+
+        // Act
+        gateway.Update(data);
+
+        // Assert
+        var carbonDioxide = GetStateAttribute(gateway.Co2Sensors[0], nameof(ICarbonDioxideSensor.CarbonDioxide));
+        var pm25 = GetStateAttribute(gateway.Pm25Sensors[0], nameof(IPm25Sensor.Pm25));
+        var isLeakDetected = GetStateAttribute(gateway.LeakSensors[0], nameof(IWaterLeakSensor.IsLeakDetected));
+
+        Assert.Equal(StateUnit.PartsPerMillion, carbonDioxide.Unit);
+        Assert.Equal(StateUnit.MicrogramPerCubicMeter, pm25.Unit);
+        Assert.True(isLeakDetected.IsDiscrete);
+    }
+
+    private static StateAttribute GetStateAttribute(IInterceptorSubject subject, string propertyName)
+    {
+        var property = subject.TryGetRegisteredSubject()!.TryGetProperty(propertyName)!;
+        return property.ReflectionAttributes.OfType<StateAttribute>().Single();
     }
 
     private static EcowittGateway CreateGateway()
