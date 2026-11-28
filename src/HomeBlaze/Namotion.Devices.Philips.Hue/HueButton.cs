@@ -30,6 +30,10 @@ public partial class HueButton :
     // never counts as a clock jump: its snapshot carries the last report the bridge had, of any age.
     private static readonly TimeSpan ClockJumpThreshold = TimeSpan.FromMinutes(5);
 
+    // The event stream and the poll apply reports concurrently. Guards ButtonResource, the last accepted
+    // change date, the state writes and the emission.
+    private readonly Lock _lock = new();
+
     private DateTimeOffset? _currentButtonChangeDate;
 
     internal ButtonResource ButtonResource { get; set; }
@@ -131,12 +135,15 @@ public partial class HueButton :
 
     internal HueButton Update(ButtonResource buttonResource, bool initialization)
     {
-        ButtonResource = buttonResource;
-        LastUpdated = DateTimeOffset.Now;
-
-        if (!initialization)
+        lock (_lock)
         {
-            RefreshButtonState();
+            ButtonResource = buttonResource;
+            LastUpdated = DateTimeOffset.Now;
+
+            if (!initialization)
+            {
+                RefreshButtonState(acceptClockJump: false);
+            }
         }
 
         return this;
@@ -144,19 +151,30 @@ public partial class HueButton :
 
     internal void ApplyEventStreamUpdate(Func<ButtonResource, ButtonResource> merge)
     {
-        var previousButtonChangeDate = ButtonChangeDate;
-        ButtonResource = merge(ButtonResource);
-        LastUpdated = DateTimeOffset.Now;
+        lock (_lock)
+        {
+            var previousButtonChangeDate = ButtonChangeDate;
+            ButtonResource = merge(ButtonResource);
+            LastUpdated = DateTimeOffset.Now;
 
-        // Only an update that carries a new report is one the bridge just sent
-        RefreshButtonState(acceptClockJump: ButtonChangeDate != previousButtonChangeDate);
+            // Only an update that carries a new report is one the bridge just sent
+            RefreshButtonState(acceptClockJump: ButtonChangeDate != previousButtonChangeDate);
+        }
     }
 
     /// <summary>
     /// Emits the current button report unless it is not newer than the last emitted one.
     /// </summary>
-    public void RefreshButtonState() => RefreshButtonState(acceptClockJump: false);
+    public void RefreshButtonState()
+    {
+        lock (_lock)
+        {
+            RefreshButtonState(acceptClockJump: false);
+        }
+    }
 
+    // Called under _lock. The event is emitted under it as well: emitted after the lock is released,
+    // the event of a later report could overtake the one of an earlier report.
     private void RefreshButtonState(bool acceptClockJump)
     {
         var newButtonChangeDate = ButtonChangeDate;
