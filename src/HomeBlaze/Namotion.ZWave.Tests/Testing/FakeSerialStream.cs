@@ -84,6 +84,16 @@ internal sealed class FakeSerialStream(FakeZWaveStick stick) : Stream
 
     public override void SetLength(long value) => throw new NotSupportedException();
 
+    public override async ValueTask DisposeAsync()
+    {
+        if (stick.DisposeGate is { } gate)
+        {
+            await gate;
+        }
+
+        await base.DisposeAsync();
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (stick.ThrowsOnDispose)

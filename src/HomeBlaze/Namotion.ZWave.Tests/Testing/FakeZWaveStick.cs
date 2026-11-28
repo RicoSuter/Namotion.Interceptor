@@ -38,6 +38,11 @@ internal sealed class FakeZWaveStick : IZWaveTransport
     public int HungWriteCount => Volatile.Read(ref _hungWriteCount);
 
     /// <summary>
+    /// When set, the stream's <see cref="Stream.DisposeAsync"/> waits for this task before it closes the stream.
+    /// </summary>
+    public Task? DisposeGate { get; init; }
+
+    /// <summary>
     /// Whether disposing the stream throws without closing it, as closing an unplugged serial port can.
     /// </summary>
     public bool ThrowsOnDispose { get; init; }

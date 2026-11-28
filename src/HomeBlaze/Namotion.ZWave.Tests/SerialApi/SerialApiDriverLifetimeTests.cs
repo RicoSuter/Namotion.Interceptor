@@ -219,6 +219,27 @@ public class SerialApiDriverLifetimeTests
     }
 
     [Fact]
+    public async Task WhenDisposedConcurrently_ThenBothCallsCompleteOnlyAfterDisposalFinished()
+    {
+        // Arrange
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stick = new FakeZWaveStick { DisposeGate = gate.Task };
+        var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+
+        // Act
+        var first = DisposeAsTask(driver);
+        var second = DisposeAsTask(driver);
+        var completedWhileClosing = first.IsCompleted || second.IsCompleted;
+        gate.SetResult();
+        await Task.WhenAll(first, second).WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.False(completedWhileClosing);
+        Assert.True(stick.IsDisposed);
+        Assert.True(driver.Completion.IsCompletedSuccessfully);
+    }
+
+    [Fact]
     public async Task WhenDisposedTwice_ThenTheSecondCallDoesNothing()
     {
         // Arrange
@@ -250,4 +271,6 @@ public class SerialApiDriverLifetimeTests
         await Assert.ThrowsAsync<ObjectDisposedException>(() => pending);
         Assert.True(driver.Completion.IsCompletedSuccessfully);
     }
+
+    private static Task DisposeAsTask(SerialApiDriver driver) => driver.DisposeAsync().AsTask();
 }

@@ -30,6 +30,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
     private Task _sendLoop = Task.CompletedTask;
     private volatile int _disposed;
     private bool _started;
+    private Task? _disposal;
 
     public SerialApiDriver(Stream stream, ZWaveControllerOptions options, ILogger logger)
     {
@@ -296,18 +297,26 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         _completion.TrySetException(failure);
     }
 
-    public async ValueTask DisposeAsync()
+    /// <summary>
+    /// Stops the loops, closes the stream and fails the requests that did not complete. Every call returns the same
+    /// disposal, which completes once it finished.
+    /// </summary>
+    public ValueTask DisposeAsync()
     {
         lock (_lifecycleLock)
         {
-            if (_disposed != 0)
+            if (_disposal is null)
             {
-                return;
+                _disposed = 1;
+                _disposal = DisposeCoreAsync();
             }
 
-            _disposed = 1;
+            return new ValueTask(_disposal);
         }
+    }
 
+    private async Task DisposeCoreAsync()
+    {
         _transactions.Writer.TryComplete();
         await _stopping.CancelAsync().ConfigureAwait(false);
 
