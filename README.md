@@ -413,6 +413,7 @@ Integrations expose subjects through .NET host frameworks. They reuse the tracki
 | **Namotion.Interceptor.Mqtt** | Bidirectional MQTT synchronization | [MQTT](docs/connectors-mqtt.md) |
 | **Namotion.Interceptor.OpcUa** | OPC UA client and server integration | [OPC UA](docs/connectors-opcua.md) |
 | **Namotion.Interceptor.Modbus** | Read-only Modbus TCP polling | [Modbus](docs/connectors-modbus.md) |
+| **Namotion.Matter** | Matter controller through matterjs-server | [Matter](docs/matter.md) |
 | **Namotion.Interceptor.WebSocket** | Real-time WebSocket synchronization | [WebSocket](docs/connectors-websocket.md) |
 | **Connector Tester** | Chaos and load testing for connector verification | [Connector Tester](docs/connector-tester.md) |
 

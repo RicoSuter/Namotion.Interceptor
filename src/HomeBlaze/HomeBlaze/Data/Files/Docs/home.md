@@ -86,3 +86,4 @@ System architecture, scaling stages, deployment topology, and design decisions. 
 Working design documents for features not yet implemented. During implementation, the relevant content migrates into [design documents](architecture/design/) and [architecture decisions](architecture/decisions/). Completed plans are removed. [Implementation State](architecture/state.md) tracks overall status.
 
 - [Dynamic Subject Proxying](plans/dynamic-subject-proxying.md): WebSocket sync with dynamic proxy subjects
+- [Matter Controller](plans/matter.md): Matter and Thread devices through matterjs-server
