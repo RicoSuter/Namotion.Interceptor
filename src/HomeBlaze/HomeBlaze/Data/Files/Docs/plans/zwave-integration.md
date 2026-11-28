@@ -149,19 +149,27 @@ src/HomeBlaze/
 
 `IZWaveTransport` has one member, `ValueTask<Stream> OpenAsync(CancellationToken cancellationToken)`.
 
-- `SerialTransport(string portName)`: `SerialPort` at 115200 baud, 8N1, returns a stream over its `BaseStream` that also closes the port.
-- `TcpTransport(string host, int port)`: returns a `NetworkStream`, for a stick behind ser2net or a similar bridge.
+- `SerialTransport(string portName)`: `SerialPort` at 115200 baud, 8N1, asserts DTR and RTS once the port is open (as node-serialport does for zwave-js), and returns a stream over its `BaseStream` that also closes the port. On Linux, a `/dev/serial/by-id/...` path is recommended, as `/dev/ttyACMn` can be renumbered when the stick re-enumerates.
+- `TcpTransport(string host, int port)`: returns a `NetworkStream`, for a stick behind ser2net or a similar bridge. A connect that does not complete within 10 s throws a `TimeoutException`. A bridge that stops answering without closing the connection ends it after about a minute: TCP keepalive (30 s, then 3 probes 10 s apart) covers an idle connection, and on Linux `TCP_USER_TIMEOUT` (60 s) covers sent data that stays unacknowledged, which keepalive does not probe.
+- Each transport names what it connects to through `ToString()`. `ZWaveController.ConnectAsync` reports every exception of `OpenAsync` as a `ZWaveConnectionException` with the transport's exception inside and the transport named in the message; only an `OperationCanceledException` of the caller's own token passes through, so that only the caller's cancellation ends a reconnect loop.
 - Tests pass a transport that returns an in-memory duplex stream.
 
 ### Serial API Driver
 
 - **Frame parser**: a pure incremental state machine over `ReadOnlySpan<byte>` with a reused buffer, producing `Ack`, `Nak`, `Can` and `DataFrame(type, function, payload)`. It skips bytes up to the next start of frame. The driver acknowledges each valid data frame and answers a bad checksum with a NAK.
 - **One transaction at a time**: a read loop and a send loop over a `Channel<T>` queue.
-  1. Write the frame and wait for the ACK (1600 ms). On NAK, CAN or timeout, retransmit, with 3 attempts in total and a delay of 100 ms + (attempt - 1) × 1000 ms before each retransmission.
+  1. Write the frame and wait for the ACK (1600 ms). On NAK, CAN or timeout, retransmit, with 3 attempts in total and a delay of 100 ms + (attempt - 1) × 1000 ms before each retransmission. A request whose attempts were all rejected with NAK or CAN fails with `ZWaveControllerException`, and one whose last attempt timed out after an earlier rejection with `ZWaveTimeoutException`; the connection stays up. When no attempt got any ACK, NAK or CAN, the controller stopped responding: the connection fails with `ZWaveConnectionException`, which the request also fails with, so that `Completion` faults and the owner reconnects.
   2. Wait for the response if the function has one (10 s).
   3. Wait for the callback if the function has one, matched by a rolling callback ID from 1 to 255 (SendData: 30 s, with SendDataAbort after 20 s).
-- The timeouts and attempt counts are the zwave-js defaults and live in `ZWaveControllerOptions`, the options of `ZWaveController.ConnectAsync`. All waits use the `TimeProvider` of the options. A frame whose bytes stop arriving before it is complete is not timed out yet; the byte timeout of the Host API (150 ms) is added together with the interview stage.
+- The timeouts and attempt counts are the zwave-js defaults and live in `ZWaveControllerOptions`, the options of `ZWaveController.ConnectAsync`. All waits use the `TimeProvider` of the options.
+- **Frame delivery timeout**: a data frame must complete within `FrameDeliveryTimeout` (1500 ms, INS12350) of its start of frame byte. Otherwise the parser drops that byte, logs a Warning and parses the bytes after it again, so a stray 0x01 taken for a start of frame does not swallow the real frames behind it. A read pending at the timeout is kept for the next read, never canceled, so no bytes are lost. While no partial frame is pending, reading starts no timer and allocates nothing. The byte timeout of the Host API (150 ms) is not used: the frame delivery timeout bounds the same failure.
+- **Write timeout**: a write that does not complete within the acknowledgement timeout fails the connection, as a stalled network bridge or a hung USB device never completes it.
+- **Logging and observed failures**: the driver fails the connection completely (pending requests, the queue, `Completion`) before it logs the failure, so a logger that throws cannot leave it half failed, and the dispatch loop survives an exception from handling or logging a frame. The connection failure, an abandoned write and the waits a failure ends are marked as observed, so no failure raises `TaskScheduler.UnobservedTaskException`; an owner that awaits `Completion` still gets the exception.
 - **Unsolicited frames** (ApplicationCommandHandler, its bridge variant and ApplicationUpdate) are handed to a dispatch loop and never processed on the read loop, so consumer code cannot stall the serial line, and the reports of a node stay in order.
+- **Deferred, inherent to the Serial API or later work**:
+  - A response is matched by its function only, after the request's ACK. When a request times out and the same function is requested again, a late response to the first request can be taken as the response to the second. The Serial API has no correlation ID for responses; Plan 3 validates responses that carry a node ID against the request.
+  - 16-bit node IDs of 700 and 800-series sticks (Long Range) belong to the 700/800 work; the first version reads 8-bit node IDs.
+  - A noise byte 0x06, 0x15 or 0x18 on the line is read as an ACK, NAK or CAN, as single-byte frames carry no checksum. The retransmission and response handling bound the effect.
 - **Startup**: NAK to resynchronize, then version, home ID and own node ID, Serial API capabilities with the supported function bitmask, init data with the node list, and controller capabilities. The first version targets the 500 series; differences of the 700 and 800 series (Serial API started notification, extended capabilities) are kept out of the way and not implemented. No soft reset: a 500-series stick may re-enumerate on USB after it, and ZWave4Net ran this stick without one.
 
 ### Connection Lifetime
@@ -173,7 +181,7 @@ await using var controller = await ZWaveController.ConnectAsync(
     new SerialTransport("/dev/ttyACM0"), options, cancellationToken: cancellationToken);
 ```
 
-When the stream fails, every pending request faults with `ZWaveConnectionException` and `controller.Completion` faults. The SDK does not reconnect by itself; the caller decides, and the device library reconnects with a backoff. The node cache makes a reconnect cheap.
+When the transport cannot be opened, `ConnectAsync` throws `ZWaveConnectionException`. When the stream fails, a write times out or the controller answers no attempt of a request, every pending request faults with `ZWaveConnectionException` and `controller.Completion` faults. The SDK does not reconnect by itself; the caller decides, and the device library reconnects with a backoff. The node cache makes a reconnect cheap.
 
 Errors are typed: `ZWaveException` with `ZWaveTimeoutException`, `ZWaveConnectionException`, `ZWaveTransmitException` (carrying the `TransmitStatus`, for example `NoAck` when the node does not answer) and `ZWaveControllerException` (the controller rejected the request). Every request takes a `CancellationToken`; canceling a queued request removes it before it is written.
 
@@ -248,7 +256,7 @@ The unit and notification tables are ported from the registries of zwave-js (`pa
 ### Testing
 
 - **Frame parser**: byte-by-byte input, garbage before a frame, split frames, bad checksums, ACK, NAK and CAN between data frames.
-- **Driver** with a fake transport and `FakeTimeProvider`, without real waits: ACK timeouts and retransmission delays, giving up, CAN during a transaction, callback ID wrap-around, SendData abort, canceling a queued request, a failing stream faulting the pending requests and `Completion`.
+- **Driver** with a fake transport and `FakeTimeProvider`, without real waits: ACK timeouts and retransmission delays, giving up, an unresponsive controller failing the connection, CAN during a transaction, the frame delivery timeout, callback ID wrap-around, SendData abort, canceling a queued request, a failing stream faulting the pending requests and `Completion`, a logger that throws, and no unobserved task exception after a failed connect.
 - **Simulated controller and nodes** in the test project: an in-process Serial API controller with scripted nodes (listening, sleeping with wake-up, multi-channel). It drives the interview tests (continuing after a failure, the queue of a sleeping node and Wake Up No More Information, cached nodes, inclusion and exclusion) and is reused by the tests of the device library.
 - **Command classes**: a generated round trip of every command (encode, decode, compare, with sample values from the generator), golden vectors from the specification and from the zwave-js tests for the semantic layer (meter precision and scale, sensor units, Battery 0xFF, notification events, Central Scene), and the encapsulations (CRC-16 vectors, Multi Channel, Multi Command, the Supervision answer).
 - **Generator drift test**: the checked-in generated code and index equal the generator output, as for SunSpec.
