@@ -394,10 +394,14 @@ public class MatterServerControllerRequestTests
         var commissioning = controller.CommissionAsync("34970112332", networkOnly: true, cancellation.Token);
         await server.ReadRequestAsync("commission_with_code");
 
+        // A request sent later times out, while commissioning, which has no request timeout, keeps waiting
+        await Assert.ThrowsAsync<TimeoutException>(() => controller.RemoveNodeAsync(1));
+        Assert.False(commissioning.IsCompleted);
+
         // Act
         await cancellation.CancelAsync();
 
-        // Assert: the request timeout does not apply to commissioning, so only the cancellation ends it
+        // Assert
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => commissioning.WaitAsync(TestTimeouts.Default));
     }
 

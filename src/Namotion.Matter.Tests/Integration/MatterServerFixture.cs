@@ -56,33 +56,49 @@ public sealed partial class MatterServerFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        Directory.CreateDirectory(_dataDirectory);
-        await InstallPackagesAsync();
+        // xUnit does not reliably dispose a fixture whose initialization failed, so the processes are stopped here.
+        try
+        {
+            Directory.CreateDirectory(_dataDirectory);
+            await InstallPackagesAsync();
 
-        var port = LoopbackPorts.GetFreePort();
-        // A Unix socket path is limited to about 100 bytes, so the socket stays at the top of the data directory.
-        var socketPath = Path.Combine(_dataDirectory, "matter.sock");
-        TcpUrl = new Uri($"ws://127.0.0.1:{port}/ws");
-        UnixUrl = new Uri("unix://" + socketPath);
+            var port = LoopbackPorts.GetFreePort();
+            // A Unix socket path is limited to about 100 bytes, so the socket stays at the top of the data directory.
+            var socketPath = Path.Combine(_dataDirectory, "matter.sock");
+            TcpUrl = new Uri($"ws://127.0.0.1:{port}/ws");
+            UnixUrl = new Uri("unix://" + socketPath);
 
-        // The bundled DCL seed trusts the virtual light's test PAA; --dcl-offline keeps commissioning from waiting
-        // for a DCL refresh over the network.
-        _server = Start(Path.Combine(_workingDirectory, "node_modules", ".bin", "matter-server"), $"--storage-path \"{Path.Combine(_dataDirectory, "server")}\" --port {port} " +
-            $"--listen-address 127.0.0.1 --listen-address \"{socketPath}\" --enable-test-net-dcl --dcl-offline --disable-ota");
-        _light = Start("node", string.Create(CultureInfo.InvariantCulture,
-            $"virtual-light.mjs \"{Path.Combine(_dataDirectory, "light")}\" {LoopbackPorts.GetFreePort()} {LightPasscode} {LightDiscriminator}"));
+            // The bundled DCL seed trusts the virtual light's test PAA; --dcl-offline keeps commissioning from waiting
+            // for a DCL refresh over the network.
+            _server = Start(Path.Combine(_workingDirectory, "node_modules", ".bin", "matter-server"), $"--storage-path \"{Path.Combine(_dataDirectory, "server")}\" --port {port} " +
+                $"--listen-address 127.0.0.1 --listen-address \"{socketPath}\" --enable-test-net-dcl --dcl-offline --disable-ota");
+            _light = Start("node", string.Create(CultureInfo.InvariantCulture,
+                $"virtual-light.mjs \"{Path.Combine(_dataDirectory, "light")}\" {LoopbackPorts.GetFreePort()} {LightPasscode} {LightDiscriminator}"));
 
-        await AsyncTestHelpers.WaitUntilAsync(() => LightReadyPattern().IsMatch(Output), () => Output);
-        LightManualCode = LightReadyPattern().Match(Output).Groups[1].Value;
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-            Output.Contains($"Webserver listening on http://127.0.0.1:{port}", StringComparison.Ordinal) &&
-            Output.Contains($"Webserver listening on unix socket {socketPath}", StringComparison.Ordinal), () => Output);
+            await AsyncTestHelpers.WaitUntilAsync(() => LightReadyPattern().IsMatch(Output), () => Output);
+            LightManualCode = LightReadyPattern().Match(Output).Groups[1].Value;
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+                Output.Contains($"Webserver listening on http://127.0.0.1:{port}", StringComparison.Ordinal) &&
+                Output.Contains($"Webserver listening on unix socket {socketPath}", StringComparison.Ordinal), () => Output);
 
-        // The server sends its information once its controller has started, which can take a while on the first start.
-        await using var controller = await MatterServerController.ConnectAsync(TcpUrl, new MatterServerOptions { RequestTimeout = TestTimeouts.Default });
+            // The server sends its information once its controller has started, which can take a while on the first start.
+            await using var controller = await MatterServerController.ConnectAsync(TcpUrl, new MatterServerOptions { ConnectTimeout = TestTimeouts.Default });
+        }
+        catch
+        {
+            Stop();
+            throw;
+        }
     }
 
     public Task DisposeAsync()
+    {
+        Stop();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Kills the processes and deletes the data directory; safe to call more than once.</summary>
+    private void Stop()
     {
         foreach (var process in new[] { _light, _server })
         {
@@ -95,8 +111,12 @@ public sealed partial class MatterServerFixture : IAsyncLifetime
             process?.Dispose();
         }
 
-        Directory.Delete(_dataDirectory, recursive: true);
-        return Task.CompletedTask;
+        _light = null;
+        _server = null;
+        if (Directory.Exists(_dataDirectory))
+        {
+            Directory.Delete(_dataDirectory, recursive: true);
+        }
     }
 
     private static uint CreatePasscode()
