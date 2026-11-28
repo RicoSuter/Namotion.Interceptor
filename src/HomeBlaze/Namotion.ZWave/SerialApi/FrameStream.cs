@@ -52,7 +52,7 @@ internal sealed class FrameStream : IDisposable
     /// <summary>
     /// Writes and flushes a frame.
     /// </summary>
-    /// <exception cref="ZWaveConnectionException">The stream failed.</exception>
+    /// <exception cref="ZWaveConnectionException">The stream failed; any failure other than the canceled token is reported this way.</exception>
     public async Task WriteAsync(ReadOnlyMemory<byte> frame, CancellationToken cancellationToken)
     {
         await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -66,7 +66,7 @@ internal sealed class FrameStream : IDisposable
             await _stream.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
             await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is IOException or ObjectDisposedException && !cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
             throw new ZWaveConnectionException("Writing to the Z-Wave controller failed.", exception);
         }

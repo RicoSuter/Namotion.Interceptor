@@ -14,11 +14,28 @@ internal sealed class FakeZWaveStick : IZWaveTransport
     private readonly Dictionary<byte, byte[]> _responses = [];
     private readonly Queue<byte> _acknowledgements = new();
     private FakeSerialStream? _stream;
+    private int _hungWriteCount;
 
     /// <summary>
     /// Whether request frames are acknowledged when no other acknowledgement is queued.
     /// </summary>
     public bool AcknowledgesFrames { get; set; } = true;
+
+    /// <summary>
+    /// Whether the host's writes fail with an <see cref="IOException"/>.
+    /// </summary>
+    public bool FailWrites { get; set; }
+
+    /// <summary>
+    /// Whether the host's writes never complete. Like a serial port, a hung write ignores cancellation and fails
+    /// with an <see cref="IOException"/> only when the stream is closed.
+    /// </summary>
+    public bool HangWrites { get; set; }
+
+    /// <summary>
+    /// The number of writes that hang because of <see cref="HangWrites"/>.
+    /// </summary>
+    public int HungWriteCount => Volatile.Read(ref _hungWriteCount);
 
     /// <summary>
     /// Whether disposing the stream throws without closing it, as closing an unplugged serial port can.
@@ -105,6 +122,8 @@ internal sealed class FakeZWaveStick : IZWaveTransport
     /// Ends the stream, as an unplugged stick does.
     /// </summary>
     public void Disconnect() => GetStream().EndOfStream();
+
+    internal void OnHungWrite() => Interlocked.Increment(ref _hungWriteCount);
 
     internal void OnHostWrite(ReadOnlySpan<byte> bytes)
     {

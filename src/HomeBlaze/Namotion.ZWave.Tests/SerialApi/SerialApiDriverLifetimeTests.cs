@@ -102,6 +102,39 @@ public class SerialApiDriverLifetimeTests
     }
 
     [Fact]
+    public async Task WhenAWriteFails_ThenTheRequestAndCompletionFailWithAConnectionException()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        stick.FailWrites = true;
+
+        // Act
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+
+        // Assert
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => request.WaitAsync(TestTimeouts.Default));
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
+    }
+
+    [Fact]
+    public async Task WhenDisposedDuringAWriteThatIgnoresCancellation_ThenTheRequestFailsWithObjectDisposed()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        stick.HangWrites = true;
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.HungWriteCount == 1);
+
+        // Act
+        await driver.DisposeAsync().AsTask().WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => request.WaitAsync(TestTimeouts.Default));
+    }
+
+    [Fact]
     public async Task WhenDisposed_ThenPendingRequestsFailWithObjectDisposedAndTheStreamIsClosed()
     {
         // Arrange

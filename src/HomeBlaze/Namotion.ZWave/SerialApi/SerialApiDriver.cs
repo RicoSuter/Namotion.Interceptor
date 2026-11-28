@@ -100,8 +100,9 @@ internal sealed class SerialApiDriver : IAsyncDisposable
                 {
                     transaction.Complete(await ExecuteAsync(transaction, stopping).ConfigureAwait(false));
                 }
-                catch (OperationCanceledException) when (stopping.IsCancellationRequested)
+                catch (Exception) when (stopping.IsCancellationRequested)
                 {
+                    // Also a write that a closed stream ended with an I/O error: the caller sees why the driver stopped.
                     transaction.Fail((Exception?)_failure ?? new ObjectDisposedException(nameof(SerialApiDriver)));
                     return;
                 }

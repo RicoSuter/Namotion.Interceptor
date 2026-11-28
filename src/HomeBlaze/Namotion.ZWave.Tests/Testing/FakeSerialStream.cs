@@ -8,6 +8,7 @@ namespace Namotion.ZWave.Tests.Testing;
 internal sealed class FakeSerialStream(FakeZWaveStick stick) : Stream
 {
     private readonly Channel<byte[]> _incoming = Channel.CreateUnbounded<byte[]>();
+    private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private byte[]? _current;
     private int _offset;
 
@@ -53,6 +54,17 @@ internal sealed class FakeSerialStream(FakeZWaveStick stick) : Stream
     public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(IsDisposed, this);
+        if (stick.FailWrites)
+        {
+            throw new IOException("The fake serial port failed to write.");
+        }
+
+        if (stick.HangWrites)
+        {
+            stick.OnHungWrite();
+            return new ValueTask(_closed.Task);
+        }
+
         stick.OnHostWrite(buffer.Span);
         return ValueTask.CompletedTask;
     }
@@ -78,6 +90,7 @@ internal sealed class FakeSerialStream(FakeZWaveStick stick) : Stream
 
         IsDisposed = true;
         _incoming.Writer.TryComplete();
+        _closed.TrySetException(new IOException("The fake serial port was closed."));
         base.Dispose(disposing);
     }
 }
