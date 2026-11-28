@@ -20,16 +20,17 @@ public interface IPairingController
     bool? IsPairing { get; }
 
     /// <summary>
-    /// Opens the pairing window.
+    /// Opens the pairing window, or restarts an open window with the new duration.
     /// </summary>
     /// <param name="duration">How long the window stays open, or null for the default of the hub. A duration above the maximum of the hub is clamped to that maximum.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="duration"/> is zero or negative.</exception>
     [Operation(Title = "Start Pairing", Icon = "Add", Position = 1, Description = "Opens the window in which the hub accepts new devices.")]
     [Category("Pairing")]
     Task StartPairingAsync(TimeSpan? duration, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Closes the pairing window.
+    /// Closes the pairing window; does nothing while no window is open.
     /// </summary>
     [Operation(Title = "Stop Pairing", Icon = "Stop", Position = 2, Description = "Closes the window in which the hub accepts new devices.")]
     [Category("Pairing")]
