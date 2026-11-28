@@ -12,7 +12,8 @@ public interface ISmokeSensor
 {
     /// <summary>
     /// True for every alarm level the device reports (such as warning and critical), false when it reports normal,
-    /// null when it is unknown. Test, fault and end-of-life states are no alarms.
+    /// null when it is unknown. An alarm that the user silenced stays true while the condition persists.
+    /// Test, fault and end-of-life states are no alarms.
     /// </summary>
     [State(IsDiscrete = true, Position = 180)]
     bool? IsSmokeDetected { get; }
