@@ -219,20 +219,25 @@ namespace Namotion.Matter
         public MatterServerInfoChangedEvent(Namotion.Matter.MatterServerInfo ServerInfo) { }
         public Namotion.Matter.MatterServerInfo ServerInfo { get; init; }
     }
-    public readonly struct MatterValue
+    public readonly struct MatterValue : System.IEquatable<Namotion.Matter.MatterValue>
     {
         public bool IsNull { get; }
         public Namotion.Matter.MatterValueKind Kind { get; }
         public Namotion.Matter.MatterValue.ListEnumerator EnumerateList() { }
+        public bool Equals(Namotion.Matter.MatterValue other) { }
+        public override bool Equals(object? obj) { }
         public bool GetBoolean() { }
         public byte[] GetBytes() { }
         public double GetDouble() { }
+        public override int GetHashCode() { }
         public long GetInt64() { }
         public int GetListLength() { }
         public string GetString() { }
         public ulong GetUInt64() { }
         public override string ToString() { }
         public bool TryGetField(uint tag, string name, out Namotion.Matter.MatterValue value) { }
+        public static bool operator !=(Namotion.Matter.MatterValue left, Namotion.Matter.MatterValue right) { }
+        public static bool operator ==(Namotion.Matter.MatterValue left, Namotion.Matter.MatterValue right) { }
         public struct ListEnumerator
         {
             public Namotion.Matter.MatterValue Current { get; }

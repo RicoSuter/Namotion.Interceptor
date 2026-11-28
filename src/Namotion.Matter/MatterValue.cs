@@ -5,9 +5,15 @@ namespace Namotion.Matter;
 
 /// <summary>
 /// An attribute value, event payload or command response received from a node. The default value is null.
-/// A getter that does not match <see cref="Kind"/> throws <see cref="InvalidOperationException"/>.
+/// A getter that does not match <see cref="Kind"/> throws <see cref="InvalidOperationException"/>; a number getter whose
+/// type cannot hold the number, and <see cref="GetBytes"/> for text that is not valid base64, throw
+/// <see cref="FormatException"/>.
 /// </summary>
-public readonly struct MatterValue
+/// <remarks>
+/// Values are equal when their content is: struct fields in any order, and numbers by value. The hash code only
+/// distinguishes the kind, so a value is a poor dictionary key.
+/// </remarks>
+public readonly struct MatterValue : IEquatable<MatterValue>
 {
     private readonly JsonElement _element;
 
@@ -76,6 +82,23 @@ public readonly struct MatterValue
         value = default;
         return false;
     }
+
+    /// <summary>Compares two values by content.</summary>
+    public static bool operator ==(MatterValue left, MatterValue right) => left.Equals(right);
+
+    /// <summary>Compares two values by content.</summary>
+    public static bool operator !=(MatterValue left, MatterValue right) => !left.Equals(right);
+
+    /// <inheritdoc />
+    public bool Equals(MatterValue other) => IsNull || other.IsNull
+        ? IsNull && other.IsNull
+        : JsonElement.DeepEquals(_element, other._element);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is MatterValue other && Equals(other);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => (int)Kind;
 
     /// <summary>Returns the value's text form for logging.</summary>
     public override string ToString() => _element.ValueKind == JsonValueKind.Undefined ? "null" : _element.GetRawText();

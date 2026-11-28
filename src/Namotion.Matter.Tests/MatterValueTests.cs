@@ -129,4 +129,47 @@ public class MatterValueTests
         // Act & Assert
         Assert.Throws<InvalidOperationException>(() => Parse("\"text\"").GetBoolean());
     }
+
+    [Theory]
+    [InlineData("1", "1.0")]
+    [InlineData("{\"0\":1,\"1\":[true,\"a\"]}", "{\"1\":[true,\"a\"],\"0\":1}")]
+    [InlineData("\"A\"", "\"\\u0041\"")]
+    [InlineData("null", "null")]
+    public void WhenContentIsEqual_ThenValuesAreEqual(string json, string otherJson)
+    {
+        // Act
+        var value = Parse(json);
+        var other = Parse(otherJson);
+
+        // Assert
+        Assert.True(value == other);
+        Assert.False(value != other);
+        Assert.True(value.Equals((object)other));
+        Assert.Equal(value.GetHashCode(), other.GetHashCode());
+    }
+
+    [Theory]
+    [InlineData("1", "2")]
+    [InlineData("[1,2]", "[2,1]")]
+    [InlineData("{\"0\":1}", "{\"0\":1,\"1\":2}")]
+    [InlineData("null", "false")]
+    [InlineData("\"1\"", "1")]
+    public void WhenContentDiffers_ThenValuesAreNotEqual(string json, string otherJson)
+    {
+        // Act
+        var value = Parse(json);
+        var other = Parse(otherJson);
+
+        // Assert
+        Assert.False(value == other);
+        Assert.True(value != other);
+    }
+
+    [Fact]
+    public void WhenDefaultIsComparedToJsonNull_ThenTheyAreEqual()
+    {
+        // Act & Assert
+        Assert.Equal(default, Parse("null"));
+        Assert.NotEqual(default, Parse("0"));
+    }
 }
