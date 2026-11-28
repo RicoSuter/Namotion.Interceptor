@@ -99,11 +99,15 @@ Each new contract was checked against Matter, Zigbee (ZCL clusters and the actio
 
 - **Ecowitt**: `EcowittCo2Sensor` implements `ICarbonDioxideSensor` (`Co2` becomes `CarbonDioxide`, `Co2Avg24h` becomes `CarbonDioxideDailyAverage`), `EcowittPm25Sensor` implements `IPm25Sensor` (`Pm25` keeps its name, `Pm25Avg24h` becomes `Pm25DailyAverage`) and `EcowittLeakSensor` implements `IWaterLeakSensor` (`IsLeaking` becomes `IsLeakDetected`, `null` while the gateway reports no status). The daily averages are class-specific properties at position 400. `EcowittSensor` reports `IsBatteryLow` at level 1 of 5 and below, the threshold of Ecowitt, and for a binary battery that reports low.
 - **Hue**: `HueButton` implements `IMultiPressButtonDevice` and maps `double_short_release` to `Release` with `PressCount` 2. Single releases report 1. `HueButtonDevice` and `HueMotionDevice` report `IsBatteryLow` from the battery state of the bridge (true for low and critical, false for normal) and fall back to the level when the bridge reports no state.
-- **Nuki**: `NukiDevice.IsBatteryCritical` becomes `IsBatteryLow`, so that `NukiSmartLock` reports the bridge's critical battery flag through `IBatteryState`.
+- **Nuki**: `NukiDevice.IsBatteryCritical` becomes `IsBatteryLow`, so that `NukiSmartLock` reports the bridge's critical battery flag through `IBatteryState`. The property is declared on `NukiDevice`, so `NukiOpener` loses `IsBatteryCritical` as well and reports `IsBatteryLow` without implementing `IBatteryState`.
 
 The Ecowitt DTOs (`EcowittCo2Data`, `EcowittPm25Data`, `EcowittLeakData`) mirror the JSON of the gateway and keep their names.
 
-These renames change the paths of the properties, so history recorded under the old names is not continued and automations or pages that use them must be updated. The pull request lists each rename as a breaking change with its migration step.
+These renames change the paths of the properties, so history recorded under the old names is not continued and automations or pages that use them must be updated. The pull request lists each rename as a breaking change with its migration step, together with these behavior changes:
+
+- **Hue double press**: a Hue double press now emits a second `Release` event, with `PressCount` 2, after the `Release` of its first press. An automation that reacts to every `Release` runs twice for a double press. Migration: filter on `event/PressCount`, such as `event/ButtonState == Release and event/PressCount == 1` for single presses only, or `event/PressCount == 2` for double presses.
+- **New recorded state**: `IsBatteryLow` is a new recorded state on every `IBatteryState` subject, `null` for SunSpec storage. No migration is needed; history of it starts with the update.
+- **Ecowitt leak DTO**: `EcowittLeakData.IsLeaking` becomes `bool?`, `null` when the gateway reports no status. Migration: handle `null` where the DTO is read.
 
 ### Checklist for Later Integrations
 
