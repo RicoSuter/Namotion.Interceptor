@@ -34,6 +34,28 @@ public class TcpTransportTests
         Assert.Equal(0x06, fromServer[0]);
     }
 
+    [Fact]
+    public async Task WhenOpened_ThenTcpKeepAliveIsEnabledWithShortProbes()
+    {
+        // Arrange
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var transport = new TcpTransport("127.0.0.1", port);
+        var acceptTask = listener.AcceptTcpClientAsync();
+
+        // Act
+        await using var stream = await transport.OpenAsync(CancellationToken.None);
+        using var server = await acceptTask;
+
+        // Assert
+        var socket = Assert.IsType<NetworkStream>(stream).Socket;
+        Assert.NotEqual(0, (int)socket.GetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive)!);
+        Assert.Equal(30, (int)socket.GetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime)!);
+        Assert.Equal(10, (int)socket.GetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval)!);
+        Assert.Equal(3, (int)socket.GetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount)!);
+    }
+
     [Theory]
     [InlineData("", 4001)]
     [InlineData("host", 0)]
