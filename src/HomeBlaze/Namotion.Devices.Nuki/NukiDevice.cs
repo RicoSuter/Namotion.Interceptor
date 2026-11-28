@@ -30,7 +30,7 @@ public abstract partial class NukiDevice :
         Name = null;
         HasLastKnownState = false;
         SoftwareVersion = null;
-        IsBatteryCritical = null;
+        IsBatteryLow = null;
         LastUpdated = null;
     }
 
@@ -53,10 +53,13 @@ public abstract partial class NukiDevice :
 
     public partial string? SoftwareVersion { get; internal set; }
 
-    /// <summary>Whether the batteries of the device are at a critical level.</summary>
-    [State(Position = 341)]
+    /// <summary>
+    /// Whether the batteries are at a critical level, as the bridge reports it.
+    /// </summary>
+    // The base class implements no IBatteryState, so the metadata of the contract is repeated here.
+    [State(IsDiscrete = true, Position = 344)]
     [Category("Battery")]
-    public partial bool? IsBatteryCritical { get; internal set; }
+    public partial bool? IsBatteryLow { get; internal set; }
 
     [State(Position = 950)]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
@@ -94,7 +97,7 @@ public abstract partial class NukiDevice :
 
         var state = device.LastKnownState;
         HasLastKnownState = state is not null;
-        IsBatteryCritical = state?.BatteryCritical;
+        IsBatteryLow = state?.BatteryCritical;
         LastUpdated = state?.Timestamp;
         UpdateState(state);
     }

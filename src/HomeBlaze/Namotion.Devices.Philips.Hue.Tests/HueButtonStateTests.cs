@@ -1,4 +1,8 @@
+using HomeBlaze.Services;
 using HueApi.Models;
+using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Xunit;
 using ButtonState = HomeBlaze.Abstractions.Inputs.ButtonState;
 
@@ -11,6 +15,7 @@ public class HueButtonStateTests
     [InlineData(ButtonEvent.repeat, ButtonState.Repeat)]
     [InlineData(ButtonEvent.short_release, ButtonState.Release)]
     [InlineData(ButtonEvent.long_release, ButtonState.LongRelease)]
+    [InlineData(ButtonEvent.double_short_release, ButtonState.Release)]
     public void WhenEventType_ThenGetButtonStateReturnsExpected(ButtonEvent eventType, ButtonState expectedState)
     {
         // Act
@@ -193,5 +198,255 @@ public class HueButtonStateTests
 
         // Assert
         Assert.Equal(ButtonState.None, button.ButtonState);
+    }
+
+    [Theory]
+    [InlineData(ButtonEvent.initial_press, null)]
+    [InlineData(ButtonEvent.repeat, null)]
+    [InlineData(ButtonEvent.short_release, 1)]
+    [InlineData(ButtonEvent.long_release, null)]
+    [InlineData(ButtonEvent.double_short_release, 2)]
+    public void WhenEventType_ThenGetPressCountReturnsExpected(ButtonEvent eventType, int? expectedPressCount)
+    {
+        // Act
+        var result = HueButton.GetPressCount(eventType);
+
+        // Assert
+        Assert.Equal(expectedPressCount, result);
+    }
+
+    [Theory]
+    [InlineData(ButtonEvent.short_release, 1)]
+    [InlineData(ButtonEvent.double_short_release, 2)]
+    public void WhenShortPressSequenceEnds_ThenReleaseEventHasItsPressCountAndStateResetsToNone(ButtonEvent eventType, int expectedPressCount)
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        var pressTimestamp = DateTimeOffset.UtcNow;
+        Report(button, ButtonEvent.initial_press, pressTimestamp);
+
+        // Act
+        Report(button, eventType, pressTimestamp.AddMilliseconds(300));
+
+        // Assert
+        var releaseEvent = Assert.Single(events, e => e.ButtonState == ButtonState.Release);
+        Assert.Equal(expectedPressCount, releaseEvent.PressCount);
+        Assert.Equal(ButtonState.None, button.ButtonState);
+        Assert.Null(button.PressCount);
+    }
+
+    [Fact]
+    public void WhenTheSameDoubleShortReleaseIsReportedAgain_ThenOnlyOneReleaseEventIsEmitted()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        var pressTimestamp = DateTimeOffset.UtcNow;
+        Report(button, ButtonEvent.initial_press, pressTimestamp);
+        var releaseTimestamp = pressTimestamp.AddMilliseconds(300);
+
+        // Act
+        Report(button, ButtonEvent.double_short_release, releaseTimestamp);
+        Report(button, ButtonEvent.double_short_release, releaseTimestamp);
+
+        // Assert
+        var releaseEvent = Assert.Single(events, e => e.ButtonState == ButtonState.Release);
+        Assert.Equal(2, releaseEvent.PressCount);
+    }
+
+    [Fact]
+    public void WhenDoubleShortReleaseFollowsAShortRelease_ThenTheDoublePressIsReported()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        var pressTimestamp = DateTimeOffset.UtcNow;
+        Report(button, ButtonEvent.initial_press, pressTimestamp);
+        Report(button, ButtonEvent.short_release, pressTimestamp.AddMilliseconds(200));
+
+        // Act
+        Report(button, ButtonEvent.double_short_release, pressTimestamp.AddMilliseconds(500));
+
+        // Assert
+        Assert.Equal(new[] { 1, 2 }, events.Where(e => e.ButtonState == ButtonState.Release).Select(e => e.PressCount));
+        Assert.Equal(ButtonState.None, button.ButtonState);
+        Assert.Null(button.PressCount);
+    }
+
+    [Fact]
+    public void WhenAnOlderDoubleShortReleaseIsReportedAfterANewerPress_ThenItIsIgnored()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        var doublePressTimestamp = DateTimeOffset.UtcNow;
+        Report(button, ButtonEvent.double_short_release, doublePressTimestamp);
+        Report(button, ButtonEvent.initial_press, doublePressTimestamp.AddSeconds(1.8));
+        Report(button, ButtonEvent.short_release, doublePressTimestamp.AddSeconds(2));
+
+        // Act
+        Report(button, ButtonEvent.double_short_release, doublePressTimestamp);
+
+        // Assert
+        Assert.Equal(new[] { 2, 1 }, events.Where(e => e.ButtonState == ButtonState.Release).Select(e => e.PressCount));
+    }
+
+    [Fact]
+    public void WhenAShortReleaseFollowsAShortReleaseWithoutAnInitialPress_ThenBothReleasesAreEmitted()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        var firstReleaseTimestamp = DateTimeOffset.UtcNow;
+
+        // Act
+        Report(button, ButtonEvent.short_release, firstReleaseTimestamp);
+        Report(button, ButtonEvent.short_release, firstReleaseTimestamp.AddSeconds(3));
+
+        // Assert
+        Assert.Equal(new[] { ButtonState.Release, ButtonState.Release }, events.Select(e => e.ButtonState));
+        Assert.Equal(new[] { 1, 1 }, events.Select(e => e.PressCount));
+    }
+
+    [Fact]
+    public void WhenTheBridgeClockMovesBackByMoreThanFiveMinutes_ThenTheFollowingPressesAreEmitted()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        ReportFromEventStream(button, ButtonEvent.short_release, new DateTimeOffset(2026, 11, 28, 10, 0, 0, TimeSpan.Zero));
+        var rebootedClock = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Act
+        for (var index = 0; index < 3; index++)
+        {
+            ReportFromEventStream(button, ButtonEvent.short_release, rebootedClock.AddSeconds(index * 10));
+        }
+
+        // Assert
+        Assert.Equal(4, events.Count(e => e.ButtonState == ButtonState.Release));
+    }
+
+    [Fact]
+    public void WhenAnEventStreamReportIsOlderByLessThanFiveMinutes_ThenItIsIgnored()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        var releaseTimestamp = DateTimeOffset.UtcNow;
+        ReportFromEventStream(button, ButtonEvent.short_release, releaseTimestamp);
+
+        // Act
+        ReportFromEventStream(button, ButtonEvent.short_release, releaseTimestamp.AddMinutes(-4));
+
+        // Assert
+        Assert.Single(events, e => e.ButtonState == ButtonState.Release);
+    }
+
+    [Fact]
+    public void WhenAPollAppliesAReportMuchOlderThanTheLastOneFromTheEventStream_ThenItIsIgnored()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        var previousReleaseTimestamp = DateTimeOffset.UtcNow.AddHours(-1);
+        ReportFromEventStream(button, ButtonEvent.short_release, previousReleaseTimestamp);
+        ReportFromEventStream(button, ButtonEvent.short_release, DateTimeOffset.UtcNow);
+
+        // Act - the poll read the bridge just before the newer press
+        Report(button, ButtonEvent.short_release, previousReleaseTimestamp);
+
+        // Assert
+        Assert.Equal(2, events.Count(e => e.ButtonState == ButtonState.Release));
+    }
+
+    [Fact]
+    public void WhenAPollAppliesTheFirstReportAfterAClockJumpBeforeTheEventStreamDeliversIt_ThenThePressIsStillEmitted()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        var releaseTimestamp = DateTimeOffset.UtcNow;
+        var rebootedTimestamp = releaseTimestamp.AddDays(-1);
+        ReportFromEventStream(button, ButtonEvent.short_release, releaseTimestamp);
+
+        // Act
+        Report(button, ButtonEvent.short_release, rebootedTimestamp);
+        ReportFromEventStream(button, ButtonEvent.short_release, rebootedTimestamp);
+
+        // Assert
+        Assert.Equal(2, events.Count(e => e.ButtonState == ButtonState.Release));
+    }
+
+    [Fact]
+    public void WhenAnUpdateArrivesAfterDispose_ThenItDoesNotThrowAndEmitsNothing()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+        button.Dispose();
+
+        // Act
+        var timestamp = DateTimeOffset.UtcNow;
+        Report(button, ButtonEvent.short_release, timestamp);
+        ReportFromEventStream(button, ButtonEvent.short_release, timestamp.AddSeconds(1));
+        button.RefreshButtonState();
+
+        // Assert
+        Assert.Empty(events);
+    }
+
+    [Fact]
+    public void WhenAButtonIsRegistered_ThenPressCountIsADiscreteStateAtTheContractPosition()
+    {
+        // Arrange
+        var button = CreateButton();
+        ((IInterceptorSubject)button).Context.AddFallbackContext(SubjectContextFactory.Create(new ServiceCollection()));
+
+        // Act
+        var property = button.TryGetRegisteredSubject()!.TryGetProperty(nameof(HueButton.PressCount))!;
+
+        // Assert
+        var metadata = property.GetStateMetadata();
+        Assert.NotNull(metadata);
+        Assert.True(metadata.IsDiscrete);
+        Assert.Equal(151, metadata.Position);
+    }
+
+    private static HueButton CreateButton() =>
+        TestHelpers.CreateButtonDevice([TestHelpers.CreateButtonResource(null)]).Buttons[0];
+
+    private static void Report(HueButton button, ButtonEvent eventType, DateTimeOffset timestamp)
+    {
+        var resource = TestHelpers.CreateButtonResource(eventType, timestamp);
+        resource.Id = button.ResourceId;
+        button.Update(resource, false);
+    }
+
+    private static void ReportFromEventStream(HueButton button, ButtonEvent eventType, DateTimeOffset timestamp)
+    {
+        var resource = TestHelpers.CreateButtonResource(eventType, timestamp);
+        resource.Id = button.ResourceId;
+        button.ApplyEventStreamUpdate(_ => resource);
     }
 }

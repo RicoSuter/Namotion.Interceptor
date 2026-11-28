@@ -847,7 +847,7 @@ public partial class EcowittGateway : BackgroundService,
         for (var i = 0; i < visible.Length; i++)
         {
             Pm25Sensors[i].Pm25 = visible[i].Pm25;
-            Pm25Sensors[i].Pm25Avg24h = visible[i].Pm25Avg24h;
+            Pm25Sensors[i].Pm25DailyAverage = visible[i].Pm25Avg24h;
             Pm25Sensors[i].LastUpdated = now;
         }
     }
@@ -864,8 +864,8 @@ public partial class EcowittGateway : BackgroundService,
 
         for (var i = 0; i < visible.Length; i++)
         {
-            Co2Sensors[i].Co2 = visible[i].Co2;
-            Co2Sensors[i].Co2Avg24h = visible[i].Co2Avg24h;
+            Co2Sensors[i].CarbonDioxide = visible[i].Co2;
+            Co2Sensors[i].CarbonDioxideDailyAverage = visible[i].Co2Avg24h;
             Co2Sensors[i].Temperature = visible[i].Temperature;
             Co2Sensors[i].Humidity = visible[i].Humidity;
             Co2Sensors[i].LastUpdated = now;
@@ -884,7 +884,7 @@ public partial class EcowittGateway : BackgroundService,
 
         for (var i = 0; i < visible.Length; i++)
         {
-            LeakSensors[i].IsLeaking = visible[i].IsLeaking;
+            LeakSensors[i].IsLeakDetected = visible[i].IsLeaking;
             LeakSensors[i].LastUpdated = now;
         }
     }

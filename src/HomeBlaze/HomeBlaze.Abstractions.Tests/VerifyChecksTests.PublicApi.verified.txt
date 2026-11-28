@@ -152,6 +152,8 @@ namespace HomeBlaze.Abstractions.Attributes
         DecibelMilliwatt = 37,
         KilometerPerHour = 38,
         Bar = 39,
+        PartsPerMillion = 40,
+        MicrogramPerCubicMeter = 41,
     }
     [System.AttributeUsage(System.AttributeTargets.Interface)]
     public class SubjectAbstractionAttribute : System.Attribute
@@ -326,6 +328,20 @@ namespace HomeBlaze.Abstractions.Devices
     [System.ComponentModel.Description("Hub device that manages child devices (bridges, controllers).")]
     public interface IHubDevice { }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Opens and closes the window in which a hub accepts new devices.")]
+    public interface IPairingController
+    {
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=190)]
+        [System.ComponentModel.Category("Pairing")]
+        bool? IsPairing { get; }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Opens the window in which the hub accepts new devices.", Icon="Add", Position=1, Title="Start Pairing")]
+        [System.ComponentModel.Category("Pairing")]
+        System.Threading.Tasks.Task StartPairingAsync(System.TimeSpan? duration, System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Closes the window in which the hub accepts new devices.", Icon="Stop", Position=2, Title="Stop Pairing")]
+        [System.ComponentModel.Category("Pairing")]
+        System.Threading.Tasks.Task StopPairingAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Power relay that controls electrical power via switching.")]
     public interface IPowerRelay : HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState { }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
@@ -362,11 +378,14 @@ namespace HomeBlaze.Abstractions.Devices
 namespace HomeBlaze.Abstractions.Devices.Energy
 {
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
-    [System.ComponentModel.Description("Reports battery level as a percentage.")]
+    [System.ComponentModel.Description("Reports battery level as a percentage and whether the battery is low.")]
     public interface IBatteryState
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=340, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         decimal? BatteryLevel { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=344)]
+        [Namotion.Interceptor.Attributes.Derived]
+        bool? IsBatteryLow { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports whether a charging cable is plugged in, whether it charges and with which" +
@@ -757,6 +776,7 @@ namespace HomeBlaze.Abstractions.Inputs
         public ButtonEvent() { }
         public required HomeBlaze.Abstractions.Inputs.IButtonDevice Button { get; init; }
         public required HomeBlaze.Abstractions.Inputs.ButtonState ButtonState { get; init; }
+        public int PressCount { get; init; }
     }
     public enum ButtonState
     {
@@ -804,6 +824,13 @@ namespace HomeBlaze.Abstractions.Inputs
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=150)]
         HomeBlaze.Abstractions.Inputs.ButtonState? ButtonState { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports button presses with the number of presses in a quick sequence.")]
+    public interface IMultiPressButtonDevice : HomeBlaze.Abstractions.Inputs.IButtonDevice
+    {
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=151)]
+        int? PressCount { get; }
     }
 }
 namespace HomeBlaze.Abstractions.Media
@@ -1113,6 +1140,20 @@ namespace HomeBlaze.Abstractions.Sensors
         HomeBlaze.Abstractions.Common.Image? CurrentImage { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports the carbon dioxide concentration in parts per million.")]
+    public interface ICarbonDioxideSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=280, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.PartsPerMillion)]
+        decimal? CarbonDioxide { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether carbon monoxide is detected.")]
+    public interface ICarbonMonoxideSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=181)]
+        bool? IsCarbonMonoxideDetected { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports door state (open, closed, partially open).")]
     public interface IDoorSensor
     {
@@ -1160,6 +1201,14 @@ namespace HomeBlaze.Abstractions.Sensors
         decimal? Illuminance { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports the concentration of fine particulate matter (PM2.5) in micrograms per cu" +
+        "bic meter.")]
+    public interface IPm25Sensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=285, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MicrogramPerCubicMeter)]
+        decimal? Pm25 { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Measures power and energy flowing through an external circuit in both directions.")]
     public interface IPowerMeter
     {
@@ -1198,11 +1247,25 @@ namespace HomeBlaze.Abstractions.Sensors
         decimal? TotalRain { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether smoke is detected.")]
+    public interface ISmokeSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=180)]
+        bool? IsSmokeDetected { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports soil moisture level as a percentage.")]
     public interface ISoilSensor
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=260, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         decimal? SoilMoisture { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether the device detects tampering.")]
+    public interface ITamperSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=295)]
+        bool? IsTampered { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports temperature in degrees Celsius.")]
@@ -1227,6 +1290,13 @@ namespace HomeBlaze.Abstractions.Sensors
     {
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.UvIndex)]
         decimal? UvIndex { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether a water leak is detected.")]
+    public interface IWaterLeakSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=290)]
+        bool? IsLeakDetected { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports wind speed, gust, and direction.")]

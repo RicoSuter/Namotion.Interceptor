@@ -137,6 +137,7 @@ The title is the nickname, else the model (or "Hyundai" without one), a colon an
 | Property | Unit | Description |
 |----------|------|-------------|
 | `BatteryLevel` | Percent | State of charge |
+| `IsBatteryLow` | | Derived from `BatteryLevel`: whether the state of charge is at most 10 %; `null` when the level is unknown |
 | `IsPluggedIn` | | Whether the cable is plugged in; `null` when the vehicle does not tell |
 | `IsCharging` | | Whether the vehicle charges: `false` when the charging state is 0 or the connector is not fastened, else from the remaining charging time; `null` when unknown |
 | `ChargingPower` | W | Charging power, which the API reports in kW |

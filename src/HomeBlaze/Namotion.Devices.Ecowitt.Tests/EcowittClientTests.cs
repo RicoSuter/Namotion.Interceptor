@@ -500,14 +500,17 @@ public class EcowittClientTests
     }
 
     [Fact]
-    public void WhenLeakSensorPresent_ThenParsesLeakData()
+    public void WhenLeakSensorReportsAStatus_ThenParsesTheStatus()
     {
         // Arrange
         var json = JsonSerializer.Deserialize<JsonElement>("""
         {
             "ch_leak": [
-                {"channel":"1","leak":"0","battery":"5"},
-                {"channel":"2","leak":"1","battery":"3"}
+                {"channel":"1","name":"","battery":"5","status":"Normal"},
+                {"channel":"2","name":"","battery":"5","status":"Leakage"},
+                {"channel":"3","name":"","battery":"5","status":"LEAK"},
+                {"channel":"4","name":"","battery":"5","status":"normal"},
+                {"channel":"5","name":"","battery":"5","status":"--"}
             ]
         }
         """);
@@ -516,8 +519,37 @@ public class EcowittClientTests
         var data = EcowittClient.ParseLiveData(json);
 
         // Assert
-        Assert.Equal(2, data.Leaks.Length);
+        Assert.Equal(5, data.Leaks.Length);
         Assert.False(data.Leaks[0].IsLeaking);
         Assert.True(data.Leaks[1].IsLeaking);
+        Assert.True(data.Leaks[2].IsLeaking);
+        Assert.False(data.Leaks[3].IsLeaking);
+        Assert.Null(data.Leaks[4].IsLeaking);
+    }
+
+    [Fact]
+    public void WhenLeakSensorReportsNoStatus_ThenParsesTheLeakKey()
+    {
+        // Arrange
+        var json = JsonSerializer.Deserialize<JsonElement>("""
+        {
+            "ch_leak": [
+                {"channel":"1","leak":"0","battery":"5"},
+                {"channel":"2","leak":"1","battery":"3"},
+                {"channel":"3","leak":"--","battery":"9"},
+                {"channel":"4","battery":"9"}
+            ]
+        }
+        """);
+
+        // Act
+        var data = EcowittClient.ParseLiveData(json);
+
+        // Assert
+        Assert.Equal(4, data.Leaks.Length);
+        Assert.False(data.Leaks[0].IsLeaking);
+        Assert.True(data.Leaks[1].IsLeaking);
+        Assert.Null(data.Leaks[2].IsLeaking);
+        Assert.Null(data.Leaks[3].IsLeaking);
     }
 }

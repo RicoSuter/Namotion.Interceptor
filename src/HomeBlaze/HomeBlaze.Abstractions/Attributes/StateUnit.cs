@@ -61,5 +61,15 @@ public enum StateUnit
     /// <summary>
     /// A pressure in bar, such as the pressure of a tire.
     /// </summary>
-    Bar
+    Bar,
+
+    /// <summary>
+    /// A concentration in parts per million, such as the carbon dioxide in the air.
+    /// </summary>
+    PartsPerMillion,
+
+    /// <summary>
+    /// A mass concentration in micrograms per cubic meter, such as the particulate matter in the air.
+    /// </summary>
+    MicrogramPerCubicMeter
 }

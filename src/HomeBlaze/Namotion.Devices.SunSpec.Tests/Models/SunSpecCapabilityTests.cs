@@ -122,4 +122,30 @@ public class SunSpecCapabilityTests
         // Assert
         Assert.Equal(0.8m, ((IBatteryState)battery).BatteryLevel);
     }
+
+    [Fact]
+    public void WhenStorageIsDischargedToItsReserve_ThenItReportsNoLowBattery()
+    {
+        // Arrange
+        var storage = TestRoot.Attach(new SunSpecStorageCapacity(41090, 7));
+
+        // Act
+        storage.SoC = 0.05m;
+
+        // Assert
+        Assert.Null(((IBatteryState)storage).IsBatteryLow);
+    }
+
+    [Fact]
+    public void WhenBatteryIsDischargedToItsReserve_ThenItReportsNoLowBattery()
+    {
+        // Arrange
+        var battery = TestRoot.Attach(new SunSpecBattery(40300, 62));
+
+        // Act
+        battery.SoC = 0.05m;
+
+        // Assert
+        Assert.Null(((IBatteryState)battery).IsBatteryLow);
+    }
 }

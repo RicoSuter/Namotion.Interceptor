@@ -113,9 +113,9 @@ namespace Namotion.Devices.Nuki
         public virtual string? IconColor { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public virtual string? IconName { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=341)]
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=344)]
         [System.ComponentModel.Category("Battery")]
-        public bool? IsBatteryCritical { get; }
+        public bool? IsBatteryLow { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public bool IsConnected { get; }
         [HomeBlaze.Abstractions.Attributes.State(Position=950)]

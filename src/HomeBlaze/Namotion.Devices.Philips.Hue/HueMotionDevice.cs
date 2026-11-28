@@ -37,6 +37,9 @@ public partial class HueMotionDevice : HueDevice,
     public decimal? BatteryLevel => DevicePowerResource?.PowerState?.BatteryLevel / 100m;
 
     [Derived]
+    public bool? IsBatteryLow => GetIsBatteryLow(DevicePowerResource?.PowerState);
+
+    [Derived]
     [State]
     public decimal? Temperature =>
         TemperatureResource?.Temperature?.TemperatureValid == true

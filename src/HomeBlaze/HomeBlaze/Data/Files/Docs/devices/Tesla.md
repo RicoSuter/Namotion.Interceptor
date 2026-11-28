@@ -148,6 +148,7 @@ The title is the name set in the vehicle, else the display name of the account, 
 | `ChargingState` | | `Disconnected`, `NoPower`, `Starting`, `Charging`, `Complete`, `Stopped`, `Calibrating` |
 | `IsPluggedIn`, `IsCharging` | | Derived from `ChargingState` |
 | `BatteryLevel`, `UsableBatteryLevel` | Percent | State of charge and the usable part of it |
+| `IsBatteryLow` | | Derived from `BatteryLevel`: whether the state of charge is at most 10 %; `null` when the level is unknown |
 | `ChargeLimit`, `MinimumChargeLimit`, `MaximumChargeLimit`, `StandardChargeLimit` | Percent | Charge limit with its bounds and the standard limit |
 | `Range`, `IdealRange`, `EstimatedRange` | km | Rated, ideal and estimated range |
 | `ChargingPower` | W | Current charging power |

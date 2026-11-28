@@ -479,12 +479,25 @@ public class EcowittClient
             if (!int.TryParse(channelStr, out var channel))
                 continue;
 
-            var leak = item.TryGetProperty("leak", out var leakProp) ? leakProp.GetString() : null;
+            bool? isLeaking;
+            if (item.TryGetProperty("status", out var statusProp))
+            {
+                var status = statusProp.GetString();
+                isLeaking =
+                    string.Equals(status, "Normal", StringComparison.OrdinalIgnoreCase) ? false :
+                    status?.StartsWith("Leak", StringComparison.OrdinalIgnoreCase) == true ? true :
+                    null;
+            }
+            else
+            {
+                var leak = item.TryGetProperty("leak", out var leakProp) ? leakProp.GetString() : null;
+                isLeaking = leak switch { "1" => true, "0" => false, _ => null };
+            }
 
             items.Add(new EcowittLeakData
             {
                 Channel = channel,
-                IsLeaking = leak == "1"
+                IsLeaking = isLeaking
             });
         }
         return items.ToArray();

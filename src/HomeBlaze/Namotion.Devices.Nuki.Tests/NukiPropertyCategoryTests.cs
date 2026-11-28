@@ -1,6 +1,7 @@
 using HomeBlaze.Services;
 using Namotion.Devices.Nuki.Tests.Testing;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Xunit;
 
@@ -30,6 +31,25 @@ public class NukiPropertyCategoryTests
 
         // Assert
         Assert.Equal(expectedCategory, category);
+    }
+
+    [Fact]
+    public async Task WhenTheLockIsRegistered_ThenIsBatteryLowIsTheWritableDiscreteClassPropertyAtTheContractPosition()
+    {
+        // Arrange
+        await using var test = new TestBridge();
+        test.Merge(NukiFixtures.List);
+
+        // Act
+        var property = test.Lock.TryGetRegisteredSubject()!.TryGetProperty(nameof(NukiSmartLock.IsBatteryLow))!;
+
+        // Assert
+        Assert.True(property.HasSetter);
+        Assert.DoesNotContain(property.ReflectionAttributes, attribute => attribute is DerivedAttribute);
+        var metadata = property.GetStateMetadata();
+        Assert.Equal("Battery", metadata?.Category);
+        Assert.True(metadata?.IsDiscrete);
+        Assert.Equal(344, metadata?.Position);
     }
 
     [Theory]

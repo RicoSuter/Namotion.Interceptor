@@ -60,6 +60,10 @@ public partial class EcowittSensor :
     [State(Unit = StateUnit.Percent)]
     public partial decimal? BatteryLevel { get; internal set; }
 
+    // Ecowitt shows a low battery at level 1 of 5 and below, which is 0.2; a binary low flag is normalized to 0.
+    [Derived]
+    public bool? IsBatteryLow => BatteryLevel is { } level ? level <= 0.2m : null;
+
     /// <summary>
     /// Gets the reception quality in bars from 0 to 4.
     /// </summary>

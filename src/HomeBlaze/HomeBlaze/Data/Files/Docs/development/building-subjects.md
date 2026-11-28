@@ -151,7 +151,9 @@ public enum StateUnit
     WattPerSquareMeter,     // 850 W/m² (irradiance)
     DecibelMilliwatt,       // -75 dBm (received signal strength)
     KilometerPerHour,       // 87 km/h (vehicle speed)
-    Bar                     // 2.9 bar (tire pressure)
+    Bar,                    // 2.9 bar (tire pressure)
+    PartsPerMillion,        // 612 ppm (carbon dioxide)
+    MicrogramPerCubicMeter  // 12.5 µg/m³ (particulate matter)
 }
 ```
 
@@ -609,7 +611,7 @@ public void SetTargetSpeed(int speed) { /* ... */ }
 ```
 
 - Categories are ordered by the lowest `Position` of their state properties. Categories with only methods come last, and names break ties.
-- A `[Category]` on an interface member applies to the class member that implements it. One on the class member wins, and `[Category("")]` there removes the category. The shared interfaces in `HomeBlaze.Abstractions` carry "Device", "Network", "Light", "Playback", "Volume", "Track", "Lock", "Door", "Charging", "Climate" and "Vehicle" this way.
+- A `[Category]` on an interface member applies to the class member that implements it. One on the class member wins, and `[Category("")]` there removes the category. The shared interfaces in `HomeBlaze.Abstractions` carry "Device", "Network", "Light", "Playback", "Volume", "Track", "Lock", "Door", "Charging", "Climate", "Vehicle" and "Pairing" this way.
 - Names are case-sensitive. .NET shows "Default" as "Misc", "Config" as "Configurations", "DragDrop" as "Drag Drop" and "WindowStyle" as "Window Style".
 
 ## Background Services
@@ -934,8 +936,8 @@ Core platform interfaces and attributes:
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
 | Security | `IAuthenticatedSubject` |
 | Networking | `IConnectionState` |
-| Devices | Switches, lighting, covers, locks, energy, media, input devices, vehicles |
-| Sensors | Temperature, humidity, presence, light, door, rain, soil, power, camera |
+| Devices | Switches, lighting, covers, locks, energy, media, input devices, vehicles, pairing |
+| Sensors | Temperature, humidity, presence, light, door, rain, soil, power, camera, air quality, water leak, smoke, carbon monoxide, tamper |
 
 Subjects implement these interfaces to declare their capabilities. For example, a Zigbee temperature sensor plugin would implement `ITemperatureSensor`, and a Philips Hue light plugin would implement `ILightbulb` (which composes `ISwitchDevice`, `IBrightnessController`, `IColorController`).
 

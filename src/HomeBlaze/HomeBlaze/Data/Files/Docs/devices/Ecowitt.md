@@ -61,6 +61,7 @@ With the WS90 offline, temperature and humidity are empty, while wind and light 
 | IsOnline | Whether the gateway currently receives the sensor |
 | LastSeen | Last time the gateway received the sensor, kept while the sensor is offline. It is kept in memory and starts over when the gateway connection is lost or the service restarts. |
 | BatteryLevel | Battery from 0 to 100 %, empty while the gateway reports none |
+| IsBatteryLow | Whether the battery is low: at level 1 of 5 and below, or when a sensor with a binary battery reports low. Empty while the gateway reports no battery |
 | SignalStrength | Reception quality in bars from 0 to 4 |
 | Rssi | Received signal strength in dBm |
 
@@ -93,9 +94,9 @@ The gateway automatically discovers these sensor types:
 | Soil Moisture | Per-channel soil moisture percentage |
 | Leaf Wetness | Per-channel leaf wetness |
 | Temperature (WH34) | Per-channel temperature-only sensors |
-| PM2.5 | Per-channel particulate matter with 24h average |
-| CO2 | Per-channel CO2 with temperature and humidity |
-| Leak Detectors | Per-channel water leak status |
+| PM2.5 | Per-channel particulate matter (`IPm25Sensor`: `Pm25`) with the 24h average `Pm25DailyAverage` |
+| CO2 | Per-channel CO2 (`ICarbonDioxideSensor`: `CarbonDioxide`) with the 24h average `CarbonDioxideDailyAverage`, temperature and humidity |
+| Leak Detectors | Per-channel water leak status (`IWaterLeakSensor`: `IsLeakDetected`), empty while the gateway reports no status |
 | Lightning | Distance, strike count, last strike time |
 
 The gateway's built-in sensor measures wherever the gateway is placed and is not in the gateway's sensor list, so it has no entry in `Sensors`.
@@ -152,7 +153,7 @@ The Ecowitt gateway exposes an undocumented but stable local HTTP API. Values ar
 | `ch_leaf[]` | Array of `{channel, leaf_wetness, battery}` | Leaf wetness channels (WH35) |
 | `ch_pm25[]` | Array of `{channel, pm25, pm25_24h, battery}` | PM2.5 air quality |
 | `ch_co2[]` | Array of `{channel, co2, co2_24h, temp, humidity, unit, battery}` | CO2 sensors |
-| `ch_leak[]` | Array of `{channel, leak, battery}` | Water leak detectors |
+| `ch_leak[]` | Array of `{channel, name, battery, status}` | Water leak detectors: `status` is `Normal` or `Leakage` (case-insensitive, any value starting with `Leak` is a leak, any other value is unknown); a `leak` key with `1` or `0` is read when `status` is absent |
 | `lightning` | Object `{distance, count, timestamp, battery}` | Lightning (NOT an array) |
 
 ### common_list ID mapping

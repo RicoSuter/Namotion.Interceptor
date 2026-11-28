@@ -276,6 +276,8 @@ public static class StateUnitExtensions
         StateUnit.DecibelMilliwatt => ("dBm", true),
         StateUnit.KilometerPerHour => ("km/h", true),
         StateUnit.Bar => ("bar", true),
+        StateUnit.PartsPerMillion => ("ppm", true),
+        StateUnit.MicrogramPerCubicMeter => ("µg/m³", true),
         _ => null
     };
 

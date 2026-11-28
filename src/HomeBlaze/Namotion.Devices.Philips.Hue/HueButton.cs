@@ -15,7 +15,7 @@ namespace Namotion.Devices.Philips.Hue;
 /// </summary>
 [InterceptorSubject]
 public partial class HueButton :
-    IButtonDevice,
+    IMultiPressButtonDevice,
     IObservable<HomeBlaze.Abstractions.Inputs.ButtonEvent>,
     ITitleProvider,
     IIconProvider,
@@ -25,8 +25,23 @@ public partial class HueButton :
     private readonly string _name;
     private readonly Subject<HomeBlaze.Abstractions.Inputs.ButtonEvent> _buttonEventSubject = new();
 
-    private ButtonState? _currentButtonState;
+    // The event stream delivers each report as it happens, so one older than the last accepted by more
+    // than this means the bridge clock moved back, such as after a reboot before its time sync. A poll
+    // never counts as a clock jump: its snapshot carries the last report the bridge had, of any age.
+    private static readonly TimeSpan ClockJumpThreshold = TimeSpan.FromMinutes(5);
+
+    // The event stream and the poll apply reports concurrently. Guards ButtonResource, the last accepted
+    // change date, the state writes and the emission.
+    private readonly Lock _lock = new();
+
     private DateTimeOffset? _currentButtonChangeDate;
+
+    // Kept apart from ButtonResource, which the poll writes as well: a poll that applied the first report
+    // after a clock jump must not make the event stream copy of that report look like an already seen one.
+    private DateTimeOffset? _lastEventStreamChangeDate;
+
+    // Set under _lock. A removed button is disposed while the event stream may still deliver to it.
+    private bool _isDisposed;
 
     internal ButtonResource ButtonResource { get; set; }
 
@@ -42,6 +57,9 @@ public partial class HueButton :
 
     [State]
     public partial ButtonState? ButtonState { get; internal set; }
+
+    [State]
+    public partial int? PressCount { get; internal set; }
 
     [State]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
@@ -88,9 +106,23 @@ public partial class HueButton :
         {
             return HomeBlaze.Abstractions.Inputs.ButtonState.LongRelease;
         }
+        else if (eventType == HueButtonEventType.double_short_release)
+        {
+            return HomeBlaze.Abstractions.Inputs.ButtonState.Release;
+        }
 
         return HomeBlaze.Abstractions.Inputs.ButtonState.None;
     }
+
+    /// <summary>
+    /// Gets the number of presses of a sequence that ends with the event, or null for an event that ends no sequence of short presses.
+    /// </summary>
+    public static int? GetPressCount(HueButtonEventType eventType) => eventType switch
+    {
+        HueButtonEventType.short_release => 1,
+        HueButtonEventType.double_short_release => 2,
+        _ => null
+    };
 
     public HueButton(string name, ButtonResource buttonResource, HueButtonDevice buttonDevice, bool initialization)
     {
@@ -98,9 +130,10 @@ public partial class HueButton :
         ButtonResource = buttonResource;
         ParentDevice = buttonDevice;
         ButtonState = HomeBlaze.Abstractions.Inputs.ButtonState.None;
+        PressCount = null;
 
         _currentButtonChangeDate = ButtonChangeDate;
-        _currentButtonState = InternalButtonState;
+        _lastEventStreamChangeDate = ButtonChangeDate;
 
         if (!initialization)
         {
@@ -110,33 +143,83 @@ public partial class HueButton :
 
     internal HueButton Update(ButtonResource buttonResource, bool initialization)
     {
-        ButtonResource = buttonResource;
-        LastUpdated = DateTimeOffset.Now;
-
-        if (!initialization)
+        lock (_lock)
         {
-            RefreshButtonState();
+            if (_isDisposed)
+            {
+                return this;
+            }
+
+            ButtonResource = buttonResource;
+            LastUpdated = DateTimeOffset.Now;
+
+            if (!initialization)
+            {
+                RefreshButtonState(acceptClockJump: false);
+            }
         }
 
         return this;
     }
 
+    internal void ApplyEventStreamUpdate(Func<ButtonResource, ButtonResource> merge)
+    {
+        lock (_lock)
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            ButtonResource = merge(ButtonResource);
+            LastUpdated = DateTimeOffset.Now;
+
+            // Only an update that carries a new report is one the bridge just sent
+            var isNewReport = ButtonChangeDate != _lastEventStreamChangeDate;
+            _lastEventStreamChangeDate = ButtonChangeDate;
+            RefreshButtonState(acceptClockJump: isNewReport);
+        }
+    }
+
+    /// <summary>
+    /// Emits the current button report unless it is not newer than the last emitted one.
+    /// </summary>
     public void RefreshButtonState()
     {
+        lock (_lock)
+        {
+            RefreshButtonState(acceptClockJump: false);
+        }
+    }
+
+    // Called under _lock. The event is emitted under it as well: emitted after the lock is released,
+    // the event of a later report could overtake the one of an earlier report.
+    private void RefreshButtonState(bool acceptClockJump)
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         var newButtonChangeDate = ButtonChangeDate;
         var newButtonState = InternalButtonState;
+        var pressCount = ButtonResource?.Button?.ButtonReport?.Event is { } eventType ? GetPressCount(eventType) : null;
 
         if (newButtonChangeDate != null &&
-            newButtonChangeDate != _currentButtonChangeDate &&
-            newButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.None &&
-            newButtonState != _currentButtonState)
+            (_currentButtonChangeDate is null ||
+             newButtonChangeDate > _currentButtonChangeDate ||
+             (acceptClockJump && _currentButtonChangeDate - newButtonChangeDate > ClockJumpThreshold)) &&
+            newButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.None)
         {
             _currentButtonChangeDate = newButtonChangeDate;
-            _currentButtonState = newButtonState;
 
+            // A release that follows a release is a press whose initial_press the bridge dropped, while
+            // a held button keeps reporting repeat
             if (newButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.Repeat ||
                 ButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.Repeat)
             {
+                // The count is set before the state, so that a reader of the Release state sees its count
+                PressCount = pressCount;
                 ButtonState = newButtonState;
 
                 if (newButtonState.HasValue)
@@ -146,7 +229,8 @@ public partial class HueButton :
                         Button = this,
                         ButtonState = newButtonState.Value,
                         Timestamp = DateTimeOffset.UtcNow,
-                        DeviceId = Id
+                        DeviceId = Id,
+                        PressCount = pressCount ?? 1
                     });
                 }
 
@@ -155,6 +239,7 @@ public partial class HueButton :
                     newButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.Repeat)
                 {
                     // Reset back to None after release events
+                    PressCount = null;
                     ButtonState = HomeBlaze.Abstractions.Inputs.ButtonState.None;
                 }
             }
@@ -168,7 +253,11 @@ public partial class HueButton :
 
     public void Dispose()
     {
-        _buttonEventSubject.OnCompleted();
-        _buttonEventSubject.Dispose();
+        lock (_lock)
+        {
+            _isDisposed = true;
+            _buttonEventSubject.OnCompleted();
+            _buttonEventSubject.Dispose();
+        }
     }
 }

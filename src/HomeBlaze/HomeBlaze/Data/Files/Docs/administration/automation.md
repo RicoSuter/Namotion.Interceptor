@@ -403,7 +403,7 @@ A gust held for 20 seconds or rain for a minute retracts the blinds, at most onc
 
 ### Hue button
 
-Every short press of the button starts the music, also two in a row: a short press ends with the button state `Release`, while a press held long ends with `LongRelease`, which the filter does not match.
+A short press ends with the button state `Release` and `PressCount` 1, while a press held long ends with `LongRelease`, which neither filter matches. Hue reports a double press as two events: the first press as a `Release` with `PressCount` 1 and then a `Release` with `PressCount` 2. So the first rule, which filters on `PressCount` 1, starts the music on every short press and still matches the first press of a double press, and the second rule skips to the next track only on a double press. Without the `PressCount` filter, the first rule would run for both events of a double press.
 
 ```json
 {
@@ -418,11 +418,26 @@ Every short press of the button starts the music, also two in a row: a short pre
           "$type": "SubjectEventTrigger",
           "subjectPath": "/Kitchen/Hue/Buttons[dimmer-1]",
           "eventType": "ButtonEvent",
-          "filter": "event/ButtonState == Release"
+          "filter": "event/ButtonState == Release and event/PressCount == 1"
         }
       ],
       "actions": [
         { "$type": "InvokeOperation", "id": "call-1", "operationPath": "/Kitchen/Sonos/Play" }
+      ]
+    },
+    "next": {
+      "name": "Next track",
+      "mode": "On",
+      "triggers": [
+        {
+          "$type": "SubjectEventTrigger",
+          "subjectPath": "/Kitchen/Hue/Buttons[dimmer-1]",
+          "eventType": "ButtonEvent",
+          "filter": "event/ButtonState == Release and event/PressCount == 2"
+        }
+      ],
+      "actions": [
+        { "$type": "InvokeOperation", "id": "call-2", "operationPath": "/Kitchen/Sonos/Next" }
       ]
     }
   }
