@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.ZWave.SerialApi;
@@ -32,7 +34,7 @@ public sealed class ZWaveController : IAsyncDisposable
         LibraryType = version.LibraryType;
         HomeId = id.HomeId;
         OwnNodeId = id.OwnNodeId;
-        NodeIds = nodeIds;
+        NodeIds = ImmutableCollectionsMarshal.AsImmutableArray(nodeIds);
         Capabilities = capabilities;
         _dispatchLoop = Task.Run(DispatchLoopAsync);
     }
@@ -60,7 +62,7 @@ public sealed class ZWaveController : IAsyncDisposable
     public ZWaveControllerCapabilities Capabilities { get; }
 
     /// <summary>The IDs of the nodes in the network, including the controller, in ascending order.</summary>
-    public IReadOnlyList<byte> NodeIds { get; }
+    public ImmutableArray<byte> NodeIds { get; }
 
     /// <summary>
     /// Completes when the controller is disposed, and faults with <see cref="ZWaveConnectionException"/> when the connection fails.
@@ -133,7 +135,7 @@ public sealed class ZWaveController : IAsyncDisposable
     /// <summary>
     /// Whether the controller's Serial API supports the function with the given ID.
     /// </summary>
-    public bool SupportsFunction(byte functionId) => _serialApiCapabilities.SupportsFunction(functionId);
+    internal bool SupportsFunction(byte functionId) => _serialApiCapabilities.SupportsFunction(functionId);
 
     public async ValueTask DisposeAsync()
     {

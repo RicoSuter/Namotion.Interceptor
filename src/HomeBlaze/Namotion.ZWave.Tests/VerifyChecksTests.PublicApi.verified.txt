@@ -39,13 +39,12 @@ namespace Namotion.ZWave
         public Namotion.ZWave.ZWaveLibraryType LibraryType { get; }
         public string LibraryVersion { get; }
         public ushort ManufacturerId { get; }
-        public System.Collections.Generic.IReadOnlyList<byte> NodeIds { get; }
+        public System.Collections.Immutable.ImmutableArray<byte> NodeIds { get; }
         public byte OwnNodeId { get; }
         public ushort ProductId { get; }
         public ushort ProductType { get; }
         public string SerialApiVersion { get; }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
-        public bool SupportsFunction(byte functionId) { }
         public static System.Threading.Tasks.Task<Namotion.ZWave.ZWaveController> ConnectAsync(Namotion.ZWave.Transport.IZWaveTransport transport, Namotion.ZWave.ZWaveControllerOptions? options = null, Microsoft.Extensions.Logging.ILoggerFactory? loggerFactory = null, System.Threading.CancellationToken cancellationToken = default) { }
     }
     [System.Flags]
