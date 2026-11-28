@@ -8,6 +8,9 @@ namespace Namotion.ZWave.SerialApi;
 /// </summary>
 internal sealed class FrameStream : IDisposable
 {
+    // The byte timeout of the Host API.
+    private static readonly TimeSpan LateReaderGrace = TimeSpan.FromMilliseconds(150);
+
     private readonly Stream _stream;
     private readonly ILogger _logger;
     private readonly TimeSpan _writeTimeout;
@@ -21,6 +24,7 @@ internal sealed class FrameStream : IDisposable
     private Task<int>? _pendingRead;
     private long _partialFramePosition = -1;
     private long _partialFrameStartedAt;
+    private bool _partialFrameGraceUsed;
 
     public FrameStream(Stream stream, ZWaveControllerOptions options, ILogger logger)
     {
@@ -83,22 +87,36 @@ internal sealed class FrameStream : IDisposable
         {
             _partialFramePosition = _parser.Position;
             _partialFrameStartedAt = _timeProvider.GetTimestamp();
+            _partialFrameGraceUsed = false;
         }
 
+        var read = _pendingRead ?? StartPendingRead(cancellationToken);
         var remaining = _frameDeliveryTimeout - _timeProvider.GetElapsedTime(_partialFrameStartedAt);
+        if (remaining <= TimeSpan.Zero && !_partialFrameGraceUsed)
+        {
+            // The reader itself reached the deadline late, such as on a starved thread pool, and a serial read completes
+            // only through the port's I/O thread: once per frame, the bytes that arrived meanwhile get this long to come in.
+            _partialFrameGraceUsed = true;
+            remaining = LateReaderGrace;
+        }
+
         if (remaining > TimeSpan.Zero)
         {
-            var read = _pendingRead ?? StartPendingRead(cancellationToken);
             try
             {
-                var count = await read.WaitAsync(remaining, _timeProvider, cancellationToken).ConfigureAwait(false);
-                _pendingRead = null;
-                return count;
+                await read.WaitAsync(remaining, _timeProvider, cancellationToken).ConfigureAwait(false);
             }
-            catch (TimeoutException) when (!read.IsFaulted)
+            catch (TimeoutException)
             {
-                // The frame delivery timeout expired; the partial frame is dropped below.
+                // The frame delivery timeout expired; the read is checked once more below.
             }
+        }
+
+        // A read that completed while the reader was stalled past the timer still belongs to the frame. One that faulted throws here.
+        if (read.IsCompleted)
+        {
+            _pendingRead = null;
+            return await read.ConfigureAwait(false);
         }
 
         _logger.TryLog(

@@ -8,6 +8,7 @@ namespace Namotion.ZWave.Tests.SerialApi;
 public class FrameStreamTests
 {
     private static readonly TimeSpan FrameDeliveryTimeout = TimeSpan.FromMilliseconds(1500);
+    private static readonly TimeSpan LateReaderGrace = TimeSpan.FromMilliseconds(150);
     private static readonly TimeSpan Tick = TimeSpan.FromMilliseconds(1);
 
     [Fact]
@@ -91,6 +92,85 @@ public class FrameStreamTests
     }
 
     [Fact]
+    public async Task WhenTheReaderResumesAfterTheDeadlineWithTheRestOfTheFrameAlreadyArrived_ThenTheFrameIsRead()
+    {
+        // Arrange
+        var time = new TimerRecordingTimeProvider();
+        var stick = new FakeZWaveStick();
+        var bytes = FrameEncoder.Encode(FrameType.Response, 0x15, [0x01, 0x02, 0x03]);
+        var secondChunk = bytes[2..5];
+        var thirdChunk = bytes[5..];
+
+        // Stalls the reader while it handles the second chunk: the deadline passes and the third chunk arrives meanwhile.
+        var logger = new StallingLogger($"Received {Convert.ToHexString(secondChunk)}.", () =>
+        {
+            time.Advance(FrameDeliveryTimeout);
+            stick.SendToHost(thirdChunk);
+        });
+        await using var stream = await stick.OpenAsync(CancellationToken.None);
+        using var frames = new FrameStream(stream, new ZWaveControllerOptions { TimeProvider = time }, logger);
+
+        // Act
+        var read = ReadAsync(frames);
+        stick.SendToHost(bytes[..2]);
+        await time.WaitForTimerAsync(FrameDeliveryTimeout);
+        stick.SendToHost(secondChunk);
+        var frame = await read.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(FrameKind.Data, frame?.Kind);
+        Assert.Equal(new byte[] { 0x01, 0x02, 0x03 }, frame!.Value.Data.Payload);
+        Assert.DoesNotContain(logger.Entries, entry => entry.Level == LogLevel.Warning);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenTheReaderResumesAfterTheDeadline_ThenTheRestOfTheFrameGetsTheGraceToArrive(bool arrivesWithinGrace)
+    {
+        // Arrange
+        var time = new TimerRecordingTimeProvider();
+        var stick = new FakeZWaveStick();
+        var bytes = FrameEncoder.Encode(FrameType.Response, 0x15, [0x01, 0x02, 0x03]);
+        var secondChunk = bytes[2..5];
+        var logger = new StallingLogger($"Received {Convert.ToHexString(secondChunk)}.", () => time.Advance(FrameDeliveryTimeout));
+        await using var stream = await stick.OpenAsync(CancellationToken.None);
+        using var frames = new FrameStream(stream, new ZWaveControllerOptions { TimeProvider = time }, logger);
+
+        // Act
+        var read = ReadAsync(frames);
+        stick.SendToHost(bytes[..2]);
+        await time.WaitForTimerAsync(FrameDeliveryTimeout);
+        stick.SendToHost(secondChunk);
+        var graceTimer = await time.WaitForTimerAsync(LateReaderGrace);
+        time.Advance(LateReaderGrace - Tick);
+        if (arrivesWithinGrace)
+        {
+            stick.SendToHost(bytes[5..]);
+        }
+        else
+        {
+            time.Advance(Tick);
+        }
+
+        var frame = await read.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(FrameDeliveryTimeout, graceTimer.StartedAt);
+        if (arrivesWithinGrace)
+        {
+            Assert.Equal(FrameKind.Data, frame?.Kind);
+            Assert.DoesNotContain(logger.Entries, entry => entry.Level == LogLevel.Warning);
+        }
+        else
+        {
+            // The payload byte 0x06 after the dropped start of frame byte is read as an ACK.
+            Assert.Equal(FrameKind.Ack, frame?.Kind);
+            Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Warning);
+        }
+    }
+
+    [Fact]
     public async Task WhenOnlyCompleteFramesArrive_ThenNoTimerIsStarted()
     {
         // Arrange
@@ -108,6 +188,19 @@ public class FrameStreamTests
         Assert.Equal(FrameKind.Ack, acknowledgement?.Kind);
         Assert.Equal(FrameKind.Data, response?.Kind);
         Assert.Empty(time.Timers);
+    }
+
+    // Runs the action when the given message is logged, on the logging thread.
+    private sealed class StallingLogger(string message, Action action) : RecordingLogger, ILogger
+    {
+        void ILogger.Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            Log(logLevel, eventId, state, exception, formatter);
+            if (formatter(state, exception) == message)
+            {
+                action();
+            }
+        }
     }
 
     // Sonar (S5034) reads two ReadAsync calls in one method as one ValueTask consumed twice.
