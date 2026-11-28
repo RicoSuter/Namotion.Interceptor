@@ -586,6 +586,8 @@ namespace Namotion.Devices.Ecowitt.Sensors
         public string IconColor { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string IconName { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsBatteryLow { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
         public bool IsOnline { get; }
         [HomeBlaze.Abstractions.Attributes.State]
