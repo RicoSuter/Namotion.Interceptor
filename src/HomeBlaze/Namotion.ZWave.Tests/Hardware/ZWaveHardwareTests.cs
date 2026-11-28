@@ -13,7 +13,7 @@ public class ZWaveHardwareTests(ITestOutputHelper output)
         var port = Environment.GetEnvironmentVariable(ZWaveHardwareFactAttribute.PortVariable)!;
 
         // Act
-        await using var controller = await ZWaveController.ConnectAsync(new SerialTransport(port));
+        await using var controller = await ZWaveController.ConnectAsync(new SerialTransport(port), loggerFactory: new TestOutputLoggerFactory(output));
 
         // Assert
         output.WriteLine($"Library: {controller.LibraryVersion} ({controller.LibraryType})");
