@@ -158,7 +158,10 @@ public sealed class ZWaveController : IAsyncDisposable
 
     private void Dispatch(DataFrame frame)
     {
-        _logger.LogDebug("Received function 0x{Function:X2} with {Length} bytes.", frame.Function, frame.Payload.Length);
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug("Received function 0x{Function:X2} with {Length} bytes.", frame.Function, frame.Payload.Length);
+        }
     }
 
     private void LogDispatchFailure(Exception exception, DataFrame frame)
