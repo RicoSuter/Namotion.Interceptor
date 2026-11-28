@@ -1,0 +1,30 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.ZWave.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.ZWave
+{
+    public sealed class ZWaveConnectionException : Namotion.ZWave.ZWaveException
+    {
+        public ZWaveConnectionException() { }
+        public ZWaveConnectionException(string message) { }
+        public ZWaveConnectionException(string message, System.Exception innerException) { }
+    }
+    public sealed class ZWaveControllerException : Namotion.ZWave.ZWaveException
+    {
+        public ZWaveControllerException() { }
+        public ZWaveControllerException(string message) { }
+        public ZWaveControllerException(string message, System.Exception innerException) { }
+    }
+    public class ZWaveException : System.Exception
+    {
+        public ZWaveException() { }
+        public ZWaveException(string message) { }
+        public ZWaveException(string message, System.Exception innerException) { }
+    }
+    public sealed class ZWaveTimeoutException : Namotion.ZWave.ZWaveException
+    {
+        public ZWaveTimeoutException() { }
+        public ZWaveTimeoutException(string message) { }
+        public ZWaveTimeoutException(string message, System.Exception innerException) { }
+    }
+}

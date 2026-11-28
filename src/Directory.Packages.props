@@ -66,6 +66,7 @@
     <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.33.0.1635" />
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
     <PackageVersion Include="System.Device.Gpio" Version="4.3.0-prerelease.26569.7" />
+    <PackageVersion Include="System.IO.Ports" Version="10.0.15" />
     <PackageVersion Include="System.Reactive" Version="6.1.0" />
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.15" />
     <PackageVersion Include="Toolbelt.Blazor.HotKeys2" Version="6.0.1" />
