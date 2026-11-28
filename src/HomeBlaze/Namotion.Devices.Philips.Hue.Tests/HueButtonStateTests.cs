@@ -1,4 +1,8 @@
+using HomeBlaze.Services;
 using HueApi.Models;
+using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Xunit;
 using ButtonState = HomeBlaze.Abstractions.Inputs.ButtonState;
 
@@ -294,6 +298,23 @@ public class HueButtonStateTests
 
         // Assert
         Assert.Equal(new[] { 2, 1 }, events.Where(e => e.ButtonState == ButtonState.Release).Select(e => e.PressCount));
+    }
+
+    [Fact]
+    public void WhenAButtonIsRegistered_ThenPressCountIsADiscreteStateAtTheContractPosition()
+    {
+        // Arrange
+        var button = CreateButton();
+        ((IInterceptorSubject)button).Context.AddFallbackContext(SubjectContextFactory.Create(new ServiceCollection()));
+
+        // Act
+        var property = button.TryGetRegisteredSubject()!.TryGetProperty(nameof(HueButton.PressCount))!;
+
+        // Assert
+        var metadata = property.GetStateMetadata();
+        Assert.NotNull(metadata);
+        Assert.True(metadata.IsDiscrete);
+        Assert.Equal(151, metadata.Position);
     }
 
     private static HueButton CreateButton() =>

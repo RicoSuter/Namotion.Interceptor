@@ -7,10 +7,13 @@ public class ButtonAbstractionTests
     [Fact]
     public void WhenButtonEventSetsNoPressCount_ThenItIsOne()
     {
-        // Arrange & Act
+        // Arrange
+        var button = new TestButton();
+
+        // Act
         var buttonEvent = new ButtonEvent
         {
-            Button = new TestButton(),
+            Button = button,
             ButtonState = ButtonState.Release,
             Timestamp = DateTimeOffset.UnixEpoch,
             DeviceId = "button"
