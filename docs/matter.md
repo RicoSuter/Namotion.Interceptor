@@ -31,14 +31,7 @@ await foreach (var controllerEvent in controller.Events.ReadAllAsync(cancellatio
 }
 ```
 
-`MatterServerController` lives in `Namotion.Matter.Server`, everything else in `Namotion.Matter`. `ConnectAsync` takes `ws://host:5580/ws`, `wss://...` or `unix:///path/to/socket`, optional `MatterServerOptions` and an optional logger. It fails with:
-
-- `ArgumentException` when the URL scheme is not supported.
-- `ArgumentOutOfRangeException` when an option is not positive, or a timeout exceeds about 49 days.
-- `WebSocketException` when the server refuses the connection or closes it before sending its information.
-- `MatterException` when the server's information cannot be read.
-- `NotSupportedException` when the server's schema version is not supported.
-- `TimeoutException` when the server does not accept the connection and send its information within `ConnectTimeout`.
+`MatterServerController` lives in `Namotion.Matter.Server`, everything else in `Namotion.Matter`. `ConnectAsync` takes `ws://host:5580/ws`, `wss://...` or `unix:///path/to/socket`, optional `MatterServerOptions` and an optional logger; its XML documentation lists the exceptions it throws.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -50,7 +43,7 @@ await foreach (var controllerEvent in controller.Events.ReadAllAsync(cancellatio
 
 A connection is not reopened. When it is lost, also when the server announces its shutdown, `Events` completes with the error and every pending and later request fails with a `WebSocketException` whose `InnerException` is that error. Connect again and call `StartListeningAsync` for the current state. After `DisposeAsync`, `Events` completes without an error and requests throw `ObjectDisposedException`.
 
-`StartListeningAsync` returns every commissioned node with all attribute values, keyed by `AttributePath` (`endpoint/cluster/attribute`), and the parent of each endpoint in `EndpointParents`. The server subscribes to every node, so the snapshot plus the events always hold the current values; there is no explicit read. Events arrive in order on a single-reader channel. The channel is unbounded, so keep reading it; a consumer that stops lets it grow without limit:
+`StartListeningAsync` returns every commissioned node with all attribute values, keyed by `AttributePath` (`endpoint/cluster/attribute`), and the parent of each endpoint in `EndpointParents`. The server subscribes to every node, so the snapshot plus the events always hold the current values; there is no explicit read. Events arrive in order on a single-reader channel. The channel is unbounded, so keep reading it:
 
 | Event | Meaning |
 |---|---|
@@ -60,15 +53,15 @@ A connection is not reopened. When it is lost, also when the server announces it
 | `MatterEndpointAddedEvent`, `MatterEndpointRemovedEvent` | An endpoint was added to or removed from a node |
 | `MatterAttributeUpdatedEvent` | An attribute value changed; a null value also means the attribute was removed |
 | `MatterNodeEventReceivedEvent` | A node reported a Matter event, such as a button press; `TimestampType` (`DeviceUptime`, `Epoch` or `ServerTime`) names the clock of `Timestamp` |
-| `MatterServerInfoChangedEvent` | Credentials or other server information changed |
+| `MatterServerInfoUpdatedEvent` | Credentials or other server information changed |
 
 Node IDs of groups (0xFFFFFFFFFFFF0000 and above) are not supported: a method taking a node ID throws `ArgumentOutOfRangeException` for one.
 
 ## Values
 
-Received values are `MatterValue`: check `Kind` (`Null`, `Boolean`, `Number`, `String`, `List` or `Struct`), then read with `GetBoolean`, `GetInt64`, `GetUInt64`, `GetDouble`, `GetString`, `GetBytes`, `GetListLength`, `EnumerateList` or `TryGetField`. Structs in attribute values are keyed by field tag and structs in event data and command responses by field name, so `TryGetField(tag, name, out value)` takes both. Values compare by content, so `==`, `Equals` and `GetHashCode` can be used to detect a changed value.
+Received values are `MatterValue`: check `Kind` (`Null`, `Boolean`, `Number`, `String`, `List` or `Struct`), then read with `GetBoolean`, `GetInt64`, `GetUInt64`, `GetDouble`, `GetString`, `GetBytes`, `GetListLength`, `EnumerateList` or `TryGetField`. Structs in attribute values are keyed by field tag and structs in event data and command responses by field name, so `TryGetField(tag, name, out value)` takes both. `==` and `Equals` compare values by content; `GetHashCode` only hashes the kind, so a value is a poor dictionary key.
 
-Sent values implement `IMatterPayload`, which writes itself to an `IMatterValueWriter`. `MatterPayload.Empty` is the payload of a command without fields and `MatterPayload.Create` wraps a delegate:
+Sent values implement `IMatterPayload`, which writes itself to an `IMatterValueWriter`. `MatterPayload.Empty` is the payload of a command without fields and `MatterPayload.Create` wraps a delegate. A payload that leaves a struct or list open throws `ArgumentException` before anything is sent:
 
 ```csharp
 await controller.InvokeAsync(nodeId, new CommandPath(endpoint, 8, 4), "moveToLevelWithOnOff", MatterPayload.Create(writer =>
