@@ -15,6 +15,30 @@ public class StartupResponsesTests
         Assert.Equal(ZWaveLibraryType.StaticController, libraryType);
     }
 
+    [Theory]
+    [InlineData("5A2D5761766520372E313233" + "00" + "07")]
+    [InlineData("5A2D5761766520372E313233" + "07")]
+    public void WhenTheControllerVersionHasTwelveCharacters_ThenItIsReadWithOrWithoutTerminator(string payload)
+    {
+        // Act
+        var (libraryVersion, libraryType) = StartupResponses.ParseControllerVersion(Convert.FromHexString(payload));
+
+        // Assert
+        Assert.Equal("Z-Wave 7.123", libraryVersion);
+        Assert.Equal(ZWaveLibraryType.BridgeController, libraryType);
+    }
+
+    [Fact]
+    public void WhenTheLibraryTypeIsZero_ThenItIsNotTakenForTheTerminator()
+    {
+        // Act
+        var (libraryVersion, libraryType) = StartupResponses.ParseControllerVersion([.. "Z-Wave 4.05"u8, 0x00, 0x00]);
+
+        // Assert
+        Assert.Equal("Z-Wave 4.05", libraryVersion);
+        Assert.Equal(ZWaveLibraryType.Unknown, libraryType);
+    }
+
     [Fact]
     public void WhenControllerIdIsParsed_ThenHomeIdIsBigEndian()
     {
@@ -77,7 +101,7 @@ public class StartupResponsesTests
     {
         // Act & Assert
         Assert.Throws<ZWaveException>(() => StartupResponses.ParseControllerId([0xC0]));
-        Assert.Throws<ZWaveException>(() => StartupResponses.ParseControllerVersion([0x41, 0x42]));
+        Assert.Throws<ZWaveException>(() => StartupResponses.ParseControllerVersion([0x01]));
         Assert.Throws<ZWaveException>(() => StartupResponses.ParseSerialApiCapabilities([0x01]));
         Assert.Throws<ZWaveException>(() => StartupResponses.ParseNodeIds([0x05, 0x08, 29, 0x01]));
         Assert.Throws<ZWaveException>(() => StartupResponses.ParseControllerCapabilities([]));

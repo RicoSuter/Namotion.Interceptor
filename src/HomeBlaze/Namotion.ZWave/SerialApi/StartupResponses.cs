@@ -9,13 +9,15 @@ internal static class StartupResponses
 
     public static (string LibraryVersion, ZWaveLibraryType LibraryType) ParseControllerVersion(byte[] payload)
     {
-        var terminator = Array.IndexOf(payload, (byte)0);
-        if (terminator < 0 || terminator + 1 >= payload.Length)
+        if (payload.Length < 2)
         {
             throw Invalid("GetControllerVersion");
         }
 
-        return (Encoding.ASCII.GetString(payload, 0, terminator), (ZWaveLibraryType)payload[terminator + 1]);
+        // The library type is the last byte; the version before it may fill its 12 bytes without a terminator.
+        var version = payload.AsSpan(0, payload.Length - 1);
+        var terminator = version.IndexOf((byte)0);
+        return (Encoding.ASCII.GetString(terminator < 0 ? version : version[..terminator]), (ZWaveLibraryType)payload[^1]);
     }
 
     public static (uint HomeId, byte OwnNodeId) ParseControllerId(byte[] payload)
