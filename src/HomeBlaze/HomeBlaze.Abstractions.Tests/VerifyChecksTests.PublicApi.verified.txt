@@ -1115,6 +1115,20 @@ namespace HomeBlaze.Abstractions.Sensors
         HomeBlaze.Abstractions.Common.Image? CurrentImage { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports the carbon dioxide concentration in parts per million.")]
+    public interface ICarbonDioxideSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=280, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.PartsPerMillion)]
+        decimal? CarbonDioxide { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether carbon monoxide is detected.")]
+    public interface ICarbonMonoxideSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=181)]
+        bool? IsCarbonMonoxideDetected { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports door state (open, closed, partially open).")]
     public interface IDoorSensor
     {
@@ -1162,6 +1176,14 @@ namespace HomeBlaze.Abstractions.Sensors
         decimal? Illuminance { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports the concentration of fine particulate matter (PM2.5) in micrograms per cu" +
+        "bic meter.")]
+    public interface IPm25Sensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=285, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MicrogramPerCubicMeter)]
+        decimal? Pm25 { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Measures power and energy flowing through an external circuit in both directions.")]
     public interface IPowerMeter
     {
@@ -1200,11 +1222,25 @@ namespace HomeBlaze.Abstractions.Sensors
         decimal? TotalRain { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether smoke is detected.")]
+    public interface ISmokeSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=180)]
+        bool? IsSmokeDetected { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports soil moisture level as a percentage.")]
     public interface ISoilSensor
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=260, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         decimal? SoilMoisture { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether the device detects tampering.")]
+    public interface ITamperSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=295)]
+        bool? IsTampered { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports temperature in degrees Celsius.")]
@@ -1229,6 +1265,13 @@ namespace HomeBlaze.Abstractions.Sensors
     {
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.UvIndex)]
         decimal? UvIndex { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports whether a water leak is detected.")]
+    public interface IWaterLeakSensor
+    {
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=290)]
+        bool? IsLeakDetected { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports wind speed, gust, and direction.")]
