@@ -1,0 +1,279 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("IsAotCompatible", "True")]
+[assembly: System.Reflection.AssemblyMetadata("IsTrimmable", "True")]
+[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Matter.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.Matter
+{
+    public readonly struct AttributePath : System.IEquatable<Namotion.Matter.AttributePath>
+    {
+        public AttributePath(ushort Endpoint, uint Cluster, uint Attribute) { }
+        public uint Attribute { get; init; }
+        public uint Cluster { get; init; }
+        public ushort Endpoint { get; init; }
+        public override string ToString() { }
+        public static Namotion.Matter.AttributePath Parse(System.ReadOnlySpan<char> text) { }
+        public static bool TryParse(System.ReadOnlySpan<char> text, out Namotion.Matter.AttributePath path) { }
+    }
+    public readonly struct CommandPath : System.IEquatable<Namotion.Matter.CommandPath>
+    {
+        public CommandPath(ushort Endpoint, uint Cluster, uint Command) { }
+        public uint Cluster { get; init; }
+        public uint Command { get; init; }
+        public ushort Endpoint { get; init; }
+        public override string ToString() { }
+    }
+    public readonly struct EventPath : System.IEquatable<Namotion.Matter.EventPath>
+    {
+        public EventPath(ushort Endpoint, uint Cluster, uint Event) { }
+        public uint Cluster { get; init; }
+        public ushort Endpoint { get; init; }
+        public uint Event { get; init; }
+        public override string ToString() { }
+    }
+    public interface IMatterController : System.IAsyncDisposable
+    {
+        System.Threading.Channels.ChannelReader<Namotion.Matter.MatterControllerEvent> Events { get; }
+        Namotion.Matter.MatterServerInfo ServerInfo { get; }
+        System.Threading.Tasks.Task<Namotion.Matter.MatterNode> CommissionAsync(string code, bool networkOnly, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<Namotion.Matter.MatterValue> InvokeAsync(ulong nodeId, Namotion.Matter.CommandPath path, string commandName, Namotion.Matter.IMatterPayload? payload = null, System.TimeSpan? timedRequestTimeout = default, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<Namotion.Matter.MatterCommissioningWindow> OpenCommissioningWindowAsync(ulong nodeId, System.TimeSpan timeout, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Namotion.Matter.MatterOnboardingPayload>> ParseOnboardingPayloadAsync(string code, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task RemoveNodeAsync(ulong nodeId, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task SetThreadDatasetAsync(string dataset, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task SetWifiCredentialsAsync(string ssid, string password, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Namotion.Matter.MatterNode>> StartListeningAsync(System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task WriteAttributeAsync(ulong nodeId, Namotion.Matter.AttributePath path, Namotion.Matter.IMatterPayload value, System.Threading.CancellationToken cancellationToken = default);
+    }
+    public interface IMatterPayload
+    {
+        void Write(Namotion.Matter.IMatterValueWriter writer);
+    }
+    public interface IMatterValueWriter
+    {
+        void WriteBoolean(bool value);
+        void WriteBytes(System.ReadOnlySpan<byte> value);
+        void WriteDouble(double value);
+        void WriteEndList();
+        void WriteEndStruct();
+        void WriteFieldName(uint tag, string name);
+        void WriteInt64(long value);
+        void WriteNull();
+        void WriteStartList();
+        void WriteStartStruct();
+        void WriteString(string value);
+        void WriteUInt64(ulong value);
+    }
+    public sealed class MatterAttributeChangedEvent : Namotion.Matter.MatterControllerEvent, System.IEquatable<Namotion.Matter.MatterAttributeChangedEvent>
+    {
+        public MatterAttributeChangedEvent(ulong NodeId, Namotion.Matter.AttributePath Path, Namotion.Matter.MatterValue Value) { }
+        public ulong NodeId { get; init; }
+        public Namotion.Matter.AttributePath Path { get; init; }
+        public Namotion.Matter.MatterValue Value { get; init; }
+    }
+    public enum MatterCommissioningFailureReason
+    {
+        Other = 0,
+        NotDiscovered = 1,
+        PasscodeMismatch = 2,
+        InvalidPayload = 3,
+        AttestationRejected = 4,
+        Timeout = 5,
+    }
+    public sealed class MatterCommissioningWindow : System.IEquatable<Namotion.Matter.MatterCommissioningWindow>
+    {
+        public MatterCommissioningWindow(uint SetupPinCode, string ManualCode, string QrCode) { }
+        public string ManualCode { get; init; }
+        public string QrCode { get; init; }
+        public uint SetupPinCode { get; init; }
+    }
+    public abstract class MatterControllerEvent : System.IEquatable<Namotion.Matter.MatterControllerEvent>
+    {
+        protected MatterControllerEvent() { }
+    }
+    [System.Flags]
+    public enum MatterDiscoveryCapabilities
+    {
+        None = 0,
+        SoftAccessPoint = 1,
+        Bluetooth = 2,
+        OnNetwork = 4,
+    }
+    public sealed class MatterEndpointAddedEvent : Namotion.Matter.MatterControllerEvent, System.IEquatable<Namotion.Matter.MatterEndpointAddedEvent>
+    {
+        public MatterEndpointAddedEvent(ulong NodeId, ushort Endpoint) { }
+        public ushort Endpoint { get; init; }
+        public ulong NodeId { get; init; }
+    }
+    public sealed class MatterEndpointRemovedEvent : Namotion.Matter.MatterControllerEvent, System.IEquatable<Namotion.Matter.MatterEndpointRemovedEvent>
+    {
+        public MatterEndpointRemovedEvent(ulong NodeId, ushort Endpoint) { }
+        public ushort Endpoint { get; init; }
+        public ulong NodeId { get; init; }
+    }
+    public enum MatterErrorCode
+    {
+        Unknown = 0,
+        NodeCommissionFailed = 1,
+        NodeInterviewFailed = 2,
+        NodeNotReady = 3,
+        NodeNotResolving = 4,
+        NodeNotExists = 5,
+        VersionMismatch = 6,
+        SdkStackError = 7,
+        InvalidArguments = 8,
+        InvalidCommand = 9,
+        UpdateCheckError = 10,
+        UpdateError = 11,
+        IcdMultiAdmin = 100,
+        OtaUploadError = 101,
+        CameraStreamIncompatible = 102,
+        CameraResourceExhausted = 103,
+        CameraStreamInUse = 104,
+        CameraNotSupported = 105,
+        CameraPrivacyMode = 106,
+    }
+    public enum MatterEventTimestampType
+    {
+        DeviceUptime = 0,
+        Epoch = 1,
+        ServerTime = 2,
+    }
+    public sealed class MatterException : System.Exception
+    {
+        public MatterException() { }
+        public MatterException(string message) { }
+        public MatterException(string message, System.Exception innerException) { }
+        public MatterException(Namotion.Matter.MatterErrorCode errorCode, string message, int? status = default, int? clusterStatus = default, Namotion.Matter.MatterCommissioningFailureReason? commissioningFailureReason = default) { }
+        public int? ClusterStatus { get; }
+        public Namotion.Matter.MatterCommissioningFailureReason? CommissioningFailureReason { get; }
+        public Namotion.Matter.MatterErrorCode ErrorCode { get; }
+        public int? Status { get; }
+    }
+    public sealed class MatterNode : System.IEquatable<Namotion.Matter.MatterNode>
+    {
+        public MatterNode(ulong NodeId, bool Available, bool IsBridge, System.DateTimeOffset? DateCommissioned, System.DateTimeOffset? LastInterview, System.Collections.Generic.IReadOnlyDictionary<Namotion.Matter.AttributePath, Namotion.Matter.MatterValue> Attributes, System.Collections.Generic.IReadOnlyDictionary<ushort, ushort> EndpointParents) { }
+        public System.Collections.Generic.IReadOnlyDictionary<Namotion.Matter.AttributePath, Namotion.Matter.MatterValue> Attributes { get; init; }
+        public bool Available { get; init; }
+        public System.DateTimeOffset? DateCommissioned { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<ushort, ushort> EndpointParents { get; init; }
+        public bool IsBridge { get; init; }
+        public System.DateTimeOffset? LastInterview { get; init; }
+        public ulong NodeId { get; init; }
+    }
+    public sealed class MatterNodeAddedEvent : Namotion.Matter.MatterControllerEvent, System.IEquatable<Namotion.Matter.MatterNodeAddedEvent>
+    {
+        public MatterNodeAddedEvent(Namotion.Matter.MatterNode Node) { }
+        public Namotion.Matter.MatterNode Node { get; init; }
+    }
+    public sealed class MatterNodeEventReceivedEvent : Namotion.Matter.MatterControllerEvent, System.IEquatable<Namotion.Matter.MatterNodeEventReceivedEvent>
+    {
+        public MatterNodeEventReceivedEvent(ulong NodeId, Namotion.Matter.EventPath Path, ulong EventNumber, byte Priority, long Timestamp, Namotion.Matter.MatterEventTimestampType TimestampType, Namotion.Matter.MatterValue Data) { }
+        public Namotion.Matter.MatterValue Data { get; init; }
+        public ulong EventNumber { get; init; }
+        public ulong NodeId { get; init; }
+        public Namotion.Matter.EventPath Path { get; init; }
+        public byte Priority { get; init; }
+        public long Timestamp { get; init; }
+        public Namotion.Matter.MatterEventTimestampType TimestampType { get; init; }
+    }
+    public sealed class MatterNodeRemovedEvent : Namotion.Matter.MatterControllerEvent, System.IEquatable<Namotion.Matter.MatterNodeRemovedEvent>
+    {
+        public MatterNodeRemovedEvent(ulong NodeId) { }
+        public ulong NodeId { get; init; }
+    }
+    public sealed class MatterNodeUpdatedEvent : Namotion.Matter.MatterControllerEvent, System.IEquatable<Namotion.Matter.MatterNodeUpdatedEvent>
+    {
+        public MatterNodeUpdatedEvent(Namotion.Matter.MatterNode Node) { }
+        public Namotion.Matter.MatterNode Node { get; init; }
+    }
+    public sealed class MatterOnboardingPayload : System.IEquatable<Namotion.Matter.MatterOnboardingPayload>
+    {
+        public MatterOnboardingPayload(uint SetupPinCode, ushort? Discriminator, byte? ShortDiscriminator, ushort? VendorId, ushort? ProductId, Namotion.Matter.MatterDiscoveryCapabilities? DiscoveryCapabilities) { }
+        public Namotion.Matter.MatterDiscoveryCapabilities? DiscoveryCapabilities { get; init; }
+        public ushort? Discriminator { get; init; }
+        public ushort? ProductId { get; init; }
+        public uint SetupPinCode { get; init; }
+        public byte? ShortDiscriminator { get; init; }
+        public ushort? VendorId { get; init; }
+    }
+    public static class MatterPayload
+    {
+        public static Namotion.Matter.IMatterPayload Empty { get; }
+        public static Namotion.Matter.IMatterPayload Create(System.Action<Namotion.Matter.IMatterValueWriter> write) { }
+    }
+    public sealed class MatterServerInfo : System.IEquatable<Namotion.Matter.MatterServerInfo>
+    {
+        public MatterServerInfo(ulong FabricId, ulong CompressedFabricId, int SchemaVersion, int MinSupportedSchemaVersion, string SdkVersion, bool WifiCredentialsSet, bool ThreadCredentialsSet, bool BluetoothEnabled) { }
+        public bool BluetoothEnabled { get; init; }
+        public ulong CompressedFabricId { get; init; }
+        public ulong FabricId { get; init; }
+        public int MinSupportedSchemaVersion { get; init; }
+        public int SchemaVersion { get; init; }
+        public string SdkVersion { get; init; }
+        public bool ThreadCredentialsSet { get; init; }
+        public bool WifiCredentialsSet { get; init; }
+    }
+    public sealed class MatterServerInfoChangedEvent : Namotion.Matter.MatterControllerEvent, System.IEquatable<Namotion.Matter.MatterServerInfoChangedEvent>
+    {
+        public MatterServerInfoChangedEvent(Namotion.Matter.MatterServerInfo ServerInfo) { }
+        public Namotion.Matter.MatterServerInfo ServerInfo { get; init; }
+    }
+    public readonly struct MatterValue
+    {
+        public bool IsNull { get; }
+        public Namotion.Matter.MatterValueKind Kind { get; }
+        public Namotion.Matter.MatterValue.ListEnumerator EnumerateList() { }
+        public bool GetBoolean() { }
+        public byte[] GetBytes() { }
+        public double GetDouble() { }
+        public long GetInt64() { }
+        public int GetListLength() { }
+        public string GetString() { }
+        public ulong GetUInt64() { }
+        public override string ToString() { }
+        public bool TryGetField(uint tag, string name, out Namotion.Matter.MatterValue value) { }
+        public struct ListEnumerator
+        {
+            public Namotion.Matter.MatterValue Current { get; }
+            public Namotion.Matter.MatterValue.ListEnumerator GetEnumerator() { }
+            public bool MoveNext() { }
+        }
+    }
+    public enum MatterValueKind
+    {
+        Null = 0,
+        Boolean = 1,
+        Number = 2,
+        String = 3,
+        List = 4,
+        Struct = 5,
+    }
+}
+namespace Namotion.Matter.Server
+{
+    public sealed class MatterServerController : Namotion.Matter.IMatterController, System.IAsyncDisposable
+    {
+        public const int ClientSchemaVersion = 15;
+        public const int MinimumServerSchemaVersion = 14;
+        public System.Threading.Channels.ChannelReader<Namotion.Matter.MatterControllerEvent> Events { get; }
+        public Namotion.Matter.MatterServerInfo ServerInfo { get; }
+        public System.Threading.Tasks.Task<Namotion.Matter.MatterNode> CommissionAsync(string code, bool networkOnly, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        public System.Threading.Tasks.Task<Namotion.Matter.MatterValue> InvokeAsync(ulong nodeId, Namotion.Matter.CommandPath path, string commandName, Namotion.Matter.IMatterPayload? payload = null, System.TimeSpan? timedRequestTimeout = default, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<Namotion.Matter.MatterCommissioningWindow> OpenCommissioningWindowAsync(ulong nodeId, System.TimeSpan timeout, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Namotion.Matter.MatterOnboardingPayload>> ParseOnboardingPayloadAsync(string code, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task RemoveNodeAsync(ulong nodeId, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task SetThreadDatasetAsync(string dataset, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task SetWifiCredentialsAsync(string ssid, string password, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Namotion.Matter.MatterNode>> StartListeningAsync(System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task WriteAttributeAsync(ulong nodeId, Namotion.Matter.AttributePath path, Namotion.Matter.IMatterPayload value, System.Threading.CancellationToken cancellationToken = default) { }
+        public static System.Threading.Tasks.Task<Namotion.Matter.Server.MatterServerController> ConnectAsync(System.Uri serverUrl, Namotion.Matter.Server.MatterServerOptions? options = null, Microsoft.Extensions.Logging.ILogger? logger = null, System.Threading.CancellationToken cancellationToken = default) { }
+    }
+    public sealed class MatterServerOptions : System.IEquatable<Namotion.Matter.Server.MatterServerOptions>
+    {
+        public MatterServerOptions() { }
+        public int MaxMessageSize { get; init; }
+        public System.TimeSpan RequestTimeout { get; init; }
+    }
+}
