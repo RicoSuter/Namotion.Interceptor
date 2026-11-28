@@ -128,10 +128,11 @@ Motion sensors are exposed as `HueMotionDevice` subjects implementing `IPresence
 | `Temperature`  | decimal? | Ambient temperature in degrees Celsius (null if sensor reports invalid) |
 | `Illuminance`  | decimal? | Light level in lux (null if sensor disabled)                            |
 | `BatteryLevel` | decimal? | Battery level as 0-1 fraction                                           |
+| `IsBatteryLow` | bool?    | Whether the bridge reports the battery as low or critical; without a battery state of the bridge, whether the level is at most 10 % |
 
 ### Button Devices (`HueButtonDevice`)
 
-Button devices (dimmer switches, tap switches, etc.) are exposed as `HueButtonDevice` subjects implementing `IBatteryState`, with child `HueButton` subjects for each physical button.
+Button devices (dimmer switches, tap switches, etc.) are exposed as `HueButtonDevice` subjects implementing `IBatteryState`, with child `HueButton` subjects for each physical button. Like a motion sensor, a button device reports `BatteryLevel` and `IsBatteryLow`.
 
 Each `HueButton` implements `IMultiPressButtonDevice` and `IObservable<ButtonEvent>` for reactive event streaming.
 
@@ -147,7 +148,7 @@ Each `HueButton` implements `IMultiPressButtonDevice` and `IObservable<ButtonEve
 
 A double press is reported as `Release` with `PressCount` 2, a single short press with `PressCount` 1, and `ButtonEvent.PressCount` carries the same count.
 
-**Duplicate prevention:** Button state changes are only emitted when the `ButtonChangeDate` from the Hue API changes and the new state differs from the previous state, except that a double press is reported also right after a single short release. Repeat events are deduplicated so consecutive `Repeat` states don't fire redundant events. After release events (`Release`, `LongRelease`), the state automatically resets to `None`.
+**Duplicate prevention:** Button state changes are only emitted when the `ButtonChangeDate` from the Hue API is newer than the one of the last emitted change, so an older report that the poll applies after the event stream is ignored, and the new state differs from the previous state, except that a double press is reported also right after a single short release. Repeat events are deduplicated so consecutive `Repeat` states don't fire redundant events. After release events (`Release`, `LongRelease`), the state automatically resets to `None`.
 
 **Reactive stream:** Subscribe to `IObservable<ButtonEvent>` on any `HueButton` to receive events with the button reference, state, timestamp, and device ID.
 
