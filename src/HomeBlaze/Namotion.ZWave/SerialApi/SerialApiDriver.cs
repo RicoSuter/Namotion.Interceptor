@@ -300,7 +300,16 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         await _stopping.CancelAsync().ConfigureAwait(false);
 
         // A serial read does not always observe cancellation; closing the stream ends it.
-        await _stream.DisposeAsync().ConfigureAwait(false);
+        try
+        {
+            await _stream.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            // Closing an unplugged serial port can throw; the loops still end through the canceled token.
+            _logger.LogWarning(exception, "Closing the connection to the Z-Wave controller failed.");
+        }
+
         await Task.WhenAll(_readLoop, _sendLoop).ConfigureAwait(false);
 
         var disposed = new ObjectDisposedException(nameof(SerialApiDriver));

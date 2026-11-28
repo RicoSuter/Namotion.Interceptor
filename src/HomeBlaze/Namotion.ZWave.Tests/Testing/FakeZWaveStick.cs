@@ -20,6 +20,11 @@ internal sealed class FakeZWaveStick : IZWaveTransport
     /// </summary>
     public bool AcknowledgesFrames { get; set; } = true;
 
+    /// <summary>
+    /// Whether disposing the stream throws without closing it, as closing an unplugged serial port can.
+    /// </summary>
+    public bool ThrowsOnDispose { get; init; }
+
     public bool IsDisposed => _stream?.IsDisposed == true;
 
     public IReadOnlyList<ParsedFrame> ReceivedFrames

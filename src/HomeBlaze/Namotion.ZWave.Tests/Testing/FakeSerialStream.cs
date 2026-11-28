@@ -71,6 +71,11 @@ internal sealed class FakeSerialStream(FakeZWaveStick stick) : Stream
 
     protected override void Dispose(bool disposing)
     {
+        if (stick.ThrowsOnDispose)
+        {
+            throw new IOException("The fake serial port could not be closed.");
+        }
+
         IsDisposed = true;
         _incoming.Writer.TryComplete();
         base.Dispose(disposing);
