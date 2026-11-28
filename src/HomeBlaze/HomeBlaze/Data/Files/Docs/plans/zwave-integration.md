@@ -70,7 +70,7 @@ The XML documentation of each contract states its semantics, so that every integ
 - `IsSmokeDetected` and `IsCarbonMonoxideDetected` are true for every alarm level (Matter Warning and Critical, Z-Wave detected events), false when the device reports normal, and `null` when unknown. Test, fault and end-of-life states are not alarms.
 - `IsTampered` is true from the tamper event until the device reports idle. A device that never reports idle resets it after a timeout that its implementation documents.
 - `IsLeakDetected` is true while the device reports a leak, also for a leak at an unknown location.
-- `PressCount` is set together with the final `ButtonState.Release` of a press sequence and is `null` while the button is idle; `ButtonEvent.PressCount` carries the same count.
+- `PressCount` is set together with the final `ButtonState.Release` of a press sequence and is `null` while the button is idle; `ButtonEvent.PressCount` carries the same count. A device that cannot defer a single press, such as Hue, may report the earlier presses of a sequence as their own `Release` with a lower count first, so a consumer that tells a single from a double press reacts to the highest count of a sequence.
 - `IsPairing` is true while the hub accepts new devices; it turns false when the window closes on its own, after a device was added or when `StopPairingAsync` is called.
 
 ### Fit with Other Ecosystems
@@ -91,7 +91,7 @@ Each new contract was checked against Matter, Zigbee (ZCL clusters and the actio
 
 ### Changes to Existing Contracts
 
-- `IBatteryState` gets `bool? IsBatteryLow` (position 341) as a `[Derived]` default member that is true when `BatteryLevel` is at most 0.1, false above and `null` when the level is unknown. A device that reports a low battery flag, such as Z-Wave Battery 0xFF, implements the property itself and leaves `BatteryLevel` `null` when it has no level. Existing implementations compile unchanged.
+- `IBatteryState` gets `bool? IsBatteryLow` (position 344, after the charge states of vehicles at 341 to 343) as a `[Derived]` default member that is true when `BatteryLevel` is at most 0.1, false above and `null` when the level is unknown. A device that reports a low battery flag, such as Z-Wave Battery 0xFF, implements the property itself and leaves `BatteryLevel` `null` when it has no level. Existing implementations compile unchanged.
 - `ButtonEvent` gets `int PressCount { get; init; } = 1`.
 - `StateUnit` gets `PartsPerMillion` (ppm) and `MicrogramPerCubicMeter` (µg/m³), appended at the end, with the unit formatting of the UI and the unit list in [Building Subjects](../development/building-subjects.md#state-properties) updated.
 
