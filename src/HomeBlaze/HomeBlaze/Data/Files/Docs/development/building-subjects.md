@@ -151,7 +151,9 @@ public enum StateUnit
     WattPerSquareMeter,     // 850 W/m² (irradiance)
     DecibelMilliwatt,       // -75 dBm (received signal strength)
     KilometerPerHour,       // 87 km/h (vehicle speed)
-    Bar                     // 2.9 bar (tire pressure)
+    Bar,                    // 2.9 bar (tire pressure)
+    PartsPerMillion,        // 612 ppm (carbon dioxide)
+    MicrogramPerCubicMeter  // 12.5 µg/m³ (particulate matter)
 }
 ```
 

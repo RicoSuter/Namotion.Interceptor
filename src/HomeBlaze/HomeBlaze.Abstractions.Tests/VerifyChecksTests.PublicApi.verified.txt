@@ -152,6 +152,8 @@ namespace HomeBlaze.Abstractions.Attributes
         DecibelMilliwatt = 37,
         KilometerPerHour = 38,
         Bar = 39,
+        PartsPerMillion = 40,
+        MicrogramPerCubicMeter = 41,
     }
     [System.AttributeUsage(System.AttributeTargets.Interface)]
     public class SubjectAbstractionAttribute : System.Attribute
