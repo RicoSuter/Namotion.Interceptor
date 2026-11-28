@@ -328,6 +328,20 @@ namespace HomeBlaze.Abstractions.Devices
     [System.ComponentModel.Description("Hub device that manages child devices (bridges, controllers).")]
     public interface IHubDevice { }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Opens and closes the window in which a hub accepts new devices.")]
+    public interface IPairingController
+    {
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=190)]
+        [System.ComponentModel.Category("Pairing")]
+        bool IsPairing { get; }
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Opens the window in which the hub accepts new devices.", Title="Start Pairing")]
+        [System.ComponentModel.Category("Pairing")]
+        System.Threading.Tasks.Task StartPairingAsync(System.TimeSpan? duration, System.Threading.CancellationToken cancellationToken);
+        [HomeBlaze.Abstractions.Attributes.Operation(Description="Closes the window in which the hub accepts new devices.", Title="Stop Pairing")]
+        [System.ComponentModel.Category("Pairing")]
+        System.Threading.Tasks.Task StopPairingAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Power relay that controls electrical power via switching.")]
     public interface IPowerRelay : HomeBlaze.Abstractions.Devices.ISwitchController, HomeBlaze.Abstractions.Devices.ISwitchDevice, HomeBlaze.Abstractions.Devices.ISwitchState { }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
