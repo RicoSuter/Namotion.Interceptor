@@ -42,7 +42,7 @@ Non-goals of the first version: S0 and S2 security, SmartStart, Z-Wave Long Rang
 
 Three changes, in this order, each with its own pull request:
 
-1. **Abstractions**: new contracts and units in `HomeBlaze.Abstractions`, with Ecowitt, Hue and Nuki implementing them.
+1. **Abstractions**: new contracts and units in `HomeBlaze.Abstractions`, with Ecowitt, Hue, Nuki and SunSpec adopting them.
 2. **Z-Wave SDK** (sub-project 1): `Namotion.ZWave`, `Namotion.ZWave.Generator` and `Namotion.ZWave.Tests`.
 3. **Z-Wave device library** (sub-project 2): `Namotion.Devices.ZWave`, `Namotion.Devices.ZWave.HomeBlaze` and `Namotion.Devices.ZWave.Tests`. It gets its own design round before implementation; this plan records its direction only.
 
@@ -63,7 +63,7 @@ Every contract carries `[SubjectAbstraction]` and a `[Description]`, and reading
 | `Devices/IPairingController` | `bool? IsPairing` (state), `StartPairingAsync(TimeSpan? duration)`, `StopPairingAsync` (operations) | 190 | Z-Wave inclusion, Zigbee permit join, a later Hue light search. A `null` duration uses the default of the hub, a duration above its maximum is clamped to that maximum, and a zero or negative one throws `ArgumentOutOfRangeException`. Starting while a window is open restarts it with the new duration, and stopping while none is open does nothing |
 | `Inputs/IMultiPressButtonDevice : IButtonDevice` | `int? PressCount` (`IsDiscrete`): the number of presses of a sequence, set with its final `Release` and `null` in every other state | 151 | Hue `double_short_release`, Z-Wave Central Scene 2x to 5x, Matter Switch MultiPressComplete |
 
-The smoke and carbon monoxide contracts follow the `I{Concept}Sensor` naming of the other sensors. Particulate matter has one contract per particle size, as Matter (one cluster per size), Zigbee and Home Assistant (`pm1`, `pm25`, `pm10`) have, so that a device implements only the sizes it measures; `IPm25Sensor` uses the established name of the quantity because no plain English name exists for PM2.5, PM10 or PM1.
+The smoke and carbon monoxide contracts follow the `I{Concept}Sensor` naming of the other sensors. They sit at 180 and 181, in the range of the primary device function, because an alarm is the primary function of a smoke or carbon monoxide detector. Particulate matter has one contract per particle size, as Matter (one cluster per size), Zigbee and Home Assistant (`pm1`, `pm25`, `pm10`) have, so that a device implements only the sizes it measures; `IPm25Sensor` uses the established name of the quantity because no plain English name exists for PM2.5, PM10 or PM1.
 
 The XML documentation of each contract states its semantics, so that every integration maps its protocol the same way:
 
@@ -100,6 +100,7 @@ Each new contract was checked against Matter, Zigbee (ZCL clusters and the actio
 - **Ecowitt**: `EcowittCo2Sensor` implements `ICarbonDioxideSensor` (`Co2` becomes `CarbonDioxide`, `Co2Avg24h` becomes `CarbonDioxideDailyAverage`), `EcowittPm25Sensor` implements `IPm25Sensor` (`Pm25` keeps its name, `Pm25Avg24h` becomes `Pm25DailyAverage`) and `EcowittLeakSensor` implements `IWaterLeakSensor` (`IsLeaking` becomes `IsLeakDetected`, `null` while the gateway reports no status). The daily averages are class-specific properties at position 400. `EcowittSensor` reports `IsBatteryLow` at level 1 of 5 and below, the threshold of Ecowitt, and for a binary battery that reports low.
 - **Hue**: `HueButton` implements `IMultiPressButtonDevice` and maps `double_short_release` to `Release` with `PressCount` 2. Single releases report 1. `HueButtonDevice` and `HueMotionDevice` report `IsBatteryLow` from the battery state of the bridge (true for low and critical, false for normal) and fall back to the level when the bridge reports no state.
 - **Nuki**: `NukiDevice.IsBatteryCritical` becomes `IsBatteryLow`, so that `NukiSmartLock` reports the bridge's critical battery flag through `IBatteryState`. The property is declared on `NukiDevice`, so `NukiOpener` loses `IsBatteryCritical` as well and reports `IsBatteryLow` without implementing `IBatteryState`.
+- **SunSpec**: `SunSpecBattery` and `SunSpecStorageCapacity` report `IsBatteryLow` as `null`, because a storage battery is discharged to its reserve by design.
 
 The Ecowitt DTOs (`EcowittCo2Data`, `EcowittPm25Data`, `EcowittLeakData`) mirror the JSON of the gateway and keep their names.
 
