@@ -4,12 +4,17 @@ namespace Namotion.Matter.Server;
 public sealed record MatterServerOptions
 {
     // CancellationTokenSource.CancelAfter accepts at most this.
-    private static readonly TimeSpan MaxRequestTimeout = TimeSpan.FromMilliseconds(uint.MaxValue - 1.0);
+    private static readonly TimeSpan MaxTimeout = TimeSpan.FromMilliseconds(uint.MaxValue - 1.0);
 
     /// <summary>
-    /// Gets how long a request other than commissioning waits for its answer, how long sending any request may take,
-    /// and how long connecting waits for the server's information. The default is 60 seconds, above the server's own
-    /// response timeout for a device.
+    /// Gets how long connecting may take, from opening the WebSocket until the server has sent its information. The
+    /// default is 30 seconds.
+    /// </summary>
+    public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Gets how long a request other than commissioning waits for its answer, and how long sending any request may
+    /// take. The default is 60 seconds, above the server's own response timeout for a device.
     /// </summary>
     public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromSeconds(60);
 
@@ -28,10 +33,12 @@ public sealed record MatterServerOptions
     /// <exception cref="ArgumentOutOfRangeException">A value is not positive, or too large.</exception>
     internal void ThrowIfInvalid()
     {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(ConnectTimeout, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(ConnectTimeout, MaxTimeout);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(RequestTimeout, TimeSpan.Zero);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(RequestTimeout, MaxRequestTimeout);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(RequestTimeout, MaxTimeout);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(MaxMessageSize, 0);
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(MaxMessageSize, Array.MaxLength);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(MaxMessageSize, Array.MaxLength);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(KeepAliveInterval, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(KeepAliveTimeout, TimeSpan.Zero);
     }

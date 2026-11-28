@@ -34,15 +34,16 @@ await foreach (var controllerEvent in controller.Events.ReadAllAsync(cancellatio
 `MatterServerController` lives in `Namotion.Matter.Server`, everything else in `Namotion.Matter`. `ConnectAsync` takes `ws://host:5580/ws`, `wss://...` or `unix:///path/to/socket`, optional `MatterServerOptions` and an optional logger. It fails with:
 
 - `ArgumentException` when the URL scheme is not supported.
-- `ArgumentOutOfRangeException` when an option is not positive, or `RequestTimeout` exceeds about 49 days.
+- `ArgumentOutOfRangeException` when an option is not positive, or a timeout exceeds about 49 days.
 - `WebSocketException` when the server refuses the connection or closes it before sending its information.
 - `MatterException` when the server's information cannot be read.
 - `NotSupportedException` when the server's schema version is not supported.
-- `TimeoutException` when the server sends no information within `RequestTimeout`.
+- `TimeoutException` when the server does not accept the connection and send its information within `ConnectTimeout`.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `RequestTimeout` | 60 seconds | How long a request other than commissioning waits for its answer, how long sending any request may take, and how long connecting waits for the server's information. It is above the server's own response timeout for a device |
+| `ConnectTimeout` | 30 seconds | How long connecting may take, from opening the WebSocket until the server has sent its information |
+| `RequestTimeout` | 60 seconds | How long a request other than commissioning waits for its answer, and how long sending any request may take. It is above the server's own response timeout for a device |
 | `MaxMessageSize` | 64 MB | The largest message accepted from the server, in bytes |
 | `KeepAliveInterval` | 30 seconds | How often the connection sends a WebSocket ping |
 | `KeepAliveTimeout` | 30 seconds | How long the connection waits for the answer to a ping before it treats the connection as lost |

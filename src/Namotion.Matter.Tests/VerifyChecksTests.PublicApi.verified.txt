@@ -276,6 +276,7 @@ namespace Namotion.Matter.Server
     public sealed class MatterServerOptions : System.IEquatable<Namotion.Matter.Server.MatterServerOptions>
     {
         public MatterServerOptions() { }
+        public System.TimeSpan ConnectTimeout { get; init; }
         public System.TimeSpan KeepAliveInterval { get; init; }
         public System.TimeSpan KeepAliveTimeout { get; init; }
         public int MaxMessageSize { get; init; }

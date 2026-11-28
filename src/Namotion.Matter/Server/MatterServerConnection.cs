@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net.WebSockets;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -22,7 +21,7 @@ internal sealed class MatterServerConnection : IAsyncDisposable
     // Disposed last in DisposeAsync; a request that reads its token afterwards fails with ObjectDisposedException.
     private readonly CancellationTokenSource _disposeCancellation = new();
 
-    // Received from by ReceiveServerInfoAsync, then only by the receive loop; disposed in DisposeAsync after the loop ended.
+    // Received from only by the receive loop; disposed in DisposeAsync after the loop ended.
     private readonly MatterServerSocket _socket;
     private Action<MatterControllerEvent> _handleEvent = static _ => { };
     private Action<Exception> _handleConnectionLost = static _ => { };
@@ -33,51 +32,55 @@ internal sealed class MatterServerConnection : IAsyncDisposable
 
     // Set once, under the dispose lock.
     private volatile Task? _disposeTask;
-    private long _nextMessageId;
 
-    private MatterServerConnection(MatterServerSocket socket, TimeSpan requestTimeout, ILogger? logger)
+    // 1 while a send runs, so a send timer that fires once the send completed does nothing.
+    private int _sendInProgress;
+
+    private MatterServerConnection(MatterServerSocket socket, MatterServerInfo serverInfo, TimeSpan requestTimeout, ILogger? logger)
     {
         _socket = socket;
+        ServerInfo = serverInfo;
         _requestTimeout = requestTimeout;
         _logger = logger;
     }
 
-    /// <summary>Opens the WebSocket with the options, which the caller has validated.</summary>
+    /// <summary>
+    /// Opens the WebSocket and receives the information the server sends first, both within
+    /// <see cref="MatterServerOptions.ConnectTimeout"/>; the options are validated by the caller.
+    /// </summary>
     /// <exception cref="ArgumentException">The URL scheme is not supported.</exception>
-    /// <exception cref="WebSocketException">The server refused the connection.</exception>
+    /// <exception cref="WebSocketException">The server refused the connection or closed it before sending its information.</exception>
+    /// <exception cref="MatterException">The information could not be read.</exception>
+    /// <exception cref="TimeoutException">Connecting took longer than the connect timeout.</exception>
     public static async Task<MatterServerConnection> ConnectAsync(
         Uri serverUrl, MatterServerOptions options, ILogger? logger, CancellationToken cancellationToken)
     {
-        var socket = await MatterServerSocket.ConnectAsync(serverUrl, options, cancellationToken).ConfigureAwait(false);
-        return new MatterServerConnection(socket, options.RequestTimeout, logger);
-    }
-
-    /// <summary>Receives the information the server sends first; call it once, before <see cref="StartReceiving"/>.</summary>
-    /// <exception cref="TimeoutException">The server sent nothing within the request timeout.</exception>
-    /// <exception cref="WebSocketException">The server closed the connection first.</exception>
-    /// <exception cref="MatterException">The information could not be read.</exception>
-    public async Task<MatterServerInfo> ReceiveServerInfoAsync(CancellationToken cancellationToken)
-    {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(_requestTimeout);
-        ReadOnlyMemory<byte>? message;
+        timeout.CancelAfter(options.ConnectTimeout);
         try
         {
-            message = await _socket.ReceiveAsync(timeout.Token).ConfigureAwait(false);
+            var socket = await MatterServerSocket.ConnectAsync(serverUrl, options, timeout.Token).ConfigureAwait(false);
+            try
+            {
+                var serverInfo = await ReceiveServerInfoAsync(socket, timeout.Token).ConfigureAwait(false);
+                return new MatterServerConnection(socket, serverInfo, options.RequestTimeout, logger);
+            }
+            catch
+            {
+                // The receive has ended, so the buffer can be returned.
+                socket.Dispose();
+                throw;
+            }
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (exception is OperationCanceledException or WebSocketException &&
+                                          timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
-            throw new TimeoutException(string.Create(CultureInfo.InvariantCulture,
-                $"The Matter server did not send its information within {_requestTimeout}."));
+            throw new TimeoutException($"The Matter server did not accept the connection and send its information within {options.ConnectTimeout}.", exception);
         }
-
-        if (message is not { } serverInfo)
-        {
-            throw new WebSocketException("The Matter server closed the connection before sending its information.");
-        }
-
-        return MatterServerResults.ReadServerInfo(serverInfo);
     }
+
+    /// <summary>Gets the information the server sent when the connection opened.</summary>
+    public MatterServerInfo ServerInfo { get; }
 
     /// <summary>Starts the receive loop.</summary>
     /// <param name="handleEvent">Handles an event this client knows.</param>
@@ -96,8 +99,7 @@ internal sealed class MatterServerConnection : IAsyncDisposable
     /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<JsonElement> SendRequestAsync(string command, Action<Utf8JsonWriter>? writeArguments, TimeSpan? timeout, CancellationToken cancellationToken)
     {
-        var messageId = Interlocked.Increment(ref _nextMessageId).ToString(CultureInfo.InvariantCulture);
-        var answer = _pendingRequests.Add(messageId);
+        var answer = _pendingRequests.Add(out var messageId);
         try
         {
             // Closing sets its state before it fails the pending requests, so a request registered after that fails here.
@@ -120,8 +122,7 @@ internal sealed class MatterServerConnection : IAsyncDisposable
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                throw new TimeoutException(string.Create(CultureInfo.InvariantCulture,
-                    $"The Matter server did not answer '{command}' within {timeout}."));
+                throw new TimeoutException($"The Matter server did not answer '{command}' within {timeout}.");
             }
             catch (OperationCanceledException exception) when (exception.CancellationToken != cancellationToken)
             {
@@ -164,33 +165,47 @@ internal sealed class MatterServerConnection : IAsyncDisposable
 
             // Canceling a WebSocket send aborts the connection, so the caller's token never reaches the send. A send
             // that times out fails the connection first, so the timeout and not the aborted socket is its error.
-            // Disposing the source stops its timer, which also ends the registration.
             using var sendTimeout = new CancellationTokenSource(_requestTimeout);
-            _ = sendTimeout.Token.UnsafeRegister(static state => ((MatterServerConnection)state!).FailSendTimedOut(), this);
-            try
-            {
-                await _socket.SendAsync(message, _disposeCancellation.Token).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or ObjectDisposedException && !_disposeCancellation.IsCancellationRequested)
-            {
-                if (sendTimeout.IsCancellationRequested)
-                {
-                    throw new TimeoutException(string.Create(CultureInfo.InvariantCulture,
-                        $"The Matter server did not accept '{command}' within {_requestTimeout}."));
-                }
+            Interlocked.Exchange(ref _sendInProgress, 1);
 
-                if (_connectionError is { } connectionError)
+            // Disposing the registration before the lock is released waits for a running timeout callback.
+            using (sendTimeout.Token.UnsafeRegister(static state => ((MatterServerConnection)state!).FailSendTimedOut(), this))
+            {
+                try
                 {
-                    throw MatterServerPendingRequests.CreateClosedException(connectionError);
+                    await _socket.SendAsync(message, _disposeCancellation.Token).ConfigureAwait(false);
                 }
+                catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or ObjectDisposedException && !_disposeCancellation.IsCancellationRequested)
+                {
+                    if (Interlocked.Exchange(ref _sendInProgress, 0) == 0)
+                    {
+                        throw new TimeoutException($"The Matter server did not accept '{command}' within {_requestTimeout}.");
+                    }
 
-                throw;
+                    if (_connectionError is { } connectionError)
+                    {
+                        throw MatterServerPendingRequests.CreateClosedException(connectionError);
+                    }
+
+                    throw;
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _sendInProgress, 0);
+                }
             }
         }
         finally
         {
             _sendLock.Release();
         }
+    }
+
+    private static async Task<MatterServerInfo> ReceiveServerInfoAsync(MatterServerSocket socket, CancellationToken cancellationToken)
+    {
+        var message = await socket.ReceiveAsync(cancellationToken).ConfigureAwait(false)
+            ?? throw new WebSocketException("The Matter server closed the connection before sending its information.");
+        return MatterServerResults.ReadServerInfo(message);
     }
 
     private async Task RunReceiveLoopAsync()
@@ -249,19 +264,7 @@ internal sealed class MatterServerConnection : IAsyncDisposable
             }
             else if (root.TryGetProperty("event", out var eventName))
             {
-                if (eventName.ValueEquals("server_shutdown"u8))
-                {
-                    return false;
-                }
-
-                if (MatterServerEvents.ReadEvent(eventName, root.GetProperty("data")) is { } controllerEvent)
-                {
-                    _handleEvent(controllerEvent);
-                }
-                else
-                {
-                    _logger?.LogDebug("Ignored the Matter server event {EventName}.", eventName.GetString());
-                }
+                return HandleEvent(eventName, root);
             }
             else
             {
@@ -276,8 +279,34 @@ internal sealed class MatterServerConnection : IAsyncDisposable
         return true;
     }
 
-    private void FailSendTimedOut() => FailConnection(new TimeoutException(string.Create(CultureInfo.InvariantCulture,
-        $"The Matter server did not accept a request within {_requestTimeout}.")));
+    /// <summary>Handles an event message; returns false when the server announced its shutdown.</summary>
+    private bool HandleEvent(JsonElement eventName, JsonElement root)
+    {
+        if (eventName.ValueEquals("server_shutdown"u8))
+        {
+            return false;
+        }
+
+        if (MatterServerEvents.ReadEvent(eventName, root.GetProperty("data")) is { } controllerEvent)
+        {
+            _handleEvent(controllerEvent);
+        }
+        else if (_logger?.IsEnabled(LogLevel.Debug) == true)
+        {
+            _logger.LogDebug("Ignored the Matter server event {EventName}.", eventName.GetString());
+        }
+
+        return true;
+    }
+
+    /// <summary>Fails the connection unless the send completed meanwhile or the connection is being disposed.</summary>
+    private void FailSendTimedOut()
+    {
+        if (Interlocked.CompareExchange(ref _sendInProgress, 0, 1) == 1 && !_disposeCancellation.IsCancellationRequested)
+        {
+            FailConnection(new TimeoutException($"The Matter server did not accept a request within {_requestTimeout}."));
+        }
+    }
 
     /// <summary>Closes the connection with its first error; safe to call from any thread, and only the first call has an effect.</summary>
     private void FailConnection(Exception exception)

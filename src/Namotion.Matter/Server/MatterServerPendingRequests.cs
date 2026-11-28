@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net.WebSockets;
 using System.Text.Json;
 
@@ -11,10 +12,13 @@ namespace Namotion.Matter.Server;
 internal sealed class MatterServerPendingRequests
 {
     private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonElement>> _requests = new();
+    private long _nextMessageId;
 
     /// <summary>Adds a request, whose task completes with its cloned <c>result</c> or fails with its error.</summary>
-    public Task<JsonElement> Add(string messageId)
+    /// <param name="messageId">The new request's unique message ID.</param>
+    public Task<JsonElement> Add(out string messageId)
     {
+        messageId = Interlocked.Increment(ref _nextMessageId).ToString(CultureInfo.InvariantCulture);
         var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         _requests[messageId] = completion;
         return completion.Task;

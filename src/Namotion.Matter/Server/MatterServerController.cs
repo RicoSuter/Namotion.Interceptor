@@ -47,11 +47,11 @@ public sealed class MatterServerController : IMatterController
     /// <param name="logger">The logger, or null for none.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="ArgumentException">The URL scheme is not supported.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">An option is not positive, or <see cref="MatterServerOptions.RequestTimeout"/> exceeds about 49 days.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">An option is not positive, or a timeout exceeds about 49 days.</exception>
     /// <exception cref="WebSocketException">The server refused the connection, or closed it before sending its information.</exception>
     /// <exception cref="MatterException">The server's information could not be read.</exception>
     /// <exception cref="NotSupportedException">The server's schema version is not supported.</exception>
-    /// <exception cref="TimeoutException">The server sent no information within <see cref="MatterServerOptions.RequestTimeout"/>.</exception>
+    /// <exception cref="TimeoutException">The server did not accept the connection and send its information within <see cref="MatterServerOptions.ConnectTimeout"/>.</exception>
     public static async Task<MatterServerController> ConnectAsync(
         Uri serverUrl,
         MatterServerOptions? options = null,
@@ -64,9 +64,8 @@ public sealed class MatterServerController : IMatterController
         var connection = await MatterServerConnection.ConnectAsync(serverUrl, options, logger, cancellationToken).ConfigureAwait(false);
         try
         {
-            var serverInfo = await connection.ReceiveServerInfoAsync(cancellationToken).ConfigureAwait(false);
-            MatterServerResults.ThrowIfUnsupported(serverInfo);
-            var controller = new MatterServerController(connection, serverInfo, options.RequestTimeout);
+            MatterServerResults.ThrowIfUnsupported(connection.ServerInfo);
+            var controller = new MatterServerController(connection, connection.ServerInfo, options.RequestTimeout);
             connection.StartReceiving(controller.HandleEvent, controller.HandleConnectionLost);
             return controller;
         }

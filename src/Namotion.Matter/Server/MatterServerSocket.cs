@@ -20,6 +20,9 @@ internal sealed class MatterServerSocket : IDisposable
     private readonly ClientWebSocket _socket;
     private readonly HttpMessageInvoker? _invoker;
     private readonly int _maxMessageSize;
+
+    // Receives the continuation of a message that fills the buffer at the maximum size; only an oversized message fills it.
+    private readonly byte[] _overflowProbe = new byte[1];
     private byte[] _buffer = ArrayPool<byte>.Shared.Rent(InitialBufferSize);
 
     private MatterServerSocket(ClientWebSocket socket, HttpMessageInvoker? invoker, int maxMessageSize)
@@ -79,12 +82,13 @@ internal sealed class MatterServerSocket : IDisposable
         var length = 0;
         while (true)
         {
-            if (length == _buffer.Length)
+            if (length == _buffer.Length && length < _maxMessageSize)
             {
                 GrowBuffer(length);
             }
 
-            var result = await _socket.ReceiveAsync(_buffer.AsMemory(length), cancellationToken).ConfigureAwait(false);
+            var target = length < _buffer.Length ? _buffer.AsMemory(length) : _overflowProbe;
+            var result = await _socket.ReceiveAsync(target, cancellationToken).ConfigureAwait(false);
             if (result.MessageType == WebSocketMessageType.Close)
             {
                 return null;
@@ -122,10 +126,10 @@ internal sealed class MatterServerSocket : IDisposable
         ArrayPool<byte>.Shared.Return(_buffer);
     }
 
-    /// <summary>Grows the full buffer; up to one byte past the maximum size, so an oversized message is detected.</summary>
+    /// <summary>Grows the full buffer, up to the maximum size.</summary>
     private void GrowBuffer(int length)
     {
-        var larger = ArrayPool<byte>.Shared.Rent((int)Math.Min(2L * length, _maxMessageSize + 1L));
+        var larger = ArrayPool<byte>.Shared.Rent((int)Math.Min(2L * length, _maxMessageSize));
         _buffer.AsSpan(0, length).CopyTo(larger);
         ArrayPool<byte>.Shared.Return(_buffer);
         _buffer = larger;

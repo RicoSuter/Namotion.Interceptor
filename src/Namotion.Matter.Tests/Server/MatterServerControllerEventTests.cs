@@ -201,12 +201,13 @@ public class MatterServerControllerEventTests
     }
 
     [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    public async Task WhenMessageReachesMaximumSize_ThenOnlyALargerMessageFailsTheConnection(int bytesOverMaximum)
+    [InlineData(1024, 0)]
+    [InlineData(1024, 1)]
+    [InlineData(16 * 1024, 0)] // fills the initial buffer exactly
+    [InlineData(16 * 1024, 1)]
+    public async Task WhenMessageReachesMaximumSize_ThenOnlyALargerMessageFailsTheConnection(int maxMessageSize, int bytesOverMaximum)
     {
         // Arrange
-        const int maxMessageSize = 1024;
         var (server, controller, _) = await StartListeningAsync(new MatterServerOptions { MaxMessageSize = maxMessageSize });
         await using var serverScope = server;
         await using var controllerScope = controller;

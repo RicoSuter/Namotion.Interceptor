@@ -51,7 +51,7 @@ public class MatterServerControllerConnectTests
         server.ServerInfo = null;
 
         // Act & Assert
-        await Assert.ThrowsAsync<TimeoutException>(() => MatterServerController.ConnectAsync(server.Url, new MatterServerOptions { RequestTimeout = TimeSpan.FromMilliseconds(200) }));
+        await Assert.ThrowsAsync<TimeoutException>(() => MatterServerController.ConnectAsync(server.Url, new MatterServerOptions { ConnectTimeout = TimeSpan.FromMilliseconds(200) }));
     }
 
     [Fact]
@@ -89,6 +89,7 @@ public class MatterServerControllerConnectTests
     }
 
     [Theory]
+    [InlineData(nameof(MatterServerOptions.ConnectTimeout))]
     [InlineData(nameof(MatterServerOptions.RequestTimeout))]
     [InlineData(nameof(MatterServerOptions.MaxMessageSize))]
     [InlineData(nameof(MatterServerOptions.KeepAliveInterval))]
@@ -98,6 +99,7 @@ public class MatterServerControllerConnectTests
         // Arrange
         var options = option switch
         {
+            nameof(MatterServerOptions.ConnectTimeout) => new MatterServerOptions { ConnectTimeout = TimeSpan.Zero },
             nameof(MatterServerOptions.RequestTimeout) => new MatterServerOptions { RequestTimeout = TimeSpan.Zero },
             nameof(MatterServerOptions.MaxMessageSize) => new MatterServerOptions { MaxMessageSize = 0 },
             nameof(MatterServerOptions.KeepAliveInterval) => new MatterServerOptions { KeepAliveInterval = TimeSpan.Zero },
