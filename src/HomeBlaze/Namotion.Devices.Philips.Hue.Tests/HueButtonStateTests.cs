@@ -378,6 +378,45 @@ public class HueButtonStateTests
     }
 
     [Fact]
+    public void WhenAPollAppliesTheFirstReportAfterAClockJumpBeforeTheEventStreamDeliversIt_ThenThePressIsStillEmitted()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        var releaseTimestamp = DateTimeOffset.UtcNow;
+        var rebootedTimestamp = releaseTimestamp.AddDays(-1);
+        ReportFromEventStream(button, ButtonEvent.short_release, releaseTimestamp);
+
+        // Act
+        Report(button, ButtonEvent.short_release, rebootedTimestamp);
+        ReportFromEventStream(button, ButtonEvent.short_release, rebootedTimestamp);
+
+        // Assert
+        Assert.Equal(2, events.Count(e => e.ButtonState == ButtonState.Release));
+    }
+
+    [Fact]
+    public void WhenAnUpdateArrivesAfterDispose_ThenItDoesNotThrowAndEmitsNothing()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+        button.Dispose();
+
+        // Act
+        var timestamp = DateTimeOffset.UtcNow;
+        Report(button, ButtonEvent.short_release, timestamp);
+        ReportFromEventStream(button, ButtonEvent.short_release, timestamp.AddSeconds(1));
+        button.RefreshButtonState();
+
+        // Assert
+        Assert.Empty(events);
+    }
+
+    [Fact]
     public void WhenAButtonIsRegistered_ThenPressCountIsADiscreteStateAtTheContractPosition()
     {
         // Arrange

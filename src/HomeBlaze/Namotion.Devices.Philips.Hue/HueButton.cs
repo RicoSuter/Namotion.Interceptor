@@ -36,6 +36,13 @@ public partial class HueButton :
 
     private DateTimeOffset? _currentButtonChangeDate;
 
+    // Kept apart from ButtonResource, which the poll writes as well: a poll that applied the first report
+    // after a clock jump must not make the event stream copy of that report look like an already seen one.
+    private DateTimeOffset? _lastEventStreamChangeDate;
+
+    // Set under _lock. A removed button is disposed while the event stream may still deliver to it.
+    private bool _isDisposed;
+
     internal ButtonResource ButtonResource { get; set; }
 
     public HueButtonDevice ParentDevice { get; }
@@ -126,6 +133,7 @@ public partial class HueButton :
         PressCount = null;
 
         _currentButtonChangeDate = ButtonChangeDate;
+        _lastEventStreamChangeDate = ButtonChangeDate;
 
         if (!initialization)
         {
@@ -137,6 +145,11 @@ public partial class HueButton :
     {
         lock (_lock)
         {
+            if (_isDisposed)
+            {
+                return this;
+            }
+
             ButtonResource = buttonResource;
             LastUpdated = DateTimeOffset.Now;
 
@@ -153,12 +166,18 @@ public partial class HueButton :
     {
         lock (_lock)
         {
-            var previousButtonChangeDate = ButtonChangeDate;
+            if (_isDisposed)
+            {
+                return;
+            }
+
             ButtonResource = merge(ButtonResource);
             LastUpdated = DateTimeOffset.Now;
 
             // Only an update that carries a new report is one the bridge just sent
-            RefreshButtonState(acceptClockJump: ButtonChangeDate != previousButtonChangeDate);
+            var isNewReport = ButtonChangeDate != _lastEventStreamChangeDate;
+            _lastEventStreamChangeDate = ButtonChangeDate;
+            RefreshButtonState(acceptClockJump: isNewReport);
         }
     }
 
@@ -177,6 +196,11 @@ public partial class HueButton :
     // the event of a later report could overtake the one of an earlier report.
     private void RefreshButtonState(bool acceptClockJump)
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         var newButtonChangeDate = ButtonChangeDate;
         var newButtonState = InternalButtonState;
         var pressCount = ButtonResource?.Button?.ButtonReport?.Event is { } eventType ? GetPressCount(eventType) : null;
@@ -229,7 +253,11 @@ public partial class HueButton :
 
     public void Dispose()
     {
-        _buttonEventSubject.OnCompleted();
-        _buttonEventSubject.Dispose();
+        lock (_lock)
+        {
+            _isDisposed = true;
+            _buttonEventSubject.OnCompleted();
+            _buttonEventSubject.Dispose();
+        }
     }
 }
