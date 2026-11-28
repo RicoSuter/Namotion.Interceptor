@@ -4,14 +4,18 @@ namespace Namotion.Matter.Tests;
 
 public class AttributePathTests
 {
-    [Fact]
-    public void WhenParsingValidPath_ThenPartsAreRead()
+    [Theory]
+    [InlineData("1/6/16384", 1, 6, 16384)]
+    [InlineData("01/6/0", 1, 6, 0)]
+    [InlineData("65535/4294967295/4294967295", 65535, 4294967295, 4294967295)]
+    public void WhenParsingValidPath_ThenPartsAreRead(string text, int endpoint, uint cluster, uint attribute)
     {
         // Act
-        var path = AttributePath.Parse("1/6/16384");
+        var success = AttributePath.TryParse(Encoding.UTF8.GetBytes(text), out var path);
 
         // Assert
-        Assert.Equal(new AttributePath(1, 6, 16384), path);
+        Assert.True(success);
+        Assert.Equal(new AttributePath((ushort)endpoint, cluster, attribute), path);
     }
 
     [Fact]
@@ -31,33 +35,6 @@ public class AttributePathTests
     [InlineData("")]
     [InlineData("1/6")]
     [InlineData("1/6/0/0")]
-    [InlineData("*/6/0")]
-    [InlineData("65536/6/0")]
-    [InlineData("-1/6/0")]
-    [InlineData(" 1/6/0")]
-    public void WhenParsingInvalidPath_ThenTryParseFails(string text)
-    {
-        // Act
-        var success = AttributePath.TryParse(text, out _);
-
-        // Assert
-        Assert.False(success);
-    }
-
-    [Fact]
-    public void WhenParsingInvalidPath_ThenParseThrowsFormatException()
-    {
-        // Act & Assert
-        Assert.Throws<FormatException>(() => AttributePath.Parse("1/6"));
-    }
-
-    [Theory]
-    [InlineData("1/6/16384")]
-    [InlineData("01/6/0")]
-    [InlineData("65535/4294967295/4294967295")]
-    [InlineData("")]
-    [InlineData("1/6")]
-    [InlineData("1/6/0/0")]
     [InlineData("1//0")]
     [InlineData("*/6/0")]
     [InlineData("65536/6/0")]
@@ -67,14 +44,13 @@ public class AttributePathTests
     [InlineData(" 1/6/0")]
     [InlineData("1/6/0 ")]
     [InlineData("1/6/0x1")]
-    public void WhenParsingUtf8Text_ThenResultMatchesParsingCharacters(string text)
+    public void WhenParsingInvalidPath_ThenTryParseFails(string text)
     {
         // Act
-        var utf8Success = AttributePath.TryParse(Encoding.UTF8.GetBytes(text), out var utf8Path);
-        var success = AttributePath.TryParse(text, out var path);
+        var success = AttributePath.TryParse(Encoding.UTF8.GetBytes(text), out var path);
 
         // Assert
-        Assert.Equal(success, utf8Success);
-        Assert.Equal(path, utf8Path);
+        Assert.False(success);
+        Assert.Equal(default, path);
     }
 }

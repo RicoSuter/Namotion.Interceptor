@@ -44,7 +44,8 @@ public class MatterServerControllerEventTests
         try
         {
             session.Server.Handler = request => request["command"]!.GetValue<string>() == "start_listening" ? new JsonArray(CreateNode(TestNodeId)) : null;
-            return session with { Nodes = await session.Controller.StartListeningAsync() };
+            session.Nodes = await session.Controller.StartListeningAsync();
+            return session;
         }
         catch
         {
