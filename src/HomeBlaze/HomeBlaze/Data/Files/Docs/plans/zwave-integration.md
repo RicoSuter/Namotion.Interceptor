@@ -149,13 +149,13 @@ src/HomeBlaze/
 
 `IZWaveTransport` has one member, `ValueTask<Stream> OpenAsync(CancellationToken cancellationToken)`.
 
-- `SerialTransport(string portName)`: `SerialPort` at 115200 baud, 8N1, returns its `BaseStream`.
+- `SerialTransport(string portName)`: `SerialPort` at 115200 baud, 8N1, returns a stream over its `BaseStream` that also closes the port.
 - `TcpTransport(string host, int port)`: returns a `NetworkStream`, for a stick behind ser2net or a similar bridge.
 - Tests pass a transport that returns an in-memory duplex stream.
 
 ### Serial API Driver
 
-- **Frame parser**: a pure incremental state machine over `ReadOnlySpan<byte>` with a pooled buffer, producing `Ack`, `Nak`, `Can` and `DataFrame(type, function, payload)`. It skips bytes up to the next start of frame. The driver acknowledges each valid data frame and answers a bad checksum with a NAK.
+- **Frame parser**: a pure incremental state machine over `ReadOnlySpan<byte>` with a reused buffer, producing `Ack`, `Nak`, `Can` and `DataFrame(type, function, payload)`. It skips bytes up to the next start of frame. The driver acknowledges each valid data frame and answers a bad checksum with a NAK.
 - **One transaction at a time**: a read loop and a send loop over a `Channel<T>` queue.
   1. Write the frame and wait for the ACK (1600 ms). On NAK, CAN or timeout, retransmit, with 3 attempts in total and a delay of 100 ms + (attempt - 1) × 1000 ms before each retransmission.
   2. Wait for the response if the function has one (10 s).
@@ -170,7 +170,7 @@ One `ZWaveController` instance is one connection:
 
 ```csharp
 await using var controller = await ZWaveController.ConnectAsync(
-    new SerialTransport("/dev/ttyACM0"), options, cancellationToken);
+    new SerialTransport("/dev/ttyACM0"), options, cancellationToken: cancellationToken);
 ```
 
 When the stream fails, every pending request faults with `ZWaveConnectionException` and `controller.Completion` faults. The SDK does not reconnect by itself; the caller decides, and the device library reconnects with a backoff. The node cache makes a reconnect cheap.
