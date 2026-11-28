@@ -23,7 +23,7 @@ public class SerialApiDriverLifetimeTests
         // Arrange
         var stick = new FakeZWaveStick();
         var driver = await SerialApiDriverTests.CreateDriverAsync(stick);
-        await driver.DisposeAsync();
+        await driver.DisposeAsync().AsTask().WaitAsync(TestTimeouts.Default);
 
         // Act & Assert
         Assert.Throws<ObjectDisposedException>(driver.Start);
@@ -71,7 +71,7 @@ public class SerialApiDriverLifetimeTests
         await driver.SendRequestAsync(FunctionId.GetControllerCapabilities, default, CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         // Assert
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => second);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => second.WaitAsync(TestTimeouts.Default));
         Assert.Equal(
             new[] { FunctionId.GetControllerVersion, FunctionId.GetControllerCapabilities },
             stick.ReceivedDataFrames.Select(frame => frame.Function));
@@ -99,7 +99,7 @@ public class SerialApiDriverLifetimeTests
 
         // Assert
         Assert.True(canceledAtOnce);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceled);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceled.WaitAsync(TestTimeouts.Default));
 
         // The host acknowledges the canceled request's response before it writes the next request.
         Assert.Equal(
@@ -122,7 +122,7 @@ public class SerialApiDriverLifetimeTests
         // Assert
         await Assert.ThrowsAsync<ZWaveConnectionException>(() => pending.WaitAsync(TestTimeouts.Default));
         await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
-        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None));
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None).WaitAsync(TestTimeouts.Default));
     }
 
     [Fact]
@@ -209,10 +209,10 @@ public class SerialApiDriverLifetimeTests
         await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
 
         // Act
-        await driver.DisposeAsync();
+        await driver.DisposeAsync().AsTask().WaitAsync(TestTimeouts.Default);
 
         // Assert
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => pending);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => pending.WaitAsync(TestTimeouts.Default));
         Assert.True(stick.IsDisposed);
         Assert.True(driver.Completion.IsCompletedSuccessfully);
         Assert.Throws<ObjectDisposedException>(() => { _ = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None); });
@@ -240,6 +240,35 @@ public class SerialApiDriverLifetimeTests
     }
 
     [Fact]
+    public async Task WhenTheConnectionCloses_ThenTheUnsolicitedFramesComplete()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+
+        // Act
+        stick.Disconnect();
+        await driver.UnsolicitedFrames.Completion.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.True(driver.UnsolicitedFrames.Completion.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task WhenDisposed_ThenTheUnsolicitedFramesComplete()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+
+        // Act
+        await DisposeAsTask(driver).WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.True(driver.UnsolicitedFrames.Completion.IsCompletedSuccessfully);
+    }
+
+    [Fact]
     public async Task WhenDisposedTwice_ThenTheSecondCallDoesNothing()
     {
         // Arrange
@@ -247,8 +276,8 @@ public class SerialApiDriverLifetimeTests
         var driver = await SerialApiDriverTests.StartDriverAsync(stick);
 
         // Act
-        await driver.DisposeAsync();
-        var exception = await Record.ExceptionAsync(async () => await driver.DisposeAsync());
+        await DisposeAsTask(driver).WaitAsync(TestTimeouts.Default);
+        var exception = await Record.ExceptionAsync(() => DisposeAsTask(driver).WaitAsync(TestTimeouts.Default));
 
         // Assert
         Assert.Null(exception);
@@ -268,7 +297,7 @@ public class SerialApiDriverLifetimeTests
 
         // Assert
         Assert.Null(exception);
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => pending);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => pending.WaitAsync(TestTimeouts.Default));
         Assert.True(driver.Completion.IsCompletedSuccessfully);
     }
 

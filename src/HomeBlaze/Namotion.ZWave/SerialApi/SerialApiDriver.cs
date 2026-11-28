@@ -15,7 +15,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly Channel<SerialApiTransaction> _transactions = Channel.CreateUnbounded<SerialApiTransaction>();
     private readonly Channel<DataFrame> _unsolicitedFrames = Channel.CreateUnbounded<DataFrame>(
-        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+        new UnboundedChannelOptions { SingleReader = true });
     private readonly CancellationTokenSource _stopping = new();
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -45,6 +45,12 @@ internal sealed class SerialApiDriver : IAsyncDisposable
     /// </summary>
     public Task Completion => _completion.Task;
 
+    /// <summary>
+    /// The request frames the controller sent on its own, in their order. Completes when the driver fails or is disposed.
+    /// </summary>
+    /// <remarks>
+    /// The channel is unbounded: its single reader must keep up and must never block, or the frames accumulate in memory.
+    /// </remarks>
     public ChannelReader<DataFrame> UnsolicitedFrames => _unsolicitedFrames.Reader;
 
     /// <summary>
@@ -214,11 +220,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
             case FrameKind.Ack:
             case FrameKind.Nak:
             case FrameKind.Can:
-                if (_inFlight is { } transaction)
-                {
-                    transaction.TryAcknowledge(frame.Kind);
-                }
-                else
+                if (_inFlight?.TryAcknowledge(frame.Kind) != true)
                 {
                     _logger.LogDebug("Received an unexpected {Kind}.", frame.Kind);
                 }
@@ -232,20 +234,20 @@ internal sealed class SerialApiDriver : IAsyncDisposable
 
             case FrameKind.Data:
                 await WriteAsync(FrameStream.Ack, stopping).ConfigureAwait(false);
-                var data = frame.Data;
-                if (data.Type == FrameType.Response)
-                {
-                    if (_inFlight?.TryRespond(data) != true)
-                    {
-                        _logger.LogDebug("Received an unexpected response to function 0x{Function:X2}.", data.Function);
-                    }
-                }
-                else
-                {
-                    _unsolicitedFrames.Writer.TryWrite(data);
-                }
-
+                RouteDataFrame(frame.Data);
                 break;
+        }
+    }
+
+    private void RouteDataFrame(DataFrame data)
+    {
+        if (data.Type != FrameType.Response)
+        {
+            _unsolicitedFrames.Writer.TryWrite(data);
+        }
+        else if (_inFlight?.TryRespond(data) != true)
+        {
+            _logger.LogDebug("Received an unexpected response to function 0x{Function:X2}.", data.Function);
         }
     }
 

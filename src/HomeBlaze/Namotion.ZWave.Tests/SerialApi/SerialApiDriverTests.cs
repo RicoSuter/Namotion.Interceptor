@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Namotion.Interceptor.Testing;
@@ -30,7 +31,7 @@ public class SerialApiDriverTests
         await using var driver = await StartDriverAsync(stick);
 
         // Act
-        var response = await driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        var response = await driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None).WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal(FrameType.Response, response.Type);
@@ -56,6 +57,69 @@ public class SerialApiDriverTests
 
         // Assert
         Assert.Equal(new byte[] { 0x22 }, response.Payload);
+    }
+
+    [Fact]
+    public async Task WhenAResponseToAnotherFunctionArrives_ThenItIsIgnoredAndTheMatchingResponseIsReturned()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false };
+        await using var driver = await StartDriverAsync(stick, logger: logger);
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+
+        // Act
+        stick.SendToHost([
+            FrameHeader.Ack,
+            .. FrameEncoder.Encode(FrameType.Response, FunctionId.GetControllerVersion, [0x11]),
+            .. FrameEncoder.Encode(FrameType.Response, FunctionId.GetControllerId, [0x22])]);
+        var response = await request.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(new byte[] { 0x22 }, response.Payload);
+        Assert.Contains(logger.Entries, entry => entry.Level == LogLevel.Debug && entry.Message == "Received an unexpected response to function 0x15.");
+    }
+
+    [Fact]
+    public async Task WhenAnAckArrivesWithNothingPending_ThenItIsLoggedAndTheNextRequestIsAnswered()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var stick = new FakeZWaveStick();
+        stick.SetResponse(FunctionId.GetControllerId, 0x22);
+        await using var driver = await StartDriverAsync(stick, logger: logger);
+
+        // Act
+        stick.SendToHost(FrameHeader.Ack);
+        await AsyncTestHelpers.WaitUntilAsync(() => logger.Entries.Any(entry => entry.Message == "Received an unexpected Ack."));
+        var response = await driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None).WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(new byte[] { 0x22 }, response.Payload);
+        Assert.Contains(logger.Entries, entry => entry.Level == LogLevel.Debug && entry.Message == "Received an unexpected Ack.");
+    }
+
+    [Fact]
+    public async Task WhenASecondAckArrivesForTheSameAttempt_ThenItIsLoggedAsUnexpected()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false };
+        await using var driver = await StartDriverAsync(stick, logger: logger);
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+
+        // Act
+        stick.SendToHost([
+            FrameHeader.Ack,
+            FrameHeader.Ack,
+            .. FrameEncoder.Encode(FrameType.Response, FunctionId.GetControllerId, [0x22])]);
+        var response = await request.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(new byte[] { 0x22 }, response.Payload);
+        Assert.Contains(logger.Entries, entry => entry.Level == LogLevel.Debug && entry.Message == "Received an unexpected Ack.");
     }
 
     [Fact]
@@ -93,18 +157,18 @@ public class SerialApiDriverTests
     /// <summary>
     /// Creates and starts a driver on the stick, and waits until the startup NAK was written.
     /// </summary>
-    internal static async Task<SerialApiDriver> StartDriverAsync(FakeZWaveStick stick, TimeProvider? timeProvider = null)
+    internal static async Task<SerialApiDriver> StartDriverAsync(FakeZWaveStick stick, TimeProvider? timeProvider = null, ILogger? logger = null)
     {
-        var driver = await CreateDriverAsync(stick, timeProvider);
+        var driver = await CreateDriverAsync(stick, timeProvider, logger);
         driver.Start();
         await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedNakCount == 1);
         return driver;
     }
 
-    internal static async Task<SerialApiDriver> CreateDriverAsync(FakeZWaveStick stick, TimeProvider? timeProvider = null)
+    internal static async Task<SerialApiDriver> CreateDriverAsync(FakeZWaveStick stick, TimeProvider? timeProvider = null, ILogger? logger = null)
     {
         var stream = await stick.OpenAsync(CancellationToken.None);
         var options = new ZWaveControllerOptions { TimeProvider = timeProvider ?? new FakeTimeProvider() };
-        return new SerialApiDriver(stream, options, NullLogger.Instance);
+        return new SerialApiDriver(stream, options, logger ?? NullLogger.Instance);
     }
 }

@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Testing;
 using Namotion.ZWave.SerialApi;
 using Namotion.ZWave.Tests.Testing;
 
@@ -12,7 +13,7 @@ public class ZWaveControllerTests
         var stick = FakeZWaveStick.CreateWithController();
 
         // Act
-        await using var controller = await ZWaveController.ConnectAsync(stick);
+        await using var controller = await ZWaveController.ConnectAsync(stick).WaitAsync(TestTimeouts.Default);
 
         // Assert
         Assert.Equal("Z-Wave 4.05", controller.LibraryVersion);
@@ -39,7 +40,7 @@ public class ZWaveControllerTests
         stick.SetResponse(FunctionId.GetControllerId, 0xC0);
 
         // Act & Assert
-        await Assert.ThrowsAsync<ZWaveException>(() => ZWaveController.ConnectAsync(stick));
+        await Assert.ThrowsAsync<ZWaveException>(() => ZWaveController.ConnectAsync(stick).WaitAsync(TestTimeouts.Default));
         Assert.True(stick.IsDisposed);
     }
 
@@ -51,7 +52,7 @@ public class ZWaveControllerTests
         var options = new ZWaveControllerOptions { MaximumSendAttempts = 0 };
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => ZWaveController.ConnectAsync(stick, options));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => ZWaveController.ConnectAsync(stick, options).WaitAsync(TestTimeouts.Default));
         Assert.Empty(stick.ReceivedFrames);
     }
 
@@ -60,14 +61,14 @@ public class ZWaveControllerTests
     {
         // Arrange
         var stick = FakeZWaveStick.CreateWithController();
-        await using var controller = await ZWaveController.ConnectAsync(stick);
+        await using var controller = await ZWaveController.ConnectAsync(stick).WaitAsync(TestTimeouts.Default);
         var acksBefore = stick.ReceivedAckCount;
 
         // Act
         stick.SendFrame(FrameType.Request, 0x04, 0x00, 0x05, 0x03, 0x20, 0x03, 0xFF);
 
         // Assert
-        await Namotion.Interceptor.Testing.AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedAckCount == acksBefore + 1);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedAckCount == acksBefore + 1);
     }
 
     [Fact]
@@ -75,12 +76,12 @@ public class ZWaveControllerTests
     {
         // Arrange
         var stick = FakeZWaveStick.CreateWithController();
-        await using var controller = await ZWaveController.ConnectAsync(stick);
+        await using var controller = await ZWaveController.ConnectAsync(stick).WaitAsync(TestTimeouts.Default);
 
         // Act
         stick.Disconnect();
 
         // Assert
-        await Assert.ThrowsAsync<ZWaveConnectionException>(() => controller.Completion.WaitAsync(Namotion.Interceptor.Testing.TestTimeouts.Default));
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => controller.Completion.WaitAsync(TestTimeouts.Default));
     }
 }
