@@ -1,0 +1,103 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.ZWave.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.ZWave.Transport
+{
+    public interface IZWaveTransport
+    {
+        System.Threading.Tasks.ValueTask<System.IO.Stream> OpenAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    public sealed class SerialTransport : Namotion.ZWave.Transport.IZWaveTransport
+    {
+        public SerialTransport(string portName) { }
+        public string PortName { get; }
+        public System.Threading.Tasks.ValueTask<System.IO.Stream> OpenAsync(System.Threading.CancellationToken cancellationToken) { }
+        public override string ToString() { }
+    }
+    public sealed class TcpTransport : Namotion.ZWave.Transport.IZWaveTransport
+    {
+        public TcpTransport(string host, int port) { }
+        public string Host { get; }
+        public int Port { get; }
+        public System.Threading.Tasks.ValueTask<System.IO.Stream> OpenAsync(System.Threading.CancellationToken cancellationToken) { }
+        public override string ToString() { }
+    }
+}
+namespace Namotion.ZWave
+{
+    public sealed class ZWaveConnectionException : Namotion.ZWave.ZWaveException
+    {
+        public ZWaveConnectionException() { }
+        public ZWaveConnectionException(string message) { }
+        public ZWaveConnectionException(string message, System.Exception innerException) { }
+    }
+    public sealed class ZWaveController : System.IAsyncDisposable
+    {
+        public Namotion.ZWave.ZWaveControllerCapabilities Capabilities { get; }
+        public System.Threading.Tasks.Task Completion { get; }
+        public uint HomeId { get; }
+        public Namotion.ZWave.ZWaveLibraryType LibraryType { get; }
+        public string LibraryVersion { get; }
+        public ushort ManufacturerId { get; }
+        public System.Collections.Immutable.ImmutableArray<byte> NodeIds { get; }
+        public byte OwnNodeId { get; }
+        public ushort ProductId { get; }
+        public ushort ProductType { get; }
+        public string SerialApiVersion { get; }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        public static System.Threading.Tasks.Task<Namotion.ZWave.ZWaveController> ConnectAsync(Namotion.ZWave.Transport.IZWaveTransport transport, Namotion.ZWave.ZWaveControllerOptions? options = null, Microsoft.Extensions.Logging.ILoggerFactory? loggerFactory = null, System.Threading.CancellationToken cancellationToken = default) { }
+    }
+    [System.Flags]
+    public enum ZWaveControllerCapabilities : byte
+    {
+        None = 0,
+        Secondary = 1,
+        OnOtherNetwork = 2,
+        SisPresent = 4,
+        WasRealPrimary = 8,
+        Suc = 16,
+        NoNodesIncluded = 32,
+    }
+    public sealed class ZWaveControllerException : Namotion.ZWave.ZWaveException
+    {
+        public ZWaveControllerException() { }
+        public ZWaveControllerException(string message) { }
+        public ZWaveControllerException(string message, System.Exception innerException) { }
+    }
+    public sealed class ZWaveControllerOptions : System.IEquatable<Namotion.ZWave.ZWaveControllerOptions>
+    {
+        public ZWaveControllerOptions() { }
+        public System.TimeSpan AcknowledgementTimeout { get; init; }
+        public System.TimeSpan FrameDeliveryTimeout { get; init; }
+        public int MaximumSendAttempts { get; init; }
+        public System.TimeSpan ResponseTimeout { get; init; }
+        public System.TimeProvider TimeProvider { get; init; }
+    }
+    public class ZWaveException : System.Exception
+    {
+        public ZWaveException() { }
+        public ZWaveException(string message) { }
+        public ZWaveException(string message, System.Exception innerException) { }
+    }
+    public enum ZWaveLibraryType : byte
+    {
+        Unknown = 0,
+        StaticController = 1,
+        Controller = 2,
+        EnhancedEndNode = 3,
+        EndNode = 4,
+        Installer = 5,
+        RoutingEndNode = 6,
+        BridgeController = 7,
+        DeviceUnderTest = 8,
+        NotApplicable = 9,
+        AvRemote = 10,
+        AvDevice = 11,
+    }
+    public sealed class ZWaveTimeoutException : Namotion.ZWave.ZWaveException
+    {
+        public ZWaveTimeoutException() { }
+        public ZWaveTimeoutException(string message) { }
+        public ZWaveTimeoutException(string message, System.Exception innerException) { }
+    }
+}

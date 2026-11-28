@@ -1,0 +1,114 @@
+using System.Threading.Channels;
+
+namespace Namotion.ZWave.Tests.Testing;
+
+/// <summary>
+/// The host's end of an in-memory serial line: reads what the fake stick pushes, writes go to the stick.
+/// </summary>
+internal sealed class FakeSerialStream(FakeZWaveStick stick) : Stream
+{
+    private readonly Channel<byte[]> _incoming = Channel.CreateUnbounded<byte[]>();
+    private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private byte[]? _current;
+    private int _offset;
+
+    public bool IsDisposed { get; private set; }
+
+    public override bool CanRead => true;
+
+    public override bool CanWrite => true;
+
+    public override bool CanSeek => false;
+
+    public override long Length => throw new NotSupportedException();
+
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+
+    public void Push(byte[] bytes) => _incoming.Writer.TryWrite(bytes);
+
+    public void EndOfStream() => _incoming.Writer.TryComplete();
+
+    public void FailReads(Exception exception) => _incoming.Writer.TryComplete(exception);
+
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        if (_current is null || _offset == _current.Length)
+        {
+            if (!await _incoming.Reader.WaitToReadAsync(cancellationToken))
+            {
+                return 0;
+            }
+
+            _incoming.Reader.TryRead(out _current);
+            _offset = 0;
+        }
+
+        var count = Math.Min(buffer.Length, _current!.Length - _offset);
+        _current.AsSpan(_offset, count).CopyTo(buffer.Span);
+        _offset += count;
+        return count;
+    }
+
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        if (stick.FailWrites)
+        {
+            throw new IOException("The fake serial port failed to write.");
+        }
+
+        if (stick.HangWrites)
+        {
+            stick.OnHungWrite();
+            return new ValueTask(_closed.Task);
+        }
+
+        stick.OnHostWrite(buffer.Span);
+        return ValueTask.CompletedTask;
+    }
+
+    public override void Flush()
+    {
+    }
+
+    // Completes synchronously, so that a write starts no write-timeout timer the timing tests would see.
+    public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    public override async ValueTask DisposeAsync()
+    {
+        if (stick.DisposeGate is { } gate)
+        {
+            await gate;
+        }
+
+        await base.DisposeAsync();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (stick.ThrowsOnDispose)
+        {
+            throw new IOException("The fake serial port could not be closed.");
+        }
+
+        IsDisposed = true;
+        _incoming.Writer.TryComplete();
+        _closed.TrySetException(new IOException("The fake serial port was closed."));
+
+        // Observed here, so that a stream without a hung write leaves no unobserved exception behind.
+        _ = _closed.Task.Exception;
+        base.Dispose(disposing);
+    }
+}

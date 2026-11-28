@@ -1,0 +1,381 @@
+using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Testing;
+using Namotion.ZWave.SerialApi;
+using Namotion.ZWave.Tests.Testing;
+
+namespace Namotion.ZWave.Tests.SerialApi;
+
+public class SerialApiDriverLifetimeTests
+{
+    [Fact]
+    public async Task WhenStartedTwice_ThenTheSecondStartThrows()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        await using var driver = await stick.StartDriverAsync();
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(driver.Start);
+    }
+
+    [Fact]
+    public async Task WhenStartedAfterDisposal_ThenStartThrows()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        var driver = await stick.CreateDriverAsync();
+        await DisposeAsTask(driver).WaitAsync(TestTimeouts.Default);
+
+        // Act & Assert
+        Assert.Throws<ObjectDisposedException>(driver.Start);
+        Assert.Empty(stick.ReceivedFrames);
+    }
+
+    [Fact]
+    public async Task WhenTheStartupNakCannotBeWritten_ThenCompletionAndRequestsFailWithAConnectionException()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        var driver = await stick.CreateDriverAsync();
+        stick.FailWrites = true;
+
+        // Act
+        driver.Start();
+
+        // Assert
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None).WaitAsync(TestTimeouts.Default));
+        await DisposeAsTask(driver).WaitAsync(TestTimeouts.Default);
+        Assert.True(stick.IsDisposed);
+    }
+
+    [Fact]
+    public async Task WhenARequestIsCanceledWhileQueued_ThenItIsNeverWritten()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false };
+        stick.SetResponse(FunctionId.GetControllerVersion, 0x00, 0x01);
+        stick.SetResponse(FunctionId.GetControllerCapabilities, 0x00);
+        await using var driver = await stick.StartDriverAsync();
+        var first = driver.SendRequestAsync(FunctionId.GetControllerVersion, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+
+        using var cancellation = new CancellationTokenSource();
+        var second = driver.SendRequestAsync(FunctionId.GetControllerId, default, cancellation.Token);
+
+        // Act
+        await cancellation.CancelAsync();
+        stick.SendToHost(FrameHeader.Ack);
+        stick.SendFrame(FrameType.Response, FunctionId.GetControllerVersion, 0x00, 0x01);
+        await first.WaitAsync(TestTimeouts.Default);
+        stick.AcknowledgesFrames = true;
+        await driver.SendRequestAsync(FunctionId.GetControllerCapabilities, default, CancellationToken.None).WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => second.WaitAsync(TestTimeouts.Default));
+        Assert.Equal(
+            new[] { FunctionId.GetControllerVersion, FunctionId.GetControllerCapabilities },
+            stick.ReceivedDataFrames.Select(frame => frame.Function));
+    }
+
+    [Fact]
+    public async Task WhenAnInFlightRequestIsCanceled_ThenItCompletesAtOnceAndTheNextRequestWaitsForTheExchangeToFinish()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false };
+        stick.SetResponse(FunctionId.GetControllerId, 0xC0, 0xFF, 0xEE, 0x01, 0x01);
+        await using var driver = await stick.StartDriverAsync();
+        using var cancellation = new CancellationTokenSource();
+        var canceled = driver.SendRequestAsync(FunctionId.GetControllerVersion, default, cancellation.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+
+        // Act
+        await cancellation.CancelAsync();
+        var canceledAtOnce = canceled.IsCanceled;
+        var next = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        stick.AcknowledgesFrames = true;
+        stick.SendToHost(FrameHeader.Ack);
+        stick.SendFrame(FrameType.Response, FunctionId.GetControllerVersion, 0x00, 0x01);
+        await next.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.True(canceledAtOnce);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceled.WaitAsync(TestTimeouts.Default));
+
+        // The host acknowledges the canceled request's response before it writes the next request.
+        Assert.Equal(
+            new[] { "Nak", "Data 15", "Ack", "Data 20", "Ack" },
+            stick.ReceivedFrames.Select(frame => frame.Kind == FrameKind.Data ? $"Data {frame.Data.Function:X2}" : frame.Kind.ToString()));
+    }
+
+    [Fact]
+    public async Task WhenTheConnectionCloses_ThenPendingAndLaterRequestsFailAndCompletionFaults()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false };
+        await using var driver = await stick.StartDriverAsync();
+        var pending = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+
+        // Act
+        stick.Disconnect();
+
+        // Assert
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => pending.WaitAsync(TestTimeouts.Default));
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None).WaitAsync(TestTimeouts.Default));
+    }
+
+    [Fact]
+    public async Task WhenTheConnectionClosesBeforeARetransmission_ThenThePendingRequestFailsWithoutWaitingForTheDelay()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        stick.EnqueueAcknowledgement(FrameHeader.Nak);
+        await using var driver = await stick.StartDriverAsync();
+        var pending = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+
+        // Act
+        stick.Disconnect();
+
+        // Assert
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => pending.WaitAsync(TestTimeouts.Default));
+        Assert.Single(stick.ReceivedDataFrames);
+    }
+
+    [Fact]
+    public async Task WhenAWriteFails_ThenTheRequestAndCompletionFailWithAConnectionException()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        await using var driver = await stick.StartDriverAsync();
+        stick.FailWrites = true;
+
+        // Act
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+
+        // Assert
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => request.WaitAsync(TestTimeouts.Default));
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
+    }
+
+    [Fact]
+    public async Task WhenTheConnectionFails_ThenTheStreamIsClosedWithoutDisposingAndDisposingLaterCompletes()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        var driver = await stick.StartDriverAsync();
+        stick.FailWrites = true;
+
+        // Act
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.IsDisposed);
+
+        // Assert
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => request.WaitAsync(TestTimeouts.Default));
+        Assert.Null(await Record.ExceptionAsync(() => DisposeAsTask(driver).WaitAsync(TestTimeouts.Default)));
+    }
+
+    [Fact]
+    public async Task WhenAWriteDoesNotCompleteWithinTheAcknowledgementTimeout_ThenTheRequestAndCompletionFailWithAConnectionException()
+    {
+        // Arrange
+        var time = new TimerRecordingTimeProvider();
+        var stick = new FakeZWaveStick();
+        await using var driver = await stick.StartDriverAsync(time);
+        stick.HangWrites = true;
+
+        // Act
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        var writeTimer = await time.WaitForTimerAsync(TimeSpan.FromMilliseconds(1600));
+        time.Advance(TimeSpan.FromMilliseconds(1599));
+        var completedBeforeTimeout = request.IsCompleted;
+        time.Advance(TimeSpan.FromMilliseconds(1));
+
+        // Assert
+        Assert.Equal(TimeSpan.Zero, writeTimer.StartedAt);
+        Assert.False(completedBeforeTimeout);
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => request.WaitAsync(TestTimeouts.Default));
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
+    }
+
+    [Fact]
+    public async Task WhenDisposedDuringAWriteThatIgnoresCancellation_ThenTheRequestFailsWithObjectDisposed()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        var driver = await stick.StartDriverAsync();
+        stick.HangWrites = true;
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.HungWriteCount == 1);
+
+        // Act
+        await DisposeAsTask(driver).WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => request.WaitAsync(TestTimeouts.Default));
+    }
+
+    [Fact]
+    public async Task WhenDisposed_ThenPendingRequestsFailWithObjectDisposedAndTheStreamIsClosed()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false };
+        var driver = await stick.StartDriverAsync();
+        var pending = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+
+        // Act
+        await DisposeAsTask(driver).WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => pending.WaitAsync(TestTimeouts.Default));
+        Assert.True(stick.IsDisposed);
+        Assert.True(driver.Completion.IsCompletedSuccessfully);
+        Assert.Throws<ObjectDisposedException>(() => { _ = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None); });
+    }
+
+    [Fact]
+    public async Task WhenDisposedConcurrently_ThenBothCallsCompleteOnlyAfterDisposalFinished()
+    {
+        // Arrange
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stick = new FakeZWaveStick { DisposeGate = gate.Task };
+        var driver = await stick.StartDriverAsync();
+
+        // Act
+        var first = DisposeAsTask(driver);
+        var second = DisposeAsTask(driver);
+        var completedWhileClosing = first.IsCompleted || second.IsCompleted;
+        gate.SetResult();
+        await Task.WhenAll(first, second).WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.False(completedWhileClosing);
+        Assert.True(stick.IsDisposed);
+        Assert.True(driver.Completion.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task WhenTheConnectionCloses_ThenTheUnsolicitedFramesComplete()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        await using var driver = await stick.StartDriverAsync();
+
+        // Act
+        stick.Disconnect();
+        await driver.UnsolicitedFrames.Completion.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.True(driver.UnsolicitedFrames.Completion.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task WhenDisposed_ThenTheUnsolicitedFramesComplete()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        var driver = await stick.StartDriverAsync();
+
+        // Act
+        await DisposeAsTask(driver).WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.True(driver.UnsolicitedFrames.Completion.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task WhenDisposedTwice_ThenTheSecondCallDoesNothing()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        var driver = await stick.StartDriverAsync();
+
+        // Act
+        await DisposeAsTask(driver).WaitAsync(TestTimeouts.Default);
+        var exception = await Record.ExceptionAsync(() => DisposeAsTask(driver).WaitAsync(TestTimeouts.Default));
+
+        // Assert
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public async Task WhenClosingTheStreamFails_ThenDisposingStillFailsPendingRequestsAndCompletes()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false, ThrowsOnDispose = true };
+        var driver = await stick.StartDriverAsync();
+        var pending = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => DisposeAsTask(driver).WaitAsync(TestTimeouts.Default));
+
+        // Assert
+        Assert.Null(exception);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => pending.WaitAsync(TestTimeouts.Default));
+        Assert.True(driver.Completion.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task WhenAWriteFailsAndTheLoggerThrows_ThenTheRequestAndCompletionStillFailWithAConnectionException()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        var driver = await stick.StartDriverAsync(logger: new ThrowingLogger(LogLevel.Warning));
+        stick.FailWrites = true;
+
+        // Act
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+
+        // Assert
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => request.WaitAsync(TestTimeouts.Default));
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
+        Assert.Null(await Record.ExceptionAsync(() => DisposeAsTask(driver).WaitAsync(TestTimeouts.Default)));
+    }
+
+    [Fact]
+    public async Task WhenAReadFailsAndTheLoggerThrows_ThenThePendingRequestAndCompletionFailAndDisposalCompletes()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false };
+        var driver = await stick.StartDriverAsync(logger: new ThrowingLogger(LogLevel.Warning));
+        var pending = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+
+        // Act
+        stick.FailReads(new IOException("The device was removed."));
+
+        // Assert
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => pending.WaitAsync(TestTimeouts.Default));
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
+        Assert.Null(await Record.ExceptionAsync(() => DisposeAsTask(driver).WaitAsync(TestTimeouts.Default)));
+        Assert.True(stick.IsDisposed);
+    }
+
+    [Fact]
+    public async Task WhenClosingTheStreamFailsAndTheLoggerThrows_ThenDisposingStillFailsRequestsAndCompletes()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false, ThrowsOnDispose = true };
+        var driver = await stick.StartDriverAsync(logger: new ThrowingLogger(LogLevel.Warning));
+        var inFlight = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+        var queued = driver.SendRequestAsync(FunctionId.GetControllerVersion, default, CancellationToken.None);
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => DisposeAsTask(driver).WaitAsync(TestTimeouts.Default));
+
+        // Assert
+        Assert.Null(exception);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => inFlight.WaitAsync(TestTimeouts.Default));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => queued.WaitAsync(TestTimeouts.Default));
+        Assert.True(driver.Completion.IsCompletedSuccessfully);
+    }
+
+    // Sonar (S5034) reads two DisposeAsync calls in one method as one ValueTask consumed twice.
+    private static Task DisposeAsTask(SerialApiDriver driver) => driver.DisposeAsync().AsTask();
+}
