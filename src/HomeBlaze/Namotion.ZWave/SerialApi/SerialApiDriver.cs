@@ -141,9 +141,10 @@ internal sealed class SerialApiDriver : IAsyncDisposable
                 }
             }
         }
-        catch (Exception) when (stopping.IsCancellationRequested)
+        catch (Exception) when (stopping.IsCancellationRequested || _failure is not null)
         {
-            // Disposed or failed while writing the startup NAK or waiting for the next transaction.
+            // Disposed or failed while writing the startup NAK or waiting for the next transaction. A Fail that lost the race
+            // to another loop's Fail returns before that one has canceled the token, so the stored failure counts as well.
         }
     }
 
