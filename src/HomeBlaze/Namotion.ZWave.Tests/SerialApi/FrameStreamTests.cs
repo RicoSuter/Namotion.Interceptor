@@ -45,15 +45,19 @@ public class FrameStreamTests
     {
         // Arrange
         var time = new TimerRecordingTimeProvider();
+        var logger = new RecordingLogger();
         var stick = new FakeZWaveStick();
         await using var stream = await stick.OpenAsync(CancellationToken.None);
-        using var frames = new FrameStream(stream, new ZWaveControllerOptions { TimeProvider = time }, new RecordingLogger());
+        using var frames = new FrameStream(stream, new ZWaveControllerOptions { TimeProvider = time }, logger);
 
         // Act
         var first = ReadAsync(frames);
         stick.SendToHost(0x01, 0xFE);
         await time.WaitForTimerAsync(FrameDeliveryTimeout);
         time.Advance(FrameDeliveryTimeout);
+
+        // An ACK that arrives before the reader dropped the partial frame would extend it instead of following it.
+        await AsyncTestHelpers.WaitUntilAsync(() => logger.Entries.Any(entry => entry.Level == LogLevel.Warning));
         stick.SendToHost(FrameHeader.Ack);
         var acknowledgement = await first.WaitAsync(TestTimeouts.Default);
         var secondRead = ReadAsync(frames);
