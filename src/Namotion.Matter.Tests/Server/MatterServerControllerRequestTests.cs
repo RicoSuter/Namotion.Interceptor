@@ -400,4 +400,55 @@ public class MatterServerControllerRequestTests
         var later = await Assert.ThrowsAsync<WebSocketException>(() => session.Controller.RemoveNodeAsync(1));
         Assert.IsType<TimeoutException>(later.InnerException);
     }
+
+    [Fact]
+    public async Task WhenServerStopsAnsweringPings_ThenKeepAliveFailsTheConnection()
+    {
+        // Arrange: a WebSocket server answers pings only while it reads, so one that stops reading misses them
+        var options = new MatterServerOptions { KeepAliveInterval = TimeSpan.FromMilliseconds(100), KeepAliveTimeout = TimeSpan.FromMilliseconds(200) };
+        await using var session = await FakeMatterServer.StartAndConnectAsync(options);
+        session.Server.LeaveUnansweredRequestsOpen = true;
+        session.Server.PauseReceiving = true;
+
+        // Act: the request is the last message the server reads
+        var request = session.Controller.RemoveNodeAsync(1);
+        await session.Server.ReadRequestAsync("remove_node");
+
+        // Assert
+        var closeError = await Assert.ThrowsAsync<WebSocketException>(() => session.Controller.Events.WaitForCompletionAsync());
+        var exception = await Assert.ThrowsAsync<WebSocketException>(() => request);
+        Assert.Same(closeError, exception.InnerException);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WhenPayloadDoesNotCloseWhatItOpens_ThenArgumentExceptionIsThrownBeforeSending(bool leavesStructOpen)
+    {
+        // Arrange
+        await using var session = await FakeMatterServer.StartAndConnectAsync();
+        var payload = MatterPayload.Create(writer =>
+        {
+            if (leavesStructOpen)
+            {
+                writer.WriteStartStruct();
+                writer.WriteFieldName(0, "level");
+                writer.WriteUInt64(1);
+            }
+            else
+            {
+                writer.WriteUInt64(1);
+                writer.WriteEndStruct();
+            }
+        });
+
+        // Act
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => session.Controller.InvokeAsync(1, new CommandPath(1, 8, 0), "moveToLevel", payload));
+
+        // Assert: the next command is the first one the server receives
+        Assert.Equal("payload", exception.ParamName);
+        await session.Controller.InvokeAsync(1, new CommandPath(1, 6, 2), "toggle");
+        var request = await session.Server.ReadRequestAsync("device_command");
+        Assert.Equal("toggle", request["args"]!["command_name"]!.GetValue<string>());
+    }
 }

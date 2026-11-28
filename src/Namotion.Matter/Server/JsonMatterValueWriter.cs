@@ -6,10 +6,16 @@ namespace Namotion.Matter.Server;
 internal sealed class JsonMatterValueWriter(Utf8JsonWriter writer) : IMatterValueWriter
 {
     /// <summary>Writes a property with a payload as its value; a null payload is written as an empty struct.</summary>
+    /// <exception cref="ArgumentException">The payload left a struct or list open, or closed one it did not open.</exception>
     public static void WriteProperty(Utf8JsonWriter writer, string propertyName, IMatterPayload? payload)
     {
         writer.WritePropertyName(propertyName);
+        var depth = writer.CurrentDepth;
         (payload ?? MatterPayload.Empty).Write(new JsonMatterValueWriter(writer));
+        if (writer.CurrentDepth != depth)
+        {
+            throw new ArgumentException("The payload left a struct or list open, or closed one it did not open.", nameof(payload));
+        }
     }
 
     public void WriteNull() => writer.WriteNullValue();

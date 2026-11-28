@@ -184,12 +184,9 @@ internal sealed class MatterServerConnection : IAsyncDisposable
                         throw new TimeoutException($"The Matter server did not accept '{command}' within {_requestTimeout}.");
                     }
 
-                    if (_connectionError is { } connectionError)
-                    {
-                        throw MatterServerPendingRequests.CreateClosedException(connectionError);
-                    }
-
-                    throw;
+                    // Whether the receive loop recorded the failure first, the request fails like every other one.
+                    FailConnection(new WebSocketException("Sending to the Matter server failed.", exception));
+                    throw MatterServerPendingRequests.CreateClosedException(_connectionError);
                 }
                 finally
                 {
@@ -223,6 +220,12 @@ internal sealed class MatterServerConnection : IAsyncDisposable
                     break;
                 }
             }
+        }
+        catch (OperationCanceledException exception) when (!_disposeCancellation.IsCancellationRequested)
+        {
+            // An aborted socket, for example after a keep-alive timeout, ends the receive as a cancellation, which a
+            // consumer would take for its own; the error inside says why.
+            error = new WebSocketException("The connection to the Matter server was aborted.", exception);
         }
         catch (Exception exception)
         {
