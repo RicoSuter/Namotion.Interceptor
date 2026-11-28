@@ -1,20 +1,21 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
+using HomeBlaze.Abstractions.Sensors;
 using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Devices.Ecowitt.Sensors;
 
 [InterceptorSubject]
 public partial class EcowittLeakSensor :
+    IWaterLeakSensor,
     ITitleProvider,
     IIconProvider,
     ILastUpdatedProvider
 {
     public int Channel { get; }
 
-    [State(IsDiscrete = true)]
-    public partial bool? IsLeaking { get; internal set; }
+    public partial bool? IsLeakDetected { get; internal set; }
 
     [State]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
@@ -29,15 +30,15 @@ public partial class EcowittLeakSensor :
     public string? Title => $"Leak {Channel}";
 
     [Derived]
-    public string IconName => IsLeaking == true ? "WaterDamage" : "Water";
+    public string IconName => IsLeakDetected == true ? "WaterDamage" : "Water";
 
     [Derived]
-    public string? IconColor => IsLeaking == true ? "Error" : null;
+    public string? IconColor => IsLeakDetected == true ? "Error" : null;
 
     public EcowittLeakSensor(int channel)
     {
         Channel = channel;
-        IsLeaking = null;
+        IsLeakDetected = null;
         LastUpdated = null;
         Sources = new Dictionary<string, EcowittSensor>(StringComparer.Ordinal);
     }

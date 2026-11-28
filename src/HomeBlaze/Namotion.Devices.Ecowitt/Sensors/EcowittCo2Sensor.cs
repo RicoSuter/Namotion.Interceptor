@@ -8,6 +8,7 @@ namespace Namotion.Devices.Ecowitt.Sensors;
 
 [InterceptorSubject]
 public partial class EcowittCo2Sensor :
+    ICarbonDioxideSensor,
     ITemperatureSensor,
     IHumiditySensor,
     ITitleProvider,
@@ -16,11 +17,13 @@ public partial class EcowittCo2Sensor :
 {
     public int Channel { get; }
 
-    [State]
-    public partial decimal? Co2 { get; internal set; }
+    public partial decimal? CarbonDioxide { get; internal set; }
 
-    [State]
-    public partial decimal? Co2Avg24h { get; internal set; }
+    /// <summary>
+    /// The average carbon dioxide concentration of the last 24 hours in parts per million.
+    /// </summary>
+    [State(Unit = StateUnit.PartsPerMillion, Position = 281)]
+    public partial decimal? CarbonDioxideDailyAverage { get; internal set; }
 
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
@@ -42,8 +45,8 @@ public partial class EcowittCo2Sensor :
     public EcowittCo2Sensor(int channel)
     {
         Channel = channel;
-        Co2 = null;
-        Co2Avg24h = null;
+        CarbonDioxide = null;
+        CarbonDioxideDailyAverage = null;
         Temperature = null;
         Humidity = null;
         LastUpdated = null;

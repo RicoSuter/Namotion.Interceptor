@@ -317,14 +317,13 @@ namespace Namotion.Devices.Ecowitt.Sensors
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
-    public class EcowittCo2Sensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IHumiditySensor, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public class EcowittCo2Sensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.ICarbonDioxideSensor, HomeBlaze.Abstractions.Sensors.IHumiditySensor, HomeBlaze.Abstractions.Sensors.ITemperatureSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public EcowittCo2Sensor(int channel) { }
+        public decimal? CarbonDioxide { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=281, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.PartsPerMillion)]
+        public decimal? CarbonDioxideDailyAverage { get; }
         public int Channel { get; }
-        [HomeBlaze.Abstractions.Attributes.State]
-        public decimal? Co2 { get; }
-        [HomeBlaze.Abstractions.Attributes.State]
-        public decimal? Co2Avg24h { get; }
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         public decimal? Humidity { get; }
         public string? IconColor { get; }
@@ -399,7 +398,7 @@ namespace Namotion.Devices.Ecowitt.Sensors
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
-    public class EcowittLeakSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public class EcowittLeakSensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IWaterLeakSensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public EcowittLeakSensor(int channel) { }
         public int Channel { get; }
@@ -407,8 +406,7 @@ namespace Namotion.Devices.Ecowitt.Sensors
         public string? IconColor { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string IconName { get; }
-        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true)]
-        public bool? IsLeaking { get; }
+        public bool? IsLeakDetected { get; }
         [HomeBlaze.Abstractions.Attributes.State]
         public System.DateTimeOffset? LastUpdated { get; }
         [HomeBlaze.Abstractions.Attributes.State]
@@ -505,7 +503,7 @@ namespace Namotion.Devices.Ecowitt.Sensors
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
-    public class EcowittPm25Sensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
+    public class EcowittPm25Sensor : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Sensors.IPm25Sensor, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged
     {
         public EcowittPm25Sensor(int channel) { }
         public int Channel { get; }
@@ -514,10 +512,9 @@ namespace Namotion.Devices.Ecowitt.Sensors
         public string IconName { get; }
         [HomeBlaze.Abstractions.Attributes.State]
         public System.DateTimeOffset? LastUpdated { get; }
-        [HomeBlaze.Abstractions.Attributes.State]
         public decimal? Pm25 { get; }
-        [HomeBlaze.Abstractions.Attributes.State]
-        public decimal? Pm25Avg24h { get; }
+        [HomeBlaze.Abstractions.Attributes.State(Position=286, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MicrogramPerCubicMeter)]
+        public decimal? Pm25DailyAverage { get; }
         [HomeBlaze.Abstractions.Attributes.State]
         public System.Collections.Generic.Dictionary<string, Namotion.Devices.Ecowitt.Sensors.EcowittSensor> Sources { get; }
         [Namotion.Interceptor.Attributes.Derived]

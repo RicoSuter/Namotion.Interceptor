@@ -93,9 +93,9 @@ The gateway automatically discovers these sensor types:
 | Soil Moisture | Per-channel soil moisture percentage |
 | Leaf Wetness | Per-channel leaf wetness |
 | Temperature (WH34) | Per-channel temperature-only sensors |
-| PM2.5 | Per-channel particulate matter with 24h average |
-| CO2 | Per-channel CO2 with temperature and humidity |
-| Leak Detectors | Per-channel water leak status |
+| PM2.5 | Per-channel particulate matter (`IPm25Sensor`: `Pm25`) with the 24h average `Pm25DailyAverage` |
+| CO2 | Per-channel CO2 (`ICarbonDioxideSensor`: `CarbonDioxide`) with the 24h average `CarbonDioxideDailyAverage`, temperature and humidity |
+| Leak Detectors | Per-channel water leak status (`IWaterLeakSensor`: `IsLeakDetected`) |
 | Lightning | Distance, strike count, last strike time |
 
 The gateway's built-in sensor measures wherever the gateway is placed and is not in the gateway's sensor list, so it has no entry in `Sensors`.

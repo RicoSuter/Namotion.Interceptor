@@ -1,23 +1,27 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
+using HomeBlaze.Abstractions.Sensors;
 using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Devices.Ecowitt.Sensors;
 
 [InterceptorSubject]
 public partial class EcowittPm25Sensor :
+    IPm25Sensor,
     ITitleProvider,
     IIconProvider,
     ILastUpdatedProvider
 {
     public int Channel { get; }
 
-    [State]
     public partial decimal? Pm25 { get; internal set; }
 
-    [State]
-    public partial decimal? Pm25Avg24h { get; internal set; }
+    /// <summary>
+    /// The average PM2.5 concentration of the last 24 hours in micrograms per cubic meter.
+    /// </summary>
+    [State(Unit = StateUnit.MicrogramPerCubicMeter, Position = 286)]
+    public partial decimal? Pm25DailyAverage { get; internal set; }
 
     [State]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
@@ -40,7 +44,7 @@ public partial class EcowittPm25Sensor :
     {
         Channel = channel;
         Pm25 = null;
-        Pm25Avg24h = null;
+        Pm25DailyAverage = null;
         LastUpdated = null;
         Sources = new Dictionary<string, EcowittSensor>(StringComparer.Ordinal);
     }
