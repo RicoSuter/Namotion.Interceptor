@@ -12,7 +12,7 @@ public class VerifyChecksTests
     /// review the diff and accept by replacing the .verified.txt file with the test's .received.txt.
     /// </summary>
     [Fact]
-    public Task PublicApi() => Verify(typeof(ZWaveException).Assembly.GeneratePublicApi(new ApiGeneratorOptions
+    public Task PublicApi() => Verify(typeof(ZWaveController).Assembly.GeneratePublicApi(new ApiGeneratorOptions
     {
         DenyNamespacePrefixes = ["System", "XamlGeneratedNamespace"]
     }));

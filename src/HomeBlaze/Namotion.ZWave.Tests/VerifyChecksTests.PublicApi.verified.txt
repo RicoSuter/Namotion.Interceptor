@@ -29,6 +29,23 @@ namespace Namotion.ZWave
         public ZWaveConnectionException(string message) { }
         public ZWaveConnectionException(string message, System.Exception innerException) { }
     }
+    public sealed class ZWaveController : System.IAsyncDisposable
+    {
+        public Namotion.ZWave.ZWaveControllerCapabilities Capabilities { get; }
+        public System.Threading.Tasks.Task Completion { get; }
+        public uint HomeId { get; }
+        public Namotion.ZWave.ZWaveLibraryType LibraryType { get; }
+        public string LibraryVersion { get; }
+        public ushort ManufacturerId { get; }
+        public System.Collections.Generic.IReadOnlyList<byte> NodeIds { get; }
+        public byte OwnNodeId { get; }
+        public ushort ProductId { get; }
+        public ushort ProductType { get; }
+        public string SerialApiVersion { get; }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        public bool SupportsFunction(byte functionId) { }
+        public static System.Threading.Tasks.Task<Namotion.ZWave.ZWaveController> ConnectAsync(Namotion.ZWave.Transport.IZWaveTransport transport, Namotion.ZWave.ZWaveControllerOptions? options = null, Microsoft.Extensions.Logging.ILoggerFactory? loggerFactory = null, System.Threading.CancellationToken cancellationToken = default) { }
+    }
     [System.Flags]
     public enum ZWaveControllerCapabilities : byte
     {
