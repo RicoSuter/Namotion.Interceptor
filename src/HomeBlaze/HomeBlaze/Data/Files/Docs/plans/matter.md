@@ -48,11 +48,11 @@ HomeBlaze process                                       matterjs-server containe
 
 ## Protocol Library (`Namotion.Matter`)
 
-`IMatterController` is the public API, with types `NodeId` (`ulong`), `EndpointNumber`, `ClusterId`, `AttributePath` and `EventPath`:
+`IMatterController` is the public API. Node IDs are `ulong`, endpoint numbers `ushort`, cluster, attribute, command and event IDs `uint`, and `AttributePath`, `CommandPath` and `EventPath` combine them:
 
 - Connection and a snapshot of all nodes with their attributes and endpoint structure.
 - Events: node added, updated and removed, attribute changed, Matter event received (node, endpoint, cluster, event ID, event number, priority, timestamp, payload).
-- `ReadAttributeAsync`, `WriteAttributeAsync`, `InvokeAsync`.
+- `WriteAttributeAsync` and `InvokeAsync`. There is no explicit read: the server subscribes to every node, so the node snapshot and attribute events always hold the current values.
 - `CommissionAsync(code, networkOnly)`, `ParseOnboardingPayloadAsync(code)`, `SetWifiCredentialsAsync`, `SetThreadDatasetAsync`, `RemoveNodeAsync`, `OpenCommissioningWindowAsync`.
 
 Values cross the boundary as an opaque `MatterValue`, which generated code decodes into the C# type of the attribute, field or event. The WebSocket backend fills it from JSON; a native backend would fill it from TLV. JSON shapes do not appear in the public API.
@@ -64,7 +64,7 @@ Values cross the boundary as an opaque `MatterValue`, which generated code decod
 - On connect the server's `schema_version` is checked. The minimum is 14 (`endpoint_parents`, commissioning `reason`); an older server fails the connect with a message naming both versions.
 - Error responses throw `MatterException` with the error code, the Matter status and cluster status when present, and the commissioning `reason`.
 - Frames are reassembled into pooled buffers. Node IDs are read as `ulong`, which keeps 64-bit IDs exact.
-- DTOs use System.Text.Json source generation, for Native AOT.
+- Messages are parsed with `JsonDocument` and written with `Utf8JsonWriter`, without reflection-based serialization, for Native AOT. Outgoing values (command payloads, attribute writes) are written through a backend-neutral `IMatterValueWriter`.
 
 Wi-Fi passwords and Thread datasets are passed through to matterjs-server, which stores them. HomeBlaze never persists them.
 
