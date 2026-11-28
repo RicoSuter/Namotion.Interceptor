@@ -160,6 +160,29 @@ public class SerialApiDriverLifetimeTests
     }
 
     [Fact]
+    public async Task WhenAWriteDoesNotCompleteWithinTheAcknowledgementTimeout_ThenTheRequestAndCompletionFailWithAConnectionException()
+    {
+        // Arrange
+        var time = new TimerRecordingTimeProvider();
+        var stick = new FakeZWaveStick();
+        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick, time);
+        stick.HangWrites = true;
+
+        // Act
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        var writeTimer = await time.WaitForTimerAsync(TimeSpan.FromMilliseconds(1600));
+        time.Advance(TimeSpan.FromMilliseconds(1599));
+        var completedBeforeTimeout = request.IsCompleted;
+        time.Advance(TimeSpan.FromMilliseconds(1));
+
+        // Assert
+        Assert.Equal(TimeSpan.Zero, writeTimer.StartedAt);
+        Assert.False(completedBeforeTimeout);
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => request.WaitAsync(TestTimeouts.Default));
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
+    }
+
+    [Fact]
     public async Task WhenDisposedDuringAWriteThatIgnoresCancellation_ThenTheRequestFailsWithObjectDisposed()
     {
         // Arrange

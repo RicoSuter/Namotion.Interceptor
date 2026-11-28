@@ -34,7 +34,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
     public SerialApiDriver(Stream stream, ZWaveControllerOptions options, ILogger logger)
     {
         _stream = stream;
-        _frames = new FrameStream(stream, logger);
+        _frames = new FrameStream(stream, options.AcknowledgementTimeout, options.TimeProvider, logger);
         _options = options;
         _logger = logger;
     }

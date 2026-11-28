@@ -73,6 +73,9 @@ internal sealed class FakeSerialStream(FakeZWaveStick stick) : Stream
     {
     }
 
+    // Completes synchronously, so that a write starts no write-timeout timer the timing tests would see.
+    public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
     public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();

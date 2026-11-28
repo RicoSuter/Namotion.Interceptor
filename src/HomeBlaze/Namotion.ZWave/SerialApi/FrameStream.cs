@@ -10,13 +10,17 @@ internal sealed class FrameStream : IDisposable
 {
     private readonly Stream _stream;
     private readonly ILogger _logger;
+    private readonly TimeSpan _writeTimeout;
+    private readonly TimeProvider _timeProvider;
     private readonly FrameParser _parser = new();
     private readonly byte[] _buffer = new byte[256];
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
-    public FrameStream(Stream stream, ILogger logger)
+    public FrameStream(Stream stream, TimeSpan writeTimeout, TimeProvider timeProvider, ILogger logger)
     {
         _stream = stream;
+        _writeTimeout = writeTimeout;
+        _timeProvider = timeProvider;
         _logger = logger;
     }
 
@@ -50,9 +54,11 @@ internal sealed class FrameStream : IDisposable
     }
 
     /// <summary>
-    /// Writes and flushes a frame.
+    /// Writes and flushes a frame, within the write timeout.
     /// </summary>
-    /// <exception cref="ZWaveConnectionException">The stream failed; any failure other than the canceled token is reported this way.</exception>
+    /// <exception cref="ZWaveConnectionException">
+    /// The stream failed or the write timed out; any failure other than the canceled token is reported this way.
+    /// </exception>
     public async Task WriteAsync(ReadOnlyMemory<byte> frame, CancellationToken cancellationToken)
     {
         await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -63,8 +69,13 @@ internal sealed class FrameStream : IDisposable
                 _logger.LogTrace("Sending {Bytes}.", Convert.ToHexString(frame.Span));
             }
 
-            await _stream.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
-            await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            // A stalled network bridge or a hung USB device never completes a write, which would block the driver for good.
+            var write = WriteAndFlushAsync(frame, cancellationToken);
+            await (write.IsCompleted ? write : write.WaitAsync(_writeTimeout, _timeProvider, cancellationToken)).ConfigureAwait(false);
+        }
+        catch (TimeoutException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new ZWaveConnectionException("Writing to the Z-Wave controller did not complete in time.", exception);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -77,4 +88,10 @@ internal sealed class FrameStream : IDisposable
     }
 
     public void Dispose() => _writeLock.Dispose();
+
+    private async Task WriteAndFlushAsync(ReadOnlyMemory<byte> frame, CancellationToken cancellationToken)
+    {
+        await _stream.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
+        await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
 }

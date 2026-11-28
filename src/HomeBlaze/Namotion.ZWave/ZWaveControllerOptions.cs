@@ -6,7 +6,8 @@ namespace Namotion.ZWave;
 public sealed record ZWaveControllerOptions
 {
     /// <summary>
-    /// How long to wait for the controller to acknowledge a frame. Default: 1600 ms.
+    /// How long to wait for the controller to acknowledge a frame, and for a write to complete; a write that takes longer
+    /// fails the connection. Default: 1600 ms.
     /// </summary>
     public TimeSpan AcknowledgementTimeout { get; init; } = TimeSpan.FromMilliseconds(1600);
 
