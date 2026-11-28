@@ -20,7 +20,7 @@ public partial class EcowittPm25Sensor :
     /// <summary>
     /// The average PM2.5 concentration of the last 24 hours in micrograms per cubic meter.
     /// </summary>
-    [State(Unit = StateUnit.MicrogramPerCubicMeter, Position = 286)]
+    [State(Unit = StateUnit.MicrogramPerCubicMeter, Position = 400)]
     public partial decimal? Pm25DailyAverage { get; internal set; }
 
     [State]

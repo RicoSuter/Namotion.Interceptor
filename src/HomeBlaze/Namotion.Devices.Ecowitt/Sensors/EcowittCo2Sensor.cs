@@ -22,7 +22,7 @@ public partial class EcowittCo2Sensor :
     /// <summary>
     /// The average carbon dioxide concentration of the last 24 hours in parts per million.
     /// </summary>
-    [State(Unit = StateUnit.PartsPerMillion, Position = 281)]
+    [State(Unit = StateUnit.PartsPerMillion, Position = 400)]
     public partial decimal? CarbonDioxideDailyAverage { get; internal set; }
 
     [State(Unit = StateUnit.DegreeCelsius)]

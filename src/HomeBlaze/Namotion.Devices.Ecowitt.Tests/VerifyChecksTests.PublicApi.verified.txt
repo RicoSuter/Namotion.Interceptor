@@ -321,7 +321,7 @@ namespace Namotion.Devices.Ecowitt.Sensors
     {
         public EcowittCo2Sensor(int channel) { }
         public decimal? CarbonDioxide { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=281, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.PartsPerMillion)]
+        [HomeBlaze.Abstractions.Attributes.State(Position=400, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.PartsPerMillion)]
         public decimal? CarbonDioxideDailyAverage { get; }
         public int Channel { get; }
         [HomeBlaze.Abstractions.Attributes.State(Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
@@ -513,7 +513,7 @@ namespace Namotion.Devices.Ecowitt.Sensors
         [HomeBlaze.Abstractions.Attributes.State]
         public System.DateTimeOffset? LastUpdated { get; }
         public decimal? Pm25 { get; }
-        [HomeBlaze.Abstractions.Attributes.State(Position=286, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MicrogramPerCubicMeter)]
+        [HomeBlaze.Abstractions.Attributes.State(Position=400, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.MicrogramPerCubicMeter)]
         public decimal? Pm25DailyAverage { get; }
         [HomeBlaze.Abstractions.Attributes.State]
         public System.Collections.Generic.Dictionary<string, Namotion.Devices.Ecowitt.Sensors.EcowittSensor> Sources { get; }
