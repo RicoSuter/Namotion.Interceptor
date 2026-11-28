@@ -18,7 +18,8 @@ public record ButtonEvent : DeviceEvent
     public required ButtonState ButtonState { get; init; }
 
     /// <summary>
-    /// The number of presses of the sequence this event belongs to, 1 unless the button is an <see cref="IMultiPressButtonDevice"/> that reports more.
+    /// The number of presses of the sequence that a <see cref="Inputs.ButtonState.Release"/> event ends, as
+    /// <see cref="IMultiPressButtonDevice.PressCount"/> reports it; 1 for every other event and for a button that reports no count.
     /// </summary>
     public int PressCount { get; init; } = 1;
 }

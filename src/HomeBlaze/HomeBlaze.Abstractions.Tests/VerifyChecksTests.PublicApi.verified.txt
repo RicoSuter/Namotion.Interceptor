@@ -829,7 +829,7 @@ namespace HomeBlaze.Abstractions.Inputs
     [System.ComponentModel.Description("Reports button presses with the number of presses in a quick sequence.")]
     public interface IMultiPressButtonDevice : HomeBlaze.Abstractions.Inputs.IButtonDevice
     {
-        [HomeBlaze.Abstractions.Attributes.State(Position=151)]
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=151)]
         int? PressCount { get; }
     }
 }

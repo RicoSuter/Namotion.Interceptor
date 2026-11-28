@@ -12,11 +12,14 @@ namespace HomeBlaze.Abstractions.Inputs;
 public interface IMultiPressButtonDevice : IButtonDevice
 {
     /// <summary>
-    /// The number of presses of the sequence that ended with <see cref="Inputs.ButtonState.Release"/>, set together with it,
-    /// and null while the button is idle.
-    /// A device that cannot defer a single press may report the earlier presses of a sequence as their own <see cref="Inputs.ButtonState.Release"/> with a lower count before the final one,
-    /// so a consumer that must tell a single from a double press reacts to the highest count of a sequence.
+    /// The number of presses of a quick sequence, set together with the final <see cref="Inputs.ButtonState.Release"/> of
+    /// the sequence and null in every other state.
+    /// When the protocol signals the end of a sequence (such as Matter MultiPressComplete, Z-Wave Central Scene or
+    /// zigbee2mqtt actions), only the final count is reported. Only a device whose protocol reports each press before it
+    /// knows that the sequence ended (such as Hue) may report the earlier presses as their own
+    /// <see cref="Inputs.ButtonState.Release"/> with a lower count, so a consumer that tells a single from a double press
+    /// reacts to the highest count.
     /// </summary>
-    [State(Position = 151)]
+    [State(IsDiscrete = true, Position = 151)]
     int? PressCount { get; }
 }

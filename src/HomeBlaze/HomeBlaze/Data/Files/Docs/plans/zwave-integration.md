@@ -61,7 +61,7 @@ Every contract carries `[SubjectAbstraction]` and a `[Description]`, and reading
 | `Sensors/ISmokeSensor` | `bool? IsSmokeDetected` (`IsDiscrete`) | 180 | Z-Wave Notification Smoke, Zigbee IAS fire, Matter Smoke CO Alarm |
 | `Sensors/ICarbonMonoxideSensor` | `bool? IsCarbonMonoxideDetected` (`IsDiscrete`) | 181 | Z-Wave Notification CO, Zigbee IAS CO, Matter Smoke CO Alarm |
 | `Devices/IPairingController` | `bool IsPairing` (state), `StartPairingAsync(TimeSpan? duration)`, `StopPairingAsync` (operations) | 190 | Z-Wave inclusion, Zigbee permit join, a later Hue light search. A `null` duration uses the default of the hub |
-| `Inputs/IMultiPressButtonDevice : IButtonDevice` | `int? PressCount`: the number of presses of the sequence that ended with `Release`, `null` while the button is idle | 151 | Hue `double_short_release`, Z-Wave Central Scene 2x to 5x, Matter Switch MultiPressComplete |
+| `Inputs/IMultiPressButtonDevice : IButtonDevice` | `int? PressCount` (`IsDiscrete`): the number of presses of a sequence, set with its final `Release` and `null` in every other state | 151 | Hue `double_short_release`, Z-Wave Central Scene 2x to 5x, Matter Switch MultiPressComplete |
 
 The smoke and carbon monoxide contracts follow the `I{Concept}Sensor` naming of the other sensors. Particulate matter has one contract per particle size, as Matter (one cluster per size), Zigbee and Home Assistant (`pm1`, `pm25`, `pm10`) have, so that a device implements only the sizes it measures; `IPm25Sensor` uses the established name of the quantity because no plain English name exists for PM2.5, PM10 or PM1.
 
@@ -70,7 +70,7 @@ The XML documentation of each contract states its semantics, so that every integ
 - `IsSmokeDetected` and `IsCarbonMonoxideDetected` are true for every alarm level (Matter Warning and Critical, Z-Wave detected events), false when the device reports normal, and `null` when unknown. Test, fault and end-of-life states are not alarms.
 - `IsTampered` is true from the tamper event until the device reports idle. A device that never reports idle resets it after a timeout that its implementation documents.
 - `IsLeakDetected` is true while the device reports a leak, also for a leak at an unknown location.
-- `PressCount` is set together with the final `ButtonState.Release` of a press sequence and is `null` while the button is idle; `ButtonEvent.PressCount` carries the same count. A device that cannot defer a single press, such as Hue, may report the earlier presses of a sequence as their own `Release` with a lower count first, so a consumer that tells a single from a double press reacts to the highest count of a sequence.
+- `PressCount` is set together with the final `ButtonState.Release` of a press sequence and is `null` in every other state. When the protocol signals the end of a sequence (Matter MultiPressComplete, Z-Wave Central Scene, zigbee2mqtt actions), only the final count is reported. Only a device whose protocol reports each press before it knows that the sequence ended, such as Hue, may report the earlier presses as their own `Release` with a lower count, so a consumer that tells a single from a double press reacts to the highest count. `ButtonEvent.PressCount` carries the count on `Release` events and is 1 on every other event.
 - `IsPairing` is true while the hub accepts new devices; it turns false when the window closes on its own, after a device was added or when `StopPairingAsync` is called.
 
 ### Fit with Other Ecosystems
