@@ -187,7 +187,8 @@ public class NukiBridgeMergeTests
         Assert.Equal(DoorLockState.Jammed, test.Lock.LockState);
         Assert.Equal(DoorState.Open, test.Lock.DoorState);
         Assert.Equal(0.42m, test.Lock.BatteryLevel);
-        Assert.True(test.Lock.IsBatteryCritical);
+        Assert.True(test.Lock.IsBatteryLow);
+        Assert.True(((HomeBlaze.Abstractions.Devices.Energy.IBatteryState)test.Lock).IsBatteryLow);
         Assert.True(test.Lock.IsBatteryCharging);
         Assert.True(test.Lock.IsKeypadBatteryCritical);
     }

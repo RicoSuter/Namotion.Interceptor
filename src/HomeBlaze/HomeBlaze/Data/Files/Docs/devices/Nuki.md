@@ -55,7 +55,7 @@ Smart locks and Openers share these properties:
 |----------|-------------|
 | `IsConnected`, `Status`, `StatusMessage` | Whether the device is usable: the bridge is connected and reports a state for the device. Otherwise `StatusMessage` tells which of the two is missing |
 | `NukiId`, `DeviceType`, `SoftwareVersion`, `LastUpdated` | Identity, firmware and the time of the last state |
-| `IsBatteryCritical` | Whether the batteries are at a critical level |
+| `IsBatteryLow` | Whether the batteries are at a critical level (`IBatteryState.IsBatteryLow` on smart locks) |
 
 The operations of a device are disabled while it is not connected.
 
@@ -71,7 +71,7 @@ A device is a child of its bridge, so its path is the path of the bridge, then `
 | `IsLocked` | True when locked, false in every other known state, also while the lock moves or is jammed, unknown while `LockState` is unknown |
 | `DoorState`, `IsDoorClosed` | State of the door sensor: Open or Closed, unknown without a calibrated sensor |
 | `BatteryLevel` | Charge of the batteries |
-| `IsBatteryCritical`, `IsBatteryCharging`, `IsKeypadBatteryCritical` | Battery flags of the lock and its keypad |
+| `IsBatteryLow`, `IsBatteryCharging`, `IsKeypadBatteryCritical` | Battery flags of the lock and its keypad |
 
 | Operation | Confirmation | Description |
 |-----------|--------------|-------------|
