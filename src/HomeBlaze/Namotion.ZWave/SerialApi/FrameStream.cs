@@ -11,16 +11,23 @@ internal sealed class FrameStream : IDisposable
     private readonly Stream _stream;
     private readonly ILogger _logger;
     private readonly TimeSpan _writeTimeout;
+    private readonly TimeSpan _frameDeliveryTimeout;
     private readonly TimeProvider _timeProvider;
     private readonly FrameParser _parser = new();
     private readonly byte[] _buffer = new byte[256];
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
-    public FrameStream(Stream stream, TimeSpan writeTimeout, TimeProvider timeProvider, ILogger logger)
+    // A read that outlived a frame delivery timeout; the next read continues with it. Used by the reader only.
+    private Task<int>? _pendingRead;
+    private long _partialFramePosition = -1;
+    private long _partialFrameStartedAt;
+
+    public FrameStream(Stream stream, ZWaveControllerOptions options, ILogger logger)
     {
         _stream = stream;
-        _writeTimeout = writeTimeout;
-        _timeProvider = timeProvider;
+        _writeTimeout = options.AcknowledgementTimeout;
+        _frameDeliveryTimeout = options.FrameDeliveryTimeout;
+        _timeProvider = options.TimeProvider;
         _logger = logger;
     }
 
@@ -31,26 +38,94 @@ internal sealed class FrameStream : IDisposable
     /// <summary>
     /// Reads the next frame, or returns <c>null</c> at the end of the stream. Not thread-safe.
     /// </summary>
+    /// <remarks>
+    /// A frame that does not complete within the frame delivery timeout after its start of frame byte is dropped,
+    /// and the bytes after that byte are parsed again.
+    /// </remarks>
     public async ValueTask<ParsedFrame?> ReadAsync(CancellationToken cancellationToken)
     {
         ParsedFrame frame;
         while (!_parser.TryRead(out frame))
         {
-            var count = await _stream.ReadAsync(_buffer, cancellationToken).ConfigureAwait(false);
+            var count = _parser.HasPartialFrame
+                ? await ReadWithinFrameDeliveryTimeoutAsync(cancellationToken).ConfigureAwait(false)
+                : await ReadBytesAsync(cancellationToken).ConfigureAwait(false);
+
             if (count == 0)
             {
                 return null;
             }
 
-            if (_logger.IsEnabled(LogLevel.Trace))
+            if (count > 0)
             {
-                _logger.LogTrace("Received {Bytes}.", Convert.ToHexString(_buffer, 0, count));
+                Append(count);
             }
-
-            _parser.Append(_buffer.AsSpan(0, count));
         }
 
         return frame;
+    }
+
+    private ValueTask<int> ReadBytesAsync(CancellationToken cancellationToken)
+    {
+        if (_pendingRead is { } pendingRead)
+        {
+            _pendingRead = null;
+            return new ValueTask<int>(pendingRead.WaitAsync(cancellationToken));
+        }
+
+        return _stream.ReadAsync(_buffer, cancellationToken);
+    }
+
+    // Returns -1 when the partial frame was dropped; the read stays pending in _pendingRead, as canceling it could lose bytes.
+    private async ValueTask<int> ReadWithinFrameDeliveryTimeoutAsync(CancellationToken cancellationToken)
+    {
+        if (_parser.Position != _partialFramePosition)
+        {
+            _partialFramePosition = _parser.Position;
+            _partialFrameStartedAt = _timeProvider.GetTimestamp();
+        }
+
+        var remaining = _frameDeliveryTimeout - _timeProvider.GetElapsedTime(_partialFrameStartedAt);
+        if (remaining > TimeSpan.Zero)
+        {
+            var read = _pendingRead ?? StartPendingRead(cancellationToken);
+            try
+            {
+                var count = await read.WaitAsync(remaining, _timeProvider, cancellationToken).ConfigureAwait(false);
+                _pendingRead = null;
+                return count;
+            }
+            catch (TimeoutException) when (!read.IsFaulted)
+            {
+                // The frame delivery timeout expired; the partial frame is dropped below.
+            }
+        }
+
+        _logger.LogWarning(
+            "Dropped an incomplete frame that did not complete within {FrameDeliveryTimeout} ms of its start.",
+            _frameDeliveryTimeout.TotalMilliseconds);
+        _parser.DropPartialFrame();
+        return -1;
+    }
+
+    private Task<int> StartPendingRead(CancellationToken cancellationToken)
+    {
+        var read = _stream.ReadAsync(_buffer, cancellationToken).AsTask();
+
+        // A read abandoned on disposal faults when the stream closes, and nobody awaits it then.
+        ObserveException(read);
+        _pendingRead = read;
+        return read;
+    }
+
+    private void Append(int count)
+    {
+        if (_logger.IsEnabled(LogLevel.Trace))
+        {
+            _logger.LogTrace("Received {Bytes}.", Convert.ToHexString(_buffer, 0, count));
+        }
+
+        _parser.Append(_buffer.AsSpan(0, count));
     }
 
     /// <summary>
@@ -88,6 +163,18 @@ internal sealed class FrameStream : IDisposable
     }
 
     public void Dispose() => _writeLock.Dispose();
+
+    private static void ObserveException(Task task)
+    {
+        if (!task.IsCompleted)
+        {
+            task.ContinueWith(
+                static completed => _ = completed.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+    }
 
     private async Task WriteAndFlushAsync(ReadOnlyMemory<byte> frame, CancellationToken cancellationToken)
     {

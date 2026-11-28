@@ -17,6 +17,12 @@ public sealed record ZWaveControllerOptions
     public TimeSpan ResponseTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
+    /// How long a frame may take from its start of frame byte to its last byte; an incomplete frame is dropped after
+    /// it, and the bytes after its start of frame byte are parsed again. Default: 1500 ms.
+    /// </summary>
+    public TimeSpan FrameDeliveryTimeout { get; init; } = TimeSpan.FromMilliseconds(1500);
+
+    /// <summary>
     /// How often a frame is written before the request fails, 1 to 10. Default: 3.
     /// </summary>
     public int MaximumSendAttempts { get; init; } = 3;
@@ -30,6 +36,7 @@ public sealed record ZWaveControllerOptions
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(AcknowledgementTimeout, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(ResponseTimeout, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(FrameDeliveryTimeout, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThan(MaximumSendAttempts, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(MaximumSendAttempts, 10);
         ArgumentNullException.ThrowIfNull(TimeProvider);

@@ -155,4 +155,26 @@ public class FrameParserTests
             Assert.Equal(40, frame.Data.Payload.Length);
         }
     }
+
+    [Fact]
+    public void WhenAPartialFrameIsDropped_ThenTheBytesAfterItsStartOfFrameAreParsedAgain()
+    {
+        // Arrange
+        var parser = new FrameParser();
+        parser.Append([0x01, 0xFE, FrameHeader.Ack]);
+        var readBeforeDrop = parser.TryRead(out _);
+        var partialBeforeDrop = parser.HasPartialFrame;
+
+        // Act
+        parser.DropPartialFrame();
+        var read = parser.TryRead(out var frame);
+
+        // Assert
+        Assert.False(readBeforeDrop);
+        Assert.True(partialBeforeDrop);
+        Assert.True(read);
+        Assert.Equal(FrameKind.Ack, frame.Kind);
+        Assert.False(parser.HasPartialFrame);
+        Assert.Equal(3, parser.Position);
+    }
 }

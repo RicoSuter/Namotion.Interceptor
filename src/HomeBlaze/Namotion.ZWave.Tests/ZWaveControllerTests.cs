@@ -57,6 +57,18 @@ public class ZWaveControllerTests
     }
 
     [Fact]
+    public async Task WhenTheFrameDeliveryTimeoutIsNotPositive_ThenConnectThrowsBeforeOpeningTheTransport()
+    {
+        // Arrange
+        var stick = FakeZWaveStick.CreateWithController();
+        var options = new ZWaveControllerOptions { FrameDeliveryTimeout = TimeSpan.Zero };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => ZWaveController.ConnectAsync(stick, options).WaitAsync(TestTimeouts.Default));
+        Assert.Empty(stick.ReceivedFrames);
+    }
+
+    [Fact]
     public async Task WhenTheControllerSendsAnUnsolicitedFrame_ThenItIsAcknowledged()
     {
         // Arrange

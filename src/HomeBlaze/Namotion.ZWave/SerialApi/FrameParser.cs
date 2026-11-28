@@ -11,6 +11,17 @@ internal sealed class FrameParser
     private byte[] _buffer = new byte[256];
     private int _start;
     private int _count;
+    private long _position;
+
+    /// <summary>
+    /// Whether the unread bytes start with a start of frame byte whose frame is incomplete. Valid after <see cref="TryRead"/> returned <c>false</c>.
+    /// </summary>
+    public bool HasPartialFrame => _count > 0 && _buffer[_start] == FrameHeader.StartOfFrame;
+
+    /// <summary>
+    /// The number of bytes consumed since the parser was created: the position of the next unread byte on the line.
+    /// </summary>
+    public long Position => _position;
 
     public void Append(ReadOnlySpan<byte> data)
     {
@@ -92,8 +103,20 @@ internal sealed class FrameParser
         return false;
     }
 
+    /// <summary>
+    /// Drops the start of frame byte of the partial frame, so that the bytes after it are parsed again.
+    /// </summary>
+    public void DropPartialFrame()
+    {
+        if (HasPartialFrame)
+        {
+            Consume(1);
+        }
+    }
+
     private void Consume(int count)
     {
+        _position += count;
         _start += count;
         _count -= count;
         if (_count == 0)

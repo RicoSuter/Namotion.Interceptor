@@ -67,6 +67,7 @@ namespace Namotion.ZWave
     {
         public ZWaveControllerOptions() { }
         public System.TimeSpan AcknowledgementTimeout { get; init; }
+        public System.TimeSpan FrameDeliveryTimeout { get; init; }
         public int MaximumSendAttempts { get; init; }
         public System.TimeSpan ResponseTimeout { get; init; }
         public System.TimeProvider TimeProvider { get; init; }
