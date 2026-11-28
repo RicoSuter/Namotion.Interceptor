@@ -87,10 +87,11 @@ public sealed class ZWaveController : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(transport);
         options ??= new ZWaveControllerOptions();
         options.Validate();
-        loggerFactory ??= NullLoggerFactory.Instance;
+        // Before the transport is opened, so that a factory that throws, such as one disposed at shutdown, leaves no stream open.
+        var (driverLogger, logger) = CreateLoggers(transport, loggerFactory ?? NullLoggerFactory.Instance);
 
         var stream = await OpenAsync(transport, cancellationToken).ConfigureAwait(false);
-        var driver = new SerialApiDriver(stream, options, loggerFactory.CreateLogger<SerialApiDriver>());
+        var driver = new SerialApiDriver(stream, options, driverLogger);
         try
         {
             driver.Start();
@@ -101,7 +102,6 @@ public sealed class ZWaveController : IAsyncDisposable
             var nodeIds = StartupResponses.ParseNodeIds(await RequestAsync(FunctionId.GetSerialApiInitData).ConfigureAwait(false));
             var capabilities = StartupResponses.ParseControllerCapabilities(await RequestAsync(FunctionId.GetControllerCapabilities).ConfigureAwait(false));
 
-            var logger = loggerFactory.CreateLogger<ZWaveController>();
             logger.LogInformation(
                 "Connected to Z-Wave controller {LibraryVersion} with home ID 0x{HomeId:X8}, node ID {OwnNodeId} and {NodeCount} nodes.",
                 version.LibraryVersion, id.HomeId, id.OwnNodeId, nodeIds.Length);
@@ -116,6 +116,18 @@ public sealed class ZWaveController : IAsyncDisposable
 
         async Task<byte[]> RequestAsync(byte function) =>
             (await driver.SendRequestAsync(function, default, cancellationToken).ConfigureAwait(false)).Payload;
+    }
+
+    private static (ILogger DriverLogger, ILogger ControllerLogger) CreateLoggers(IZWaveTransport transport, ILoggerFactory loggerFactory)
+    {
+        try
+        {
+            return (loggerFactory.CreateLogger<SerialApiDriver>(), loggerFactory.CreateLogger<ZWaveController>());
+        }
+        catch (Exception exception)
+        {
+            throw new ZWaveConnectionException($"Creating the loggers of the connection to the Z-Wave controller on {transport} failed.", exception);
+        }
     }
 
     private static async Task<Stream> OpenAsync(IZWaveTransport transport, CancellationToken cancellationToken)

@@ -53,6 +53,11 @@ internal sealed class FakeZWaveStick : IZWaveTransport
 
     public bool IsDisposed => _stream?.IsDisposed == true;
 
+    /// <summary>
+    /// Whether a stream was opened and is not disposed yet.
+    /// </summary>
+    public bool HasOpenStream => _stream is { IsDisposed: false };
+
     public IReadOnlyList<ParsedFrame> ReceivedFrames
     {
         get

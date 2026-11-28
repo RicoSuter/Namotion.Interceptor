@@ -129,6 +129,21 @@ public class ZWaveControllerTests
     }
 
     [Fact]
+    public async Task WhenTheLoggerFactoryIsDisposed_ThenConnectThrowsAConnectionExceptionAndLeavesNoStreamOpen()
+    {
+        // Arrange
+        var stick = FakeZWaveStick.CreateWithController();
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => ZWaveController.ConnectAsync(stick, loggerFactory: new DisposedLoggerFactory()).WaitAsync(TestTimeouts.Default));
+
+        // Assert
+        var connectionException = Assert.IsType<ZWaveConnectionException>(exception);
+        Assert.IsType<ObjectDisposedException>(connectionException.InnerException);
+        Assert.False(stick.HasOpenStream);
+    }
+
+    [Fact]
     public async Task WhenTheSerialPortDoesNotExist_ThenConnectThrowsAConnectionExceptionNamingThePort()
     {
         // Arrange
@@ -220,6 +235,19 @@ public class ZWaveControllerTests
     {
         public ILogger CreateLogger(string categoryName) =>
             categoryName == typeof(ZWaveController).FullName ? controllerLogger : NullLogger.Instance;
+
+        public void AddProvider(ILoggerProvider provider)
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class DisposedLoggerFactory : ILoggerFactory
+    {
+        public ILogger CreateLogger(string categoryName) => throw new ObjectDisposedException(nameof(ILoggerFactory));
 
         public void AddProvider(ILoggerProvider provider)
         {
