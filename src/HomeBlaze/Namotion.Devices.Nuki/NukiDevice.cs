@@ -56,7 +56,8 @@ public abstract partial class NukiDevice :
     /// <summary>
     /// Whether the batteries are at a critical level, as the bridge reports it.
     /// </summary>
-    [State(Position = 341)]
+    // The base class implements no IBatteryState, so the metadata of the contract is repeated here.
+    [State(IsDiscrete = true, Position = 344)]
     [Category("Battery")]
     public partial bool? IsBatteryLow { get; internal set; }
 

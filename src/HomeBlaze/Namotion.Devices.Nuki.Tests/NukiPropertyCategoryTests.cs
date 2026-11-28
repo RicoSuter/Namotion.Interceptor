@@ -34,7 +34,7 @@ public class NukiPropertyCategoryTests
     }
 
     [Fact]
-    public async Task WhenTheLockIsRegistered_ThenIsBatteryLowIsTheWritableClassPropertyInTheBatteryCategory()
+    public async Task WhenTheLockIsRegistered_ThenIsBatteryLowIsTheWritableDiscreteClassPropertyAtTheContractPosition()
     {
         // Arrange
         await using var test = new TestBridge();
@@ -46,7 +46,10 @@ public class NukiPropertyCategoryTests
         // Assert
         Assert.True(property.HasSetter);
         Assert.DoesNotContain(property.ReflectionAttributes, attribute => attribute is DerivedAttribute);
-        Assert.Equal("Battery", property.GetStateMetadata()?.Category);
+        var metadata = property.GetStateMetadata();
+        Assert.Equal("Battery", metadata?.Category);
+        Assert.True(metadata?.IsDiscrete);
+        Assert.Equal(344, metadata?.Position);
     }
 
     [Theory]
