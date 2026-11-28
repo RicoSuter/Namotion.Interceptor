@@ -105,7 +105,7 @@ The Ecowitt DTOs (`EcowittCo2Data`, `EcowittPm25Data`, `EcowittLeakData`) mirror
 
 These renames change the paths of the properties, so history recorded under the old names is not continued and automations or pages that use them must be updated. The pull request lists each rename as a breaking change with its migration step, together with these behavior changes:
 
-- **Hue double press**: a Hue double press now emits a second `Release` event, with `PressCount` 2, after the `Release` of its first press. An automation that reacts to every `Release` runs twice for a double press. Migration: filter on `event/PressCount`, such as `event/ButtonState == Release and event/PressCount == 1` for single presses only, or `event/PressCount == 2` for double presses.
+- **Hue double press**: a Hue double press now emits a second `Release` event, with `PressCount` 2, after the `Release` of its first press. An automation that reacts to every `Release` runs twice for a double press. Migration: an automation that must run once per press sequence or only for a double press filters on `event/PressCount`, such as `event/ButtonState == Release and event/PressCount == 2`; `event/PressCount == 1` still matches the first press of a Hue double press.
 - **New recorded state**: `IsBatteryLow` is a new recorded state on every `IBatteryState` subject, `null` for SunSpec storage. No migration is needed; history of it starts with the update.
 - **Ecowitt leak DTO**: `EcowittLeakData.IsLeaking` becomes `bool?`, `null` when the gateway reports no status. Migration: handle `null` where the DTO is read.
 
