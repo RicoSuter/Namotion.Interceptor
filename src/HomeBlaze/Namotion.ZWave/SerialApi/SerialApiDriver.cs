@@ -102,7 +102,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
                 }
                 catch (OperationCanceledException) when (stopping.IsCancellationRequested)
                 {
-                    transaction.Fail(new ObjectDisposedException(nameof(SerialApiDriver)));
+                    transaction.Fail((Exception?)_failure ?? new ObjectDisposedException(nameof(SerialApiDriver)));
                     return;
                 }
                 catch (Exception exception)
@@ -113,7 +113,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         }
         catch (OperationCanceledException) when (stopping.IsCancellationRequested)
         {
-            // Disposed while waiting for the next transaction.
+            // Disposed or failed while waiting for the next transaction.
         }
     }
 
@@ -190,7 +190,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         }
         catch (Exception) when (stopping.IsCancellationRequested)
         {
-            // Disposing closes the stream under a pending read.
+            // Disposed or failed; disposing also closes the stream under a pending read.
         }
     }
 
@@ -277,6 +277,9 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         _transactions.Writer.TryComplete();
         _pendingAcknowledgement?.TrySetException(failure);
         _pendingResponse?.Source.TrySetException(failure);
+
+        // Wakes the send loop in a retransmission delay, or one that started an attempt after the pending sources were read.
+        _stopping.Cancel();
         while (_transactions.Reader.TryRead(out var transaction))
         {
             transaction.Fail(failure);
