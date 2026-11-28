@@ -42,7 +42,7 @@ Non-goals of the first version: S0 and S2 security, SmartStart, Z-Wave Long Rang
 
 Three changes, in this order, each with its own pull request:
 
-1. **Abstractions**: new contracts and units in `HomeBlaze.Abstractions`, with Ecowitt and Hue implementing them.
+1. **Abstractions**: new contracts and units in `HomeBlaze.Abstractions`, with Ecowitt, Hue and Nuki implementing them.
 2. **Z-Wave SDK** (sub-project 1): `Namotion.ZWave`, `Namotion.ZWave.Generator` and `Namotion.ZWave.Tests`.
 3. **Z-Wave device library** (sub-project 2): `Namotion.Devices.ZWave`, `Namotion.Devices.ZWave.HomeBlaze` and `Namotion.Devices.ZWave.Tests`. It gets its own design round before implementation; this plan records its direction only.
 
