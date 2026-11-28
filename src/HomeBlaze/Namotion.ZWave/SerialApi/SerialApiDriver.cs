@@ -312,6 +312,9 @@ internal sealed class SerialApiDriver : IAsyncDisposable
 
         _unsolicitedFrames.Writer.TryComplete();
         _completion.TrySetException(failure);
+
+        // The failure is logged, so it is observed here; an owner that awaits Completion still gets it.
+        _ = _completion.Task.Exception;
     }
 
     /// <summary>

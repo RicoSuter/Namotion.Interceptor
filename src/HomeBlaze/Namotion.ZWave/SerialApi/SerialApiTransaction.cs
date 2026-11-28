@@ -92,11 +92,20 @@ internal sealed class SerialApiTransaction
         _acknowledged && response.Function == Function && _response?.TrySetResult(response) == true;
 
     /// <summary>
-    /// Ends the current attempt and the response wait with an exception.
+    /// Ends the current attempt and the response wait with an exception. The send loop may await neither of them,
+    /// such as an attempt that already timed out, so the exception is marked as observed.
     /// </summary>
     public void FailExchange(Exception exception)
     {
-        _acknowledgement?.TrySetException(exception);
-        _response?.TrySetException(exception);
+        FailObserved(_acknowledgement, exception);
+        FailObserved(_response, exception);
+    }
+
+    private static void FailObserved<T>(TaskCompletionSource<T>? source, Exception exception)
+    {
+        if (source?.TrySetException(exception) == true)
+        {
+            _ = source.Task.Exception;
+        }
     }
 }

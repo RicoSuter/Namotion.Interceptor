@@ -146,7 +146,7 @@ internal sealed class FrameStream : IDisposable
 
             // A stalled network bridge or a hung USB device never completes a write, which would block the driver for good.
             var write = WriteAndFlushAsync(frame, cancellationToken);
-            await (write.IsCompleted ? write : write.WaitAsync(_writeTimeout, _timeProvider, cancellationToken)).ConfigureAwait(false);
+            await (write.IsCompleted ? write : WaitForWriteAsync(write, cancellationToken)).ConfigureAwait(false);
         }
         catch (TimeoutException exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -164,9 +164,27 @@ internal sealed class FrameStream : IDisposable
 
     public void Dispose() => _writeLock.Dispose();
 
+    private async Task WaitForWriteAsync(Task write, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await write.WaitAsync(_writeTimeout, _timeProvider, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is TimeoutException or OperationCanceledException)
+        {
+            // The write is abandoned, and a write that ignores cancellation faults later when the stream closes.
+            ObserveException(write);
+            throw;
+        }
+    }
+
     private static void ObserveException(Task task)
     {
-        if (!task.IsCompleted)
+        if (task.IsCompleted)
+        {
+            _ = task.Exception;
+        }
+        else
         {
             task.ContinueWith(
                 static completed => _ = completed.Exception,

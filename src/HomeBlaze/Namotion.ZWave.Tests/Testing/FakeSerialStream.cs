@@ -104,6 +104,9 @@ internal sealed class FakeSerialStream(FakeZWaveStick stick) : Stream
         IsDisposed = true;
         _incoming.Writer.TryComplete();
         _closed.TrySetException(new IOException("The fake serial port was closed."));
+
+        // Observed here, so that a stream without a hung write leaves no unobserved exception behind.
+        _ = _closed.Task.Exception;
         base.Dispose(disposing);
     }
 }
