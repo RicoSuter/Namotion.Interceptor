@@ -35,6 +35,14 @@ namespace Namotion.ZWave
         public ZWaveControllerException(string message) { }
         public ZWaveControllerException(string message, System.Exception innerException) { }
     }
+    public sealed class ZWaveControllerOptions : System.IEquatable<Namotion.ZWave.ZWaveControllerOptions>
+    {
+        public ZWaveControllerOptions() { }
+        public System.TimeSpan AcknowledgementTimeout { get; init; }
+        public int MaximumSendAttempts { get; init; }
+        public System.TimeSpan ResponseTimeout { get; init; }
+        public System.TimeProvider TimeProvider { get; init; }
+    }
     public class ZWaveException : System.Exception
     {
         public ZWaveException() { }
