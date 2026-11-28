@@ -28,7 +28,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
     private volatile ZWaveConnectionException? _failure;
     private Task _readLoop = Task.CompletedTask;
     private Task _sendLoop = Task.CompletedTask;
-    private volatile int _disposed;
+    private volatile bool _disposed;
     private bool _started;
     private Task? _disposal;
 
@@ -62,7 +62,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
     {
         lock (_lifecycleLock)
         {
-            ObjectDisposedException.ThrowIf(_disposed != 0, this);
+            ObjectDisposedException.ThrowIf(_disposed, this);
             if (_started)
             {
                 throw new InvalidOperationException("The Z-Wave driver was already started.");
@@ -88,12 +88,12 @@ internal sealed class SerialApiDriver : IAsyncDisposable
 
     private Task<DataFrame> Enqueue(byte function, ReadOnlyMemory<byte> payload, bool expectsResponse, CancellationToken cancellationToken)
     {
-        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        ObjectDisposedException.ThrowIf(_disposed, this);
 
         var transaction = new SerialApiTransaction(function, FrameEncoder.Encode(FrameType.Request, function, payload.Span), expectsResponse, cancellationToken);
         if (!_transactions.Writer.TryWrite(transaction))
         {
-            transaction.Fail((Exception?)_failure ?? new ObjectDisposedException(nameof(SerialApiDriver)));
+            transaction.Fail(CreateStoppedException());
         }
 
         return transaction.Task;
@@ -127,7 +127,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
                 catch (Exception) when (stopping.IsCancellationRequested)
                 {
                     // Also a write that a closed stream ended with an I/O error: the caller sees why the driver stopped.
-                    transaction.Fail((Exception?)_failure ?? new ObjectDisposedException(nameof(SerialApiDriver)));
+                    transaction.Fail(CreateStoppedException());
                     return;
                 }
                 catch (Exception exception)
@@ -277,6 +277,9 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         }
     }
 
+    private Exception CreateStoppedException() =>
+        (Exception?)_failure ?? new ObjectDisposedException(nameof(SerialApiDriver));
+
     private void Fail(ZWaveConnectionException failure)
     {
         if (Interlocked.CompareExchange(ref _failure, failure, null) is not null)
@@ -309,7 +312,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         {
             if (_disposal is null)
             {
-                _disposed = 1;
+                _disposed = true;
                 _disposal = DisposeCoreAsync();
             }
 

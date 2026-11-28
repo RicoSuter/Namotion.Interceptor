@@ -88,16 +88,11 @@ public sealed class ZWaveController : IAsyncDisposable
         {
             driver.Start();
 
-            var version = StartupResponses.ParseControllerVersion(
-                (await driver.SendRequestAsync(FunctionId.GetControllerVersion, default, cancellationToken).ConfigureAwait(false)).Payload);
-            var id = StartupResponses.ParseControllerId(
-                (await driver.SendRequestAsync(FunctionId.GetControllerId, default, cancellationToken).ConfigureAwait(false)).Payload);
-            var serialApiCapabilities = StartupResponses.ParseSerialApiCapabilities(
-                (await driver.SendRequestAsync(FunctionId.GetSerialApiCapabilities, default, cancellationToken).ConfigureAwait(false)).Payload);
-            var nodeIds = StartupResponses.ParseNodeIds(
-                (await driver.SendRequestAsync(FunctionId.GetSerialApiInitData, default, cancellationToken).ConfigureAwait(false)).Payload);
-            var capabilities = StartupResponses.ParseControllerCapabilities(
-                (await driver.SendRequestAsync(FunctionId.GetControllerCapabilities, default, cancellationToken).ConfigureAwait(false)).Payload);
+            var version = StartupResponses.ParseControllerVersion(await RequestAsync(FunctionId.GetControllerVersion).ConfigureAwait(false));
+            var id = StartupResponses.ParseControllerId(await RequestAsync(FunctionId.GetControllerId).ConfigureAwait(false));
+            var serialApiCapabilities = StartupResponses.ParseSerialApiCapabilities(await RequestAsync(FunctionId.GetSerialApiCapabilities).ConfigureAwait(false));
+            var nodeIds = StartupResponses.ParseNodeIds(await RequestAsync(FunctionId.GetSerialApiInitData).ConfigureAwait(false));
+            var capabilities = StartupResponses.ParseControllerCapabilities(await RequestAsync(FunctionId.GetControllerCapabilities).ConfigureAwait(false));
 
             var logger = loggerFactory.CreateLogger<ZWaveController>();
             logger.LogInformation(
@@ -111,6 +106,9 @@ public sealed class ZWaveController : IAsyncDisposable
             await driver.DisposeAsync().ConfigureAwait(false);
             throw;
         }
+
+        async Task<byte[]> RequestAsync(byte function) =>
+            (await driver.SendRequestAsync(function, default, cancellationToken).ConfigureAwait(false)).Payload;
     }
 
     /// <summary>
