@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Testing;
 using Namotion.ZWave.SerialApi;
 using Namotion.ZWave.Tests.Testing;
@@ -142,6 +144,23 @@ public class ZWaveControllerTests
     }
 
     [Fact]
+    public async Task WhenLoggingAnUnsolicitedFrameThrows_ThenTheNextFramesAreStillDispatched()
+    {
+        // Arrange
+        var logger = new ThrowingLogger(LogLevel.Debug);
+        var stick = FakeZWaveStick.CreateWithController();
+        var controller = await ZWaveController.ConnectAsync(stick, loggerFactory: new ControllerLoggerFactory(logger)).WaitAsync(TestTimeouts.Default);
+
+        // Act
+        stick.SendFrame(FrameType.Request, 0x04, 0x00, 0x05, 0x03, 0x20, 0x03, 0xFF);
+        stick.SendFrame(FrameType.Request, 0x04, 0x00, 0x02, 0x03, 0x20, 0x03, 0x00);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => logger.Entries.Count(entry => entry.Level == LogLevel.Debug) == 2);
+        Assert.Null(await Record.ExceptionAsync(() => controller.DisposeAsync().AsTask().WaitAsync(TestTimeouts.Default)));
+    }
+
+    [Fact]
     public async Task WhenTheStickIsUnplugged_ThenCompletionFaults()
     {
         // Arrange
@@ -153,6 +172,21 @@ public class ZWaveControllerTests
 
         // Assert
         await Assert.ThrowsAsync<ZWaveConnectionException>(() => controller.Completion.WaitAsync(TestTimeouts.Default));
+    }
+
+    // Hands the given logger to the controller and no logger to the driver.
+    private sealed class ControllerLoggerFactory(ILogger controllerLogger) : ILoggerFactory
+    {
+        public ILogger CreateLogger(string categoryName) =>
+            categoryName == typeof(ZWaveController).FullName ? controllerLogger : NullLogger.Instance;
+
+        public void AddProvider(ILoggerProvider provider)
+        {
+        }
+
+        public void Dispose()
+        {
+        }
     }
 
     private sealed class ThrowingTransport(Exception exception) : IZWaveTransport

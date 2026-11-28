@@ -145,7 +145,31 @@ public sealed class ZWaveController : IAsyncDisposable
     {
         await foreach (var frame in _driver.UnsolicitedFrames.ReadAllAsync().ConfigureAwait(false))
         {
-            _logger.LogDebug("Received function 0x{Function:X2} with {Length} bytes.", frame.Function, frame.Payload.Length);
+            try
+            {
+                Dispatch(frame);
+            }
+            catch (Exception exception)
+            {
+                LogDispatchFailure(exception, frame);
+            }
+        }
+    }
+
+    private void Dispatch(DataFrame frame)
+    {
+        _logger.LogDebug("Received function 0x{Function:X2} with {Length} bytes.", frame.Function, frame.Payload.Length);
+    }
+
+    private void LogDispatchFailure(Exception exception, DataFrame frame)
+    {
+        try
+        {
+            _logger.LogWarning(exception, "Handling function 0x{Function:X2} failed.", frame.Function);
+        }
+        catch (Exception)
+        {
+            // The logger itself failed; the loop goes on with the next frame, as there is nowhere left to report to.
         }
     }
 }

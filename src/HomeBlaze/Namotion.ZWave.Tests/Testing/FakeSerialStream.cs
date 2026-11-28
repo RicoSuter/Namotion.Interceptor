@@ -32,6 +32,8 @@ internal sealed class FakeSerialStream(FakeZWaveStick stick) : Stream
 
     public void EndOfStream() => _incoming.Writer.TryComplete();
 
+    public void FailReads(Exception exception) => _incoming.Writer.TryComplete(exception);
+
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
         if (_current is null || _offset == _current.Length)

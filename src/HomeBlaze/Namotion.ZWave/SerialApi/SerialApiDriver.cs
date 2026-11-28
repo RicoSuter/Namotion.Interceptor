@@ -205,23 +205,32 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         var stopping = _stopping.Token;
         try
         {
+            var failure = await ReadUntilFailureAsync(stopping).ConfigureAwait(false);
+            if (!stopping.IsCancellationRequested)
+            {
+                Fail(failure);
+            }
+        }
+        catch (Exception) when (stopping.IsCancellationRequested)
+        {
+            // Disposed or failed; disposing also closes the stream under a pending read.
+        }
+    }
+
+    private async Task<ZWaveConnectionException> ReadUntilFailureAsync(CancellationToken stopping)
+    {
+        try
+        {
             while (await _frames.ReadAsync(stopping).ConfigureAwait(false) is { } frame)
             {
                 await HandleFrameAsync(frame, stopping).ConfigureAwait(false);
             }
 
-            if (!stopping.IsCancellationRequested)
-            {
-                Fail(new ZWaveConnectionException("The connection to the Z-Wave controller was closed."));
-            }
+            return new ZWaveConnectionException("The connection to the Z-Wave controller was closed.");
         }
         catch (Exception exception) when (!stopping.IsCancellationRequested)
         {
-            Fail(exception as ZWaveConnectionException ?? new ZWaveConnectionException("Reading from the Z-Wave controller failed.", exception));
-        }
-        catch (Exception) when (stopping.IsCancellationRequested)
-        {
-            // Disposed or failed; disposing also closes the stream under a pending read.
+            return exception as ZWaveConnectionException ?? new ZWaveConnectionException("Reading from the Z-Wave controller failed.", exception);
         }
     }
 
@@ -299,7 +308,6 @@ internal sealed class SerialApiDriver : IAsyncDisposable
             return;
         }
 
-        _logger.LogWarning(failure, "The connection to the Z-Wave controller failed.");
         _transactions.Writer.TryComplete();
         _inFlight?.FailExchange(failure);
 
@@ -315,6 +323,10 @@ internal sealed class SerialApiDriver : IAsyncDisposable
 
         // The failure is logged, so it is observed here; an owner that awaits Completion still gets it.
         _ = _completion.Task.Exception;
+
+        // Last, so that a logger that throws cannot leave the driver half failed. The token is canceled already, so the
+        // loops that call Fail treat such an exception as the stop.
+        _logger.LogWarning(failure, "The connection to the Z-Wave controller failed.");
     }
 
     /// <summary>

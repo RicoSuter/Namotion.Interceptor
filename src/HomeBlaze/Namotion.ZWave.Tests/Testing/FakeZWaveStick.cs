@@ -153,6 +153,11 @@ internal sealed class FakeZWaveStick : IZWaveTransport
     /// </summary>
     public void Disconnect() => GetStream().EndOfStream();
 
+    /// <summary>
+    /// Makes the host's pending and later reads throw, as a serial port does when its device fails.
+    /// </summary>
+    public void FailReads(Exception exception) => GetStream().FailReads(exception);
+
     internal void OnHungWrite() => Interlocked.Increment(ref _hungWriteCount);
 
     internal void OnHostWrite(ReadOnlySpan<byte> bytes)

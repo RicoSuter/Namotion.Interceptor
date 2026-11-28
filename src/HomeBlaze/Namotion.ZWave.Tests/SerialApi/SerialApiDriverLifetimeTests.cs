@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Testing;
 using Namotion.ZWave.SerialApi;
 using Namotion.ZWave.Tests.Testing;
@@ -299,6 +300,42 @@ public class SerialApiDriverLifetimeTests
         Assert.Null(exception);
         await Assert.ThrowsAsync<ObjectDisposedException>(() => pending.WaitAsync(TestTimeouts.Default));
         Assert.True(driver.Completion.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task WhenAWriteFailsAndTheLoggerThrows_ThenTheRequestAndCompletionStillFailWithAConnectionException()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        var driver = await stick.StartDriverAsync(logger: new ThrowingLogger(LogLevel.Warning));
+        stick.FailWrites = true;
+
+        // Act
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+
+        // Assert
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => request.WaitAsync(TestTimeouts.Default));
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
+        Assert.Null(await Record.ExceptionAsync(() => DisposeAsTask(driver).WaitAsync(TestTimeouts.Default)));
+    }
+
+    [Fact]
+    public async Task WhenAReadFailsAndTheLoggerThrows_ThenThePendingRequestAndCompletionFailAndDisposalCompletes()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false };
+        var driver = await stick.StartDriverAsync(logger: new ThrowingLogger(LogLevel.Warning));
+        var pending = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+
+        // Act
+        stick.FailReads(new IOException("The device was removed."));
+
+        // Assert
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => pending.WaitAsync(TestTimeouts.Default));
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
+        Assert.Null(await Record.ExceptionAsync(() => DisposeAsTask(driver).WaitAsync(TestTimeouts.Default)));
+        Assert.True(stick.IsDisposed);
     }
 
     // Sonar (S5034) reads two DisposeAsync calls in one method as one ValueTask consumed twice.
