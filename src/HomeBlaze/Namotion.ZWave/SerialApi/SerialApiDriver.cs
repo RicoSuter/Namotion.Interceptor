@@ -166,6 +166,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
     {
         var attempts = _options.MaximumSendAttempts;
         FrameKind? result = null;
+        var answered = false;
         for (var attempt = 1; attempt <= attempts; attempt++)
         {
             var acknowledgement = transaction.StartAttempt();
@@ -176,11 +177,22 @@ internal sealed class SerialApiDriver : IAsyncDisposable
                 return;
             }
 
+            answered |= result is not null;
+
             if (attempt < attempts)
             {
                 _logger.LogDebug("Retransmitting function 0x{Function:X2} after {Result}.", transaction.Function, result?.ToString() ?? "a timeout");
                 await Task.Delay(TimeSpan.FromMilliseconds(100 + (attempt - 1) * 1000), _options.TimeProvider, stopping).ConfigureAwait(false);
             }
+        }
+
+        if (!answered)
+        {
+            // A controller that answers no attempt at all is gone, so its owner must reconnect.
+            var failure = new ZWaveConnectionException(
+                $"The Z-Wave controller stopped responding: it answered none of the {attempts} attempts of function 0x{transaction.Function:X2}.");
+            Fail(failure);
+            throw failure;
         }
 
         throw result is null

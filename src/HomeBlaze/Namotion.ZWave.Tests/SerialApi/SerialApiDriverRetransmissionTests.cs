@@ -15,7 +15,7 @@ public class SerialApiDriverRetransmissionTests
     private static readonly TimeSpan Tick = TimeSpan.FromMilliseconds(1);
 
     [Fact]
-    public async Task WhenNoAckArrives_ThenTheFrameIsWrittenThreeTimesWithTheSpecifiedDelaysAndTheRequestTimesOut()
+    public async Task WhenNoAttemptIsAnswered_ThenTheFrameIsWrittenThreeTimesWithTheSpecifiedDelaysAndTheConnectionFails()
     {
         // Arrange
         var time = new TimerRecordingTimeProvider();
@@ -58,7 +58,36 @@ public class SerialApiDriverRetransmissionTests
         Assert.Equal(TimeSpan.FromMilliseconds(3300), secondDelay.StartedAt);
         Assert.Equal(2, framesBeforeSecondRetransmission);
         Assert.Equal(TimeSpan.FromMilliseconds(4400), thirdAcknowledgementTimer.StartedAt);
+        var failure = Assert.IsType<ZWaveConnectionException>(exception);
+        Assert.Contains("stopped responding", failure.Message);
+        Assert.Same(failure, await Record.ExceptionAsync(() => driver.Completion.WaitAsync(TestTimeouts.Default)));
+        Assert.Equal(3, stick.ReceivedDataFrames.Count);
+    }
+
+    [Fact]
+    public async Task WhenAnEarlierAttemptWasRejectedAndTheLastTimesOut_ThenTheRequestTimesOutAndTheConnectionStaysUp()
+    {
+        // Arrange
+        var time = new TimerRecordingTimeProvider();
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false };
+        stick.EnqueueAcknowledgement(FrameHeader.Nak);
+        await using var driver = await stick.StartDriverAsync(time);
+
+        // Act
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await time.WaitForTimerAsync(FirstRetransmissionDelay);
+        time.Advance(FirstRetransmissionDelay);
+        await time.WaitForTimerAsync(AcknowledgementTimeout, occurrence: 2);
+        time.Advance(AcknowledgementTimeout);
+        await time.WaitForTimerAsync(SecondRetransmissionDelay);
+        time.Advance(SecondRetransmissionDelay);
+        await time.WaitForTimerAsync(AcknowledgementTimeout, occurrence: 3);
+        time.Advance(AcknowledgementTimeout);
+        var exception = await Record.ExceptionAsync(() => request.WaitAsync(TestTimeouts.Default));
+
+        // Assert
         Assert.IsType<ZWaveTimeoutException>(exception);
+        Assert.False(driver.Completion.IsCompleted);
         Assert.Equal(3, stick.ReceivedDataFrames.Count);
     }
 
