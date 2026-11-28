@@ -25,7 +25,6 @@ public partial class HueButton :
     private readonly string _name;
     private readonly Subject<HomeBlaze.Abstractions.Inputs.ButtonEvent> _buttonEventSubject = new();
 
-    private ButtonState? _currentButtonState;
     private DateTimeOffset? _currentButtonChangeDate;
 
     internal ButtonResource ButtonResource { get; set; }
@@ -118,7 +117,6 @@ public partial class HueButton :
         PressCount = null;
 
         _currentButtonChangeDate = ButtonChangeDate;
-        _currentButtonState = InternalButtonState;
 
         if (!initialization)
         {
@@ -148,13 +146,12 @@ public partial class HueButton :
         if (newButtonChangeDate != null &&
             // The poll may apply an older snapshot after the event stream delivered a newer report
             (_currentButtonChangeDate is null || newButtonChangeDate > _currentButtonChangeDate) &&
-            newButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.None &&
-            // Hue may send double_short_release right after a short_release, which maps to the same Release state
-            (newButtonState != _currentButtonState || pressCount > 1))
+            newButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.None)
         {
             _currentButtonChangeDate = newButtonChangeDate;
-            _currentButtonState = newButtonState;
 
+            // A release that follows a release is a press whose initial_press the bridge dropped, while
+            // a held button keeps reporting repeat
             if (newButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.Repeat ||
                 ButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.Repeat)
             {

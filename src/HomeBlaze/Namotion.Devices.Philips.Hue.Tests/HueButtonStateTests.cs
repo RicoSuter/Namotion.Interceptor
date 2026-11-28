@@ -301,6 +301,25 @@ public class HueButtonStateTests
     }
 
     [Fact]
+    public void WhenAShortReleaseFollowsAShortReleaseWithoutAnInitialPress_ThenBothReleasesAreEmitted()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        var firstReleaseTimestamp = DateTimeOffset.UtcNow;
+
+        // Act
+        Report(button, ButtonEvent.short_release, firstReleaseTimestamp);
+        Report(button, ButtonEvent.short_release, firstReleaseTimestamp.AddSeconds(3));
+
+        // Assert
+        Assert.Equal(new[] { ButtonState.Release, ButtonState.Release }, events.Select(e => e.ButtonState));
+        Assert.Equal(new[] { 1, 1 }, events.Select(e => e.PressCount));
+    }
+
+    [Fact]
     public void WhenAButtonIsRegistered_ThenPressCountIsADiscreteStateAtTheContractPosition()
     {
         // Arrange

@@ -148,7 +148,7 @@ Each `HueButton` implements `IMultiPressButtonDevice` and `IObservable<ButtonEve
 
 A double press is reported as `Release` with `PressCount` 2, a single short press with `PressCount` 1, and `ButtonEvent.PressCount` carries the same count.
 
-**Duplicate prevention:** Button state changes are only emitted when the `ButtonChangeDate` from the Hue API is newer than the one of the last emitted change, so an older report that the poll applies after the event stream is ignored, and the new state differs from the previous state, except that a double press is reported also right after a single short release. Repeat events are deduplicated so consecutive `Repeat` states don't fire redundant events. After release events (`Release`, `LongRelease`), the state automatically resets to `None`.
+**Duplicate prevention:** Button state changes are only emitted when the `ButtonChangeDate` from the Hue API is newer than the one of the last emitted change, so a report delivered twice, or an older report that the poll applies after the event stream, is ignored. A release that follows a release is emitted, because the bridge may drop the `initial_press` of a press. Repeat events are deduplicated so consecutive `Repeat` states don't fire redundant events. After release events (`Release`, `LongRelease`), the state automatically resets to `None`.
 
 **Reactive stream:** Subscribe to `IObservable<ButtonEvent>` on any `HueButton` to receive events with the button reference, state, timestamp, and device ID.
 
