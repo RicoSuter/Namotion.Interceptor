@@ -1,6 +1,26 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.ZWave.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace Namotion.ZWave.Transport
+{
+    public interface IZWaveTransport
+    {
+        System.Threading.Tasks.ValueTask<System.IO.Stream> OpenAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    public sealed class SerialTransport : Namotion.ZWave.Transport.IZWaveTransport
+    {
+        public SerialTransport(string portName) { }
+        public string PortName { get; }
+        public System.Threading.Tasks.ValueTask<System.IO.Stream> OpenAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    public sealed class TcpTransport : Namotion.ZWave.Transport.IZWaveTransport
+    {
+        public TcpTransport(string host, int port) { }
+        public string Host { get; }
+        public int Port { get; }
+        public System.Threading.Tasks.ValueTask<System.IO.Stream> OpenAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+}
 namespace Namotion.ZWave
 {
     public sealed class ZWaveConnectionException : Namotion.ZWave.ZWaveException
