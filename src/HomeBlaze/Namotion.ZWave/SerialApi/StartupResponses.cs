@@ -27,7 +27,20 @@ internal static class StartupResponses
             throw Invalid("GetControllerId");
         }
 
-        return (BinaryPrimitives.ReadUInt32BigEndian(payload), payload[4]);
+        var homeId = BinaryPrimitives.ReadUInt32BigEndian(payload);
+        if (payload.Length != 6)
+        {
+            return (homeId, payload[4]);
+        }
+
+        // A 700 or 800-series controller in 16-bit node ID mode (Long Range).
+        var ownNodeId = BinaryPrimitives.ReadUInt16BigEndian(payload.AsSpan(4));
+        if (ownNodeId > byte.MaxValue)
+        {
+            throw new ZWaveException($"The Z-Wave controller has node ID {ownNodeId}; 16-bit node IDs are not supported yet.");
+        }
+
+        return (homeId, (byte)ownNodeId);
     }
 
     public static SerialApiCapabilities ParseSerialApiCapabilities(byte[] payload)

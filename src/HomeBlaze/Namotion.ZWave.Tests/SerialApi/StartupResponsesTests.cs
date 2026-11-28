@@ -51,6 +51,27 @@ public class StartupResponsesTests
     }
 
     [Fact]
+    public void WhenControllerIdHasA16BitNodeIdThatFitsAByte_ThenItIsRead()
+    {
+        // Act
+        var (homeId, ownNodeId) = StartupResponses.ParseControllerId([0xC0, 0xFF, 0xEE, 0x01, 0x00, 0x01]);
+
+        // Assert
+        Assert.Equal(0xC0FFEE01u, homeId);
+        Assert.Equal(1, ownNodeId);
+    }
+
+    [Fact]
+    public void WhenControllerIdHasA16BitNodeIdAbove255_ThenParsingThrowsThatItIsNotSupported()
+    {
+        // Act
+        var exception = Assert.Throws<ZWaveException>(() => StartupResponses.ParseControllerId([0xC0, 0xFF, 0xEE, 0x01, 0x01, 0x00]));
+
+        // Assert
+        Assert.Contains("16-bit node IDs are not supported", exception.Message);
+    }
+
+    [Fact]
     public void WhenSerialApiCapabilitiesAreParsed_ThenIdsAndSupportedFunctionsAreRead()
     {
         // Arrange
