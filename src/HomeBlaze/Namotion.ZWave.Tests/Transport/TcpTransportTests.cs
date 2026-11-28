@@ -56,6 +56,48 @@ public class TcpTransportTests
         Assert.Equal(3, (int)socket.GetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount)!);
     }
 
+    [Fact]
+    public async Task WhenOpenedOnLinux_ThenTheTcpUserTimeoutIsOneMinute()
+    {
+        // TCP_USER_TIMEOUT exists on Linux only; the transport sets it nowhere else.
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        // Arrange
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var transport = new TcpTransport("127.0.0.1", port);
+        var acceptTask = listener.AcceptTcpClientAsync();
+
+        // Act
+        await using var stream = await transport.OpenAsync(CancellationToken.None);
+        using var server = await acceptTask;
+
+        // Assert
+        var socket = Assert.IsType<NetworkStream>(stream).Socket;
+        var value = new byte[sizeof(int)];
+        socket.GetRawSocketOption(6, 18, value);
+        Assert.Equal(60_000, BitConverter.ToInt32(value));
+    }
+
+    [Fact]
+    public async Task WhenOpeningIsCanceled_ThenOperationCanceledIsThrown()
+    {
+        // Arrange
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var transport = new TcpTransport("127.0.0.1", port);
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => transport.OpenAsync(cancellation.Token).AsTask());
+    }
+
     [Theory]
     [InlineData("", 4001)]
     [InlineData("host", 0)]
