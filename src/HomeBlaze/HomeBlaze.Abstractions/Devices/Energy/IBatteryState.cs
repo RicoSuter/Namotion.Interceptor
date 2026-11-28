@@ -12,6 +12,11 @@ namespace HomeBlaze.Abstractions.Devices.Energy;
 public interface IBatteryState
 {
     /// <summary>
+    /// The battery level at or below which the default <see cref="IsBatteryLow"/> reports a low battery.
+    /// </summary>
+    public const decimal LowBatteryLevel = 0.1m;
+
+    /// <summary>
     /// The current battery level (0..1).
     /// </summary>
     [State(Unit = StateUnit.Percent, Position = 340)]
@@ -19,11 +24,11 @@ public interface IBatteryState
 
     /// <summary>
     /// Whether the battery that powers the device needs charging or replacing soon: by default true when
-    /// <see cref="BatteryLevel"/> is at most 0.1, false above and null when the level is unknown. A device that reports
+    /// <see cref="BatteryLevel"/> is at most <see cref="LowBatteryLevel"/>, false above and null when the level is unknown. A device that reports
     /// a low battery flag implements this property itself and may leave <see cref="BatteryLevel"/> null when it reports
     /// no level. A stationary storage battery that is discharged to a reserve by design reports null.
     /// </summary>
     [Derived]
     [State(IsDiscrete = true, Position = 344)]
-    bool? IsBatteryLow => BatteryLevel is { } level ? level <= 0.1m : null;
+    bool? IsBatteryLow => BatteryLevel is { } level ? level <= LowBatteryLevel : null;
 }

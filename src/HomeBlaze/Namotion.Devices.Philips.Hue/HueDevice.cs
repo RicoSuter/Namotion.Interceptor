@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
 using HomeBlaze.Abstractions.Devices;
+using HomeBlaze.Abstractions.Devices.Energy;
 using HomeBlaze.Abstractions.Networking;
 using HueApi.Models;
 using Namotion.Interceptor.Attributes;
@@ -115,13 +116,13 @@ public partial class HueDevice :
     }
 
     /// <summary>
-    /// Gets whether the battery is low from the battery state of the bridge, else from the level with the threshold of the
-    /// default <c>IBatteryState.IsBatteryLow</c>.
+    /// Gets whether the battery is low from the battery state of the bridge, else whether the level is at most
+    /// <see cref="IBatteryState.LowBatteryLevel"/>.
     /// </summary>
     internal static bool? GetIsBatteryLow(PowerState? powerState) => powerState?.BatteryState switch
     {
         BatteryState.low or BatteryState.critical => true,
         BatteryState.normal => false,
-        _ => powerState?.BatteryLevel is { } level ? level <= 10 : null
+        _ => powerState?.BatteryLevel is { } level ? level <= IBatteryState.LowBatteryLevel * 100 : null
     };
 }
