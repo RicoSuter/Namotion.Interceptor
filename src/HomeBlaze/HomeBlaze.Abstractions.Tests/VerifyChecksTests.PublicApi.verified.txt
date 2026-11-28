@@ -776,6 +776,7 @@ namespace HomeBlaze.Abstractions.Inputs
         public ButtonEvent() { }
         public required HomeBlaze.Abstractions.Inputs.IButtonDevice Button { get; init; }
         public required HomeBlaze.Abstractions.Inputs.ButtonState ButtonState { get; init; }
+        public int PressCount { get; init; }
     }
     public enum ButtonState
     {
@@ -823,6 +824,13 @@ namespace HomeBlaze.Abstractions.Inputs
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=150)]
         HomeBlaze.Abstractions.Inputs.ButtonState? ButtonState { get; }
+    }
+    [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
+    [System.ComponentModel.Description("Reports button presses with the number of presses in a quick sequence.")]
+    public interface IMultiPressButtonDevice : HomeBlaze.Abstractions.Inputs.IButtonDevice
+    {
+        [HomeBlaze.Abstractions.Attributes.State(Position=151)]
+        int? PressCount { get; }
     }
 }
 namespace HomeBlaze.Abstractions.Media

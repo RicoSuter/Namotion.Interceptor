@@ -16,4 +16,9 @@ public record ButtonEvent : DeviceEvent
     /// The button state when the event occurred.
     /// </summary>
     public required ButtonState ButtonState { get; init; }
+
+    /// <summary>
+    /// The number of presses in the sequence that ended with this event, 1 unless the button is an <see cref="IMultiPressButtonDevice"/> that reports more.
+    /// </summary>
+    public int PressCount { get; init; } = 1;
 }
