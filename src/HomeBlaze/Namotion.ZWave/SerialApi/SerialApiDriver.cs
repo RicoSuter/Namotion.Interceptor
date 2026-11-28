@@ -19,14 +19,17 @@ internal sealed class SerialApiDriver : IAsyncDisposable
     private readonly CancellationTokenSource _stopping = new();
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    // Written by the send loop before a frame is written, completed by the read loop.
-    private volatile TaskCompletionSource<FrameKind>? _pendingAcknowledgement;
-    private volatile PendingResponse? _pendingResponse;
+    // Start and the start of disposal are exclusive, so that disposal always awaits the loops Start created.
+    private readonly Lock _lifecycleLock = new();
+
+    // Set by the send loop before its frame is written; the read loop completes its acknowledgement and response.
+    private volatile SerialApiTransaction? _inFlight;
 
     private volatile ZWaveConnectionException? _failure;
     private Task _readLoop = Task.CompletedTask;
     private Task _sendLoop = Task.CompletedTask;
     private volatile int _disposed;
+    private bool _started;
 
     public SerialApiDriver(Stream stream, ZWaveControllerOptions options, ILogger logger)
     {
@@ -43,14 +46,25 @@ internal sealed class SerialApiDriver : IAsyncDisposable
 
     public ChannelReader<DataFrame> UnsolicitedFrames => _unsolicitedFrames.Reader;
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Starts the read and send loops. The send loop first writes a NAK; when that fails, <see cref="Completion"/> faults.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The driver was already started.</exception>
+    /// <exception cref="ObjectDisposedException">The driver was disposed.</exception>
+    public void Start()
     {
-        _readLoop = Task.Run(ReadLoopAsync, CancellationToken.None);
+        lock (_lifecycleLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed != 0, this);
+            if (_started)
+            {
+                throw new InvalidOperationException("The Z-Wave driver was already started.");
+            }
 
-        // A NAK makes the controller drop a frame it had partially received, so both sides start in sync.
-        await WriteAsync(FrameStream.Nak, cancellationToken).ConfigureAwait(false);
-
-        _sendLoop = Task.Run(SendLoopAsync, CancellationToken.None);
+            _started = true;
+            _readLoop = Task.Run(ReadLoopAsync, CancellationToken.None);
+            _sendLoop = Task.Run(SendLoopAsync, CancellationToken.None);
+        }
     }
 
     /// <summary>
@@ -83,6 +97,9 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         var stopping = _stopping.Token;
         try
         {
+            // A NAK makes the controller drop a frame it had partially received, so both sides start in sync.
+            await WriteAsync(FrameStream.Nak, stopping).ConfigureAwait(false);
+
             await foreach (var transaction in _transactions.Reader.ReadAllAsync(stopping).ConfigureAwait(false))
             {
                 if (transaction.IsCompleted)
@@ -112,33 +129,29 @@ internal sealed class SerialApiDriver : IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException) when (stopping.IsCancellationRequested)
+        catch (Exception) when (stopping.IsCancellationRequested)
         {
-            // Disposed or failed while waiting for the next transaction.
+            // Disposed or failed while writing the startup NAK or waiting for the next transaction.
         }
     }
 
     private async Task<DataFrame> ExecuteAsync(SerialApiTransaction transaction, CancellationToken stopping)
     {
-        var response = transaction.ExpectsResponse
-            ? new TaskCompletionSource<DataFrame>(TaskCreationOptions.RunContinuationsAsynchronously)
-            : null;
-        _pendingResponse = response is null ? null : new PendingResponse(transaction.Function, response);
+        _inFlight = transaction;
         try
         {
             await WriteUntilAcknowledgedAsync(transaction, stopping).ConfigureAwait(false);
-            if (response is null)
+            if (transaction.Response is not { } response)
             {
                 return default;
             }
 
-            return await WaitOrDefaultAsync(response.Task, _options.ResponseTimeout, stopping).ConfigureAwait(false)
+            return await WaitOrDefaultAsync(response, _options.ResponseTimeout, stopping).ConfigureAwait(false)
                 ?? throw new ZWaveTimeoutException($"The Z-Wave controller did not answer function 0x{transaction.Function:X2}.");
         }
         finally
         {
-            _pendingAcknowledgement = null;
-            _pendingResponse = null;
+            _inFlight = null;
         }
     }
 
@@ -148,11 +161,9 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         FrameKind? result = null;
         for (var attempt = 1; attempt <= attempts; attempt++)
         {
-            var acknowledgement = new TaskCompletionSource<FrameKind>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _pendingAcknowledgement = acknowledgement;
-
+            var acknowledgement = transaction.StartAttempt();
             await WriteAsync(transaction.Frame, stopping).ConfigureAwait(false);
-            result = await WaitOrDefaultAsync(acknowledgement.Task, _options.AcknowledgementTimeout, stopping).ConfigureAwait(false);
+            result = await WaitOrDefaultAsync(acknowledgement, _options.AcknowledgementTimeout, stopping).ConfigureAwait(false);
             if (result == FrameKind.Ack)
             {
                 return;
@@ -202,9 +213,9 @@ internal sealed class SerialApiDriver : IAsyncDisposable
             case FrameKind.Ack:
             case FrameKind.Nak:
             case FrameKind.Can:
-                if (_pendingAcknowledgement is { } acknowledgement)
+                if (_inFlight is { } transaction)
                 {
-                    acknowledgement.TrySetResult(frame.Kind);
+                    transaction.TryAcknowledge(frame.Kind);
                 }
                 else
                 {
@@ -223,11 +234,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
                 var data = frame.Data;
                 if (data.Type == FrameType.Response)
                 {
-                    if (_pendingResponse is { } pending && pending.Function == data.Function)
-                    {
-                        pending.Source.TrySetResult(data);
-                    }
-                    else
+                    if (_inFlight?.TryRespond(data) != true)
                     {
                         _logger.LogDebug("Received an unexpected response to function 0x{Function:X2}.", data.Function);
                     }
@@ -276,8 +283,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
 
         _logger.LogWarning(failure, "The connection to the Z-Wave controller failed.");
         _transactions.Writer.TryComplete();
-        _pendingAcknowledgement?.TrySetException(failure);
-        _pendingResponse?.Source.TrySetException(failure);
+        _inFlight?.FailExchange(failure);
 
         // Wakes the send loop in a retransmission delay, or one that started an attempt after the pending sources were read.
         _stopping.Cancel();
@@ -292,9 +298,14 @@ internal sealed class SerialApiDriver : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        lock (_lifecycleLock)
         {
-            return;
+            if (_disposed != 0)
+            {
+                return;
+            }
+
+            _disposed = 1;
         }
 
         _transactions.Writer.TryComplete();
@@ -324,6 +335,4 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         _stopping.Dispose();
         _frames.Dispose();
     }
-
-    private sealed record PendingResponse(byte Function, TaskCompletionSource<DataFrame> Source);
 }

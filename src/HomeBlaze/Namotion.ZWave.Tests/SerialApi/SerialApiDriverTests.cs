@@ -70,12 +70,21 @@ public class SerialApiDriverTests
         await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedNakCount == naksAfterStart + 1);
     }
 
+    /// <summary>
+    /// Creates and starts a driver on the stick, and waits until the startup NAK was written.
+    /// </summary>
     internal static async Task<SerialApiDriver> StartDriverAsync(FakeZWaveStick stick, TimeProvider? timeProvider = null)
+    {
+        var driver = await CreateDriverAsync(stick, timeProvider);
+        driver.Start();
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedNakCount == 1);
+        return driver;
+    }
+
+    internal static async Task<SerialApiDriver> CreateDriverAsync(FakeZWaveStick stick, TimeProvider? timeProvider = null)
     {
         var stream = await stick.OpenAsync(CancellationToken.None);
         var options = new ZWaveControllerOptions { TimeProvider = timeProvider ?? new FakeTimeProvider() };
-        var driver = new SerialApiDriver(stream, options, NullLogger.Instance);
-        await driver.StartAsync(CancellationToken.None);
-        return driver;
+        return new SerialApiDriver(stream, options, NullLogger.Instance);
     }
 }

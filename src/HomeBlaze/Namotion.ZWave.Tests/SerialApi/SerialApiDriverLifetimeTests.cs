@@ -7,6 +7,48 @@ namespace Namotion.ZWave.Tests.SerialApi;
 public class SerialApiDriverLifetimeTests
 {
     [Fact]
+    public async Task WhenStartedTwice_ThenTheSecondStartThrows()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(driver.Start);
+    }
+
+    [Fact]
+    public async Task WhenStartedAfterDisposal_ThenStartThrows()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        var driver = await SerialApiDriverTests.CreateDriverAsync(stick);
+        await driver.DisposeAsync();
+
+        // Act & Assert
+        Assert.Throws<ObjectDisposedException>(driver.Start);
+        Assert.Empty(stick.ReceivedFrames);
+    }
+
+    [Fact]
+    public async Task WhenTheStartupNakCannotBeWritten_ThenCompletionAndRequestsFailWithAConnectionException()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        var driver = await SerialApiDriverTests.CreateDriverAsync(stick);
+        stick.FailWrites = true;
+
+        // Act
+        driver.Start();
+
+        // Assert
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None).WaitAsync(TestTimeouts.Default));
+        await driver.DisposeAsync().AsTask().WaitAsync(TestTimeouts.Default);
+        Assert.True(stick.IsDisposed);
+    }
+
+    [Fact]
     public async Task WhenARequestIsCanceledWhileQueued_ThenItIsNeverWritten()
     {
         // Arrange

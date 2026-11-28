@@ -86,7 +86,7 @@ public sealed class ZWaveController : IAsyncDisposable
         var driver = new SerialApiDriver(stream, options, loggerFactory.CreateLogger<SerialApiDriver>());
         try
         {
-            await driver.StartAsync(cancellationToken).ConfigureAwait(false);
+            driver.Start();
 
             var version = StartupResponses.ParseControllerVersion(
                 (await driver.SendRequestAsync(FunctionId.GetControllerVersion, default, cancellationToken).ConfigureAwait(false)).Payload);
