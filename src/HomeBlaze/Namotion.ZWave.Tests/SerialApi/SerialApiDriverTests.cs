@@ -58,6 +58,29 @@ public class SerialApiDriverTests
     }
 
     [Fact]
+    public async Task WhenAnUnsolicitedRequestArrivesBetweenTheAckAndTheResponse_ThenItIsDeliveredAndTheResponseIsStillMatched()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false };
+        await using var driver = await stick.StartDriverAsync();
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+
+        // Act
+        stick.SendToHost(FrameHeader.Ack);
+        stick.SendFrame(FrameType.Request, 0x04, 0x00, 0x05, 0x03, 0x20, 0x03, 0xFF);
+        stick.SendFrame(FrameType.Response, FunctionId.GetControllerId, 0x22);
+        var response = await request.WaitAsync(TestTimeouts.Default);
+        var unsolicited = await driver.UnsolicitedFrames.ReadAsync().AsTask().WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(new byte[] { 0x22 }, response.Payload);
+        Assert.Equal(FrameType.Request, unsolicited.Type);
+        Assert.Equal(0x04, unsolicited.Function);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedAckCount == 2);
+    }
+
+    [Fact]
     public async Task WhenAResponseToAnotherFunctionArrives_ThenItIsIgnoredAndTheMatchingResponseIsReturned()
     {
         // Arrange

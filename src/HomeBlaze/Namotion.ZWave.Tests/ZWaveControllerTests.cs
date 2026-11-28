@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Namotion.Interceptor.Testing;
 using Namotion.ZWave.SerialApi;
 using Namotion.ZWave.Tests.Testing;
@@ -44,6 +45,25 @@ public class ZWaveControllerTests
 
         // Act & Assert
         await Assert.ThrowsAsync<ZWaveException>(() => ZWaveController.ConnectAsync(stick).WaitAsync(TestTimeouts.Default));
+        Assert.True(stick.IsDisposed);
+    }
+
+    [Fact]
+    public async Task WhenConnectIsCanceledDuringStartup_ThenItThrowsOperationCanceledAndTheStreamIsClosed()
+    {
+        // Arrange
+        var stick = FakeZWaveStick.CreateWithController();
+        stick.AcknowledgesFrames = false;
+        using var cancellation = new CancellationTokenSource();
+        var options = new ZWaveControllerOptions { TimeProvider = new FakeTimeProvider() };
+        var connect = ZWaveController.ConnectAsync(stick, options, cancellationToken: cancellation.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+
+        // Act
+        await cancellation.CancelAsync();
+
+        // Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => connect.WaitAsync(TestTimeouts.Default));
         Assert.True(stick.IsDisposed);
     }
 
