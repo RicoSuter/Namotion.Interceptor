@@ -11,6 +11,9 @@ internal sealed class SerialApiTransaction
     private readonly CancellationTokenRegistration _cancellationRegistration;
     private volatile TaskCompletionSource<FrameKind>? _acknowledgement;
 
+    // Read and written only by the read loop, which handles the ACK and the response in their order on the line.
+    private bool _acknowledged;
+
     public SerialApiTransaction(byte function, byte[] frame, bool expectsResponse, CancellationToken cancellationToken)
     {
         Function = function;
@@ -68,14 +71,25 @@ internal sealed class SerialApiTransaction
     }
 
     /// <summary>
-    /// Completes the current attempt with an ACK, NAK or CAN. Called by the read loop.
+    /// Completes the current attempt with an ACK, NAK or CAN; an ACK lets the response be accepted. Called by the read loop.
     /// </summary>
-    public bool TryAcknowledge(FrameKind kind) => _acknowledgement?.TrySetResult(kind) == true;
+    public bool TryAcknowledge(FrameKind kind)
+    {
+        if (_acknowledgement?.TrySetResult(kind) != true)
+        {
+            return false;
+        }
+
+        _acknowledged |= kind == FrameKind.Ack;
+        return true;
+    }
 
     /// <summary>
-    /// Completes the response when it answers this request's function. Called by the read loop.
+    /// Completes the response when it answers this request's function and follows its ACK. The controller always
+    /// acknowledges before it responds, so a response read before the ACK is stale. Called by the read loop.
     /// </summary>
-    public bool TryRespond(DataFrame response) => response.Function == Function && _response?.TrySetResult(response) == true;
+    public bool TryRespond(DataFrame response) =>
+        _acknowledged && response.Function == Function && _response?.TrySetResult(response) == true;
 
     /// <summary>
     /// Ends the current attempt and the response wait with an exception.

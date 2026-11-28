@@ -39,6 +39,26 @@ public class SerialApiDriverTests
     }
 
     [Fact]
+    public async Task WhenAStaleResponseArrivesBeforeTheAck_ThenItIsIgnoredAndTheResponseRightBehindTheAckIsReturned()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false };
+        await using var driver = await StartDriverAsync(stick);
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+
+        // Act
+        stick.SendToHost([
+            .. FrameEncoder.Encode(FrameType.Response, FunctionId.GetControllerId, [0x11]),
+            FrameHeader.Ack,
+            .. FrameEncoder.Encode(FrameType.Response, FunctionId.GetControllerId, [0x22])]);
+        var response = await request.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(new byte[] { 0x22 }, response.Payload);
+    }
+
+    [Fact]
     public async Task WhenControllerSendsARequestFrame_ThenItIsAcknowledgedAndHandedToTheUnsolicitedFrames()
     {
         // Arrange
