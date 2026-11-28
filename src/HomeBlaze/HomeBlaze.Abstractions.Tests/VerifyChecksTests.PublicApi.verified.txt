@@ -333,7 +333,7 @@ namespace HomeBlaze.Abstractions.Devices
     {
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=190)]
         [System.ComponentModel.Category("Pairing")]
-        bool IsPairing { get; }
+        bool? IsPairing { get; }
         [HomeBlaze.Abstractions.Attributes.Operation(Description="Opens the window in which the hub accepts new devices.", Icon="Add", Position=1, Title="Start Pairing")]
         [System.ComponentModel.Category("Pairing")]
         System.Threading.Tasks.Task StartPairingAsync(System.TimeSpan? duration, System.Threading.CancellationToken cancellationToken);

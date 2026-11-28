@@ -12,17 +12,17 @@ namespace HomeBlaze.Abstractions.Devices;
 public interface IPairingController
 {
     /// <summary>
-    /// Whether the hub accepts new devices. Turns false when the window closes on its own, after a device was added,
-    /// or when <see cref="StopPairingAsync"/> is called.
+    /// Whether the hub accepts new devices, or null until the hub reports its state. Turns false when the window closes
+    /// on its own or when <see cref="StopPairingAsync"/> is called, and depending on the protocol after a device was added.
     /// </summary>
     [State(IsDiscrete = true, Position = 190)]
     [Category("Pairing")]
-    bool IsPairing { get; }
+    bool? IsPairing { get; }
 
     /// <summary>
     /// Opens the pairing window.
     /// </summary>
-    /// <param name="duration">How long the window stays open, or null for the default of the hub.</param>
+    /// <param name="duration">How long the window stays open, or null for the default of the hub. A duration above the maximum of the hub is clamped to that maximum.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     [Operation(Title = "Start Pairing", Icon = "Add", Position = 1, Description = "Opens the window in which the hub accepts new devices.")]
     [Category("Pairing")]
