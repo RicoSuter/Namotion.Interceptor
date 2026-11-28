@@ -153,7 +153,7 @@ The Ecowitt gateway exposes an undocumented but stable local HTTP API. Values ar
 | `ch_leaf[]` | Array of `{channel, leaf_wetness, battery}` | Leaf wetness channels (WH35) |
 | `ch_pm25[]` | Array of `{channel, pm25, pm25_24h, battery}` | PM2.5 air quality |
 | `ch_co2[]` | Array of `{channel, co2, co2_24h, temp, humidity, unit, battery}` | CO2 sensors |
-| `ch_leak[]` | Array of `{channel, leak, battery}` | Water leak detectors |
+| `ch_leak[]` | Array of `{channel, name, battery, status}` | Water leak detectors: `status` is `Normal` or `Leakage` (case-insensitive, any value starting with `Leak` is a leak, any other value is unknown); a `leak` key with `1` or `0` is read when `status` is absent |
 | `lightning` | Object `{distance, count, timestamp, battery}` | Lightning (NOT an array) |
 
 ### common_list ID mapping
