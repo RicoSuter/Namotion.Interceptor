@@ -1,0 +1,9 @@
+{
+  "name": "namotion-matter-integration",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@matter/main": "0.18.1",
+    "matter-server": "1.6.1"
+  }
+}
