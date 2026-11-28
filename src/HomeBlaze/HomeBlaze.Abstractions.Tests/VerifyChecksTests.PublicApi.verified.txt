@@ -383,6 +383,9 @@ namespace HomeBlaze.Abstractions.Devices.Energy
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=340, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
         decimal? BatteryLevel { get; }
+        [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Position=341)]
+        [Namotion.Interceptor.Attributes.Derived]
+        bool? IsBatteryLow { get; }
     }
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
     [System.ComponentModel.Description("Reports whether a charging cable is plugged in, whether it charges and with which" +
