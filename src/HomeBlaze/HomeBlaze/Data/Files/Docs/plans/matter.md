@@ -139,7 +139,7 @@ Device classes in v1:
 
 **Mapping.** Device classes are thin: interface properties are derived properties over cluster properties with unit conversion (hundredths of degrees Celsius, the level range 1 to 254, mireds), and interface methods call generated cluster commands. A capability whose cluster or feature is missing reads `null`. `MatterButton` translates Switch cluster events into `ButtonState`. Titles use the node label, then the bridged node label, then the product name.
 
-**Configuration.** Only `MatterController` has configuration: `ServerUrl` (default `unix:///run/matter/matter.sock`) and `RetryInterval`. Nodes and devices are runtime state with `internal set`, rebuilt from the server on every connect; the HomeBlaze JSON holds only the controller.
+**Configuration.** Only `MatterController` has configuration: `ServerUrl` (default `unix:///run/matter/matter.sock`), `RetryInterval` and the optional `ThreadBorderRouterUrl` (the REST API of an OpenThread Border Router, see Thread). Nodes and devices are runtime state with `internal set`, rebuilt from the server on every connect; the HomeBlaze JSON holds only the controller.
 
 **Operations.** On the controller: `CommissionDevice(code)`, `SetWifiCredentials`, `SetThreadDataset`. On a node: `Remove`, `Identify`.
 
@@ -160,7 +160,7 @@ Device classes in v1:
 | Component | Type | Content |
 |---|---|---|
 | `MatterControllerWidget` | Widget | Connection status, server version, node count, whether Bluetooth, Wi-Fi credentials and a Thread dataset are available, link to the matterjs-server dashboard |
-| `MatterControllerEditComponent` | Edit | `ServerUrl`, `RetryInterval`, with local state and dirty tracking initialized in `OnInitialized` |
+| `MatterControllerEditComponent` | Edit | `ServerUrl`, `RetryInterval`, `ThreadBorderRouterUrl`, with local state and dirty tracking initialized in `OnInitialized` |
 | `MatterControllerPage` | Page | Node list (name, vendor, product, availability, device count), Add device panel, credentials section |
 
 There is no Setup component and no discovery: the single controller is created with the default URL, and commissionable devices cannot be added without their pairing code anyway. Nodes and devices use the generic interface-driven display, and their operations appear through `[Operation]`.
@@ -173,11 +173,21 @@ There is no Setup component and no discovery: the single controller is created w
 4. Commissioning runs with progress shown and can be canceled.
 5. On success the node arrives through `node_added`. On failure the server's `reason` is shown in plain words, such as "Wrong pairing code" or "Device not found, is it in pairing mode?".
 
-**Credentials.** Wi-Fi SSID and password and the Thread dataset (hex TLV) are write-only: they are sent to the server, and the page only shows whether each is set.
+**Credentials.** Wi-Fi SSID and password and the Thread dataset (hex TLV) are write-only: they are sent to the server, and the page only shows whether each is set. With `ThreadBorderRouterUrl` configured, an "Import from border router" button reads the dataset from the border router and sends it to the server, so the hex value is never typed or shown.
+
+## Thread
+
+Thread devices are reachable over IPv6 through a Thread border router. Commissioning a new Thread device needs the network's active dataset, which commercial border routers (Apple, Google) do not hand out. With those, HomeBlaze can only control Thread devices that were paired there first and shared through a multi-admin pairing code. For commissioning its own Thread devices, HomeBlaze uses an OpenThread Border Router (OTBR) whose dataset it can read.
+
+- **Radio.** A USB Thread radio with OpenThread RCP firmware, such as the Home Assistant Connect ZBT-2 (flashed with the Open Home Foundation web flasher, serial at 460800 baud). The radio runs Thread only, not Zigbee at the same time.
+- **Border router.** The `openthread/otbr` container on the same host as matterjs-server: host networking, `NET_ADMIN`, `/dev/net/tun` and the radio's serial device, with the LAN interface as infrastructure interface.
+- **Dataset import.** `MatterController` reads `GET {ThreadBorderRouterUrl}/node/dataset/active` with `Accept: text/plain`, which returns the hex TLV, and passes it to `SetThreadDatasetAsync`. A 204 response means the border router has no network yet; the import then fails with that message. HomeBlaze never writes to the border router.
+- **Host network.** The host accepts the border router's route announcements: kernel support for IPv6 route information, `accept_ra_rt_info_max_plen` of at least 64 and `accept_ra=2` (IPv6 forwarding is on for the border router), set persistently through NetworkManager or systemd-networkd. Running matterjs-server and OTBR on one host with forwarding enabled is part of the manual verification.
 
 ## Deployment
 
 - **Docker Compose.** An opt-in `matter` profile runs `ghcr.io/matter-js/matterjs-server`, pinned by version and digest, with `network_mode: host` (needed for IPv6 link-local addresses and mDNS), `read_only`, and its storage in `./data/Matter`. It listens only on `--listen-address /run/matter/matter.sock` in a volume shared with the `homeblaze` service, so no unauthenticated port is opened on the network. Bluetooth (`--bluetooth-adapter 0` and the D-Bus mount) is commented out, like the GPIO lines, together with the permission note for the unprivileged data folder.
+- **Thread profile.** An opt-in `thread` profile runs `openthread/otbr`, pinned by version and digest, with the radio's `/dev/serial/by-id/...` path as a commented placeholder. Its REST API has no authentication either, so the compose file binds it to the Docker bridge gateway address, where the `homeblaze` container reaches it and the LAN does not. `ThreadBorderRouterUrl` points there.
 - **Aspire AppHost.** An optional matterjs-server container behind an `AppHost:Matter` flag, with host networking (Linux only).
 - **Trust model.** The matterjs-server WebSocket has no authentication. The documentation states that a `ws://` port, when used, must stay on a trusted network.
 
@@ -190,12 +200,14 @@ There is no Setup component and no discovery: the single controller is created w
 
 **Integration tests** (`Category=Integration`, run when the Matter code changes): a fixture starts matterjs-server and a matter.js virtual light through `npx`, commissions the light on the network with its pairing code, reads state, toggles it and observes the update, reads and writes an attribute, checks that the generated wire names are accepted, and removes the node. `import_test_node` loads recorded dumps of real devices to check their structure end to end.
 
-**Manual verification** before the pull request is finalized: commission a Philips Hue Bridge on a real host and check on/off, brightness, color and color temperature of its lights, behavior after a HomeBlaze reconnect and after a matterjs-server restart.
+**Manual verification** before the pull request is finalized: commission a Philips Hue Bridge on a real host and check on/off, brightness, color and color temperature of its lights, behavior after a HomeBlaze reconnect and after a matterjs-server restart. With a Thread radio: start the `thread` profile, import the dataset, commission a Thread contact sensor over Bluetooth and check that open and close reach HomeBlaze, also after the host restarts.
+
+Unit tests of the dataset import run against a fake border router (dataset returned, 204, unreachable).
 
 ## Documentation
 
 - `docs/matter.md`: the `Namotion.Matter` library (API, backend, code generation), without application references.
-- `Docs/devices/Matter.md`: the compose profile, commissioning with a Hue Bridge walkthrough, Wi-Fi and Thread credentials, Bluetooth, the trust model and troubleshooting.
+- `Docs/devices/Matter.md`: the compose profile, commissioning with a Hue Bridge walkthrough, Wi-Fi and Thread credentials, Bluetooth, the Thread border router setup (radio firmware, `thread` profile, host network settings, dataset import), the trust model and troubleshooting.
 - `Data/Files/Devices/Matter.json`: a sample controller configuration.
 
 ## Out of Scope
