@@ -91,7 +91,7 @@ Each new contract was checked against Matter, Zigbee (ZCL clusters and the actio
 
 ### Changes to Existing Contracts
 
-- `IBatteryState` gets `bool? IsBatteryLow` (position 344, after the charge states of vehicles at 341 to 343) as a `[Derived]` default member that is true when `BatteryLevel` is at most 0.1, false above and `null` when the level is unknown. A device that reports a low battery flag, such as Z-Wave Battery 0xFF, implements the property itself and leaves `BatteryLevel` `null` when it has no level. Existing implementations compile unchanged.
+- `IBatteryState` gets `bool? IsBatteryLow` (position 344, after the charge states of vehicles at 341 to 343) as a `[Derived]` default member that is true when `BatteryLevel` is at most 0.1, false above and `null` when the level is unknown. It signals that the battery that powers the device needs charging or replacing soon. A device that reports a low battery flag, such as Z-Wave Battery 0xFF, implements the property itself and leaves `BatteryLevel` `null` when it has no level. A stationary storage battery that is discharged to a reserve by design reports `null`, so `SunSpecBattery` and `SunSpecStorageCapacity` implement it as `null`; vehicles keep the default. Existing implementations compile unchanged.
 - `ButtonEvent` gets `int PressCount { get; init; } = 1`.
 - `StateUnit` gets `PartsPerMillion` (ppm) and `MicrogramPerCubicMeter` (µg/m³), appended at the end, with the unit formatting of the UI and the unit list in [Building Subjects](../development/building-subjects.md#state-properties) updated.
 

@@ -573,6 +573,8 @@ namespace Namotion.Devices.SunSpec.Models
         [HomeBlaze.Abstractions.Attributes.State(Title="Battery Heartbeat")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(18, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
         public ushort? Hb { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsBatteryLow { get; }
         public int Length { get; }
         [HomeBlaze.Abstractions.Attributes.State(IsDiscrete=true, Title="Control Mode")]
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(17, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly, NotAvailableValue=Namotion.Interceptor.Modbus.ModbusNotAvailableValue.UnsignedMaximum)]
@@ -14308,6 +14310,8 @@ namespace Namotion.Devices.SunSpec.Models
         public int BaseAddress { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public decimal? BatteryLevel { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsBatteryLow { get; }
         public int Length { get; }
         public int ModelId { get; }
         [Namotion.Interceptor.Modbus.Attributes.ModbusRegister(0, Namotion.Interceptor.Modbus.ModbusDataType.U16, Access=Namotion.Interceptor.Modbus.ModbusAccess.ReadOnly)]

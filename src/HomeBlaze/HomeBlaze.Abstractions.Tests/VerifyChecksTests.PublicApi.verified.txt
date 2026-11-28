@@ -378,7 +378,7 @@ namespace HomeBlaze.Abstractions.Devices
 namespace HomeBlaze.Abstractions.Devices.Energy
 {
     [HomeBlaze.Abstractions.Attributes.SubjectAbstraction]
-    [System.ComponentModel.Description("Reports battery level as a percentage.")]
+    [System.ComponentModel.Description("Reports battery level as a percentage and whether the battery is low.")]
     public interface IBatteryState
     {
         [HomeBlaze.Abstractions.Attributes.State(Position=340, Unit=HomeBlaze.Abstractions.Attributes.StateUnit.Percent)]
