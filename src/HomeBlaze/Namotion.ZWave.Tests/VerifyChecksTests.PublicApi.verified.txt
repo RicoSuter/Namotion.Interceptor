@@ -12,6 +12,7 @@ namespace Namotion.ZWave.Transport
         public SerialTransport(string portName) { }
         public string PortName { get; }
         public System.Threading.Tasks.ValueTask<System.IO.Stream> OpenAsync(System.Threading.CancellationToken cancellationToken) { }
+        public override string ToString() { }
     }
     public sealed class TcpTransport : Namotion.ZWave.Transport.IZWaveTransport
     {
@@ -19,6 +20,7 @@ namespace Namotion.ZWave.Transport
         public string Host { get; }
         public int Port { get; }
         public System.Threading.Tasks.ValueTask<System.IO.Stream> OpenAsync(System.Threading.CancellationToken cancellationToken) { }
+        public override string ToString() { }
     }
 }
 namespace Namotion.ZWave

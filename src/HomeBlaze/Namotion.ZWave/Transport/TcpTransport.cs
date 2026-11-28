@@ -26,6 +26,11 @@ public sealed class TcpTransport : IZWaveTransport
 
     public int Port { get; }
 
+    /// <summary>
+    /// Returns the endpoint, such as "TCP 192.168.1.10:4001".
+    /// </summary>
+    public override string ToString() => $"TCP {Host}:{Port}";
+
     public async ValueTask<Stream> OpenAsync(CancellationToken cancellationToken)
     {
         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };

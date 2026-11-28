@@ -1,6 +1,7 @@
 using Namotion.Interceptor.Testing;
 using Namotion.ZWave.SerialApi;
 using Namotion.ZWave.Tests.Testing;
+using Namotion.ZWave.Transport;
 
 namespace Namotion.ZWave.Tests;
 
@@ -69,6 +70,63 @@ public class ZWaveControllerTests
     }
 
     [Fact]
+    public async Task WhenTheTransportFailsToOpen_ThenConnectThrowsAConnectionExceptionNamingTheTransport()
+    {
+        // Arrange
+        var failure = new IOException("The port is busy.");
+        var transport = new ThrowingTransport(failure);
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => ZWaveController.ConnectAsync(transport).WaitAsync(TestTimeouts.Default));
+
+        // Assert
+        var connectionException = Assert.IsType<ZWaveConnectionException>(exception);
+        Assert.Same(failure, connectionException.InnerException);
+        Assert.Contains("the throwing transport", connectionException.Message);
+    }
+
+    [Fact]
+    public async Task WhenTheSerialPortDoesNotExist_ThenConnectThrowsAConnectionExceptionNamingThePort()
+    {
+        // Arrange
+        var transport = new SerialTransport("/dev/namotion-zwave-missing-port");
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => ZWaveController.ConnectAsync(transport).WaitAsync(TestTimeouts.Default));
+
+        // Assert
+        var connectionException = Assert.IsType<ZWaveConnectionException>(exception);
+        Assert.NotNull(connectionException.InnerException);
+        Assert.Contains("/dev/namotion-zwave-missing-port", connectionException.Message);
+    }
+
+    [Fact]
+    public async Task WhenOpeningTheTransportIsCanceled_ThenConnectThrowsOperationCanceled()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var transport = new ThrowingTransport(new OperationCanceledException(cancellation.Token));
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => ZWaveController.ConnectAsync(transport, cancellationToken: cancellation.Token).WaitAsync(TestTimeouts.Default));
+    }
+
+    [Fact]
+    public async Task WhenTheTransportThrowsOperationCanceledWithoutTheCallerCanceling_ThenConnectThrowsAConnectionException()
+    {
+        // Arrange
+        var transport = new ThrowingTransport(new OperationCanceledException());
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => ZWaveController.ConnectAsync(transport).WaitAsync(TestTimeouts.Default));
+
+        // Assert
+        Assert.IsType<ZWaveConnectionException>(exception);
+    }
+
+    [Fact]
     public async Task WhenTheControllerSendsAnUnsolicitedFrame_ThenItIsAcknowledged()
     {
         // Arrange
@@ -95,5 +153,12 @@ public class ZWaveControllerTests
 
         // Assert
         await Assert.ThrowsAsync<ZWaveConnectionException>(() => controller.Completion.WaitAsync(TestTimeouts.Default));
+    }
+
+    private sealed class ThrowingTransport(Exception exception) : IZWaveTransport
+    {
+        public ValueTask<Stream> OpenAsync(CancellationToken cancellationToken) => ValueTask.FromException<Stream>(exception);
+
+        public override string ToString() => "the throwing transport";
     }
 }

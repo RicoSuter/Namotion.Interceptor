@@ -70,7 +70,12 @@ public sealed class ZWaveController : IAsyncDisposable
     /// <summary>
     /// Opens the transport and reads the controller's version, identity, capabilities and node list.
     /// </summary>
+    /// <exception cref="ZWaveConnectionException">
+    /// The transport could not be opened, with the transport's exception as the inner exception, or the connection
+    /// failed during startup.
+    /// </exception>
     /// <exception cref="ZWaveException">The controller did not answer as expected; the transport is closed again.</exception>
+    /// <exception cref="OperationCanceledException">The <paramref name="cancellationToken"/> was canceled; the transport is closed again.</exception>
     public static async Task<ZWaveController> ConnectAsync(
         IZWaveTransport transport,
         ZWaveControllerOptions? options = null,
@@ -82,7 +87,7 @@ public sealed class ZWaveController : IAsyncDisposable
         options.Validate();
         loggerFactory ??= NullLoggerFactory.Instance;
 
-        var stream = await transport.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var stream = await OpenAsync(transport, cancellationToken).ConfigureAwait(false);
         var driver = new SerialApiDriver(stream, options, loggerFactory.CreateLogger<SerialApiDriver>());
         try
         {
@@ -109,6 +114,20 @@ public sealed class ZWaveController : IAsyncDisposable
 
         async Task<byte[]> RequestAsync(byte function) =>
             (await driver.SendRequestAsync(function, default, cancellationToken).ConfigureAwait(false)).Payload;
+    }
+
+    private static async Task<Stream> OpenAsync(IZWaveTransport transport, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await transport.OpenAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not ZWaveConnectionException
+            && (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested))
+        {
+            // Also an OperationCanceledException the caller did not cause, so that only the caller's cancellation ends a reconnect loop.
+            throw new ZWaveConnectionException($"Opening the connection to the Z-Wave controller on {transport} failed.", exception);
+        }
     }
 
     /// <summary>

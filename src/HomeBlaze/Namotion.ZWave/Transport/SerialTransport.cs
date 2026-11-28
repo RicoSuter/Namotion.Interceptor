@@ -20,6 +20,11 @@ public sealed class SerialTransport : IZWaveTransport
     /// </summary>
     public string PortName { get; }
 
+    /// <summary>
+    /// Returns the serial port, such as "serial port /dev/ttyACM0".
+    /// </summary>
+    public override string ToString() => $"serial port {PortName}";
+
     public ValueTask<Stream> OpenAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
