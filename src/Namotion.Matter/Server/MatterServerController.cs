@@ -1,3 +1,4 @@
+using System.Net.WebSockets;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -11,12 +12,15 @@ namespace Namotion.Matter.Server;
 public sealed class MatterServerController : IMatterController
 {
     /// <summary>The oldest server schema version this client works with.</summary>
-    public const int MinimumServerSchemaVersion = 14;
+    internal const int MinimumServerSchemaVersion = 14;
 
     /// <summary>The schema version this client implements.</summary>
-    public const int ClientSchemaVersion = 15;
+    internal const int ClientSchemaVersion = 15;
 
+    private const ulong FirstGroupNodeId = 0xFFFF_FFFF_FFFF_0000;
     private static readonly TimeSpan MaxTimedRequestTimeout = TimeSpan.FromMilliseconds(ushort.MaxValue);
+    private static readonly TimeSpan MinCommissioningWindowTimeout = TimeSpan.FromSeconds(180);
+    private static readonly TimeSpan MaxCommissioningWindowTimeout = TimeSpan.FromSeconds(900);
 
     private readonly MatterServerConnection _connection;
     private readonly TimeSpan _requestTimeout;
@@ -43,6 +47,9 @@ public sealed class MatterServerController : IMatterController
     /// <param name="logger">The logger, or null for none.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="ArgumentException">The URL scheme is not supported.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">An option is not positive, or <see cref="MatterServerOptions.RequestTimeout"/> exceeds about 49 days.</exception>
+    /// <exception cref="WebSocketException">The server refused the connection, or closed it before sending its information.</exception>
+    /// <exception cref="MatterException">The server's information could not be read.</exception>
     /// <exception cref="NotSupportedException">The server's schema version is not supported.</exception>
     /// <exception cref="TimeoutException">The server sent no information within <see cref="MatterServerOptions.RequestTimeout"/>.</exception>
     public static async Task<MatterServerController> ConnectAsync(
@@ -53,12 +60,12 @@ public sealed class MatterServerController : IMatterController
     {
         ArgumentNullException.ThrowIfNull(serverUrl);
         options ??= new MatterServerOptions();
-        var connection = await MatterServerConnection.ConnectAsync(
-            serverUrl, options.RequestTimeout, options.MaxMessageSize, logger, cancellationToken).ConfigureAwait(false);
+        options.ThrowIfInvalid();
+        var connection = await MatterServerConnection.ConnectAsync(serverUrl, options, logger, cancellationToken).ConfigureAwait(false);
         try
         {
             var serverInfo = await connection.ReceiveServerInfoAsync(cancellationToken).ConfigureAwait(false);
-            MatterServerJson.ThrowIfUnsupported(serverInfo);
+            MatterServerResults.ThrowIfUnsupported(serverInfo);
             var controller = new MatterServerController(connection, serverInfo, options.RequestTimeout);
             connection.StartReceiving(controller.HandleEvent, controller.HandleConnectionLost);
             return controller;
@@ -74,12 +81,13 @@ public sealed class MatterServerController : IMatterController
     public async Task<IReadOnlyList<MatterNode>> StartListeningAsync(CancellationToken cancellationToken = default)
     {
         var result = await _connection.SendRequestAsync("start_listening", null, _requestTimeout, cancellationToken).ConfigureAwait(false);
-        return MatterServerJson.ReadNodes(result);
+        return MatterServerResults.ReadNodes(result);
     }
 
     /// <inheritdoc />
     public async Task WriteAttributeAsync(ulong nodeId, AttributePath path, IMatterPayload value, CancellationToken cancellationToken = default)
     {
+        ThrowIfGroupNodeId(nodeId);
         ArgumentNullException.ThrowIfNull(value);
         var result = await _connection.SendRequestAsync("write_attribute", writer =>
         {
@@ -88,7 +96,7 @@ public sealed class MatterServerController : IMatterController
             JsonMatterValueWriter.WriteProperty(writer, "value", value);
         }, _requestTimeout, cancellationToken).ConfigureAwait(false);
 
-        MatterServerJson.ThrowIfWriteFailed(result, nodeId, path);
+        MatterServerResults.ThrowIfWriteFailed(result, nodeId, path);
     }
 
     /// <inheritdoc />
@@ -100,6 +108,7 @@ public sealed class MatterServerController : IMatterController
         TimeSpan? timedRequestTimeout = null,
         CancellationToken cancellationToken = default)
     {
+        ThrowIfGroupNodeId(nodeId);
         ArgumentException.ThrowIfNullOrEmpty(commandName);
         if (timedRequestTimeout is { } timedTimeout && (timedTimeout < TimeSpan.Zero || timedTimeout > MaxTimedRequestTimeout))
         {
@@ -132,7 +141,7 @@ public sealed class MatterServerController : IMatterController
             writer.WriteBoolean("network_only", networkOnly);
         }, timeout: null, cancellationToken).ConfigureAwait(false);
 
-        return MatterServerJson.ReadNode(result);
+        return MatterServerResults.ReadCommissionedNode(result);
     }
 
     /// <inheritdoc />
@@ -141,7 +150,7 @@ public sealed class MatterServerController : IMatterController
         ArgumentException.ThrowIfNullOrEmpty(code);
         var result = await _connection.SendRequestAsync("parse_onboarding_payload", writer => writer.WriteString("code", code), _requestTimeout, cancellationToken)
             .ConfigureAwait(false);
-        return MatterServerJson.ReadOnboardingPayloads(result);
+        return MatterServerResults.ReadOnboardingPayloads(result);
     }
 
     /// <inheritdoc />
@@ -164,19 +173,29 @@ public sealed class MatterServerController : IMatterController
     }
 
     /// <inheritdoc />
-    public Task RemoveNodeAsync(ulong nodeId, CancellationToken cancellationToken = default) =>
-        _connection.SendRequestAsync("remove_node", writer => writer.WriteNumber("node_id", nodeId), _requestTimeout, cancellationToken);
+    public Task RemoveNodeAsync(ulong nodeId, CancellationToken cancellationToken = default)
+    {
+        ThrowIfGroupNodeId(nodeId);
+        return _connection.SendRequestAsync("remove_node", writer => writer.WriteNumber("node_id", nodeId), _requestTimeout, cancellationToken);
+    }
 
     /// <inheritdoc />
     public async Task<MatterCommissioningWindow> OpenCommissioningWindowAsync(ulong nodeId, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
+        ThrowIfGroupNodeId(nodeId);
+        if (timeout < MinCommissioningWindowTimeout || timeout > MaxCommissioningWindowTimeout || timeout.Ticks % TimeSpan.TicksPerSecond != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout), timeout, "A commissioning window timeout is a whole number of seconds from 180 to 900.");
+        }
+
+        var seconds = (int)timeout.TotalSeconds;
         var result = await _connection.SendRequestAsync("open_commissioning_window", writer =>
         {
             writer.WriteNumber("node_id", nodeId);
-            writer.WriteNumber("timeout", (int)timeout.TotalSeconds);
+            writer.WriteNumber("timeout", seconds);
         }, _requestTimeout, cancellationToken).ConfigureAwait(false);
 
-        return MatterServerJson.ReadCommissioningWindow(result);
+        return MatterServerResults.ReadCommissioningWindow(result);
     }
 
     /// <inheritdoc />
@@ -186,16 +205,23 @@ public sealed class MatterServerController : IMatterController
         _events.Writer.TryComplete();
     }
 
-    private bool HandleEvent(string name, JsonElement data)
+    private void HandleEvent(MatterControllerEvent controllerEvent)
     {
-        var controllerEvent = MatterServerJson.ReadEvent(name, data);
         if (controllerEvent is MatterServerInfoChangedEvent serverInfoChanged)
         {
             _serverInfo = serverInfoChanged.ServerInfo;
         }
 
-        return controllerEvent is not null && _events.Writer.TryWrite(controllerEvent);
+        _events.Writer.TryWrite(controllerEvent);
     }
 
     private void HandleConnectionLost(Exception exception) => _events.Writer.TryComplete(exception);
+
+    private static void ThrowIfGroupNodeId(ulong nodeId)
+    {
+        if (nodeId >= FirstGroupNodeId)
+        {
+            throw new ArgumentOutOfRangeException(nameof(nodeId), nodeId, "Group node IDs (0xFFFFFFFFFFFF0000 and above) are not supported.");
+        }
+    }
 }

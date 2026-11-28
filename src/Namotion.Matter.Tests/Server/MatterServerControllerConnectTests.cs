@@ -1,3 +1,6 @@
+using System.Net.WebSockets;
+using System.Text.Json.Nodes;
+using Namotion.Interceptor.Testing;
 using Namotion.Matter.Server;
 
 namespace Namotion.Matter.Tests.Server;
@@ -22,7 +25,7 @@ public class MatterServerControllerConnectTests
     {
         // Arrange
         await using var server = await FakeMatterServer.StartAsync();
-        server.ServerInfo = FakeMatterServer.CreateServerInfo(schemaVersion: 13, minSupportedSchemaVersion: 11);
+        server.ServerInfo = FakeMatterServer.CreateServerInfo(schemaVersion: MatterServerController.MinimumServerSchemaVersion - 1, minSupportedSchemaVersion: 11);
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<NotSupportedException>(() => MatterServerController.ConnectAsync(server.Url));
@@ -34,7 +37,7 @@ public class MatterServerControllerConnectTests
     {
         // Arrange
         await using var server = await FakeMatterServer.StartAsync();
-        server.ServerInfo = FakeMatterServer.CreateServerInfo(schemaVersion: 20, minSupportedSchemaVersion: 16);
+        server.ServerInfo = FakeMatterServer.CreateServerInfo(schemaVersion: 20, minSupportedSchemaVersion: MatterServerController.ClientSchemaVersion + 1);
 
         // Act & Assert
         await Assert.ThrowsAsync<NotSupportedException>(() => MatterServerController.ConnectAsync(server.Url));
@@ -49,6 +52,61 @@ public class MatterServerControllerConnectTests
 
         // Act & Assert
         await Assert.ThrowsAsync<TimeoutException>(() => MatterServerController.ConnectAsync(server.Url, new MatterServerOptions { RequestTimeout = TimeSpan.FromMilliseconds(200) }));
+    }
+
+    [Fact]
+    public async Task WhenServerClosesBeforeServerInfo_ThenConnectThrowsWebSocketException()
+    {
+        // Arrange
+        await using var server = await FakeMatterServer.StartAsync();
+        server.ServerInfo = null;
+        server.CloseClient();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<WebSocketException>(() => MatterServerController.ConnectAsync(server.Url));
+    }
+
+    [Fact]
+    public async Task WhenServerInfoIsMalformed_ThenConnectThrowsMatterException()
+    {
+        // Arrange
+        await using var server = await FakeMatterServer.StartAsync();
+        server.ServerInfo = new JsonObject { ["fabric_id"] = "not a number" };
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<MatterException>(() => MatterServerController.ConnectAsync(server.Url));
+        Assert.IsType<InvalidOperationException>(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task WhenServerRefusesConnection_ThenConnectThrowsWebSocketException()
+    {
+        // Arrange
+        var url = new Uri($"ws://127.0.0.1:{LoopbackPorts.GetFreePort()}/ws");
+
+        // Act & Assert
+        await Assert.ThrowsAsync<WebSocketException>(() => MatterServerController.ConnectAsync(url));
+    }
+
+    [Theory]
+    [InlineData(nameof(MatterServerOptions.RequestTimeout))]
+    [InlineData(nameof(MatterServerOptions.MaxMessageSize))]
+    [InlineData(nameof(MatterServerOptions.KeepAliveInterval))]
+    [InlineData(nameof(MatterServerOptions.KeepAliveTimeout))]
+    public async Task WhenOptionIsNotPositive_ThenConnectThrowsArgumentOutOfRangeException(string option)
+    {
+        // Arrange
+        var options = option switch
+        {
+            nameof(MatterServerOptions.RequestTimeout) => new MatterServerOptions { RequestTimeout = TimeSpan.Zero },
+            nameof(MatterServerOptions.MaxMessageSize) => new MatterServerOptions { MaxMessageSize = 0 },
+            nameof(MatterServerOptions.KeepAliveInterval) => new MatterServerOptions { KeepAliveInterval = TimeSpan.Zero },
+            _ => new MatterServerOptions { KeepAliveTimeout = TimeSpan.FromSeconds(-1) }
+        };
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => MatterServerController.ConnectAsync(new Uri("ws://127.0.0.1:1/ws"), options));
+        Assert.Contains(option, exception.ParamName);
     }
 
     [Fact]
@@ -72,4 +130,20 @@ public class MatterServerControllerConnectTests
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() => MatterServerController.ConnectAsync(new Uri("http://localhost:5580/ws")));
     }
+
+    [Fact]
+    public async Task WhenDisposedTwice_ThenSecondDisposeCompletes()
+    {
+        // Arrange
+        await using var server = await FakeMatterServer.StartAsync();
+        var controller = await MatterServerController.ConnectAsync(server.Url);
+
+        // Act
+        await Task.WhenAll(DisposeAsTask(controller), DisposeAsTask(controller)).WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.True(controller.Events.Completion.IsCompletedSuccessfully);
+    }
+
+    private static Task DisposeAsTask(IAsyncDisposable disposable) => disposable.DisposeAsync().AsTask();
 }

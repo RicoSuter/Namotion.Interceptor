@@ -47,7 +47,11 @@ internal static class MatterServerJson
         {
             foreach (var parent in parents.EnumerateObject())
             {
-                endpointParents[ushort.Parse(parent.Name, NumberStyles.None, CultureInfo.InvariantCulture)] = parent.Value.GetUInt16();
+                if (ushort.TryParse(parent.Name, NumberStyles.None, CultureInfo.InvariantCulture, out var endpoint) &&
+                    parent.Value.ValueKind == JsonValueKind.Number && parent.Value.TryGetUInt16(out var parentEndpoint))
+                {
+                    endpointParents[endpoint] = parentEndpoint;
+                }
             }
         }
 
@@ -61,32 +65,6 @@ internal static class MatterServerJson
             endpointParents);
     }
 
-    public static MatterControllerEvent? ReadEvent(string name, JsonElement data) => name switch
-    {
-        "node_added" => new MatterNodeAddedEvent(ReadNode(data.Clone())),
-        "node_updated" => new MatterNodeUpdatedEvent(ReadNode(data.Clone())),
-        "node_removed" => new MatterNodeRemovedEvent(data.GetUInt64()),
-        "endpoint_added" => new MatterEndpointAddedEvent(data.GetProperty("node_id").GetUInt64(), data.GetProperty("endpoint_id").GetUInt16()),
-        "endpoint_removed" => new MatterEndpointRemovedEvent(data.GetProperty("node_id").GetUInt64(), data.GetProperty("endpoint_id").GetUInt16()),
-        "attribute_updated" => new MatterAttributeChangedEvent(
-            data[0].GetUInt64(),
-            AttributePath.Parse(data[1].GetString()),
-            new MatterValue(data[2].Clone())),
-        "node_event" => new MatterNodeEventReceivedEvent(
-            data.GetProperty("node_id").GetUInt64(),
-            new EventPath(
-                data.GetProperty("endpoint_id").GetUInt16(),
-                data.GetProperty("cluster_id").GetUInt32(),
-                data.GetProperty("event_id").GetUInt32()),
-            data.GetProperty("event_number").GetUInt64(),
-            data.GetProperty("priority").GetByte(),
-            data.GetProperty("timestamp").GetInt64(),
-            (MatterEventTimestampType)data.GetProperty("timestamp_type").GetInt32(),
-            new MatterValue(data.GetProperty("data").Clone())),
-        "server_info_updated" => new MatterServerInfoChangedEvent(ReadServerInfo(data)),
-        _ => null
-    };
-
     /// <summary>Reads the nodes of a cloned <c>start_listening</c> result.</summary>
     public static IReadOnlyList<MatterNode> ReadNodes(JsonElement clonedNodes)
     {
@@ -97,28 +75,6 @@ internal static class MatterServerJson
         }
 
         return nodes;
-    }
-
-    /// <summary>Throws when a device answered a write with a status other than success; a group write has no statuses.</summary>
-    public static void ThrowIfWriteFailed(JsonElement result, ulong nodeId, AttributePath path)
-    {
-        if (result.ValueKind != JsonValueKind.Array)
-        {
-            return;
-        }
-
-        foreach (var entry in result.EnumerateArray())
-        {
-            var status = entry.GetProperty("Status").GetInt32();
-            if (status != 0)
-            {
-                throw new MatterException(
-                    MatterErrorCode.Unknown,
-                    string.Create(CultureInfo.InvariantCulture, $"Node {nodeId} rejected the write to {path} with status 0x{status:X2}."),
-                    status,
-                    ReadOptionalInt32(entry, "ClusterStatus"));
-            }
-        }
     }
 
     public static MatterCommissioningWindow ReadCommissioningWindow(JsonElement result) => new(
@@ -161,7 +117,7 @@ internal static class MatterServerJson
         _ => MatterCommissioningFailureReason.Other
     };
 
-    private static int? ReadOptionalInt32(JsonElement element, string propertyName) =>
+    public static int? ReadOptionalInt32(JsonElement element, string propertyName) =>
         element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.Number ? value.GetInt32() : null;
 
     private static DateTimeOffset? ReadOptionalTimestamp(JsonElement element, string propertyName) =>
@@ -169,23 +125,6 @@ internal static class MatterServerJson
         DateTimeOffset.TryParse(value.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var timestamp)
             ? timestamp
             : null;
-
-    /// <summary>Throws when this client does not support the server's schema version.</summary>
-    /// <exception cref="NotSupportedException">The schema version is not supported.</exception>
-    public static void ThrowIfUnsupported(MatterServerInfo serverInfo)
-    {
-        if (serverInfo.SchemaVersion < MatterServerController.MinimumServerSchemaVersion)
-        {
-            throw new NotSupportedException(string.Create(CultureInfo.InvariantCulture,
-                $"The Matter server has schema version {serverInfo.SchemaVersion}, older than the required {MatterServerController.MinimumServerSchemaVersion}. Update the server."));
-        }
-
-        if (serverInfo.MinSupportedSchemaVersion > MatterServerController.ClientSchemaVersion)
-        {
-            throw new NotSupportedException(string.Create(CultureInfo.InvariantCulture,
-                $"The Matter server requires client schema version {serverInfo.MinSupportedSchemaVersion} or newer, this client implements {MatterServerController.ClientSchemaVersion}. Update the client."));
-        }
-    }
 
     /// <summary>Writes a request message.</summary>
     public static ReadOnlyMemory<byte> WriteRequest(string messageId, string command, Action<Utf8JsonWriter>? writeArguments)

@@ -85,7 +85,7 @@ public class MatterServerIntegrationTests(MatterServerFixture fixture)
         {
             switch (controllerEvent)
             {
-                case MatterAttributeChangedEvent changed when changed.NodeId == nodeId && changed.Path == path:
+                case MatterAttributeUpdatedEvent changed when changed.NodeId == nodeId && changed.Path == path:
                     value = changed.Value;
                     return condition(value);
 

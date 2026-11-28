@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Matter.Tests.Server;
 
@@ -44,6 +45,9 @@ public sealed class FakeMatterServer : IAsyncDisposable
 
     /// <summary>Whether a request without a handler result is left unanswered rather than answered with a null result.</summary>
     public bool LeaveUnansweredRequestsOpen { get; set; }
+
+    /// <summary>Whether the server stops reading requests, so the client's sends block once the buffers are full.</summary>
+    public bool PauseReceiving { get; set; }
 
     public Channel<JsonObject> Requests { get; } = Channel.CreateUnbounded<JsonObject>();
 
@@ -93,6 +97,27 @@ public sealed class FakeMatterServer : IAsyncDisposable
     {
         var client = await _client.Task;
         await SendAsync(client, new JsonObject { ["event"] = eventName, ["data"] = data });
+    }
+
+    /// <summary>Sends a message as it is.</summary>
+    public async Task SendRawAsync(string message)
+    {
+        var client = await _client.Task;
+        await SendAsync(client, Encoding.UTF8.GetBytes(message));
+    }
+
+    /// <summary>Waits for the next request with the command, skipping others.</summary>
+    public async Task<JsonObject> ReadRequestAsync(string command)
+    {
+        using var timeout = new CancellationTokenSource(TestTimeouts.Default);
+        while (true)
+        {
+            var request = await Requests.Reader.ReadAsync(timeout.Token);
+            if (request["command"]!.GetValue<string>() == command)
+            {
+                return request;
+            }
+        }
     }
 
     /// <summary>Answers a request that was left open with its <c>result</c>.</summary>
@@ -154,12 +179,23 @@ public sealed class FakeMatterServer : IAsyncDisposable
     }
 
     /// <summary>Receives one message into the buffer; returns its length, or -1 when the client closed.</summary>
-    private static async Task<int> ReceiveMessageAsync(WebSocket socket, byte[] buffer, CancellationToken cancellationToken)
+    private async Task<int> ReceiveMessageAsync(WebSocket socket, byte[] buffer, CancellationToken cancellationToken)
     {
         var length = 0;
         ValueWebSocketReceiveResult result;
         do
         {
+            if (PauseReceiving)
+            {
+                // Ends when the client disconnects or the server stops.
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+
+            if (length == buffer.Length)
+            {
+                throw new InvalidOperationException("The request exceeds the fake server's buffer.");
+            }
+
             result = await socket.ReceiveAsync(buffer.AsMemory(length), cancellationToken);
             if (result.MessageType == WebSocketMessageType.Close)
             {
@@ -195,9 +231,11 @@ public sealed class FakeMatterServer : IAsyncDisposable
         await SendAsync(socket, response);
     }
 
-    private async Task SendAsync(WebSocket socket, JsonNode message)
+    private Task SendAsync(WebSocket socket, JsonNode message) =>
+        SendAsync(socket, Encoding.UTF8.GetBytes(message.ToJsonString(JsonSerializerOptions.Default)));
+
+    private async Task SendAsync(WebSocket socket, byte[] bytes)
     {
-        var bytes = Encoding.UTF8.GetBytes(message.ToJsonString(JsonSerializerOptions.Default));
         await _sendLock.WaitAsync();
         try
         {

@@ -1,9 +1,7 @@
-using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.WebSockets;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Namotion.Matter.Server;
 
@@ -13,11 +11,10 @@ namespace Namotion.Matter.Server;
 /// </summary>
 internal sealed class MatterServerConnection : IAsyncDisposable
 {
-    private const string ServerShutdownEvent = "server_shutdown";
-
     private readonly TimeSpan _requestTimeout;
-    private readonly ILogger _logger;
-    private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonElement>> _pendingRequests = new();
+    private readonly ILogger? _logger;
+    private readonly MatterServerPendingRequests _pendingRequests = new();
+    private readonly Lock _disposeLock = new();
 
     // Never disposed: a request that races DisposeAsync still releases it.
     private readonly SemaphoreSlim _sendLock = new(1, 1);
@@ -25,33 +22,40 @@ internal sealed class MatterServerConnection : IAsyncDisposable
     // Disposed last in DisposeAsync; a request that reads its token afterwards fails with ObjectDisposedException.
     private readonly CancellationTokenSource _disposeCancellation = new();
 
-    // Read by ReceiveServerInfoAsync, then only by the receive loop; disposed in DisposeAsync after the loop ended.
+    // Received from by ReceiveServerInfoAsync, then only by the receive loop; disposed in DisposeAsync after the loop ended.
     private readonly MatterServerSocket _socket;
-    private Func<string, JsonElement, bool> _handleEvent = static (_, _) => false;
+    private Action<MatterControllerEvent> _handleEvent = static _ => { };
     private Action<Exception> _handleConnectionLost = static _ => { };
     private Task _receiveLoop = Task.CompletedTask;
+
+    // Set once, by the first failure.
     private volatile Exception? _connectionError;
-    private volatile int _disposed;
+
+    // Set once, under the dispose lock.
+    private volatile Task? _disposeTask;
     private long _nextMessageId;
 
-    private MatterServerConnection(MatterServerSocket socket, TimeSpan requestTimeout, ILogger logger)
+    private MatterServerConnection(MatterServerSocket socket, TimeSpan requestTimeout, ILogger? logger)
     {
         _socket = socket;
         _requestTimeout = requestTimeout;
         _logger = logger;
     }
 
-    /// <summary>Opens the WebSocket; see <see cref="MatterServerOptions"/> for the timeout and the maximum message size.</summary>
+    /// <summary>Opens the WebSocket with the options, which the caller has validated.</summary>
     /// <exception cref="ArgumentException">The URL scheme is not supported.</exception>
+    /// <exception cref="WebSocketException">The server refused the connection.</exception>
     public static async Task<MatterServerConnection> ConnectAsync(
-        Uri serverUrl, TimeSpan requestTimeout, int maxMessageSize, ILogger? logger, CancellationToken cancellationToken)
+        Uri serverUrl, MatterServerOptions options, ILogger? logger, CancellationToken cancellationToken)
     {
-        var socket = await MatterServerSocket.ConnectAsync(serverUrl, maxMessageSize, cancellationToken).ConfigureAwait(false);
-        return new MatterServerConnection(socket, requestTimeout, logger ?? NullLogger.Instance);
+        var socket = await MatterServerSocket.ConnectAsync(serverUrl, options, cancellationToken).ConfigureAwait(false);
+        return new MatterServerConnection(socket, options.RequestTimeout, logger);
     }
 
     /// <summary>Receives the information the server sends first; call it once, before <see cref="StartReceiving"/>.</summary>
     /// <exception cref="TimeoutException">The server sent nothing within the request timeout.</exception>
+    /// <exception cref="WebSocketException">The server closed the connection first.</exception>
+    /// <exception cref="MatterException">The information could not be read.</exception>
     public async Task<MatterServerInfo> ReceiveServerInfoAsync(CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -72,14 +76,13 @@ internal sealed class MatterServerConnection : IAsyncDisposable
             throw new WebSocketException("The Matter server closed the connection before sending its information.");
         }
 
-        using var document = JsonDocument.Parse(serverInfo);
-        return MatterServerJson.ReadServerInfo(document.RootElement);
+        return MatterServerResults.ReadServerInfo(serverInfo);
     }
 
     /// <summary>Starts the receive loop.</summary>
-    /// <param name="handleEvent">Handles an event by name and returns whether it knows it; the data is only valid during the call.</param>
+    /// <param name="handleEvent">Handles an event this client knows.</param>
     /// <param name="handleConnectionLost">Called once with the error when the connection is lost, not when it is disposed.</param>
-    public void StartReceiving(Func<string, JsonElement, bool> handleEvent, Action<Exception> handleConnectionLost)
+    public void StartReceiving(Action<MatterControllerEvent> handleEvent, Action<Exception> handleConnectionLost)
     {
         _handleEvent = handleEvent;
         _handleConnectionLost = handleConnectionLost;
@@ -94,8 +97,7 @@ internal sealed class MatterServerConnection : IAsyncDisposable
     public async Task<JsonElement> SendRequestAsync(string command, Action<Utf8JsonWriter>? writeArguments, TimeSpan? timeout, CancellationToken cancellationToken)
     {
         var messageId = Interlocked.Increment(ref _nextMessageId).ToString(CultureInfo.InvariantCulture);
-        var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _pendingRequests[messageId] = completion;
+        var answer = _pendingRequests.Add(messageId);
         try
         {
             // Closing sets its state before it fails the pending requests, so a request registered after that fails here.
@@ -109,18 +111,8 @@ internal sealed class MatterServerConnection : IAsyncDisposable
 
             try
             {
-                await _sendLock.WaitAsync(waitCancellation.Token).ConfigureAwait(false);
-                try
-                {
-                    // Canceling a WebSocket send aborts the connection, so the send only stops when the connection is disposed.
-                    await _socket.SendAsync(message, _disposeCancellation.Token).ConfigureAwait(false);
-                }
-                finally
-                {
-                    _sendLock.Release();
-                }
-
-                return await completion.Task.WaitAsync(waitCancellation.Token).ConfigureAwait(false);
+                await SendAsync(command, message, waitCancellation.Token).ConfigureAwait(false);
+                return await answer.WaitAsync(waitCancellation.Token).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is OperationCanceledException or WebSocketException && _disposeCancellation.IsCancellationRequested)
             {
@@ -131,29 +123,79 @@ internal sealed class MatterServerConnection : IAsyncDisposable
                 throw new TimeoutException(string.Create(CultureInfo.InvariantCulture,
                     $"The Matter server did not answer '{command}' within {timeout}."));
             }
+            catch (OperationCanceledException exception) when (exception.CancellationToken != cancellationToken)
+            {
+                // The wait observed the linked token; the caller sees its own.
+                throw new OperationCanceledException(exception.Message, exception, cancellationToken);
+            }
         }
         finally
         {
-            _pendingRequests.TryRemove(messageId, out _);
+            _pendingRequests.Remove(messageId, answer);
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        lock (_disposeLock)
         {
-            return;
+            _disposeTask ??= DisposeCoreAsync();
+            return new ValueTask(_disposeTask);
         }
+    }
 
+    private async Task DisposeCoreAsync()
+    {
         await _disposeCancellation.CancelAsync().ConfigureAwait(false);
         await _receiveLoop.ConfigureAwait(false);
-        FailPendingRequests(connectionError: null);
+        _pendingRequests.FailAll(connectionError: null);
         _socket.Dispose();
         _disposeCancellation.Dispose();
     }
 
+    /// <summary>Sends a message under the send lock; a send that takes longer than the request timeout fails the connection.</summary>
+    private async Task SendAsync(string command, ReadOnlyMemory<byte> message, CancellationToken waitCancellationToken)
+    {
+        await _sendLock.WaitAsync(waitCancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Aborting the socket also disposes it, so a request that waited for the lock checks the state first.
+            ThrowIfClosed();
+
+            // Canceling a WebSocket send aborts the connection, so the caller's token never reaches the send. A send
+            // that times out fails the connection first, so the timeout and not the aborted socket is its error.
+            // Disposing the source stops its timer, which also ends the registration.
+            using var sendTimeout = new CancellationTokenSource(_requestTimeout);
+            _ = sendTimeout.Token.UnsafeRegister(static state => ((MatterServerConnection)state!).FailSendTimedOut(), this);
+            try
+            {
+                await _socket.SendAsync(message, _disposeCancellation.Token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or ObjectDisposedException && !_disposeCancellation.IsCancellationRequested)
+            {
+                if (sendTimeout.IsCancellationRequested)
+                {
+                    throw new TimeoutException(string.Create(CultureInfo.InvariantCulture,
+                        $"The Matter server did not accept '{command}' within {_requestTimeout}."));
+                }
+
+                if (_connectionError is { } connectionError)
+                {
+                    throw MatterServerPendingRequests.CreateClosedException(connectionError);
+                }
+
+                throw;
+            }
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
+    }
+
     private async Task RunReceiveLoopAsync()
     {
+        Exception error;
         try
         {
             while (true)
@@ -161,32 +203,38 @@ internal sealed class MatterServerConnection : IAsyncDisposable
                 var message = await _socket.ReceiveAsync(_disposeCancellation.Token).ConfigureAwait(false);
                 if (message is not { } received)
                 {
-                    CloseWithError(new WebSocketException("The Matter server closed the connection."));
-                    return;
+                    error = new WebSocketException("The Matter server closed the connection.");
+                    break;
                 }
 
                 if (!HandleMessage(received))
                 {
-                    CloseWithError(new WebSocketException("The Matter server shut down."));
-                    return;
+                    error = new WebSocketException("The Matter server shut down.");
+                    break;
                 }
             }
         }
-        catch (Exception exception) when (_disposeCancellation.IsCancellationRequested)
-        {
-            // Disposing cancels the pending receive, which ends as a cancellation or as an aborted socket.
-            _logger.LogDebug(exception, "The Matter server receive loop stopped.");
-        }
         catch (Exception exception)
         {
-            CloseWithError(exception);
+            error = exception;
         }
+
+        if (_disposeCancellation.IsCancellationRequested)
+        {
+            // Disposing cancels the pending receive, which ends as a cancellation, an aborted socket or a close that raced it.
+            _logger?.LogDebug(error, "The Matter server receive loop stopped.");
+            return;
+        }
+
+        FailConnection(error);
+        var connectionError = _connectionError!;
+        _logger?.LogWarning(connectionError, "The connection to the Matter server was lost.");
+        _handleConnectionLost(connectionError);
     }
 
     /// <summary>Handles one message; returns false when the server announced its shutdown.</summary>
     private bool HandleMessage(ReadOnlyMemory<byte> message)
     {
-        TaskCompletionSource<JsonElement>? completion = null;
         try
         {
             // The document references the socket's buffer, which the next receive overwrites: everything kept is cloned.
@@ -194,89 +242,60 @@ internal sealed class MatterServerConnection : IAsyncDisposable
             var root = document.RootElement;
             if (root.TryGetProperty("message_id", out var messageId))
             {
-                if (!_pendingRequests.TryRemove(messageId.GetString() ?? "", out completion))
+                if (!_pendingRequests.TryComplete(messageId, root))
                 {
-                    _logger.LogDebug("Ignored a Matter server response that nothing waits for.");
-                    return true;
+                    _logger?.LogDebug("Ignored a Matter server response that nothing waits for.");
                 }
-
-                CompleteRequest(completion, root);
             }
             else if (root.TryGetProperty("event", out var eventName))
             {
-                var name = eventName.GetString() ?? "";
-                if (name == ServerShutdownEvent)
+                if (eventName.ValueEquals("server_shutdown"u8))
                 {
                     return false;
                 }
 
-                if (!_handleEvent(name, root.GetProperty("data")))
+                if (MatterServerEvents.ReadEvent(eventName, root.GetProperty("data")) is { } controllerEvent)
                 {
-                    _logger.LogDebug("Ignored the Matter server event {EventName}.", name);
+                    _handleEvent(controllerEvent);
+                }
+                else
+                {
+                    _logger?.LogDebug("Ignored the Matter server event {EventName}.", eventName.GetString());
                 }
             }
             else
             {
-                _logger.LogDebug("Ignored a Matter server message that is neither a response nor an event.");
+                _logger?.LogDebug("Ignored a Matter server message that is neither a response nor an event.");
             }
         }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
+        catch (Exception exception) when (MatterServerResults.IsReadFailure(exception))
         {
-            if (completion is null)
-            {
-                _logger.LogWarning(exception, "Ignored a Matter server message that could not be read.");
-            }
-            else
-            {
-                completion.TrySetException(new MatterException("The Matter server's answer could not be read.", exception));
-            }
+            _logger?.LogWarning(exception, "Ignored a Matter server message that could not be read.");
         }
 
         return true;
     }
 
-    private static void CompleteRequest(TaskCompletionSource<JsonElement> completion, JsonElement response)
-    {
-        if (response.TryGetProperty("error_code", out _))
-        {
-            completion.TrySetException(MatterServerJson.ReadError(response));
-        }
-        else
-        {
-            completion.TrySetResult(response.TryGetProperty("result", out var result) ? result.Clone() : default);
-        }
-    }
+    private void FailSendTimedOut() => FailConnection(new TimeoutException(string.Create(CultureInfo.InvariantCulture,
+        $"The Matter server did not accept a request within {_requestTimeout}.")));
 
-    private void CloseWithError(Exception exception)
+    /// <summary>Closes the connection with its first error; safe to call from any thread, and only the first call has an effect.</summary>
+    private void FailConnection(Exception exception)
     {
-        _logger.LogWarning(exception, "The connection to the Matter server was lost.");
-        _connectionError = exception;
-        FailPendingRequests(exception);
-        _handleConnectionLost(exception);
-    }
-
-    private void FailPendingRequests(Exception? connectionError)
-    {
-        foreach (var messageId in _pendingRequests.Keys)
+        if (Interlocked.CompareExchange(ref _connectionError, exception, null) is null)
         {
-            if (_pendingRequests.TryRemove(messageId, out var completion))
-            {
-                completion.TrySetException(CreateClosedException(connectionError));
-            }
+            // The receive loop sees the aborted socket and reports the loss; it never touches the buffer afterwards.
+            _socket.Abort();
+            _pendingRequests.FailAll(exception);
         }
     }
 
     private void ThrowIfClosed()
     {
-        ObjectDisposedException.ThrowIf(_disposed != 0, typeof(MatterServerController));
+        ObjectDisposedException.ThrowIf(_disposeTask is not null, typeof(MatterServerController));
         if (_connectionError is { } connectionError)
         {
-            throw CreateClosedException(connectionError);
+            throw MatterServerPendingRequests.CreateClosedException(connectionError);
         }
     }
-
-    /// <summary>Creates the exception of one request, so requests never share an exception instance.</summary>
-    private static Exception CreateClosedException(Exception? connectionError) => connectionError is null
-        ? new ObjectDisposedException(nameof(MatterServerController))
-        : new WebSocketException("The connection to the Matter server is closed.", connectionError);
 }

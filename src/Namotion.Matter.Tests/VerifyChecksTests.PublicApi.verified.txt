@@ -64,9 +64,9 @@ namespace Namotion.Matter
         void WriteString(string value);
         void WriteUInt64(ulong value);
     }
-    public sealed class MatterAttributeChangedEvent : Namotion.Matter.MatterControllerEvent, System.IEquatable<Namotion.Matter.MatterAttributeChangedEvent>
+    public sealed class MatterAttributeUpdatedEvent : Namotion.Matter.MatterControllerEvent, System.IEquatable<Namotion.Matter.MatterAttributeUpdatedEvent>
     {
-        public MatterAttributeChangedEvent(ulong NodeId, Namotion.Matter.AttributePath Path, Namotion.Matter.MatterValue Value) { }
+        public MatterAttributeUpdatedEvent(ulong NodeId, Namotion.Matter.AttributePath Path, Namotion.Matter.MatterValue Value) { }
         public ulong NodeId { get; init; }
         public Namotion.Matter.AttributePath Path { get; init; }
         public Namotion.Matter.MatterValue Value { get; init; }
@@ -259,8 +259,6 @@ namespace Namotion.Matter.Server
 {
     public sealed class MatterServerController : Namotion.Matter.IMatterController, System.IAsyncDisposable
     {
-        public const int ClientSchemaVersion = 15;
-        public const int MinimumServerSchemaVersion = 14;
         public System.Threading.Channels.ChannelReader<Namotion.Matter.MatterControllerEvent> Events { get; }
         public Namotion.Matter.MatterServerInfo ServerInfo { get; }
         public System.Threading.Tasks.Task<Namotion.Matter.MatterNode> CommissionAsync(string code, bool networkOnly, System.Threading.CancellationToken cancellationToken = default) { }
@@ -278,6 +276,8 @@ namespace Namotion.Matter.Server
     public sealed class MatterServerOptions : System.IEquatable<Namotion.Matter.Server.MatterServerOptions>
     {
         public MatterServerOptions() { }
+        public System.TimeSpan KeepAliveInterval { get; init; }
+        public System.TimeSpan KeepAliveTimeout { get; init; }
         public int MaxMessageSize { get; init; }
         public System.TimeSpan RequestTimeout { get; init; }
     }

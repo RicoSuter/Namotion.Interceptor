@@ -29,7 +29,7 @@ public sealed record MatterEndpointRemovedEvent(ulong NodeId, ushort Endpoint) :
 /// <param name="NodeId">The node ID.</param>
 /// <param name="Path">The attribute path.</param>
 /// <param name="Value">The new value.</param>
-public sealed record MatterAttributeChangedEvent(ulong NodeId, AttributePath Path, MatterValue Value) : MatterControllerEvent;
+public sealed record MatterAttributeUpdatedEvent(ulong NodeId, AttributePath Path, MatterValue Value) : MatterControllerEvent;
 
 /// <summary>A node reported a Matter event, such as a button press.</summary>
 /// <param name="NodeId">The node ID.</param>

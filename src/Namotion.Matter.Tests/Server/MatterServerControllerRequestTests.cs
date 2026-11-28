@@ -1,24 +1,13 @@
 using System.Globalization;
+using System.Net.WebSockets;
 using System.Text.Json.Nodes;
+using Namotion.Interceptor.Testing;
 using Namotion.Matter.Server;
 
 namespace Namotion.Matter.Tests.Server;
 
 public class MatterServerControllerRequestTests
 {
-    private static async Task<JsonObject> ReadRequestAsync(FakeMatterServer server, string command)
-    {
-        await foreach (var request in server.Requests.Reader.ReadAllAsync())
-        {
-            if (request["command"]!.GetValue<string>() == command)
-            {
-                return request;
-            }
-        }
-
-        throw new InvalidOperationException($"No '{command}' request was received.");
-    }
-
     [Fact]
     public async Task WhenInvokingCommand_ThenRequestCarriesPathNameAndPayload()
     {
@@ -37,7 +26,7 @@ public class MatterServerControllerRequestTests
         var response = await controller.InvokeAsync(0xFFFFFFFE00000001, new CommandPath(1, 8, 4), "moveToLevelWithOnOff", payload, TimeSpan.FromSeconds(2));
 
         // Assert
-        var request = await ReadRequestAsync(server, "device_command");
+        var request = await server.ReadRequestAsync("device_command");
         var arguments = request["args"]!;
         Assert.Equal(0xFFFFFFFE00000001, arguments["node_id"]!.GetValue<ulong>());
         Assert.Equal(1, arguments["endpoint_id"]!.GetValue<int>());
@@ -59,7 +48,7 @@ public class MatterServerControllerRequestTests
         await controller.InvokeAsync(1, new CommandPath(1, 6, 2), "toggle");
 
         // Assert
-        var request = await ReadRequestAsync(server, "device_command");
+        var request = await server.ReadRequestAsync("device_command");
         Assert.Equal("{}", request["args"]!["payload"]!.ToJsonString());
         Assert.Null(request["args"]!["timed_request_timeout_ms"]);
     }
@@ -118,7 +107,7 @@ public class MatterServerControllerRequestTests
         // Act & Assert
         var exception = await Assert.ThrowsAsync<MatterException>(() => controller.WriteAttributeAsync(1, new AttributePath(1, 6, 16385), value));
         Assert.Equal(135, exception.Status);
-        var request = await ReadRequestAsync(server, "write_attribute");
+        var request = await server.ReadRequestAsync("write_attribute");
         Assert.Equal("1/6/16385", request["args"]!["attribute_path"]!.GetValue<string>());
         Assert.Equal(10, request["args"]!["value"]!.GetValue<int>());
     }
@@ -130,9 +119,9 @@ public class MatterServerControllerRequestTests
         await using var server = await FakeMatterServer.StartAsync();
         await using var controller = await MatterServerController.ConnectAsync(server.Url);
 
-        // Act: the fake answers with null, as the server answers a group write
+        // Act: the fake answers with null
         var exception = await Record.ExceptionAsync(() =>
-            controller.WriteAttributeAsync(0xFFFFFFFFFFFF0001, new AttributePath(0, 6, 16385), MatterPayload.Create(writer => writer.WriteUInt64(10))));
+            controller.WriteAttributeAsync(1, new AttributePath(0, 6, 16385), MatterPayload.Create(writer => writer.WriteUInt64(10))));
 
         // Assert
         Assert.Null(exception);
@@ -209,10 +198,10 @@ public class MatterServerControllerRequestTests
         await controller.SetThreadDatasetAsync("0e080000000000010000");
 
         // Assert
-        var wifi = await ReadRequestAsync(server, "set_wifi_credentials");
+        var wifi = await server.ReadRequestAsync("set_wifi_credentials");
         Assert.Equal("home", wifi["args"]!["ssid"]!.GetValue<string>());
         Assert.Equal("secret", wifi["args"]!["credentials"]!.GetValue<string>());
-        var thread = await ReadRequestAsync(server, "set_thread_dataset");
+        var thread = await server.ReadRequestAsync("set_thread_dataset");
         Assert.Equal("0e080000000000010000", thread["args"]!["dataset"]!.GetValue<string>());
     }
 
@@ -232,7 +221,7 @@ public class MatterServerControllerRequestTests
 
         // Assert
         Assert.Equal(new MatterCommissioningWindow(12345678, "35325335079", "MT:Y.ABCDEFG123456789"), window);
-        var request = await ReadRequestAsync(server, "open_commissioning_window");
+        var request = await server.ReadRequestAsync("open_commissioning_window");
         Assert.Equal(300, request["args"]!["timeout"]!.GetValue<int>());
     }
 
@@ -263,7 +252,7 @@ public class MatterServerControllerRequestTests
         var requests = new List<JsonObject>();
         while (requests.Count < requestCount)
         {
-            requests.Add(await server.Requests.Reader.ReadAsync());
+            requests.Add(await server.Requests.Reader.ReadWithTimeoutAsync());
         }
 
         for (var index = requests.Count - 1; index >= 0; index--)
@@ -277,4 +266,159 @@ public class MatterServerControllerRequestTests
         // Assert
         Assert.Equal(Enumerable.Range(1, requestCount).Select(index => (uint)index), results.Select(payloads => payloads[0].SetupPinCode));
     }
+
+    [Theory]
+    [InlineData(179)]
+    [InlineData(901)]
+    [InlineData(300.5)]
+    public async Task WhenCommissioningWindowTimeoutIsInvalid_ThenArgumentOutOfRangeExceptionIsThrown(double seconds)
+    {
+        // Arrange
+        await using var server = await FakeMatterServer.StartAsync();
+        await using var controller = await MatterServerController.ConnectAsync(server.Url);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => controller.OpenCommissioningWindowAsync(5, TimeSpan.FromSeconds(seconds)));
+    }
+
+    [Fact]
+    public async Task WhenNodeIdIsGroupId_ThenArgumentOutOfRangeExceptionIsThrown()
+    {
+        // Arrange
+        const ulong groupNodeId = 0xFFFFFFFFFFFF0001;
+        await using var server = await FakeMatterServer.StartAsync();
+        await using var controller = await MatterServerController.ConnectAsync(server.Url);
+        var value = MatterPayload.Create(writer => writer.WriteUInt64(10));
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => controller.WriteAttributeAsync(groupNodeId, new AttributePath(1, 6, 16385), value));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => controller.InvokeAsync(groupNodeId, new CommandPath(1, 6, 2), "toggle"));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => controller.RemoveNodeAsync(groupNodeId));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => controller.OpenCommissioningWindowAsync(groupNodeId, TimeSpan.FromMinutes(5)));
+    }
+
+    [Theory]
+    [InlineData("start_listening")]
+    [InlineData("parse_onboarding_payload")]
+    [InlineData("open_commissioning_window")]
+    [InlineData("write_attribute")]
+    public async Task WhenResultIsMalformed_ThenMatterExceptionWrapsTheReadError(string command)
+    {
+        // Arrange
+        await using var server = await FakeMatterServer.StartAsync();
+        server.Handler = _ => command == "write_attribute" ? new JsonArray(new JsonObject { ["Status"] = "busy" }) : new JsonObject { ["unexpected"] = true };
+        await using var controller = await MatterServerController.ConnectAsync(server.Url);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<MatterException>(() => command switch
+        {
+            "start_listening" => controller.StartListeningAsync(),
+            "parse_onboarding_payload" => controller.ParseOnboardingPayloadAsync("34970112332"),
+            "open_commissioning_window" => controller.OpenCommissioningWindowAsync(5, TimeSpan.FromMinutes(5)),
+            _ => controller.WriteAttributeAsync(1, new AttributePath(1, 6, 16385), MatterPayload.Create(writer => writer.WriteUInt64(10)))
+        });
+
+        // Assert
+        Assert.Contains(command, exception.Message);
+        Assert.NotNull(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task WhenConnectionIsLostWhileRequestIsPending_ThenRequestFailsWithWebSocketException()
+    {
+        // Arrange
+        await using var server = await FakeMatterServer.StartAsync();
+        server.LeaveUnansweredRequestsOpen = true;
+        await using var controller = await MatterServerController.ConnectAsync(server.Url);
+        var request = controller.RemoveNodeAsync(1);
+        await server.ReadRequestAsync("remove_node");
+
+        // Act
+        server.CloseClient();
+
+        // Assert
+        var exception = await Assert.ThrowsAsync<WebSocketException>(() => request);
+        var closeError = await Assert.ThrowsAsync<WebSocketException>(() => controller.Events.WaitForCompletionAsync());
+        Assert.Same(closeError, exception.InnerException);
+    }
+
+    [Fact]
+    public async Task WhenControllerIsDisposedWhileRequestIsPending_ThenRequestThrowsObjectDisposedException()
+    {
+        // Arrange
+        await using var server = await FakeMatterServer.StartAsync();
+        server.LeaveUnansweredRequestsOpen = true;
+        var controller = await MatterServerController.ConnectAsync(server.Url);
+        var request = controller.RemoveNodeAsync(1);
+        await server.ReadRequestAsync("remove_node");
+
+        // Act
+        await controller.DisposeAsync();
+
+        // Assert
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => request);
+        await controller.Events.WaitForCompletionAsync();
+    }
+
+    [Fact]
+    public async Task WhenCallerCancelsRequest_ThenOperationCanceledExceptionIsThrownAndConnectionStaysUsable()
+    {
+        // Arrange
+        await using var server = await FakeMatterServer.StartAsync();
+        server.LeaveUnansweredRequestsOpen = true;
+        await using var controller = await MatterServerController.ConnectAsync(server.Url);
+        using var cancellation = new CancellationTokenSource();
+        var request = controller.RemoveNodeAsync(1, cancellation.Token);
+        var openRequest = await server.ReadRequestAsync("remove_node");
+
+        // Act
+        await cancellation.CancelAsync();
+
+        // Assert
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        await server.AnswerAsync(openRequest, null);
+        var payloads = controller.ParseOnboardingPayloadAsync("34970112332");
+        await server.AnswerAsync(await server.ReadRequestAsync("parse_onboarding_payload"), new JsonObject { ["type"] = "manual", ["setup_pin_code"] = 20202021 });
+        Assert.Equal(20202021u, Assert.Single(await payloads).SetupPinCode);
+    }
+
+    [Fact]
+    public async Task WhenCommissioningIsCanceled_ThenOperationCanceledExceptionIsThrown()
+    {
+        // Arrange
+        await using var server = await FakeMatterServer.StartAsync();
+        server.LeaveUnansweredRequestsOpen = true;
+        await using var controller = await MatterServerController.ConnectAsync(server.Url, new MatterServerOptions { RequestTimeout = TimeSpan.FromMilliseconds(200) });
+        using var cancellation = new CancellationTokenSource();
+        var commissioning = controller.CommissionAsync("34970112332", networkOnly: true, cancellation.Token);
+        await server.ReadRequestAsync("commission_with_code");
+
+        // Act
+        await cancellation.CancelAsync();
+
+        // Assert: the request timeout does not apply to commissioning, so only the cancellation ends it
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => commissioning.WaitAsync(TestTimeouts.Default));
+    }
+
+    [Fact]
+    public async Task WhenSendTimesOut_ThenRequestTimesOutAndConnectionFails()
+    {
+        // Arrange: a Unix socket has a small fixed send buffer, so a large request blocks while the server does not read
+        var socketPath = Path.Combine(Path.GetTempPath(), $"matter-{Guid.NewGuid():N}.sock");
+        await using var server = await FakeMatterServer.StartAsync(socketPath);
+        await using var controller = await MatterServerController.ConnectAsync(server.Url, new MatterServerOptions { RequestTimeout = TimeSpan.FromMilliseconds(500) });
+        server.PauseReceiving = true;
+        var largeValue = MatterPayload.Create(writer => writer.WriteBytes(new byte[12 * 1024 * 1024]));
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() => controller.WriteAttributeAsync(1, new AttributePath(1, 6, 16385), largeValue));
+        Assert.Contains("accept", exception.Message);
+        await Assert.ThrowsAsync<TimeoutException>(() => controller.Events.WaitForCompletionAsync());
+        var later = await Assert.ThrowsAsync<WebSocketException>(() => controller.RemoveNodeAsync(1));
+        Assert.IsType<TimeoutException>(later.InnerException);
+    }
+
+    // Keep-alive (MatterServerOptions.KeepAliveTimeout) is not tested: Kestrel answers pings itself, so a fake server
+    // that ignores them would need a raw socket, and the test would have to wait for the keep-alive timeout.
 }

@@ -12,6 +12,9 @@ namespace Namotion.Matter.Server;
 internal sealed class MatterServerSocket : IDisposable
 {
     private const int InitialBufferSize = 16 * 1024;
+
+    // A buffer grown beyond this is returned before the next receive, so one large message does not keep it rented.
+    private const int RetainedBufferSize = 1024 * 1024;
     private static readonly Uri UnixSocketRequestUri = new("ws://localhost/ws");
 
     private readonly ClientWebSocket _socket;
@@ -27,9 +30,11 @@ internal sealed class MatterServerSocket : IDisposable
     }
 
     /// <exception cref="ArgumentException">The URL scheme is not supported.</exception>
-    public static async Task<MatterServerSocket> ConnectAsync(Uri serverUrl, int maxMessageSize, CancellationToken cancellationToken)
+    public static async Task<MatterServerSocket> ConnectAsync(Uri serverUrl, MatterServerOptions options, CancellationToken cancellationToken)
     {
         var socket = new ClientWebSocket();
+        socket.Options.KeepAliveInterval = options.KeepAliveInterval;
+        socket.Options.KeepAliveTimeout = options.KeepAliveTimeout;
         HttpMessageInvoker? invoker = null;
         try
         {
@@ -48,7 +53,7 @@ internal sealed class MatterServerSocket : IDisposable
                     throw new ArgumentException($"The Matter server URL '{serverUrl}' must use the ws, wss or unix scheme.", nameof(serverUrl));
             }
 
-            return new MatterServerSocket(socket, invoker, maxMessageSize);
+            return new MatterServerSocket(socket, invoker, options.MaxMessageSize);
         }
         catch
         {
@@ -65,12 +70,18 @@ internal sealed class MatterServerSocket : IDisposable
     /// <exception cref="InvalidDataException">The message exceeds the maximum size.</exception>
     public async ValueTask<ReadOnlyMemory<byte>?> ReceiveAsync(CancellationToken cancellationToken)
     {
+        if (_buffer.Length > RetainedBufferSize)
+        {
+            ArrayPool<byte>.Shared.Return(_buffer);
+            _buffer = ArrayPool<byte>.Shared.Rent(InitialBufferSize);
+        }
+
         var length = 0;
         while (true)
         {
             if (length == _buffer.Length)
             {
-                GrowBuffer();
+                GrowBuffer(length);
             }
 
             var result = await _socket.ReceiveAsync(_buffer.AsMemory(length), cancellationToken).ConfigureAwait(false);
@@ -80,6 +91,12 @@ internal sealed class MatterServerSocket : IDisposable
             }
 
             length += result.Count;
+            if (length > _maxMessageSize)
+            {
+                throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture,
+                    $"A message from the Matter server exceeds the maximum size of {_maxMessageSize} bytes."));
+            }
+
             if (result.EndOfMessage)
             {
                 return _buffer.AsMemory(0, length);
@@ -91,6 +108,12 @@ internal sealed class MatterServerSocket : IDisposable
     public ValueTask SendAsync(ReadOnlyMemory<byte> message, CancellationToken cancellationToken) =>
         _socket.SendAsync(message, WebSocketMessageType.Text, endOfMessage: true, cancellationToken);
 
+    /// <summary>
+    /// Aborts and disposes the WebSocket, which ends a pending receive and send; safe to call from any thread. The
+    /// buffer stays rented until <see cref="Dispose"/>.
+    /// </summary>
+    public void Abort() => _socket.Abort();
+
     /// <summary>Closes the socket and returns the buffer to the pool; call it only after the last receive ended.</summary>
     public void Dispose()
     {
@@ -99,16 +122,11 @@ internal sealed class MatterServerSocket : IDisposable
         ArrayPool<byte>.Shared.Return(_buffer);
     }
 
-    private void GrowBuffer()
+    /// <summary>Grows the full buffer; up to one byte past the maximum size, so an oversized message is detected.</summary>
+    private void GrowBuffer(int length)
     {
-        if (_buffer.Length >= _maxMessageSize)
-        {
-            throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture,
-                $"A message from the Matter server exceeds the maximum size of {_maxMessageSize} bytes."));
-        }
-
-        var larger = ArrayPool<byte>.Shared.Rent(Math.Min(_buffer.Length * 2, _maxMessageSize));
-        _buffer.CopyTo(larger, 0);
+        var larger = ArrayPool<byte>.Shared.Rent((int)Math.Min(2L * length, _maxMessageSize + 1L));
+        _buffer.AsSpan(0, length).CopyTo(larger);
         ArrayPool<byte>.Shared.Return(_buffer);
         _buffer = larger;
     }

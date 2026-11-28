@@ -6,7 +6,11 @@ namespace Namotion.Matter;
 /// A connection to a Matter controller. Requests can be sent concurrently. A failed request throws
 /// <see cref="MatterException"/> and one without an answer in time <see cref="TimeoutException"/>. Once the connection
 /// is lost, pending and later requests throw an exception whose <see cref="Exception.InnerException"/> is the error that
-/// closed the connection; once the controller is disposed, they throw <see cref="ObjectDisposedException"/>.
+/// closed the connection; once the controller is disposed, they throw <see cref="ObjectDisposedException"/>. Canceling
+/// a request's token throws <see cref="OperationCanceledException"/>. A result the client cannot read throws
+/// <see cref="MatterException"/> with the read error as <see cref="Exception.InnerException"/>. Group node IDs
+/// (0xFFFFFFFFFFFF0000 and above) are not supported: a method taking a node ID throws
+/// <see cref="ArgumentOutOfRangeException"/> for one.
 /// </summary>
 public interface IMatterController : IAsyncDisposable
 {
@@ -68,5 +72,10 @@ public interface IMatterController : IAsyncDisposable
     Task RemoveNodeAsync(ulong nodeId, CancellationToken cancellationToken = default);
 
     /// <summary>Opens a commissioning window so another controller can commission the node.</summary>
+    /// <param name="nodeId">The node ID.</param>
+    /// <param name="timeout">How long the window stays open, a whole number of seconds from 180 to 900, as the Matter specification allows.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The codes to commission the node with.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/> is outside 180 to 900 seconds or has a fraction of a second.</exception>
     Task<MatterCommissioningWindow> OpenCommissioningWindowAsync(ulong nodeId, TimeSpan timeout, CancellationToken cancellationToken = default);
 }
