@@ -1,3 +1,7 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
+using Namotion.Interceptor.Testing;
 using Namotion.ZWave.SerialApi;
 using Namotion.ZWave.Transport;
 
@@ -116,6 +120,27 @@ internal sealed class FakeZWaveStick : IZWaveTransport
     {
         _stream = new FakeSerialStream(this);
         return ValueTask.FromResult<Stream>(_stream);
+    }
+
+    /// <summary>
+    /// Opens the stick and creates a driver on it, on a <see cref="FakeTimeProvider"/> unless a time provider is given.
+    /// </summary>
+    public async Task<SerialApiDriver> CreateDriverAsync(TimeProvider? timeProvider = null, ILogger? logger = null)
+    {
+        var stream = await OpenAsync(CancellationToken.None);
+        var options = new ZWaveControllerOptions { TimeProvider = timeProvider ?? new FakeTimeProvider() };
+        return new SerialApiDriver(stream, options, logger ?? NullLogger.Instance);
+    }
+
+    /// <summary>
+    /// Creates and starts a driver on the stick, and waits until the startup NAK was written.
+    /// </summary>
+    public async Task<SerialApiDriver> StartDriverAsync(TimeProvider? timeProvider = null, ILogger? logger = null)
+    {
+        var driver = await CreateDriverAsync(timeProvider, logger);
+        driver.Start();
+        await AsyncTestHelpers.WaitUntilAsync(() => ReceivedNakCount == 1);
+        return driver;
     }
 
     public void SendToHost(params byte[] bytes) => GetStream().Push(bytes);

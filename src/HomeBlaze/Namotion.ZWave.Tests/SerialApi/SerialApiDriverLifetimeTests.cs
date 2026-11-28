@@ -11,7 +11,7 @@ public class SerialApiDriverLifetimeTests
     {
         // Arrange
         var stick = new FakeZWaveStick();
-        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        await using var driver = await stick.StartDriverAsync();
 
         // Act & Assert
         Assert.Throws<InvalidOperationException>(driver.Start);
@@ -22,8 +22,8 @@ public class SerialApiDriverLifetimeTests
     {
         // Arrange
         var stick = new FakeZWaveStick();
-        var driver = await SerialApiDriverTests.CreateDriverAsync(stick);
-        await driver.DisposeAsync().AsTask().WaitAsync(TestTimeouts.Default);
+        var driver = await stick.CreateDriverAsync();
+        await DisposeAsTask(driver).WaitAsync(TestTimeouts.Default);
 
         // Act & Assert
         Assert.Throws<ObjectDisposedException>(driver.Start);
@@ -35,7 +35,7 @@ public class SerialApiDriverLifetimeTests
     {
         // Arrange
         var stick = new FakeZWaveStick();
-        var driver = await SerialApiDriverTests.CreateDriverAsync(stick);
+        var driver = await stick.CreateDriverAsync();
         stick.FailWrites = true;
 
         // Act
@@ -44,7 +44,7 @@ public class SerialApiDriverLifetimeTests
         // Assert
         await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
         await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None).WaitAsync(TestTimeouts.Default));
-        await driver.DisposeAsync().AsTask().WaitAsync(TestTimeouts.Default);
+        await DisposeAsTask(driver).WaitAsync(TestTimeouts.Default);
         Assert.True(stick.IsDisposed);
     }
 
@@ -55,7 +55,7 @@ public class SerialApiDriverLifetimeTests
         var stick = new FakeZWaveStick { AcknowledgesFrames = false };
         stick.SetResponse(FunctionId.GetControllerVersion, 0x00, 0x01);
         stick.SetResponse(FunctionId.GetControllerCapabilities, 0x00);
-        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        await using var driver = await stick.StartDriverAsync();
         var first = driver.SendRequestAsync(FunctionId.GetControllerVersion, default, CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
 
@@ -83,7 +83,7 @@ public class SerialApiDriverLifetimeTests
         // Arrange
         var stick = new FakeZWaveStick { AcknowledgesFrames = false };
         stick.SetResponse(FunctionId.GetControllerId, 0xC0, 0xFF, 0xEE, 0x01, 0x01);
-        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        await using var driver = await stick.StartDriverAsync();
         using var cancellation = new CancellationTokenSource();
         var canceled = driver.SendRequestAsync(FunctionId.GetControllerVersion, default, cancellation.Token);
         await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
@@ -112,7 +112,7 @@ public class SerialApiDriverLifetimeTests
     {
         // Arrange
         var stick = new FakeZWaveStick { AcknowledgesFrames = false };
-        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        await using var driver = await stick.StartDriverAsync();
         var pending = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
 
@@ -131,7 +131,7 @@ public class SerialApiDriverLifetimeTests
         // Arrange
         var stick = new FakeZWaveStick();
         stick.EnqueueAcknowledgement(FrameHeader.Nak);
-        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        await using var driver = await stick.StartDriverAsync();
         var pending = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
 
@@ -148,7 +148,7 @@ public class SerialApiDriverLifetimeTests
     {
         // Arrange
         var stick = new FakeZWaveStick();
-        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        await using var driver = await stick.StartDriverAsync();
         stick.FailWrites = true;
 
         // Act
@@ -165,7 +165,7 @@ public class SerialApiDriverLifetimeTests
         // Arrange
         var time = new TimerRecordingTimeProvider();
         var stick = new FakeZWaveStick();
-        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick, time);
+        await using var driver = await stick.StartDriverAsync(time);
         stick.HangWrites = true;
 
         // Act
@@ -187,13 +187,13 @@ public class SerialApiDriverLifetimeTests
     {
         // Arrange
         var stick = new FakeZWaveStick();
-        var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        var driver = await stick.StartDriverAsync();
         stick.HangWrites = true;
         var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => stick.HungWriteCount == 1);
 
         // Act
-        await driver.DisposeAsync().AsTask().WaitAsync(TestTimeouts.Default);
+        await DisposeAsTask(driver).WaitAsync(TestTimeouts.Default);
 
         // Assert
         await Assert.ThrowsAsync<ObjectDisposedException>(() => request.WaitAsync(TestTimeouts.Default));
@@ -204,12 +204,12 @@ public class SerialApiDriverLifetimeTests
     {
         // Arrange
         var stick = new FakeZWaveStick { AcknowledgesFrames = false };
-        var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        var driver = await stick.StartDriverAsync();
         var pending = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
 
         // Act
-        await driver.DisposeAsync().AsTask().WaitAsync(TestTimeouts.Default);
+        await DisposeAsTask(driver).WaitAsync(TestTimeouts.Default);
 
         // Assert
         await Assert.ThrowsAsync<ObjectDisposedException>(() => pending.WaitAsync(TestTimeouts.Default));
@@ -224,7 +224,7 @@ public class SerialApiDriverLifetimeTests
         // Arrange
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var stick = new FakeZWaveStick { DisposeGate = gate.Task };
-        var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        var driver = await stick.StartDriverAsync();
 
         // Act
         var first = DisposeAsTask(driver);
@@ -244,7 +244,7 @@ public class SerialApiDriverLifetimeTests
     {
         // Arrange
         var stick = new FakeZWaveStick();
-        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        await using var driver = await stick.StartDriverAsync();
 
         // Act
         stick.Disconnect();
@@ -259,7 +259,7 @@ public class SerialApiDriverLifetimeTests
     {
         // Arrange
         var stick = new FakeZWaveStick();
-        var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        var driver = await stick.StartDriverAsync();
 
         // Act
         await DisposeAsTask(driver).WaitAsync(TestTimeouts.Default);
@@ -273,7 +273,7 @@ public class SerialApiDriverLifetimeTests
     {
         // Arrange
         var stick = new FakeZWaveStick();
-        var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        var driver = await stick.StartDriverAsync();
 
         // Act
         await DisposeAsTask(driver).WaitAsync(TestTimeouts.Default);
@@ -288,12 +288,12 @@ public class SerialApiDriverLifetimeTests
     {
         // Arrange
         var stick = new FakeZWaveStick { AcknowledgesFrames = false, ThrowsOnDispose = true };
-        var driver = await SerialApiDriverTests.StartDriverAsync(stick);
+        var driver = await stick.StartDriverAsync();
         var pending = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
 
         // Act
-        var exception = await Record.ExceptionAsync(() => driver.DisposeAsync().AsTask().WaitAsync(TestTimeouts.Default));
+        var exception = await Record.ExceptionAsync(() => DisposeAsTask(driver).WaitAsync(TestTimeouts.Default));
 
         // Assert
         Assert.Null(exception);
@@ -301,5 +301,6 @@ public class SerialApiDriverLifetimeTests
         Assert.True(driver.Completion.IsCompletedSuccessfully);
     }
 
+    // Sonar (S5034) reads two DisposeAsync calls in one method as one ValueTask consumed twice.
     private static Task DisposeAsTask(SerialApiDriver driver) => driver.DisposeAsync().AsTask();
 }

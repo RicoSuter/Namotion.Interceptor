@@ -1,6 +1,4 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Time.Testing;
 using Namotion.Interceptor.Testing;
 using Namotion.ZWave.SerialApi;
 using Namotion.ZWave.Tests.Testing;
@@ -16,7 +14,7 @@ public class SerialApiDriverTests
         var stick = new FakeZWaveStick();
 
         // Act
-        await using var driver = await StartDriverAsync(stick);
+        await using var driver = await stick.StartDriverAsync();
 
         // Assert
         Assert.Equal(FrameKind.Nak, stick.ReceivedFrames[0].Kind);
@@ -28,7 +26,7 @@ public class SerialApiDriverTests
         // Arrange
         var stick = new FakeZWaveStick();
         stick.SetResponse(FunctionId.GetControllerId, 0xC0, 0xFF, 0xEE, 0x01, 0x01);
-        await using var driver = await StartDriverAsync(stick);
+        await using var driver = await stick.StartDriverAsync();
 
         // Act
         var response = await driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None).WaitAsync(TestTimeouts.Default);
@@ -44,7 +42,7 @@ public class SerialApiDriverTests
     {
         // Arrange
         var stick = new FakeZWaveStick { AcknowledgesFrames = false };
-        await using var driver = await StartDriverAsync(stick);
+        await using var driver = await stick.StartDriverAsync();
         var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
 
@@ -65,7 +63,7 @@ public class SerialApiDriverTests
         // Arrange
         var logger = new RecordingLogger();
         var stick = new FakeZWaveStick { AcknowledgesFrames = false };
-        await using var driver = await StartDriverAsync(stick, logger: logger);
+        await using var driver = await stick.StartDriverAsync(logger: logger);
         var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
 
@@ -88,7 +86,7 @@ public class SerialApiDriverTests
         var logger = new RecordingLogger();
         var stick = new FakeZWaveStick();
         stick.SetResponse(FunctionId.GetControllerId, 0x22);
-        await using var driver = await StartDriverAsync(stick, logger: logger);
+        await using var driver = await stick.StartDriverAsync(logger: logger);
 
         // Act
         stick.SendToHost(FrameHeader.Ack);
@@ -106,7 +104,7 @@ public class SerialApiDriverTests
         // Arrange
         var logger = new RecordingLogger();
         var stick = new FakeZWaveStick { AcknowledgesFrames = false };
-        await using var driver = await StartDriverAsync(stick, logger: logger);
+        await using var driver = await stick.StartDriverAsync(logger: logger);
         var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
 
@@ -127,7 +125,7 @@ public class SerialApiDriverTests
     {
         // Arrange
         var stick = new FakeZWaveStick();
-        await using var driver = await StartDriverAsync(stick);
+        await using var driver = await stick.StartDriverAsync();
 
         // Act
         stick.SendFrame(FrameType.Request, 0x04, 0x00, 0x05, 0x03, 0x20, 0x03, 0xFF);
@@ -140,11 +138,25 @@ public class SerialApiDriverTests
     }
 
     [Fact]
+    public async Task WhenACommandIsAcknowledged_ThenItCompletesWithoutAResponse()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        await using var driver = await stick.StartDriverAsync();
+
+        // Act
+        await driver.SendCommandAsync(0x08, default, CancellationToken.None).WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Single(stick.ReceivedDataFrames);
+    }
+
+    [Fact]
     public async Task WhenControllerSendsABadChecksum_ThenANakIsSent()
     {
         // Arrange
         var stick = new FakeZWaveStick();
-        await using var driver = await StartDriverAsync(stick);
+        await using var driver = await stick.StartDriverAsync();
         var naksAfterStart = stick.ReceivedNakCount;
 
         // Act
@@ -152,23 +164,5 @@ public class SerialApiDriverTests
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedNakCount == naksAfterStart + 1);
-    }
-
-    /// <summary>
-    /// Creates and starts a driver on the stick, and waits until the startup NAK was written.
-    /// </summary>
-    internal static async Task<SerialApiDriver> StartDriverAsync(FakeZWaveStick stick, TimeProvider? timeProvider = null, ILogger? logger = null)
-    {
-        var driver = await CreateDriverAsync(stick, timeProvider, logger);
-        driver.Start();
-        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedNakCount == 1);
-        return driver;
-    }
-
-    internal static async Task<SerialApiDriver> CreateDriverAsync(FakeZWaveStick stick, TimeProvider? timeProvider = null, ILogger? logger = null)
-    {
-        var stream = await stick.OpenAsync(CancellationToken.None);
-        var options = new ZWaveControllerOptions { TimeProvider = timeProvider ?? new FakeTimeProvider() };
-        return new SerialApiDriver(stream, options, logger ?? NullLogger.Instance);
     }
 }

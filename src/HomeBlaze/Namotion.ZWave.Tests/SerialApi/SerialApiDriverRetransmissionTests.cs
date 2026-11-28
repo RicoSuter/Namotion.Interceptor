@@ -20,7 +20,7 @@ public class SerialApiDriverRetransmissionTests
         // Arrange
         var time = new TimerRecordingTimeProvider();
         var stick = new FakeZWaveStick { AcknowledgesFrames = false };
-        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick, time);
+        await using var driver = await stick.StartDriverAsync(time);
 
         // Act
         var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
@@ -72,7 +72,7 @@ public class SerialApiDriverRetransmissionTests
         var stick = new FakeZWaveStick();
         stick.EnqueueAcknowledgement(rejection);
         stick.SetResponse(FunctionId.GetControllerId, 0xC0, 0xFF, 0xEE, 0x01, 0x01);
-        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick, time);
+        await using var driver = await stick.StartDriverAsync(time);
 
         // Act
         var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
@@ -99,7 +99,7 @@ public class SerialApiDriverRetransmissionTests
         stick.EnqueueAcknowledgement(FrameHeader.Nak);
         stick.EnqueueAcknowledgement(FrameHeader.Nak);
         stick.EnqueueAcknowledgement(FrameHeader.Nak);
-        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick, time);
+        await using var driver = await stick.StartDriverAsync(time);
 
         // Act
         var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
@@ -122,7 +122,7 @@ public class SerialApiDriverRetransmissionTests
         // Arrange
         var time = new TimerRecordingTimeProvider();
         var stick = new FakeZWaveStick();
-        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick, time);
+        await using var driver = await stick.StartDriverAsync(time);
 
         // Act
         var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
@@ -138,20 +138,6 @@ public class SerialApiDriverRetransmissionTests
         Assert.Equal(TimeSpan.Zero, responseTimer.StartedAt);
         Assert.False(completedBeforeTimeout);
         Assert.IsType<ZWaveTimeoutException>(exception);
-        Assert.Single(stick.ReceivedDataFrames);
-    }
-
-    [Fact]
-    public async Task WhenACommandIsAcknowledged_ThenItCompletesWithoutAResponse()
-    {
-        // Arrange
-        var stick = new FakeZWaveStick();
-        await using var driver = await SerialApiDriverTests.StartDriverAsync(stick);
-
-        // Act
-        await driver.SendCommandAsync(0x08, default, CancellationToken.None).WaitAsync(TestTimeouts.Default);
-
-        // Assert
         Assert.Single(stick.ReceivedDataFrames);
     }
 }
