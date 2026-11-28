@@ -104,6 +104,33 @@ internal static class TestHelpers
     }
 
     /// <summary>
+    /// Creates a DevicePower with the specified battery level in percent and battery state.
+    /// </summary>
+    internal static DevicePower CreateDevicePower(int? batteryPercent, BatteryState? batteryState = null)
+    {
+        return new DevicePower
+        {
+            Id = Guid.NewGuid(),
+            PowerState = new PowerState { BatteryLevel = batteryPercent, BatteryState = batteryState }
+        };
+    }
+
+    /// <summary>
+    /// Creates a HueMotionDevice with the specified device power and no other sensor resources.
+    /// </summary>
+    internal static HueMotionDevice CreateMotionDevice(DevicePower? devicePower)
+    {
+        return new HueMotionDevice(
+            CreateDevice("SML001"),
+            CreateZigbeeConnectivity(ConnectivityStatus.connected),
+            devicePower,
+            null,
+            null,
+            new HueApi.Models.Sensors.MotionResource { Id = Guid.NewGuid() },
+            null!);
+    }
+
+    /// <summary>
     /// Creates a GroupedLight with the specified on state and brightness.
     /// </summary>
     internal static GroupedLight CreateGroupedLight(bool isOn, double? brightness = null)
@@ -215,12 +242,13 @@ internal static class TestHelpers
     /// </summary>
     internal static HueButtonDevice CreateButtonDevice(
         ButtonResource[] buttonResources,
-        ConnectivityStatus connectivityStatus = ConnectivityStatus.connected)
+        ConnectivityStatus connectivityStatus = ConnectivityStatus.connected,
+        DevicePower? devicePower = null)
     {
         var device = CreateDevice("RWL021", "Test Button Device");
         var zigbee = CreateZigbeeConnectivity(connectivityStatus);
         var bridge = CreateTestBridge();
 
-        return new HueButtonDevice(device, zigbee, null, buttonResources, bridge);
+        return new HueButtonDevice(device, zigbee, devicePower, buttonResources, bridge);
     }
 }

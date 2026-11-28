@@ -148,12 +148,12 @@ public class HueDerivedStateTrackingTests
     {
         // Arrange
         var buttonDevice = Track(TestHelpers.CreateButtonDevice([TestHelpers.CreateButtonResource(null)]));
-        buttonDevice.DevicePowerResource = CreateDevicePower(80);
+        buttonDevice.DevicePowerResource = TestHelpers.CreateDevicePower(80);
         Assert.Equal(0.8m, buttonDevice.BatteryLevel);
         var firedEvents = TrackPropertyChanged(buttonDevice);
 
         // Act
-        buttonDevice.DevicePowerResource = CreateDevicePower(40);
+        buttonDevice.DevicePowerResource = TestHelpers.CreateDevicePower(40);
 
         // Assert
         Assert.Equal(0.4m, buttonDevice.BatteryLevel);
@@ -189,13 +189,6 @@ public class HueDerivedStateTrackingTests
                 TemperatureValid = true,
                 TemperatureReport = new HueApi.Models.Sensors.TemperatureReport { Temperature = celsius }
             }
-        };
-
-    private static DevicePower CreateDevicePower(int batteryPercent) =>
-        new()
-        {
-            Id = Guid.NewGuid(),
-            PowerState = new PowerState { BatteryLevel = batteryPercent }
         };
 
     private static Device CreateDeviceWithVersion(string softwareVersion)

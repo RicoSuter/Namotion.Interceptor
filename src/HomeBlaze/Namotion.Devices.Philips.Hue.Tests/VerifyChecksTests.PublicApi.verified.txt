@@ -118,6 +118,8 @@ namespace Namotion.Devices.Philips.Hue
         public override string? IconColor { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public override string? IconName { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsBatteryLow { get; }
         public new static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }
         public void Dispose() { }
     }
@@ -300,6 +302,8 @@ namespace Namotion.Devices.Philips.Hue
         [HomeBlaze.Abstractions.Attributes.State]
         [Namotion.Interceptor.Attributes.Derived]
         public decimal? Illuminance { get; }
+        [Namotion.Interceptor.Attributes.Derived]
+        public bool? IsBatteryLow { get; }
         [HomeBlaze.Abstractions.Attributes.State]
         [Namotion.Interceptor.Attributes.Derived]
         public bool? IsPresent { get; }

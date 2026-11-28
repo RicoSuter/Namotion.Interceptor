@@ -98,7 +98,7 @@ Each new contract was checked against Matter, Zigbee (ZCL clusters and the actio
 ### Retrofits
 
 - **Ecowitt**: `EcowittCo2Sensor` implements `ICarbonDioxideSensor` (`Co2` becomes `CarbonDioxide`, `Co2Avg24h` becomes `CarbonDioxideDailyAverage`), `EcowittPm25Sensor` implements `IPm25Sensor` (`Pm25` keeps its name, `Pm25Avg24h` becomes `Pm25DailyAverage`) and `EcowittLeakSensor` implements `IWaterLeakSensor` (`IsLeaking` becomes `IsLeakDetected`).
-- **Hue**: `HueButton` implements `IMultiPressButtonDevice` and maps `double_short_release` to `Release` with `PressCount` 2. Single releases report 1.
+- **Hue**: `HueButton` implements `IMultiPressButtonDevice` and maps `double_short_release` to `Release` with `PressCount` 2. Single releases report 1. `HueButtonDevice` and `HueMotionDevice` report `IsBatteryLow` from the battery state of the bridge (true for low and critical, false for normal) and fall back to the level when the bridge reports no state.
 - **Nuki**: `NukiDevice.IsBatteryCritical` becomes `IsBatteryLow`, so that `NukiSmartLock` reports the bridge's critical battery flag through `IBatteryState`.
 
 The Ecowitt DTOs (`EcowittCo2Data`, `EcowittPm25Data`, `EcowittLeakData`) mirror the JSON of the gateway and keep their names.

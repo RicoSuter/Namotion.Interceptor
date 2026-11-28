@@ -28,6 +28,9 @@ public partial class HueButtonDevice : HueDevice,
     [State]
     public decimal? BatteryLevel => DevicePowerResource?.PowerState?.BatteryLevel / 100m;
 
+    [Derived]
+    public bool? IsBatteryLow => GetIsBatteryLow(DevicePowerResource?.PowerState);
+
     [State]
     public partial HueButton[] Buttons { get; internal set; }
 
