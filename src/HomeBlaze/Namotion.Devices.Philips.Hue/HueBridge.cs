@@ -705,9 +705,7 @@ public partial class HueBridge : BackgroundService,
                     var button = buttonDevice?.Buttons.SingleOrDefault(existingButton => existingButton.ResourceId == data.Id);
                     if (button is not null)
                     {
-                        button.ButtonResource = Merge(button.ButtonResource, data);
-                        button.LastUpdated = DateTimeOffset.Now;
-                        button.RefreshButtonState();
+                        button.ApplyEventStreamUpdate(current => Merge(current, data));
                     }
                 }
                 else if (data.Type == "light")

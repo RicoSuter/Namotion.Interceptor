@@ -25,6 +25,11 @@ public partial class HueButton :
     private readonly string _name;
     private readonly Subject<HomeBlaze.Abstractions.Inputs.ButtonEvent> _buttonEventSubject = new();
 
+    // The event stream delivers each report as it happens, so one older than the last accepted by more
+    // than this means the bridge clock moved back, such as after a reboot before its time sync. A poll
+    // never counts as a clock jump: its snapshot carries the last report the bridge had, of any age.
+    private static readonly TimeSpan ClockJumpThreshold = TimeSpan.FromMinutes(5);
+
     private DateTimeOffset? _currentButtonChangeDate;
 
     internal ButtonResource ButtonResource { get; set; }
@@ -137,15 +142,31 @@ public partial class HueButton :
         return this;
     }
 
-    public void RefreshButtonState()
+    internal void ApplyEventStreamUpdate(Func<ButtonResource, ButtonResource> merge)
+    {
+        var previousButtonChangeDate = ButtonChangeDate;
+        ButtonResource = merge(ButtonResource);
+        LastUpdated = DateTimeOffset.Now;
+
+        // Only an update that carries a new report is one the bridge just sent
+        RefreshButtonState(acceptClockJump: ButtonChangeDate != previousButtonChangeDate);
+    }
+
+    /// <summary>
+    /// Emits the current button report unless it is not newer than the last emitted one.
+    /// </summary>
+    public void RefreshButtonState() => RefreshButtonState(acceptClockJump: false);
+
+    private void RefreshButtonState(bool acceptClockJump)
     {
         var newButtonChangeDate = ButtonChangeDate;
         var newButtonState = InternalButtonState;
         var pressCount = ButtonResource?.Button?.ButtonReport?.Event is { } eventType ? GetPressCount(eventType) : null;
 
         if (newButtonChangeDate != null &&
-            // The poll may apply an older snapshot after the event stream delivered a newer report
-            (_currentButtonChangeDate is null || newButtonChangeDate > _currentButtonChangeDate) &&
+            (_currentButtonChangeDate is null ||
+             newButtonChangeDate > _currentButtonChangeDate ||
+             (acceptClockJump && _currentButtonChangeDate - newButtonChangeDate > ClockJumpThreshold)) &&
             newButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.None)
         {
             _currentButtonChangeDate = newButtonChangeDate;

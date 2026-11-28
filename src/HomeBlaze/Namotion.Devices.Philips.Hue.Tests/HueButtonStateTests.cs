@@ -320,6 +320,64 @@ public class HueButtonStateTests
     }
 
     [Fact]
+    public void WhenTheBridgeClockMovesBackByMoreThanFiveMinutes_ThenTheFollowingPressesAreEmitted()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        ReportFromEventStream(button, ButtonEvent.short_release, new DateTimeOffset(2026, 11, 28, 10, 0, 0, TimeSpan.Zero));
+        var rebootedClock = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Act
+        for (var index = 0; index < 3; index++)
+        {
+            ReportFromEventStream(button, ButtonEvent.short_release, rebootedClock.AddSeconds(index * 10));
+        }
+
+        // Assert
+        Assert.Equal(4, events.Count(e => e.ButtonState == ButtonState.Release));
+    }
+
+    [Fact]
+    public void WhenAnEventStreamReportIsOlderByLessThanFiveMinutes_ThenItIsIgnored()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        var releaseTimestamp = DateTimeOffset.UtcNow;
+        ReportFromEventStream(button, ButtonEvent.short_release, releaseTimestamp);
+
+        // Act
+        ReportFromEventStream(button, ButtonEvent.short_release, releaseTimestamp.AddMinutes(-4));
+
+        // Assert
+        Assert.Single(events, e => e.ButtonState == ButtonState.Release);
+    }
+
+    [Fact]
+    public void WhenAPollAppliesAReportMuchOlderThanTheLastOneFromTheEventStream_ThenItIsIgnored()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        var previousReleaseTimestamp = DateTimeOffset.UtcNow.AddHours(-1);
+        ReportFromEventStream(button, ButtonEvent.short_release, previousReleaseTimestamp);
+        ReportFromEventStream(button, ButtonEvent.short_release, DateTimeOffset.UtcNow);
+
+        // Act - the poll read the bridge just before the newer press
+        Report(button, ButtonEvent.short_release, previousReleaseTimestamp);
+
+        // Assert
+        Assert.Equal(2, events.Count(e => e.ButtonState == ButtonState.Release));
+    }
+
+    [Fact]
     public void WhenAButtonIsRegistered_ThenPressCountIsADiscreteStateAtTheContractPosition()
     {
         // Arrange
@@ -344,5 +402,12 @@ public class HueButtonStateTests
         var resource = TestHelpers.CreateButtonResource(eventType, timestamp);
         resource.Id = button.ResourceId;
         button.Update(resource, false);
+    }
+
+    private static void ReportFromEventStream(HueButton button, ButtonEvent eventType, DateTimeOffset timestamp)
+    {
+        var resource = TestHelpers.CreateButtonResource(eventType, timestamp);
+        resource.Id = button.ResourceId;
+        button.ApplyEventStreamUpdate(_ => resource);
     }
 }
