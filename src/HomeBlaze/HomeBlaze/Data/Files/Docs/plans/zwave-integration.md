@@ -157,12 +157,12 @@ src/HomeBlaze/
 
 - **Frame parser**: a pure incremental state machine over `ReadOnlySpan<byte>` with a pooled buffer, producing `Ack`, `Nak`, `Can` and `DataFrame(type, function, payload)`. It skips bytes up to the next start of frame. The driver acknowledges each valid data frame and answers a bad checksum with a NAK.
 - **One transaction at a time**: a read loop and a send loop over a `Channel<T>` queue.
-  1. Write the frame and wait for the ACK (1600 ms). On NAK, CAN or timeout, retransmit up to 3 times after 100 ms + n × 1000 ms.
+  1. Write the frame and wait for the ACK (1600 ms). On NAK, CAN or timeout, retransmit, with 3 attempts in total and a delay of 100 ms + (attempt - 1) × 1000 ms before each retransmission.
   2. Wait for the response if the function has one (10 s).
   3. Wait for the callback if the function has one, matched by a rolling callback ID from 1 to 255 (SendData: 30 s, with SendDataAbort after 20 s).
-- The timeouts and attempt counts are the zwave-js defaults and live in `ZWaveSerialApiOptions`. All waits use the `TimeProvider` of the options.
+- The timeouts and attempt counts are the zwave-js defaults and live in `ZWaveControllerOptions`, the options of `ZWaveController.ConnectAsync`. All waits use the `TimeProvider` of the options. A frame whose bytes stop arriving before it is complete is not timed out yet; the byte timeout of the Host API (150 ms) is added together with the interview stage.
 - **Unsolicited frames** (ApplicationCommandHandler, its bridge variant and ApplicationUpdate) are handed to a dispatch loop and never processed on the read loop, so consumer code cannot stall the serial line, and the reports of a node stay in order.
-- **Startup**: NAK to resynchronize, soft reset, then version, home ID and own node ID, Serial API capabilities with the supported function bitmask, init data with the node list, and controller capabilities. The first version targets the 500 series; differences of the 700 and 800 series (Serial API started notification, extended capabilities) are kept out of the way and not implemented.
+- **Startup**: NAK to resynchronize, then version, home ID and own node ID, Serial API capabilities with the supported function bitmask, init data with the node list, and controller capabilities. The first version targets the 500 series; differences of the 700 and 800 series (Serial API started notification, extended capabilities) are kept out of the way and not implemented. No soft reset: a 500-series stick may re-enumerate on USB after it, and ZWave4Net ran this stick without one.
 
 ### Connection Lifetime
 
