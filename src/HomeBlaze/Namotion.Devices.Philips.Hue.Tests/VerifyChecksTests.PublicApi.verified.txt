@@ -75,7 +75,7 @@ namespace Namotion.Devices.Philips.Hue
         protected override System.Collections.Generic.IAsyncEnumerable<Namotion.Devices.Philips.Hue.HueDiscoveredBridge> DiscoverAsync([System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
-    public class HueButton : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Inputs.IButtonDevice, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged, System.IDisposable, System.IObservable<HomeBlaze.Abstractions.Inputs.ButtonEvent>
+    public class HueButton : HomeBlaze.Abstractions.Common.ILastUpdatedProvider, HomeBlaze.Abstractions.IIconProvider, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.Abstractions.Inputs.IButtonDevice, HomeBlaze.Abstractions.Inputs.IMultiPressButtonDevice, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, System.ComponentModel.INotifyPropertyChanged, System.IDisposable, System.IObservable<HomeBlaze.Abstractions.Inputs.ButtonEvent>
     {
         public HueButton(string name, HueApi.Models.ButtonResource buttonResource, Namotion.Devices.Philips.Hue.HueButtonDevice buttonDevice, bool initialization) { }
         public System.DateTimeOffset? ButtonChangeDate { get; }
@@ -87,6 +87,8 @@ namespace Namotion.Devices.Philips.Hue
         [HomeBlaze.Abstractions.Attributes.State]
         public System.DateTimeOffset? LastUpdated { get; }
         public Namotion.Devices.Philips.Hue.HueButtonDevice ParentDevice { get; }
+        [HomeBlaze.Abstractions.Attributes.State]
+        public int? PressCount { get; }
         public System.Guid ResourceId { get; }
         [Namotion.Interceptor.Attributes.Derived]
         public string? Title { get; }
@@ -101,6 +103,7 @@ namespace Namotion.Devices.Philips.Hue
         protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
         public System.IDisposable Subscribe(System.IObserver<HomeBlaze.Abstractions.Inputs.ButtonEvent> observer) { }
         public static HomeBlaze.Abstractions.Inputs.ButtonState GetButtonState(HueApi.Models.ButtonEvent eventType) { }
+        public static int? GetPressCount(HueApi.Models.ButtonEvent eventType) { }
     }
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     public class HueButtonDevice : Namotion.Devices.Philips.Hue.HueDevice, HomeBlaze.Abstractions.Devices.Energy.IBatteryState, Namotion.Interceptor.IInterceptorSubject, System.IDisposable

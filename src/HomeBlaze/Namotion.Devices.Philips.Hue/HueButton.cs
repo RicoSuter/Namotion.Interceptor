@@ -15,7 +15,7 @@ namespace Namotion.Devices.Philips.Hue;
 /// </summary>
 [InterceptorSubject]
 public partial class HueButton :
-    IButtonDevice,
+    IMultiPressButtonDevice,
     IObservable<HomeBlaze.Abstractions.Inputs.ButtonEvent>,
     ITitleProvider,
     IIconProvider,
@@ -42,6 +42,9 @@ public partial class HueButton :
 
     [State]
     public partial ButtonState? ButtonState { get; internal set; }
+
+    [State]
+    public partial int? PressCount { get; internal set; }
 
     [State]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
@@ -88,9 +91,23 @@ public partial class HueButton :
         {
             return HomeBlaze.Abstractions.Inputs.ButtonState.LongRelease;
         }
+        else if (eventType == HueButtonEventType.double_short_release)
+        {
+            return HomeBlaze.Abstractions.Inputs.ButtonState.Release;
+        }
 
         return HomeBlaze.Abstractions.Inputs.ButtonState.None;
     }
+
+    /// <summary>
+    /// Gets the number of presses of a sequence that ends with the event, or null for an event that ends no sequence of short presses.
+    /// </summary>
+    public static int? GetPressCount(HueButtonEventType eventType) => eventType switch
+    {
+        HueButtonEventType.short_release => 1,
+        HueButtonEventType.double_short_release => 2,
+        _ => null
+    };
 
     public HueButton(string name, ButtonResource buttonResource, HueButtonDevice buttonDevice, bool initialization)
     {
@@ -98,6 +115,7 @@ public partial class HueButton :
         ButtonResource = buttonResource;
         ParentDevice = buttonDevice;
         ButtonState = HomeBlaze.Abstractions.Inputs.ButtonState.None;
+        PressCount = null;
 
         _currentButtonChangeDate = ButtonChangeDate;
         _currentButtonState = InternalButtonState;
@@ -137,6 +155,11 @@ public partial class HueButton :
             if (newButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.Repeat ||
                 ButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.Repeat)
             {
+                var lastEvent = ButtonResource?.Button?.ButtonReport?.Event;
+                var pressCount = lastEvent is { } eventType ? GetPressCount(eventType) : null;
+
+                // The count is set before the state, so that a reader of the Release state sees its count
+                PressCount = pressCount;
                 ButtonState = newButtonState;
 
                 if (newButtonState.HasValue)
@@ -146,7 +169,8 @@ public partial class HueButton :
                         Button = this,
                         ButtonState = newButtonState.Value,
                         Timestamp = DateTimeOffset.UtcNow,
-                        DeviceId = Id
+                        DeviceId = Id,
+                        PressCount = pressCount ?? 1
                     });
                 }
 
@@ -156,6 +180,7 @@ public partial class HueButton :
                 {
                     // Reset back to None after release events
                     ButtonState = HomeBlaze.Abstractions.Inputs.ButtonState.None;
+                    PressCount = null;
                 }
             }
         }

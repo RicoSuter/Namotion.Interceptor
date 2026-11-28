@@ -133,16 +133,19 @@ Motion sensors are exposed as `HueMotionDevice` subjects implementing `IPresence
 
 Button devices (dimmer switches, tap switches, etc.) are exposed as `HueButtonDevice` subjects implementing `IBatteryState`, with child `HueButton` subjects for each physical button.
 
-Each `HueButton` implements `IButtonDevice` and `IObservable<ButtonEvent>` for reactive event streaming.
+Each `HueButton` implements `IMultiPressButtonDevice` and `IObservable<ButtonEvent>` for reactive event streaming.
 
 **Button state mapping:**
 
-| Hue Event       | ButtonState   |
-|-----------------|---------------|
-| `initial_press` | `Down`        |
-| `repeat`        | `Repeat`      |
-| `short_release` | `Release`     |
-| `long_release`  | `LongRelease` |
+| Hue Event              | ButtonState   |
+|------------------------|---------------|
+| `initial_press`        | `Down`        |
+| `repeat`               | `Repeat`      |
+| `short_release`        | `Release`     |
+| `long_release`         | `LongRelease` |
+| `double_short_release` | `Release`     |
+
+A button implements `IMultiPressButtonDevice`: a double press is reported as `Release` with `PressCount` 2, a single short press with `PressCount` 1, and `ButtonEvent.PressCount` carries the same count.
 
 **Duplicate prevention:** Button state changes are only emitted when the `ButtonChangeDate` from the Hue API changes and the new state differs from the previous state. Repeat events are deduplicated so consecutive `Repeat` states don't fire redundant events. After release events (`Release`, `LongRelease`), the state automatically resets to `None`.
 
