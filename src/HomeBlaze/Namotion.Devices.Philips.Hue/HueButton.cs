@@ -146,7 +146,8 @@ public partial class HueButton :
         var pressCount = ButtonResource?.Button?.ButtonReport?.Event is { } eventType ? GetPressCount(eventType) : null;
 
         if (newButtonChangeDate != null &&
-            newButtonChangeDate != _currentButtonChangeDate &&
+            // The poll may apply an older snapshot after the event stream delivered a newer report
+            (_currentButtonChangeDate is null || newButtonChangeDate > _currentButtonChangeDate) &&
             newButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.None &&
             // Hue may send double_short_release right after a short_release, which maps to the same Release state
             (newButtonState != _currentButtonState || pressCount > 1))

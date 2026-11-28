@@ -276,6 +276,26 @@ public class HueButtonStateTests
         Assert.Null(button.PressCount);
     }
 
+    [Fact]
+    public void WhenAnOlderDoubleShortReleaseIsReportedAfterANewerPress_ThenItIsIgnored()
+    {
+        // Arrange
+        var button = CreateButton();
+        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
+        using var subscription = button.Subscribe(events.Add);
+
+        var doublePressTimestamp = DateTimeOffset.UtcNow;
+        Report(button, ButtonEvent.double_short_release, doublePressTimestamp);
+        Report(button, ButtonEvent.initial_press, doublePressTimestamp.AddSeconds(1.8));
+        Report(button, ButtonEvent.short_release, doublePressTimestamp.AddSeconds(2));
+
+        // Act
+        Report(button, ButtonEvent.double_short_release, doublePressTimestamp);
+
+        // Assert
+        Assert.Equal(new[] { 2, 1 }, events.Where(e => e.ButtonState == ButtonState.Release).Select(e => e.PressCount));
+    }
+
     private static HueButton CreateButton() =>
         TestHelpers.CreateButtonDevice([TestHelpers.CreateButtonResource(null)]).Buttons[0];
 
