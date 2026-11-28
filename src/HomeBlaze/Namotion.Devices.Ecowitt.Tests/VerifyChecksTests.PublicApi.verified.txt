@@ -186,7 +186,7 @@ namespace Namotion.Devices.Ecowitt.Models
     {
         public EcowittLeakData() { }
         public int Channel { get; set; }
-        public bool IsLeaking { get; set; }
+        public bool? IsLeaking { get; set; }
     }
     public class EcowittLightningData
     {

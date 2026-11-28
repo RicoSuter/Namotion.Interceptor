@@ -507,7 +507,9 @@ public class EcowittClientTests
         {
             "ch_leak": [
                 {"channel":"1","leak":"0","battery":"5"},
-                {"channel":"2","leak":"1","battery":"3"}
+                {"channel":"2","leak":"1","battery":"3"},
+                {"channel":"3","leak":"--","battery":"9"},
+                {"channel":"4","battery":"9"}
             ]
         }
         """);
@@ -516,8 +518,10 @@ public class EcowittClientTests
         var data = EcowittClient.ParseLiveData(json);
 
         // Assert
-        Assert.Equal(2, data.Leaks.Length);
+        Assert.Equal(4, data.Leaks.Length);
         Assert.False(data.Leaks[0].IsLeaking);
         Assert.True(data.Leaks[1].IsLeaking);
+        Assert.Null(data.Leaks[2].IsLeaking);
+        Assert.Null(data.Leaks[3].IsLeaking);
     }
 }

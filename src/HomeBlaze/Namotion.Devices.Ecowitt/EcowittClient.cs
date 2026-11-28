@@ -484,7 +484,7 @@ public class EcowittClient
             items.Add(new EcowittLeakData
             {
                 Channel = channel,
-                IsLeaking = leak == "1"
+                IsLeaking = leak switch { "1" => true, "0" => false, _ => null }
             });
         }
         return items.ToArray();
