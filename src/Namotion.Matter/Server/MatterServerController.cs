@@ -11,28 +11,20 @@ namespace Namotion.Matter.Server;
 /// </summary>
 public sealed class MatterServerController : IMatterController
 {
-    /// <summary>The oldest server schema version this client works with.</summary>
-    internal const int MinimumServerSchemaVersion = 14;
-
-    /// <summary>The schema version this client implements.</summary>
-    internal const int ClientSchemaVersion = 15;
-
     private const ulong FirstGroupNodeId = 0xFFFF_FFFF_FFFF_0000;
     private static readonly TimeSpan MaxTimedRequestTimeout = TimeSpan.FromMilliseconds(ushort.MaxValue);
     private static readonly TimeSpan MinCommissioningWindowTimeout = TimeSpan.FromSeconds(180);
     private static readonly TimeSpan MaxCommissioningWindowTimeout = TimeSpan.FromSeconds(900);
 
     private readonly MatterServerConnection _connection;
-    private readonly TimeSpan _requestTimeout;
     private readonly Channel<MatterControllerEvent> _events = Channel.CreateUnbounded<MatterControllerEvent>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
     private volatile MatterServerInfo _serverInfo;
 
-    private MatterServerController(MatterServerConnection connection, MatterServerInfo serverInfo, TimeSpan requestTimeout)
+    private MatterServerController(MatterServerConnection connection)
     {
         _connection = connection;
-        _serverInfo = serverInfo;
-        _requestTimeout = requestTimeout;
+        _serverInfo = connection.ServerInfo;
     }
 
     /// <inheritdoc />
@@ -65,7 +57,7 @@ public sealed class MatterServerController : IMatterController
         try
         {
             MatterServerResults.ThrowIfUnsupported(connection.ServerInfo);
-            var controller = new MatterServerController(connection, connection.ServerInfo, options.RequestTimeout);
+            var controller = new MatterServerController(connection);
             connection.StartReceiving(controller.HandleEvent, controller.HandleConnectionLost);
             return controller;
         }
@@ -79,7 +71,7 @@ public sealed class MatterServerController : IMatterController
     /// <inheritdoc />
     public async Task<IReadOnlyList<MatterNode>> StartListeningAsync(CancellationToken cancellationToken = default)
     {
-        var result = await _connection.SendRequestAsync("start_listening", null, _requestTimeout, cancellationToken).ConfigureAwait(false);
+        var result = await _connection.SendRequestAsync("start_listening", null, cancellationToken).ConfigureAwait(false);
         return MatterServerResults.ReadNodes(result);
     }
 
@@ -93,7 +85,7 @@ public sealed class MatterServerController : IMatterController
             writer.WriteNumber("node_id", nodeId);
             writer.WriteString("attribute_path", path.ToString());
             JsonMatterValueWriter.WriteProperty(writer, "value", value);
-        }, _requestTimeout, cancellationToken).ConfigureAwait(false);
+        }, cancellationToken).ConfigureAwait(false);
 
         MatterServerResults.ThrowIfWriteFailed(result, nodeId, path);
     }
@@ -125,7 +117,7 @@ public sealed class MatterServerController : IMatterController
             {
                 writer.WriteNumber("timed_request_timeout_ms", (int)timeout.TotalMilliseconds);
             }
-        }, _requestTimeout, cancellationToken).ConfigureAwait(false);
+        }, cancellationToken).ConfigureAwait(false);
 
         return new MatterValue(result);
     }
@@ -138,7 +130,7 @@ public sealed class MatterServerController : IMatterController
         {
             writer.WriteString("code", code);
             writer.WriteBoolean("network_only", networkOnly);
-        }, timeout: null, cancellationToken).ConfigureAwait(false);
+        }, cancellationToken, withoutTimeout: true).ConfigureAwait(false);
 
         return MatterServerResults.ReadCommissionedNode(result);
     }
@@ -147,7 +139,7 @@ public sealed class MatterServerController : IMatterController
     public async Task<IReadOnlyList<MatterOnboardingPayload>> ParseOnboardingPayloadAsync(string code, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(code);
-        var result = await _connection.SendRequestAsync("parse_onboarding_payload", writer => writer.WriteString("code", code), _requestTimeout, cancellationToken)
+        var result = await _connection.SendRequestAsync("parse_onboarding_payload", writer => writer.WriteString("code", code), cancellationToken)
             .ConfigureAwait(false);
         return MatterServerResults.ReadOnboardingPayloads(result);
     }
@@ -161,21 +153,21 @@ public sealed class MatterServerController : IMatterController
         {
             writer.WriteString("ssid", ssid);
             writer.WriteString("credentials", password);
-        }, _requestTimeout, cancellationToken);
+        }, cancellationToken);
     }
 
     /// <inheritdoc />
     public Task SetThreadDatasetAsync(string dataset, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(dataset);
-        return _connection.SendRequestAsync("set_thread_dataset", writer => writer.WriteString("dataset", dataset), _requestTimeout, cancellationToken);
+        return _connection.SendRequestAsync("set_thread_dataset", writer => writer.WriteString("dataset", dataset), cancellationToken);
     }
 
     /// <inheritdoc />
     public Task RemoveNodeAsync(ulong nodeId, CancellationToken cancellationToken = default)
     {
         ThrowIfGroupNodeId(nodeId);
-        return _connection.SendRequestAsync("remove_node", writer => writer.WriteNumber("node_id", nodeId), _requestTimeout, cancellationToken);
+        return _connection.SendRequestAsync("remove_node", writer => writer.WriteNumber("node_id", nodeId), cancellationToken);
     }
 
     /// <inheritdoc />
@@ -192,7 +184,7 @@ public sealed class MatterServerController : IMatterController
         {
             writer.WriteNumber("node_id", nodeId);
             writer.WriteNumber("timeout", seconds);
-        }, _requestTimeout, cancellationToken).ConfigureAwait(false);
+        }, cancellationToken).ConfigureAwait(false);
 
         return MatterServerResults.ReadCommissioningWindow(result);
     }
@@ -206,7 +198,7 @@ public sealed class MatterServerController : IMatterController
 
     private void HandleEvent(MatterControllerEvent controllerEvent)
     {
-        if (controllerEvent is MatterServerInfoChangedEvent serverInfoChanged)
+        if (controllerEvent is MatterServerInfoUpdatedEvent serverInfoChanged)
         {
             _serverInfo = serverInfoChanged.ServerInfo;
         }

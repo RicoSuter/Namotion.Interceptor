@@ -1,10 +1,11 @@
 using System.Buffers;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace Namotion.Matter.Server;
 
-/// <summary>Reads matterjs-server messages. Elements kept beyond the message are cloned by the caller first.</summary>
+/// <summary>Reads and writes matterjs-server messages. Elements kept beyond the message are cloned by the caller first.</summary>
 internal static class MatterServerJson
 {
     public static MatterServerInfo ReadServerInfo(JsonElement element) => new(
@@ -30,13 +31,26 @@ internal static class MatterServerJson
             reason);
     }
 
+    /// <summary>Reads an attribute path from its UTF-8 text without allocating; a path with escapes is malformed.</summary>
+    /// <exception cref="FormatException">The element is not a string with a valid attribute path.</exception>
+    public static AttributePath ReadAttributePath(JsonElement element)
+    {
+        // The raw value includes the quotes.
+        if (element.ValueKind == JsonValueKind.String && AttributePath.TryParse(JsonMarshal.GetRawUtf8Value(element)[1..^1], out var path))
+        {
+            return path;
+        }
+
+        throw new FormatException($"'{element}' is not an attribute path of the form endpoint/cluster/attribute.");
+    }
+
     /// <summary>Reads a node from a cloned element, so its attribute values stay valid.</summary>
     public static MatterNode ReadNode(JsonElement clonedNode)
     {
         var attributes = new Dictionary<AttributePath, MatterValue>();
         foreach (var attribute in clonedNode.GetProperty("attributes").EnumerateObject())
         {
-            if (AttributePath.TryParse(attribute.Name, out var path))
+            if (AttributePath.TryParse(JsonMarshal.GetRawUtf8PropertyName(attribute), out var path))
             {
                 attributes[path] = new MatterValue(attribute.Value);
             }

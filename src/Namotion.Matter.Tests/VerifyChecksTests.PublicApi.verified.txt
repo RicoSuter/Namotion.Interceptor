@@ -12,8 +12,6 @@ namespace Namotion.Matter
         public uint Cluster { get; init; }
         public ushort Endpoint { get; init; }
         public override string ToString() { }
-        public static Namotion.Matter.AttributePath Parse(System.ReadOnlySpan<char> text) { }
-        public static bool TryParse(System.ReadOnlySpan<char> text, out Namotion.Matter.AttributePath path) { }
     }
     public readonly struct CommandPath : System.IEquatable<Namotion.Matter.CommandPath>
     {
@@ -214,9 +212,9 @@ namespace Namotion.Matter
         public bool ThreadCredentialsSet { get; init; }
         public bool WifiCredentialsSet { get; init; }
     }
-    public sealed class MatterServerInfoChangedEvent : Namotion.Matter.MatterControllerEvent, System.IEquatable<Namotion.Matter.MatterServerInfoChangedEvent>
+    public sealed class MatterServerInfoUpdatedEvent : Namotion.Matter.MatterControllerEvent, System.IEquatable<Namotion.Matter.MatterServerInfoUpdatedEvent>
     {
-        public MatterServerInfoChangedEvent(Namotion.Matter.MatterServerInfo ServerInfo) { }
+        public MatterServerInfoUpdatedEvent(Namotion.Matter.MatterServerInfo ServerInfo) { }
         public Namotion.Matter.MatterServerInfo ServerInfo { get; init; }
     }
     public readonly struct MatterValue : System.IEquatable<Namotion.Matter.MatterValue>

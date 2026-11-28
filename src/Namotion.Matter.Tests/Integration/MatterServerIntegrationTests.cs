@@ -17,7 +17,7 @@ public class MatterServerIntegrationTests(MatterServerFixture fixture)
         await using var controller = await MatterServerController.ConnectAsync(fixture.UnixUrl);
 
         // Assert
-        Assert.True(controller.ServerInfo.SchemaVersion >= MatterServerController.MinimumServerSchemaVersion);
+        Assert.True(controller.ServerInfo.SchemaVersion >= MatterServerResults.MinimumServerSchemaVersion);
     }
 
     [Fact]

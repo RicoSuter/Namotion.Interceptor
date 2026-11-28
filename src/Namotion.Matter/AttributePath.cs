@@ -13,7 +13,7 @@ public readonly record struct AttributePath(ushort Endpoint, uint Cluster, uint 
     /// <param name="text">The text to parse.</param>
     /// <returns>The path.</returns>
     /// <exception cref="FormatException">The text is not three decimal numbers separated by slashes.</exception>
-    public static AttributePath Parse(ReadOnlySpan<char> text)
+    internal static AttributePath Parse(ReadOnlySpan<char> text)
     {
         if (!TryParse(text, out var path))
         {
@@ -27,7 +27,7 @@ public readonly record struct AttributePath(ushort Endpoint, uint Cluster, uint 
     /// <param name="text">The text to parse.</param>
     /// <param name="path">The path, or the default value when parsing fails.</param>
     /// <returns>Whether the text is a valid path.</returns>
-    public static bool TryParse(ReadOnlySpan<char> text, out AttributePath path)
+    internal static bool TryParse(ReadOnlySpan<char> text, out AttributePath path)
     {
         path = default;
         var firstSlash = text.IndexOf('/');

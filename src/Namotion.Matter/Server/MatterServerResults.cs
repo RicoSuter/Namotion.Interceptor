@@ -9,6 +9,12 @@ namespace Namotion.Matter.Server;
 /// </summary>
 internal static class MatterServerResults
 {
+    /// <summary>The oldest server schema version this client works with.</summary>
+    internal const int MinimumServerSchemaVersion = 14;
+
+    /// <summary>The schema version this client implements.</summary>
+    internal const int ClientSchemaVersion = 15;
+
     /// <summary>Reads the server information message.</summary>
     /// <exception cref="MatterException">The message could not be read.</exception>
     public static MatterServerInfo ReadServerInfo(ReadOnlyMemory<byte> message)
@@ -55,16 +61,16 @@ internal static class MatterServerResults
     /// <exception cref="NotSupportedException">The schema version is not supported.</exception>
     public static void ThrowIfUnsupported(MatterServerInfo serverInfo)
     {
-        if (serverInfo.SchemaVersion < MatterServerController.MinimumServerSchemaVersion)
+        if (serverInfo.SchemaVersion < MinimumServerSchemaVersion)
         {
             throw new NotSupportedException(string.Create(CultureInfo.InvariantCulture,
-                $"The Matter server has schema version {serverInfo.SchemaVersion}, older than the required {MatterServerController.MinimumServerSchemaVersion}. Update the server."));
+                $"The Matter server has schema version {serverInfo.SchemaVersion}, older than the required {MinimumServerSchemaVersion}. Update the server."));
         }
 
-        if (serverInfo.MinSupportedSchemaVersion > MatterServerController.ClientSchemaVersion)
+        if (serverInfo.MinSupportedSchemaVersion > ClientSchemaVersion)
         {
             throw new NotSupportedException(string.Create(CultureInfo.InvariantCulture,
-                $"The Matter server requires client schema version {serverInfo.MinSupportedSchemaVersion} or newer, this client implements {MatterServerController.ClientSchemaVersion}. Update the client."));
+                $"The Matter server requires client schema version {serverInfo.MinSupportedSchemaVersion} or newer, this client implements {ClientSchemaVersion}. Update the client."));
         }
     }
 

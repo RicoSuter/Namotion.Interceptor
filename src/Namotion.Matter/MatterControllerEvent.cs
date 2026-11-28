@@ -50,4 +50,4 @@ public sealed record MatterNodeEventReceivedEvent(
 
 /// <summary>The controller's information changed, for example after credentials were set.</summary>
 /// <param name="ServerInfo">The new information.</param>
-public sealed record MatterServerInfoChangedEvent(MatterServerInfo ServerInfo) : MatterControllerEvent;
+public sealed record MatterServerInfoUpdatedEvent(MatterServerInfo ServerInfo) : MatterControllerEvent;

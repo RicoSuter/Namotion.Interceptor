@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Testing;
+using Namotion.Matter.Server;
 
 namespace Namotion.Matter.Tests.Server;
 
@@ -30,6 +31,7 @@ public sealed class FakeMatterServer : IAsyncDisposable
     // Not disposed: a connection handler can still send while the server stops.
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private WebApplication _application = null!;
+    private string? _unixSocketPath;
 
     private FakeMatterServer()
     {
@@ -63,9 +65,26 @@ public sealed class FakeMatterServer : IAsyncDisposable
         ["bluetooth_enabled"] = true
     };
 
-    public static async Task<FakeMatterServer> StartAsync(string? unixSocketPath = null)
+    /// <summary>Starts a server with a connected controller, which the returned session disposes with the server.</summary>
+    public static async Task<FakeMatterServerSession> StartAndConnectAsync(MatterServerOptions? options = null, bool useUnixSocket = false)
     {
-        var server = new FakeMatterServer();
+        var server = await StartAsync(useUnixSocket);
+        try
+        {
+            return new FakeMatterServerSession(server, await MatterServerController.ConnectAsync(server.Url, options));
+        }
+        catch
+        {
+            await server.DisposeAsync();
+            throw;
+        }
+    }
+
+    /// <summary>Starts a server on a loopback port, or on a Unix socket in the temporary directory.</summary>
+    public static async Task<FakeMatterServer> StartAsync(bool useUnixSocket = false)
+    {
+        var unixSocketPath = useUnixSocket ? Path.Combine(Path.GetTempPath(), $"matter-{Guid.NewGuid():N}.sock") : null;
+        var server = new FakeMatterServer { _unixSocketPath = unixSocketPath };
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(options =>
@@ -134,6 +153,10 @@ public sealed class FakeMatterServer : IAsyncDisposable
     {
         _closeClient.TrySetResult();
         await _application.DisposeAsync();
+        if (_unixSocketPath is not null)
+        {
+            File.Delete(_unixSocketPath);
+        }
     }
 
     private static JsonObject CreateResponse(JsonObject request, JsonNode? result) =>

@@ -38,26 +38,17 @@ public class MatterServerControllerEventTests
         });
     }
 
-    private static async Task<(FakeMatterServer Server, MatterServerController Controller, IReadOnlyList<MatterNode> Nodes)> StartListeningAsync(
-        MatterServerOptions? options = null)
+    private static async Task<FakeMatterServerSession> StartListeningAsync(MatterServerOptions? options = null)
     {
-        var server = await FakeMatterServer.StartAsync();
-        MatterServerController? controller = null;
+        var session = await FakeMatterServer.StartAndConnectAsync(options);
         try
         {
-            server.Handler = request => request["command"]!.GetValue<string>() == "start_listening" ? new JsonArray(CreateNode(TestNodeId)) : null;
-            controller = await MatterServerController.ConnectAsync(server.Url, options);
-            var nodes = await controller.StartListeningAsync();
-            return (server, controller, nodes);
+            session.Server.Handler = request => request["command"]!.GetValue<string>() == "start_listening" ? new JsonArray(CreateNode(TestNodeId)) : null;
+            return session with { Nodes = await session.Controller.StartListeningAsync() };
         }
         catch
         {
-            if (controller is not null)
-            {
-                await controller.DisposeAsync();
-            }
-
-            await server.DisposeAsync();
+            await session.DisposeAsync();
             throw;
         }
     }
@@ -66,12 +57,10 @@ public class MatterServerControllerEventTests
     public async Task WhenStartingToListen_ThenNodesAreRead()
     {
         // Arrange & Act
-        var (server, controller, nodes) = await StartListeningAsync();
-        await using var serverScope = server;
-        await using var controllerScope = controller;
+        await using var session = await StartListeningAsync();
 
         // Assert
-        var node = Assert.Single(nodes);
+        var node = Assert.Single(session.Nodes);
         Assert.Equal(TestNodeId, node.NodeId);
         Assert.True(node.Available);
         Assert.True(node.IsBridge);
@@ -91,39 +80,35 @@ public class MatterServerControllerEventTests
     public async Task WhenNodeEventsArrive_ThenTheyAreDeliveredInOrder()
     {
         // Arrange
-        var (server, controller, _) = await StartListeningAsync();
-        await using var serverScope = server;
-        await using var controllerScope = controller;
+        await using var session = await StartListeningAsync();
 
         // Act
-        await server.SendEventAsync("node_added", CreateNode(7));
-        await server.SendEventAsync("node_updated", CreateNode(7, available: false));
-        await server.SendEventAsync("attribute_updated", new JsonArray(7, "2/6/0", false));
-        await server.SendEventAsync("endpoint_added", new JsonObject { ["node_id"] = 7, ["endpoint_id"] = 3 });
-        await server.SendEventAsync("endpoint_removed", new JsonObject { ["node_id"] = 7, ["endpoint_id"] = 3 });
-        await server.SendEventAsync("node_removed", 7);
+        await session.Server.SendEventAsync("node_added", CreateNode(7));
+        await session.Server.SendEventAsync("node_updated", CreateNode(7, available: false));
+        await session.Server.SendEventAsync("attribute_updated", new JsonArray(7, "2/6/0", false));
+        await session.Server.SendEventAsync("endpoint_added", new JsonObject { ["node_id"] = 7, ["endpoint_id"] = 3 });
+        await session.Server.SendEventAsync("endpoint_removed", new JsonObject { ["node_id"] = 7, ["endpoint_id"] = 3 });
+        await session.Server.SendEventAsync("node_removed", 7);
 
         // Assert
-        Assert.Equal(7UL, Assert.IsType<MatterNodeAddedEvent>(await controller.Events.ReadWithTimeoutAsync()).Node.NodeId);
-        Assert.False(Assert.IsType<MatterNodeUpdatedEvent>(await controller.Events.ReadWithTimeoutAsync()).Node.Available);
-        var attributeChanged = Assert.IsType<MatterAttributeUpdatedEvent>(await controller.Events.ReadWithTimeoutAsync());
+        Assert.Equal(7UL, Assert.IsType<MatterNodeAddedEvent>(await session.Controller.Events.ReadWithTimeoutAsync()).Node.NodeId);
+        Assert.False(Assert.IsType<MatterNodeUpdatedEvent>(await session.Controller.Events.ReadWithTimeoutAsync()).Node.Available);
+        var attributeChanged = Assert.IsType<MatterAttributeUpdatedEvent>(await session.Controller.Events.ReadWithTimeoutAsync());
         Assert.Equal(new AttributePath(2, 6, 0), attributeChanged.Path);
         Assert.False(attributeChanged.Value.GetBoolean());
-        Assert.Equal(new MatterEndpointAddedEvent(7, 3), await controller.Events.ReadWithTimeoutAsync());
-        Assert.Equal(new MatterEndpointRemovedEvent(7, 3), await controller.Events.ReadWithTimeoutAsync());
-        Assert.Equal(new MatterNodeRemovedEvent(7), await controller.Events.ReadWithTimeoutAsync());
+        Assert.Equal(new MatterEndpointAddedEvent(7, 3), await session.Controller.Events.ReadWithTimeoutAsync());
+        Assert.Equal(new MatterEndpointRemovedEvent(7, 3), await session.Controller.Events.ReadWithTimeoutAsync());
+        Assert.Equal(new MatterNodeRemovedEvent(7), await session.Controller.Events.ReadWithTimeoutAsync());
     }
 
     [Fact]
     public async Task WhenNodeReportsMatterEvent_ThenEventWithNamedFieldsIsDelivered()
     {
         // Arrange
-        var (server, controller, _) = await StartListeningAsync();
-        await using var serverScope = server;
-        await using var controllerScope = controller;
+        await using var session = await StartListeningAsync();
 
         // Act
-        await server.SendEventAsync("node_event", new JsonObject
+        await session.Server.SendEventAsync("node_event", new JsonObject
         {
             ["node_id"] = TestNodeId, ["endpoint_id"] = 1, ["cluster_id"] = 59, ["event_id"] = 1,
             ["event_number"] = 12345, ["priority"] = 1, ["timestamp"] = 1704067200000, ["timestamp_type"] = 1,
@@ -131,7 +116,7 @@ public class MatterServerControllerEventTests
         });
 
         // Assert
-        var received = Assert.IsType<MatterNodeEventReceivedEvent>(await controller.Events.ReadWithTimeoutAsync());
+        var received = Assert.IsType<MatterNodeEventReceivedEvent>(await session.Controller.Events.ReadWithTimeoutAsync());
         Assert.Equal(new EventPath(1, 59, 1), received.Path);
         Assert.Equal(12345UL, received.EventNumber);
         Assert.Equal(1704067200000, received.Timestamp);
@@ -144,57 +129,51 @@ public class MatterServerControllerEventTests
     public async Task WhenServerInfoIsUpdated_ThenServerInfoChanges()
     {
         // Arrange
-        var (server, controller, _) = await StartListeningAsync();
-        await using var serverScope = server;
-        await using var controllerScope = controller;
+        await using var session = await StartListeningAsync();
         var info = FakeMatterServer.CreateServerInfo(15, 11);
         info["wifi_credentials_set"] = true;
 
         // Act
-        await server.SendEventAsync("server_info_updated", info);
+        await session.Server.SendEventAsync("server_info_updated", info);
 
         // Assert
-        var changed = Assert.IsType<MatterServerInfoChangedEvent>(await controller.Events.ReadWithTimeoutAsync());
+        var changed = Assert.IsType<MatterServerInfoUpdatedEvent>(await session.Controller.Events.ReadWithTimeoutAsync());
         Assert.True(changed.ServerInfo.WifiCredentialsSet);
-        Assert.True(controller.ServerInfo.WifiCredentialsSet);
+        Assert.True(session.Controller.ServerInfo.WifiCredentialsSet);
     }
 
     [Fact]
     public async Task WhenUnknownOrMalformedEventArrives_ThenLaterEventsAreStillDelivered()
     {
         // Arrange
-        var (server, controller, _) = await StartListeningAsync();
-        await using var serverScope = server;
-        await using var controllerScope = controller;
+        await using var session = await StartListeningAsync();
 
         // Act
-        await server.SendEventAsync("future_event", new JsonObject());
-        await server.SendEventAsync("attribute_updated", new JsonArray(7, "not-a-path", 1));
+        await session.Server.SendEventAsync("future_event", new JsonObject());
+        await session.Server.SendEventAsync("attribute_updated", new JsonArray(7, "not-a-path", 1));
         var nodeWithoutId = CreateNode(7);
         nodeWithoutId.Remove("node_id");
-        await server.SendEventAsync("node_added", nodeWithoutId);
-        await server.SendRawAsync("not json");
-        await server.SendEventAsync("node_removed", 8);
+        await session.Server.SendEventAsync("node_added", nodeWithoutId);
+        await session.Server.SendRawAsync("not json");
+        await session.Server.SendEventAsync("node_removed", 8);
 
         // Assert
-        Assert.Equal(new MatterNodeRemovedEvent(8), await controller.Events.ReadWithTimeoutAsync());
+        Assert.Equal(new MatterNodeRemovedEvent(8), await session.Controller.Events.ReadWithTimeoutAsync());
     }
 
     [Fact]
     public async Task WhenServerClosesConnection_ThenEventsCompleteWithErrorAndRequestsFail()
     {
         // Arrange
-        var (server, controller, _) = await StartListeningAsync();
-        await using var serverScope = server;
-        await using var controllerScope = controller;
+        await using var session = await StartListeningAsync();
 
         // Act
-        server.CloseClient();
+        session.Server.CloseClient();
 
         // Assert
-        var closeError = await Assert.ThrowsAsync<WebSocketException>(() => controller.Events.WaitForCompletionAsync());
-        var first = await Assert.ThrowsAsync<WebSocketException>(() => controller.RemoveNodeAsync(1));
-        var second = await Assert.ThrowsAsync<WebSocketException>(() => controller.RemoveNodeAsync(1));
+        var closeError = await Assert.ThrowsAsync<WebSocketException>(() => session.Controller.Events.WaitForCompletionAsync());
+        var first = await Assert.ThrowsAsync<WebSocketException>(() => session.Controller.RemoveNodeAsync(1));
+        var second = await Assert.ThrowsAsync<WebSocketException>(() => session.Controller.RemoveNodeAsync(1));
         Assert.NotSame(first, second);
         Assert.Same(closeError, first.InnerException);
         Assert.Same(closeError, second.InnerException);
@@ -208,26 +187,24 @@ public class MatterServerControllerEventTests
     public async Task WhenMessageReachesMaximumSize_ThenOnlyALargerMessageFailsTheConnection(int maxMessageSize, int bytesOverMaximum)
     {
         // Arrange
-        var (server, controller, _) = await StartListeningAsync(new MatterServerOptions { MaxMessageSize = maxMessageSize });
-        await using var serverScope = server;
-        await using var controllerScope = controller;
+        await using var session = await StartListeningAsync(new MatterServerOptions { MaxMessageSize = maxMessageSize });
         const string emptyMessage = "{\"event\":\"padding\",\"data\":\"\"}";
         var message = emptyMessage.Insert(emptyMessage.Length - 2, new string('x', maxMessageSize + bytesOverMaximum - emptyMessage.Length));
 
         // Act
-        await server.SendRawAsync(message);
-        await server.SendEventAsync("node_removed", 8);
+        await session.Server.SendRawAsync(message);
 
         // Assert
         Assert.Equal(maxMessageSize + bytesOverMaximum, message.Length);
         if (bytesOverMaximum == 0)
         {
-            Assert.Equal(new MatterNodeRemovedEvent(8), await controller.Events.ReadWithTimeoutAsync());
+            await session.Server.SendEventAsync("node_removed", 8);
+            Assert.Equal(new MatterNodeRemovedEvent(8), await session.Controller.Events.ReadWithTimeoutAsync());
         }
         else
         {
-            await Assert.ThrowsAsync<InvalidDataException>(() => controller.Events.WaitForCompletionAsync());
-            var exception = await Assert.ThrowsAsync<WebSocketException>(() => controller.RemoveNodeAsync(1));
+            await Assert.ThrowsAsync<InvalidDataException>(() => session.Controller.Events.WaitForCompletionAsync());
+            var exception = await Assert.ThrowsAsync<WebSocketException>(() => session.Controller.RemoveNodeAsync(1));
             Assert.IsType<InvalidDataException>(exception.InnerException);
         }
     }
@@ -236,9 +213,7 @@ public class MatterServerControllerEventTests
     public async Task WhenMessagesLargerThanTheInitialBufferArrive_ThenTheirContentIsIntact()
     {
         // Arrange: 100 KB grows the 16 KiB buffer, 3 MB grows it past the size that is kept, and a small message follows
-        var (server, controller, _) = await StartListeningAsync();
-        await using var serverScope = server;
-        await using var controllerScope = controller;
+        await using var session = await StartListeningAsync();
         var labels = new[] { CreateLabel(100 * 1024, 'a'), CreateLabel(3 * 1024 * 1024, 'b'), CreateLabel(10, 'c') };
 
         foreach (var label in labels)
@@ -246,10 +221,10 @@ public class MatterServerControllerEventTests
             // Act
             var node = CreateNode(7);
             node["attributes"]!["1/40/5"] = label;
-            await server.SendEventAsync("node_updated", node);
+            await session.Server.SendEventAsync("node_updated", node);
 
             // Assert
-            var updated = Assert.IsType<MatterNodeUpdatedEvent>(await controller.Events.ReadWithTimeoutAsync());
+            var updated = Assert.IsType<MatterNodeUpdatedEvent>(await session.Controller.Events.ReadWithTimeoutAsync());
             Assert.Equal(label, updated.Node.Attributes[new AttributePath(1, 40, 5)].GetString());
             Assert.Equal("Test Vendor", updated.Node.Attributes[new AttributePath(0, 40, 1)].GetString());
         }
@@ -259,17 +234,15 @@ public class MatterServerControllerEventTests
     public async Task WhenEndpointParentEntryIsMalformed_ThenOnlyThatEntryIsSkipped()
     {
         // Arrange
-        var (server, controller, _) = await StartListeningAsync();
-        await using var serverScope = server;
-        await using var controllerScope = controller;
+        await using var session = await StartListeningAsync();
         var node = CreateNode(7);
         node["endpoint_parents"] = new JsonObject { ["70000"] = 0, ["1"] = 0, ["2"] = "x", ["3"] = 1 };
 
         // Act
-        await server.SendEventAsync("node_added", node);
+        await session.Server.SendEventAsync("node_added", node);
 
         // Assert
-        var added = Assert.IsType<MatterNodeAddedEvent>(await controller.Events.ReadWithTimeoutAsync());
+        var added = Assert.IsType<MatterNodeAddedEvent>(await session.Controller.Events.ReadWithTimeoutAsync());
         Assert.Equal(new Dictionary<ushort, ushort> { [1] = 0, [3] = 1 }, added.Node.EndpointParents);
     }
 
@@ -277,16 +250,14 @@ public class MatterServerControllerEventTests
     public async Task WhenServerShutsDown_ThenEventsCompleteWithErrorAndRequestsFail()
     {
         // Arrange
-        var (server, controller, _) = await StartListeningAsync();
-        await using var serverScope = server;
-        await using var controllerScope = controller;
+        await using var session = await StartListeningAsync();
 
         // Act
-        await server.SendEventAsync("server_shutdown", new JsonObject());
+        await session.Server.SendEventAsync("server_shutdown", new JsonObject());
 
         // Assert
-        await Assert.ThrowsAsync<WebSocketException>(() => controller.Events.WaitForCompletionAsync());
-        var exception = await Assert.ThrowsAsync<WebSocketException>(() => controller.RemoveNodeAsync(1));
+        await Assert.ThrowsAsync<WebSocketException>(() => session.Controller.Events.WaitForCompletionAsync());
+        var exception = await Assert.ThrowsAsync<WebSocketException>(() => session.Controller.RemoveNodeAsync(1));
         Assert.IsType<WebSocketException>(exception.InnerException);
     }
 
@@ -294,14 +265,13 @@ public class MatterServerControllerEventTests
     public async Task WhenDisposed_ThenEventsCompleteWithoutErrorAndRequestsThrow()
     {
         // Arrange
-        var (server, controller, _) = await StartListeningAsync();
-        await using var serverScope = server;
+        await using var session = await StartListeningAsync();
 
         // Act
-        await controller.DisposeAsync();
+        await session.Controller.DisposeAsync();
 
         // Assert
-        await controller.Events.WaitForCompletionAsync();
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => controller.RemoveNodeAsync(1));
+        await session.Controller.Events.WaitForCompletionAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => session.Controller.RemoveNodeAsync(1));
     }
 }

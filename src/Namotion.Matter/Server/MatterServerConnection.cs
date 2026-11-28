@@ -62,8 +62,9 @@ internal sealed class MatterServerConnection : IAsyncDisposable
             var socket = await MatterServerSocket.ConnectAsync(serverUrl, options, timeout.Token).ConfigureAwait(false);
             try
             {
-                var serverInfo = await ReceiveServerInfoAsync(socket, timeout.Token).ConfigureAwait(false);
-                return new MatterServerConnection(socket, serverInfo, options.RequestTimeout, logger);
+                var message = await socket.ReceiveAsync(timeout.Token).ConfigureAwait(false)
+                    ?? throw new WebSocketException("The Matter server closed the connection before sending its information.");
+                return new MatterServerConnection(socket, MatterServerResults.ReadServerInfo(message), options.RequestTimeout, logger);
             }
             catch
             {
@@ -95,9 +96,10 @@ internal sealed class MatterServerConnection : IAsyncDisposable
     /// <summary>Sends a request and returns its cloned <c>result</c>, or the default element when it has none.</summary>
     /// <param name="command">The command.</param>
     /// <param name="writeArguments">Writes the properties of <c>args</c>, or null for a request without arguments.</param>
-    /// <param name="timeout">How long to wait for the answer, or null to wait without a limit.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    public async Task<JsonElement> SendRequestAsync(string command, Action<Utf8JsonWriter>? writeArguments, TimeSpan? timeout, CancellationToken cancellationToken)
+    /// <param name="withoutTimeout">Whether to wait for the answer without the request timeout, which only commissioning does.</param>
+    public async Task<JsonElement> SendRequestAsync(
+        string command, Action<Utf8JsonWriter>? writeArguments, CancellationToken cancellationToken, bool withoutTimeout = false)
     {
         var answer = _pendingRequests.Add(out var messageId);
         try
@@ -106,9 +108,9 @@ internal sealed class MatterServerConnection : IAsyncDisposable
             ThrowIfClosed();
             var message = MatterServerJson.WriteRequest(messageId, command, writeArguments);
             using var waitCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCancellation.Token);
-            if (timeout is { } requestTimeout)
+            if (!withoutTimeout)
             {
-                waitCancellation.CancelAfter(requestTimeout);
+                waitCancellation.CancelAfter(_requestTimeout);
             }
 
             try
@@ -122,7 +124,7 @@ internal sealed class MatterServerConnection : IAsyncDisposable
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                throw new TimeoutException($"The Matter server did not answer '{command}' within {timeout}.");
+                throw new TimeoutException($"The Matter server did not answer '{command}' within {_requestTimeout}.");
             }
             catch (OperationCanceledException exception) when (exception.CancellationToken != cancellationToken)
             {
@@ -199,13 +201,6 @@ internal sealed class MatterServerConnection : IAsyncDisposable
         {
             _sendLock.Release();
         }
-    }
-
-    private static async Task<MatterServerInfo> ReceiveServerInfoAsync(MatterServerSocket socket, CancellationToken cancellationToken)
-    {
-        var message = await socket.ReceiveAsync(cancellationToken).ConfigureAwait(false)
-            ?? throw new WebSocketException("The Matter server closed the connection before sending its information.");
-        return MatterServerResults.ReadServerInfo(message);
     }
 
     private async Task RunReceiveLoopAsync()

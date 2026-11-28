@@ -25,7 +25,7 @@ public class MatterServerControllerConnectTests
     {
         // Arrange
         await using var server = await FakeMatterServer.StartAsync();
-        server.ServerInfo = FakeMatterServer.CreateServerInfo(schemaVersion: MatterServerController.MinimumServerSchemaVersion - 1, minSupportedSchemaVersion: 11);
+        server.ServerInfo = FakeMatterServer.CreateServerInfo(schemaVersion: MatterServerResults.MinimumServerSchemaVersion - 1, minSupportedSchemaVersion: 11);
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<NotSupportedException>(() => MatterServerController.ConnectAsync(server.Url));
@@ -37,7 +37,7 @@ public class MatterServerControllerConnectTests
     {
         // Arrange
         await using var server = await FakeMatterServer.StartAsync();
-        server.ServerInfo = FakeMatterServer.CreateServerInfo(schemaVersion: 20, minSupportedSchemaVersion: MatterServerController.ClientSchemaVersion + 1);
+        server.ServerInfo = FakeMatterServer.CreateServerInfo(schemaVersion: 20, minSupportedSchemaVersion: MatterServerResults.ClientSchemaVersion + 1);
 
         // Act & Assert
         await Assert.ThrowsAsync<NotSupportedException>(() => MatterServerController.ConnectAsync(server.Url));
@@ -88,24 +88,19 @@ public class MatterServerControllerConnectTests
         await Assert.ThrowsAsync<WebSocketException>(() => MatterServerController.ConnectAsync(url));
     }
 
-    [Theory]
-    [InlineData(nameof(MatterServerOptions.ConnectTimeout))]
-    [InlineData(nameof(MatterServerOptions.RequestTimeout))]
-    [InlineData(nameof(MatterServerOptions.MaxMessageSize))]
-    [InlineData(nameof(MatterServerOptions.KeepAliveInterval))]
-    [InlineData(nameof(MatterServerOptions.KeepAliveTimeout))]
-    public async Task WhenOptionIsNotPositive_ThenConnectThrowsArgumentOutOfRangeException(string option)
+    public static TheoryData<string, MatterServerOptions> InvalidOptions => new()
     {
-        // Arrange
-        var options = option switch
-        {
-            nameof(MatterServerOptions.ConnectTimeout) => new MatterServerOptions { ConnectTimeout = TimeSpan.Zero },
-            nameof(MatterServerOptions.RequestTimeout) => new MatterServerOptions { RequestTimeout = TimeSpan.Zero },
-            nameof(MatterServerOptions.MaxMessageSize) => new MatterServerOptions { MaxMessageSize = 0 },
-            nameof(MatterServerOptions.KeepAliveInterval) => new MatterServerOptions { KeepAliveInterval = TimeSpan.Zero },
-            _ => new MatterServerOptions { KeepAliveTimeout = TimeSpan.FromSeconds(-1) }
-        };
+        { nameof(MatterServerOptions.ConnectTimeout), new MatterServerOptions { ConnectTimeout = TimeSpan.Zero } },
+        { nameof(MatterServerOptions.RequestTimeout), new MatterServerOptions { RequestTimeout = TimeSpan.Zero } },
+        { nameof(MatterServerOptions.MaxMessageSize), new MatterServerOptions { MaxMessageSize = 0 } },
+        { nameof(MatterServerOptions.KeepAliveInterval), new MatterServerOptions { KeepAliveInterval = TimeSpan.Zero } },
+        { nameof(MatterServerOptions.KeepAliveTimeout), new MatterServerOptions { KeepAliveTimeout = TimeSpan.FromSeconds(-1) } }
+    };
 
+    [Theory]
+    [MemberData(nameof(InvalidOptions))]
+    public async Task WhenOptionIsNotPositive_ThenConnectThrowsArgumentOutOfRangeException(string option, MatterServerOptions options)
+    {
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => MatterServerController.ConnectAsync(new Uri("ws://127.0.0.1:1/ws"), options));
         Assert.Contains(option, exception.ParamName);
@@ -115,8 +110,7 @@ public class MatterServerControllerConnectTests
     public async Task WhenConnectingOverUnixSocket_ThenServerInfoIsReceived()
     {
         // Arrange
-        var socketPath = Path.Combine(Path.GetTempPath(), $"matter-{Guid.NewGuid():N}.sock");
-        await using var server = await FakeMatterServer.StartAsync(socketPath);
+        await using var server = await FakeMatterServer.StartAsync(useUnixSocket: true);
 
         // Act
         await using var controller = await MatterServerController.ConnectAsync(server.Url);
