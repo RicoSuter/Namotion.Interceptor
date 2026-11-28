@@ -166,7 +166,6 @@ internal sealed class SerialApiDriver : IAsyncDisposable
     {
         var attempts = _options.MaximumSendAttempts;
         FrameKind? result = null;
-        var answered = false;
         for (var attempt = 1; attempt <= attempts; attempt++)
         {
             var acknowledgement = transaction.StartAttempt();
@@ -177,7 +176,10 @@ internal sealed class SerialApiDriver : IAsyncDisposable
                 return;
             }
 
-            answered |= result is not null;
+            if (result is null)
+            {
+                transaction.ExpireAttempt();
+            }
 
             if (attempt < attempts)
             {
@@ -186,7 +188,8 @@ internal sealed class SerialApiDriver : IAsyncDisposable
             }
         }
 
-        if (!answered)
+        // An attempt the controller answered after it timed out also counts: such a controller is slow, not gone.
+        if (!transaction.WasAnswered)
         {
             // A controller that answers no attempt at all is gone, so its owner must reconnect.
             var failure = new ZWaveConnectionException(
@@ -241,11 +244,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
             case FrameKind.Ack:
             case FrameKind.Nak:
             case FrameKind.Can:
-                if (_inFlight?.TryAcknowledge(frame.Kind) != true)
-                {
-                    _logger.TryLog(LogLevel.Debug, null, "Received an unexpected {Kind}.", frame.Kind);
-                }
-
+                HandleAcknowledgement(frame.Kind);
                 break;
 
             case FrameKind.ChecksumError:
@@ -256,6 +255,21 @@ internal sealed class SerialApiDriver : IAsyncDisposable
             case FrameKind.Data:
                 await WriteAsync(FrameStream.Ack, stopping).ConfigureAwait(false);
                 RouteDataFrame(frame.Data);
+                break;
+        }
+    }
+
+    private void HandleAcknowledgement(FrameKind kind)
+    {
+        var transaction = _inFlight;
+        switch (transaction?.TryAcknowledge(kind) ?? AcknowledgementMatch.None)
+        {
+            case AcknowledgementMatch.Late:
+                _logger.TryLog(LogLevel.Debug, null, "Received a late {Kind} to function 0x{Function:X2} after its attempt timed out.", kind, transaction!.Function);
+                break;
+
+            case AcknowledgementMatch.None:
+                _logger.TryLog(LogLevel.Debug, null, "Received an unexpected {Kind}.", kind);
                 break;
         }
     }

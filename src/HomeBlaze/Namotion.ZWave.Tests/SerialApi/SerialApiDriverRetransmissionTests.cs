@@ -121,6 +121,47 @@ public class SerialApiDriverRetransmissionTests
     }
 
     [Fact]
+    public async Task WhenLateAcksArriveDuringTheRetransmissionDelays_ThenTheyCountAsAnswersAndTheRequestTimesOut()
+    {
+        // Arrange
+        var time = new TimerRecordingTimeProvider();
+        var logger = new RecordingLogger();
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false };
+        await using var driver = await stick.StartDriverAsync(time, logger);
+
+        // Act
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await time.WaitForTimerAsync(AcknowledgementTimeout);
+        time.Advance(AcknowledgementTimeout);
+        await time.WaitForTimerAsync(FirstRetransmissionDelay);
+        await SendLateAckAsync(occurrence: 1);
+        time.Advance(FirstRetransmissionDelay);
+
+        await time.WaitForTimerAsync(AcknowledgementTimeout, occurrence: 2);
+        time.Advance(AcknowledgementTimeout);
+        await time.WaitForTimerAsync(SecondRetransmissionDelay);
+        await SendLateAckAsync(occurrence: 2);
+        time.Advance(SecondRetransmissionDelay);
+
+        await time.WaitForTimerAsync(AcknowledgementTimeout, occurrence: 3);
+        time.Advance(AcknowledgementTimeout);
+        var exception = await Record.ExceptionAsync(() => request.WaitAsync(TestTimeouts.Default));
+
+        // Assert
+        Assert.IsType<ZWaveTimeoutException>(exception);
+        Assert.False(driver.Completion.IsCompleted);
+        Assert.Equal(3, stick.ReceivedDataFrames.Count);
+        Assert.DoesNotContain(logger.Entries, entry => entry.Message.Contains("unexpected"));
+
+        async Task SendLateAckAsync(int occurrence)
+        {
+            stick.SendToHost(FrameHeader.Ack);
+            await AsyncTestHelpers.WaitUntilAsync(() => logger.Entries.Count(entry => entry.Level == LogLevel.Debug
+                && entry.Message == "Received a late Ack to function 0x20 after its attempt timed out.") == occurrence);
+        }
+    }
+
+    [Fact]
     public async Task WhenTheLoggerThrowsOnTheRetransmissionEntry_ThenTheFrameIsStillRetransmittedAndAnswered()
     {
         // Arrange

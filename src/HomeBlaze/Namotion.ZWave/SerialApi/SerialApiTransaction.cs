@@ -9,7 +9,10 @@ internal sealed class SerialApiTransaction
     private readonly TaskCompletionSource<DataFrame> _result = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<DataFrame>? _response;
     private readonly CancellationTokenRegistration _cancellationRegistration;
-    private volatile TaskCompletionSource<FrameKind>? _acknowledgement;
+    private volatile Attempt? _acknowledgement;
+
+    // Set by the read loop when any attempt got an ACK, NAK or CAN, also one that came after its attempt timed out.
+    private volatile bool _answered;
 
     // Read and written only by the read loop, which handles the ACK and the response in their order on the line.
     private bool _acknowledged;
@@ -47,6 +50,11 @@ internal sealed class SerialApiTransaction
     /// </summary>
     public Task<DataFrame>? Response => _response?.Task;
 
+    /// <summary>
+    /// Whether the controller answered any attempt with an ACK, NAK or CAN, also after the attempt timed out.
+    /// </summary>
+    public bool WasAnswered => _answered;
+
     public void Complete(DataFrame response)
     {
         _result.TrySetResult(response);
@@ -65,23 +73,37 @@ internal sealed class SerialApiTransaction
     /// </summary>
     public Task<FrameKind> StartAttempt()
     {
-        var acknowledgement = new TaskCompletionSource<FrameKind>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var acknowledgement = new Attempt();
         _acknowledgement = acknowledgement;
         return acknowledgement.Task;
     }
 
     /// <summary>
+    /// Marks the current attempt as timed out, so that an acknowledgement that still answers it is reported as late.
+    /// Called by the send loop.
+    /// </summary>
+    public void ExpireAttempt()
+    {
+        if (_acknowledgement is { } acknowledgement)
+        {
+            acknowledgement.IsExpired = true;
+        }
+    }
+
+    /// <summary>
     /// Completes the current attempt with an ACK, NAK or CAN; an ACK lets the response be accepted. Called by the read loop.
     /// </summary>
-    public bool TryAcknowledge(FrameKind kind)
+    public AcknowledgementMatch TryAcknowledge(FrameKind kind)
     {
-        if (_acknowledgement?.TrySetResult(kind) != true)
+        var acknowledgement = _acknowledgement;
+        if (acknowledgement?.TrySetResult(kind) != true)
         {
-            return false;
+            return AcknowledgementMatch.None;
         }
 
+        _answered = true;
         _acknowledged |= kind == FrameKind.Ack;
-        return true;
+        return acknowledgement.IsExpired ? AcknowledgementMatch.Late : AcknowledgementMatch.Current;
     }
 
     /// <summary>
@@ -108,4 +130,24 @@ internal sealed class SerialApiTransaction
             _ = source.Task.Exception;
         }
     }
+
+    private sealed class Attempt() : TaskCompletionSource<FrameKind>(TaskCreationOptions.RunContinuationsAsynchronously)
+    {
+        public volatile bool IsExpired;
+    }
+}
+
+/// <summary>
+/// Which attempt an ACK, NAK or CAN answered.
+/// </summary>
+internal enum AcknowledgementMatch
+{
+    /// <summary>No attempt was waiting for it.</summary>
+    None,
+
+    /// <summary>The attempt the send loop is waiting for.</summary>
+    Current,
+
+    /// <summary>An attempt that already timed out.</summary>
+    Late
 }
