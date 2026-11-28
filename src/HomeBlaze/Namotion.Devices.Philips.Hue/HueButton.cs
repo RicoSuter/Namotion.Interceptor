@@ -143,8 +143,7 @@ public partial class HueButton :
     {
         var newButtonChangeDate = ButtonChangeDate;
         var newButtonState = InternalButtonState;
-        var lastEvent = ButtonResource?.Button?.ButtonReport?.Event;
-        var pressCount = lastEvent is { } eventType ? GetPressCount(eventType) : null;
+        var pressCount = ButtonResource?.Button?.ButtonReport?.Event is { } eventType ? GetPressCount(eventType) : null;
 
         if (newButtonChangeDate != null &&
             newButtonChangeDate != _currentButtonChangeDate &&
