@@ -79,6 +79,27 @@ public class ZWaveControllerTests
         Assert.Empty(stick.ReceivedFrames);
     }
 
+    [Theory]
+    [InlineData(nameof(ZWaveControllerOptions.AcknowledgementTimeout))]
+    [InlineData(nameof(ZWaveControllerOptions.ResponseTimeout))]
+    [InlineData(nameof(ZWaveControllerOptions.FrameDeliveryTimeout))]
+    public async Task WhenATimeoutExceedsTheTimerLimit_ThenConnectThrowsBeforeOpeningTheTransport(string option)
+    {
+        // Arrange
+        var stick = FakeZWaveStick.CreateWithController();
+        var tooLong = TimeSpan.FromMilliseconds(uint.MaxValue - 1) + TimeSpan.FromMilliseconds(1);
+        var options = option switch
+        {
+            nameof(ZWaveControllerOptions.AcknowledgementTimeout) => new ZWaveControllerOptions { AcknowledgementTimeout = tooLong },
+            nameof(ZWaveControllerOptions.ResponseTimeout) => new ZWaveControllerOptions { ResponseTimeout = tooLong },
+            _ => new ZWaveControllerOptions { FrameDeliveryTimeout = tooLong }
+        };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => ZWaveController.ConnectAsync(stick, options).WaitAsync(TestTimeouts.Default));
+        Assert.Empty(stick.ReceivedFrames);
+    }
+
     [Fact]
     public async Task WhenTheFrameDeliveryTimeoutIsNotPositive_ThenConnectThrowsBeforeOpeningTheTransport()
     {

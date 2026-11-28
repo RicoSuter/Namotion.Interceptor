@@ -1,10 +1,16 @@
+using System.Runtime.CompilerServices;
+
 namespace Namotion.ZWave;
 
 /// <summary>
-/// Options of a connection to a Z-Wave controller. The defaults follow the Host API specification.
+/// Options of a connection to a Z-Wave controller. The defaults follow the Host API specification. Every timeout must be
+/// positive and at most <see cref="uint.MaxValue"/> - 1 ms, the longest timer a task accepts.
 /// </summary>
 public sealed record ZWaveControllerOptions
 {
+    // The longest timeout Task.Delay and Task.WaitAsync accept.
+    private static readonly TimeSpan MaximumTimeout = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
+
     /// <summary>
     /// How long to wait for the controller to acknowledge a frame, and for a write to complete; a write that takes longer
     /// fails the connection. Default: 1600 ms.
@@ -34,11 +40,17 @@ public sealed record ZWaveControllerOptions
 
     internal void Validate()
     {
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(AcknowledgementTimeout, TimeSpan.Zero);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(ResponseTimeout, TimeSpan.Zero);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(FrameDeliveryTimeout, TimeSpan.Zero);
+        ValidateTimeout(AcknowledgementTimeout);
+        ValidateTimeout(ResponseTimeout);
+        ValidateTimeout(FrameDeliveryTimeout);
         ArgumentOutOfRangeException.ThrowIfLessThan(MaximumSendAttempts, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(MaximumSendAttempts, 10);
         ArgumentNullException.ThrowIfNull(TimeProvider);
+    }
+
+    private static void ValidateTimeout(TimeSpan timeout, [CallerArgumentExpression(nameof(timeout))] string? parameterName = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero, parameterName);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(timeout, MaximumTimeout, parameterName);
     }
 }
