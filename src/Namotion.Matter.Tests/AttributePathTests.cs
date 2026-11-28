@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Namotion.Matter.Tests;
 
 public class AttributePathTests
@@ -47,5 +49,32 @@ public class AttributePathTests
     {
         // Act & Assert
         Assert.Throws<FormatException>(() => AttributePath.Parse("1/6"));
+    }
+
+    [Theory]
+    [InlineData("1/6/16384")]
+    [InlineData("01/6/0")]
+    [InlineData("65535/4294967295/4294967295")]
+    [InlineData("")]
+    [InlineData("1/6")]
+    [InlineData("1/6/0/0")]
+    [InlineData("1//0")]
+    [InlineData("*/6/0")]
+    [InlineData("65536/6/0")]
+    [InlineData("1/4294967296/0")]
+    [InlineData("-1/6/0")]
+    [InlineData("+1/6/0")]
+    [InlineData(" 1/6/0")]
+    [InlineData("1/6/0 ")]
+    [InlineData("1/6/0x1")]
+    public void WhenParsingUtf8Text_ThenResultMatchesParsingCharacters(string text)
+    {
+        // Act
+        var utf8Success = AttributePath.TryParse(Encoding.UTF8.GetBytes(text), out var utf8Path);
+        var success = AttributePath.TryParse(text, out var path);
+
+        // Assert
+        Assert.Equal(success, utf8Success);
+        Assert.Equal(path, utf8Path);
     }
 }
