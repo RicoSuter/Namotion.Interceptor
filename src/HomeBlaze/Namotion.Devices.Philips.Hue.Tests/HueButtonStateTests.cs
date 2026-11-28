@@ -211,29 +211,25 @@ public class HueButtonStateTests
         Assert.Equal(expectedPressCount, result);
     }
 
-    [Fact]
-    public void WhenDoubleShortRelease_ThenEventHasPressCountTwoAndStateResetsToNone()
+    [Theory]
+    [InlineData(ButtonEvent.short_release, 1)]
+    [InlineData(ButtonEvent.double_short_release, 2)]
+    public void WhenShortPressSequenceEnds_ThenReleaseEventHasItsPressCountAndStateResetsToNone(ButtonEvent eventType, int expectedPressCount)
     {
         // Arrange
-        var buttonResource = TestHelpers.CreateButtonResource(null);
-        var buttonDevice = TestHelpers.CreateButtonDevice([buttonResource]);
-        var button = buttonDevice.Buttons[0];
+        var button = CreateButton();
         var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
         using var subscription = button.Subscribe(events.Add);
 
         var pressTimestamp = DateTimeOffset.UtcNow;
-        var pressResource = TestHelpers.CreateButtonResource(ButtonEvent.initial_press, pressTimestamp);
-        pressResource.Id = buttonResource.Id;
-        button.Update(pressResource, false);
+        Report(button, ButtonEvent.initial_press, pressTimestamp);
 
         // Act
-        var releaseResource = TestHelpers.CreateButtonResource(ButtonEvent.double_short_release, pressTimestamp.AddMilliseconds(300));
-        releaseResource.Id = buttonResource.Id;
-        button.Update(releaseResource, false);
+        Report(button, eventType, pressTimestamp.AddMilliseconds(300));
 
         // Assert
         var releaseEvent = Assert.Single(events, e => e.ButtonState == ButtonState.Release);
-        Assert.Equal(2, releaseEvent.PressCount);
+        Assert.Equal(expectedPressCount, releaseEvent.PressCount);
         Assert.Equal(ButtonState.None, button.ButtonState);
         Assert.Null(button.PressCount);
     }
@@ -242,26 +238,17 @@ public class HueButtonStateTests
     public void WhenTheSameDoubleShortReleaseIsReportedAgain_ThenOnlyOneReleaseEventIsEmitted()
     {
         // Arrange
-        var buttonResource = TestHelpers.CreateButtonResource(null);
-        var buttonDevice = TestHelpers.CreateButtonDevice([buttonResource]);
-        var button = buttonDevice.Buttons[0];
+        var button = CreateButton();
         var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
         using var subscription = button.Subscribe(events.Add);
 
         var pressTimestamp = DateTimeOffset.UtcNow;
-        var pressResource = TestHelpers.CreateButtonResource(ButtonEvent.initial_press, pressTimestamp);
-        pressResource.Id = buttonResource.Id;
-        button.Update(pressResource, false);
-
+        Report(button, ButtonEvent.initial_press, pressTimestamp);
         var releaseTimestamp = pressTimestamp.AddMilliseconds(300);
 
         // Act
-        for (var i = 0; i < 2; i++)
-        {
-            var releaseResource = TestHelpers.CreateButtonResource(ButtonEvent.double_short_release, releaseTimestamp);
-            releaseResource.Id = buttonResource.Id;
-            button.Update(releaseResource, false);
-        }
+        Report(button, ButtonEvent.double_short_release, releaseTimestamp);
+        Report(button, ButtonEvent.double_short_release, releaseTimestamp);
 
         // Assert
         var releaseEvent = Assert.Single(events, e => e.ButtonState == ButtonState.Release);
@@ -269,62 +256,33 @@ public class HueButtonStateTests
     }
 
     [Fact]
-    public void WhenShortRelease_ThenEventHasPressCountOneAndStateResetsToNone()
+    public void WhenDoubleShortReleaseFollowsAShortRelease_ThenTheDoublePressIsReported()
     {
         // Arrange
-        var buttonResource = TestHelpers.CreateButtonResource(null);
-        var buttonDevice = TestHelpers.CreateButtonDevice([buttonResource]);
-        var button = buttonDevice.Buttons[0];
+        var button = CreateButton();
         var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
         using var subscription = button.Subscribe(events.Add);
 
         var pressTimestamp = DateTimeOffset.UtcNow;
-        var pressResource = TestHelpers.CreateButtonResource(ButtonEvent.initial_press, pressTimestamp);
-        pressResource.Id = buttonResource.Id;
-        button.Update(pressResource, false);
+        Report(button, ButtonEvent.initial_press, pressTimestamp);
+        Report(button, ButtonEvent.short_release, pressTimestamp.AddMilliseconds(200));
 
         // Act
-        var releaseResource = TestHelpers.CreateButtonResource(ButtonEvent.short_release, pressTimestamp.AddMilliseconds(200));
-        releaseResource.Id = buttonResource.Id;
-        button.Update(releaseResource, false);
+        Report(button, ButtonEvent.double_short_release, pressTimestamp.AddMilliseconds(500));
 
         // Assert
-        var releaseEvent = Assert.Single(events, e => e.ButtonState == ButtonState.Release);
-        Assert.Equal(1, releaseEvent.PressCount);
+        Assert.Equal(new[] { 1, 2 }, events.Where(e => e.ButtonState == ButtonState.Release).Select(e => e.PressCount));
         Assert.Equal(ButtonState.None, button.ButtonState);
         Assert.Null(button.PressCount);
     }
 
-    [Fact]
-    public void WhenDoubleShortReleaseFollowsAShortRelease_ThenTheDoublePressIsReported()
+    private static HueButton CreateButton() =>
+        TestHelpers.CreateButtonDevice([TestHelpers.CreateButtonResource(null)]).Buttons[0];
+
+    private static void Report(HueButton button, ButtonEvent eventType, DateTimeOffset timestamp)
     {
-        // Arrange
-        var buttonResource = TestHelpers.CreateButtonResource(null);
-        var buttonDevice = TestHelpers.CreateButtonDevice([buttonResource]);
-        var button = buttonDevice.Buttons[0];
-        var events = new List<HomeBlaze.Abstractions.Inputs.ButtonEvent>();
-        using var subscription = button.Subscribe(events.Add);
-
-        var pressTimestamp = DateTimeOffset.UtcNow;
-        var pressResource = TestHelpers.CreateButtonResource(ButtonEvent.initial_press, pressTimestamp);
-        pressResource.Id = buttonResource.Id;
-        button.Update(pressResource, false);
-
-        var shortReleaseResource = TestHelpers.CreateButtonResource(ButtonEvent.short_release, pressTimestamp.AddMilliseconds(200));
-        shortReleaseResource.Id = buttonResource.Id;
-        button.Update(shortReleaseResource, false);
-
-        // Act
-        var doubleReleaseResource = TestHelpers.CreateButtonResource(ButtonEvent.double_short_release, pressTimestamp.AddMilliseconds(500));
-        doubleReleaseResource.Id = buttonResource.Id;
-        button.Update(doubleReleaseResource, false);
-
-        // Assert
-        var releaseEvents = events.Where(e => e.ButtonState == ButtonState.Release).ToList();
-        Assert.Equal(2, releaseEvents.Count);
-        Assert.Equal(1, releaseEvents[0].PressCount);
-        Assert.Equal(2, releaseEvents[1].PressCount);
-        Assert.Equal(ButtonState.None, button.ButtonState);
-        Assert.Null(button.PressCount);
+        var resource = TestHelpers.CreateButtonResource(eventType, timestamp);
+        resource.Id = button.ResourceId;
+        button.Update(resource, false);
     }
 }
