@@ -28,13 +28,15 @@ public class MatterServerIntegrationTests(MatterServerFixture fixture)
         await controller.StartListeningAsync();
 
         // Act: commission
-        var payloads = await controller.ParseOnboardingPayloadAsync(MatterServerFixture.LightManualCode);
+        var payloads = await controller.ParseOnboardingPayloadAsync(fixture.LightManualCode);
         // Commissioning has no request timeout, so the test bounds it.
         using var commissioningTimeout = new CancellationTokenSource(TestTimeouts.Default);
-        var node = await controller.CommissionAsync(MatterServerFixture.LightManualCode, networkOnly: true, commissioningTimeout.Token);
+        var node = await controller.CommissionAsync(fixture.LightManualCode, networkOnly: true, commissioningTimeout.Token);
 
         // Assert: structure
-        Assert.Equal(20202021u, Assert.Single(payloads).SetupPinCode);
+        var payload = Assert.Single(payloads);
+        Assert.Equal(fixture.LightPasscode, payload.SetupPinCode);
+        Assert.Equal((byte)(fixture.LightDiscriminator >> 8), payload.ShortDiscriminator);
         Assert.Equal("Namotion", node.Attributes[new AttributePath(0, 40, 1)].GetString());
         var deviceTypes = node.Attributes[new AttributePath(1, 29, 0)];
         var hasOnOffLight = false;
