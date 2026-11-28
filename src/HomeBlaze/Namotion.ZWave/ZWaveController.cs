@@ -73,9 +73,11 @@ public sealed class ZWaveController : IAsyncDisposable
     /// <summary>
     /// Opens the transport and reads the controller's version, identity, capabilities and node list.
     /// </summary>
+    /// <exception cref="ArgumentNullException">The <paramref name="transport"/> or the time provider of the options is <c>null</c>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A timeout or the attempt count of the options is out of range.</exception>
     /// <exception cref="ZWaveConnectionException">
-    /// The transport could not be opened, with the transport's exception as the inner exception, or the connection
-    /// failed during startup.
+    /// The loggers could not be created or the transport could not be opened, with the original exception as the inner
+    /// exception, or the connection failed during startup.
     /// </exception>
     /// <exception cref="ZWaveException">The controller did not answer as expected; the transport is closed again.</exception>
     /// <exception cref="OperationCanceledException">The <paramref name="cancellationToken"/> was canceled; the transport is closed again.</exception>
