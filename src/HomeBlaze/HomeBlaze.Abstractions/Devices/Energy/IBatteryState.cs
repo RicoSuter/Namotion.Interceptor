@@ -23,6 +23,6 @@ public interface IBatteryState
     /// <see cref="BatteryLevel"/> null when it reports no level.
     /// </summary>
     [Derived]
-    [State(IsDiscrete = true, Position = 341)]
+    [State(IsDiscrete = true, Position = 344)]
     bool? IsBatteryLow => BatteryLevel is { } level ? level <= 0.1m : null;
 }

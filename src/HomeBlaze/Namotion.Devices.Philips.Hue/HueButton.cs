@@ -146,10 +146,10 @@ public partial class HueButton :
         var lastEvent = ButtonResource?.Button?.ButtonReport?.Event;
         var pressCount = lastEvent is { } eventType ? GetPressCount(eventType) : null;
 
-        // Hue may send double_short_release right after a short_release, which maps to the same Release state
         if (newButtonChangeDate != null &&
             newButtonChangeDate != _currentButtonChangeDate &&
             newButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.None &&
+            // Hue may send double_short_release right after a short_release, which maps to the same Release state
             (newButtonState != _currentButtonState || pressCount > 1))
         {
             _currentButtonChangeDate = newButtonChangeDate;
@@ -179,8 +179,8 @@ public partial class HueButton :
                     newButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.Repeat)
                 {
                     // Reset back to None after release events
-                    ButtonState = HomeBlaze.Abstractions.Inputs.ButtonState.None;
                     PressCount = null;
+                    ButtonState = HomeBlaze.Abstractions.Inputs.ButtonState.None;
                 }
             }
         }

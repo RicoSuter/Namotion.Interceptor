@@ -5,7 +5,7 @@ namespace HomeBlaze.Abstractions.Sensors;
 
 /// <summary>
 /// Interface for sensors that measure fine particulate matter (PM2.5): particles of 2.5 micrometers and smaller.
-/// Other particle sizes have contracts of their own, so that a device implements only the sizes it measures.
+/// Other particle sizes, such as PM10, get contracts of their own.
 /// </summary>
 [SubjectAbstraction]
 [Description("Reports the concentration of fine particulate matter (PM2.5) in micrograms per cubic meter.")]
