@@ -181,7 +181,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
 
             if (attempt < attempts)
             {
-                _logger.LogDebug("Retransmitting function 0x{Function:X2} after {Result}.", transaction.Function, result?.ToString() ?? "a timeout");
+                _logger.TryLog(LogLevel.Debug, null, "Retransmitting function 0x{Function:X2} after {Result}.", transaction.Function, result?.ToString() ?? "a timeout");
                 await Task.Delay(TimeSpan.FromMilliseconds(100 + (attempt - 1) * 1000), _options.TimeProvider, stopping).ConfigureAwait(false);
             }
         }
@@ -243,13 +243,13 @@ internal sealed class SerialApiDriver : IAsyncDisposable
             case FrameKind.Can:
                 if (_inFlight?.TryAcknowledge(frame.Kind) != true)
                 {
-                    _logger.LogDebug("Received an unexpected {Kind}.", frame.Kind);
+                    _logger.TryLog(LogLevel.Debug, null, "Received an unexpected {Kind}.", frame.Kind);
                 }
 
                 break;
 
             case FrameKind.ChecksumError:
-                _logger.LogWarning("Received a frame with a wrong checksum.");
+                _logger.TryLog(LogLevel.Warning, null, "Received a frame with a wrong checksum.");
                 await WriteAsync(FrameStream.Nak, stopping).ConfigureAwait(false);
                 break;
 
@@ -268,7 +268,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         }
         else if (_inFlight?.TryRespond(data) != true)
         {
-            _logger.LogDebug("Received an unexpected response to function 0x{Function:X2}.", data.Function);
+            _logger.TryLog(LogLevel.Debug, null, "Received an unexpected response to function 0x{Function:X2}.", data.Function);
         }
     }
 
@@ -324,9 +324,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         // The failure is logged, so it is observed here; an owner that awaits Completion still gets it.
         _ = _completion.Task.Exception;
 
-        // Last, so that a logger that throws cannot leave the driver half failed. The token is canceled already, so the
-        // loops that call Fail treat such an exception as the stop.
-        _logger.LogWarning(failure, "The connection to the Z-Wave controller failed.");
+        _logger.TryLog(LogLevel.Warning, failure, "The connection to the Z-Wave controller failed.");
     }
 
     /// <summary>
@@ -360,7 +358,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         catch (Exception exception)
         {
             // Closing an unplugged serial port can throw; the loops still end through the canceled token.
-            _logger.LogWarning(exception, "Closing the connection to the Z-Wave controller failed.");
+            _logger.TryLog(LogLevel.Warning, exception, "Closing the connection to the Z-Wave controller failed.");
         }
 
         await Task.WhenAll(_readLoop, _sendLoop).ConfigureAwait(false);

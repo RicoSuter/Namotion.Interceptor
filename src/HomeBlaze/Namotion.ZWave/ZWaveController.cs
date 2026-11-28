@@ -102,7 +102,9 @@ public sealed class ZWaveController : IAsyncDisposable
             var nodeIds = StartupResponses.ParseNodeIds(await RequestAsync(FunctionId.GetSerialApiInitData).ConfigureAwait(false));
             var capabilities = StartupResponses.ParseControllerCapabilities(await RequestAsync(FunctionId.GetControllerCapabilities).ConfigureAwait(false));
 
-            logger.LogInformation(
+            logger.TryLog(
+                LogLevel.Information,
+                null,
                 "Connected to Z-Wave controller {LibraryVersion} with home ID 0x{HomeId:X8}, node ID {OwnNodeId} and {NodeCount} nodes.",
                 version.LibraryVersion, id.HomeId, id.OwnNodeId, nodeIds.Length);
 
@@ -178,15 +180,6 @@ public sealed class ZWaveController : IAsyncDisposable
         }
     }
 
-    private void LogDispatchFailure(Exception exception, DataFrame frame)
-    {
-        try
-        {
-            _logger.LogWarning(exception, "Handling function 0x{Function:X2} failed.", frame.Function);
-        }
-        catch (Exception)
-        {
-            // The logger itself failed; the loop goes on with the next frame, as there is nowhere left to report to.
-        }
-    }
+    private void LogDispatchFailure(Exception exception, DataFrame frame) =>
+        _logger.TryLog(LogLevel.Warning, exception, "Handling function 0x{Function:X2} failed.", frame.Function);
 }

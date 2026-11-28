@@ -338,6 +338,26 @@ public class SerialApiDriverLifetimeTests
         Assert.True(stick.IsDisposed);
     }
 
+    [Fact]
+    public async Task WhenClosingTheStreamFailsAndTheLoggerThrows_ThenDisposingStillFailsRequestsAndCompletes()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick { AcknowledgesFrames = false, ThrowsOnDispose = true };
+        var driver = await stick.StartDriverAsync(logger: new ThrowingLogger(LogLevel.Warning));
+        var inFlight = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.ReceivedDataFrames.Count == 1);
+        var queued = driver.SendRequestAsync(FunctionId.GetControllerVersion, default, CancellationToken.None);
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => DisposeAsTask(driver).WaitAsync(TestTimeouts.Default));
+
+        // Assert
+        Assert.Null(exception);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => inFlight.WaitAsync(TestTimeouts.Default));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => queued.WaitAsync(TestTimeouts.Default));
+        Assert.True(driver.Completion.IsCompletedSuccessfully);
+    }
+
     // Sonar (S5034) reads two DisposeAsync calls in one method as one ValueTask consumed twice.
     private static Task DisposeAsTask(SerialApiDriver driver) => driver.DisposeAsync().AsTask();
 }

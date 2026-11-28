@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Testing;
 using Namotion.ZWave.SerialApi;
 using Namotion.ZWave.Tests.Testing;
@@ -117,6 +118,29 @@ public class SerialApiDriverRetransmissionTests
         Assert.Equal(FunctionId.GetControllerId, response.Function);
         Assert.Equal(2, stick.ReceivedDataFrames.Count);
         Assert.Equal(FirstRetransmissionDelay, time.Elapsed);
+    }
+
+    [Fact]
+    public async Task WhenTheLoggerThrowsOnTheRetransmissionEntry_ThenTheFrameIsStillRetransmittedAndAnswered()
+    {
+        // Arrange
+        var time = new TimerRecordingTimeProvider();
+        var logger = new ThrowingLogger(LogLevel.Debug);
+        var stick = new FakeZWaveStick();
+        stick.EnqueueAcknowledgement(FrameHeader.Nak);
+        stick.SetResponse(FunctionId.GetControllerId, 0xC0, 0xFF, 0xEE, 0x01, 0x01);
+        await using var driver = await stick.StartDriverAsync(time, logger);
+
+        // Act
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await time.WaitForTimerAsync(FirstRetransmissionDelay);
+        time.Advance(FirstRetransmissionDelay);
+        var response = await request.WaitAsync(TestTimeouts.Default);
+
+        // Assert
+        Assert.Equal(FunctionId.GetControllerId, response.Function);
+        Assert.Equal(2, stick.ReceivedDataFrames.Count);
+        Assert.Contains(logger.Entries, entry => entry.Level == LogLevel.Debug && entry.Message.StartsWith("Retransmitting"));
     }
 
     [Fact]

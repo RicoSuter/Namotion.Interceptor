@@ -101,7 +101,9 @@ internal sealed class FrameStream : IDisposable
             }
         }
 
-        _logger.LogWarning(
+        _logger.TryLog(
+            LogLevel.Warning,
+            null,
             "Dropped an incomplete frame that did not complete within {FrameDeliveryTimeout} ms of its start.",
             _frameDeliveryTimeout.TotalMilliseconds);
         _parser.DropPartialFrame();
@@ -120,9 +122,9 @@ internal sealed class FrameStream : IDisposable
 
     private void Append(int count)
     {
-        if (_logger.IsEnabled(LogLevel.Trace))
+        if (_logger.TryIsEnabled(LogLevel.Trace))
         {
-            _logger.LogTrace("Received {Bytes}.", Convert.ToHexString(_buffer, 0, count));
+            _logger.TryLog(LogLevel.Trace, null, "Received {Bytes}.", Convert.ToHexString(_buffer, 0, count));
         }
 
         _parser.Append(_buffer.AsSpan(0, count));
@@ -139,9 +141,9 @@ internal sealed class FrameStream : IDisposable
         await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_logger.IsEnabled(LogLevel.Trace))
+            if (_logger.TryIsEnabled(LogLevel.Trace))
             {
-                _logger.LogTrace("Sending {Bytes}.", Convert.ToHexString(frame.Span));
+                _logger.TryLog(LogLevel.Trace, null, "Sending {Bytes}.", Convert.ToHexString(frame.Span));
             }
 
             // A stalled network bridge or a hung USB device never completes a write, which would block the driver for good.
