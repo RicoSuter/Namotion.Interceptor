@@ -8,8 +8,9 @@ using Namotion.ZWave.Transport;
 namespace Namotion.ZWave;
 
 /// <summary>
-/// A connection to a Z-Wave controller. One instance is one connection: when <see cref="Completion"/> faults,
-/// connect again with a new instance.
+/// A connection to a Z-Wave controller. One instance is one connection: when <see cref="Completion"/> faults, the
+/// instance starts closing its transport by itself. Dispose it before connecting again with a new instance:
+/// <see cref="DisposeAsync"/> completes once the transport is closed, so the serial port is free again.
 /// </summary>
 public sealed class ZWaveController : IAsyncDisposable
 {

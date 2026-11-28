@@ -32,16 +32,21 @@ internal sealed class SerialApiDriver : IAsyncDisposable
     private bool _started;
     private Task? _disposal;
 
+    // Closes the stream once, on a pool thread, for the first of Fail and disposal; the other awaits the same close.
+    private readonly Lazy<Task> _streamClosing;
+
     public SerialApiDriver(Stream stream, ZWaveControllerOptions options, ILogger logger)
     {
         _stream = stream;
+        _streamClosing = new Lazy<Task>(() => Task.Run(CloseStreamAsync, CancellationToken.None));
         _frames = new FrameStream(stream, options, logger);
         _options = options;
         _logger = logger;
     }
 
     /// <summary>
-    /// Completes when the driver is disposed, and faults with <see cref="ZWaveConnectionException"/> when the connection fails.
+    /// Completes when the driver is disposed, and faults with <see cref="ZWaveConnectionException"/> when the connection
+    /// fails; the driver then closes the stream by itself, and disposing awaits that close.
     /// </summary>
     public Task Completion => _completion.Task;
 
@@ -338,6 +343,9 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         // The failure is logged, so it is observed here; an owner that awaits Completion still gets it.
         _ = _completion.Task.Exception;
 
+        // Releases the port also when the owner does not dispose; the loops end through the canceled token.
+        _ = _streamClosing.Value;
+
         _logger.TryLog(LogLevel.Warning, failure, "The connection to the Z-Wave controller failed.");
     }
 
@@ -365,15 +373,7 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         await _stopping.CancelAsync().ConfigureAwait(false);
 
         // A serial read does not always observe cancellation; closing the stream ends it.
-        try
-        {
-            await _stream.DisposeAsync().ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            // Closing an unplugged serial port can throw; the loops still end through the canceled token.
-            _logger.TryLog(LogLevel.Warning, exception, "Closing the connection to the Z-Wave controller failed.");
-        }
+        await _streamClosing.Value.ConfigureAwait(false);
 
         await Task.WhenAll(_readLoop, _sendLoop).ConfigureAwait(false);
 
@@ -387,5 +387,18 @@ internal sealed class SerialApiDriver : IAsyncDisposable
         _completion.TrySetResult();
         _stopping.Dispose();
         _frames.Dispose();
+    }
+
+    private async Task CloseStreamAsync()
+    {
+        try
+        {
+            await _stream.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            // Closing an unplugged serial port can throw; the loops still end through the canceled token.
+            _logger.TryLog(LogLevel.Warning, exception, "Closing the connection to the Z-Wave controller failed.");
+        }
     }
 }

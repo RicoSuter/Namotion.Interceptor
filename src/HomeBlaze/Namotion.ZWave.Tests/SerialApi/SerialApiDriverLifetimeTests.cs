@@ -161,6 +161,24 @@ public class SerialApiDriverLifetimeTests
     }
 
     [Fact]
+    public async Task WhenTheConnectionFails_ThenTheStreamIsClosedWithoutDisposingAndDisposingLaterCompletes()
+    {
+        // Arrange
+        var stick = new FakeZWaveStick();
+        var driver = await stick.StartDriverAsync();
+        stick.FailWrites = true;
+
+        // Act
+        var request = driver.SendRequestAsync(FunctionId.GetControllerId, default, CancellationToken.None);
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => driver.Completion.WaitAsync(TestTimeouts.Default));
+        await AsyncTestHelpers.WaitUntilAsync(() => stick.IsDisposed);
+
+        // Assert
+        await Assert.ThrowsAsync<ZWaveConnectionException>(() => request.WaitAsync(TestTimeouts.Default));
+        Assert.Null(await Record.ExceptionAsync(() => DisposeAsTask(driver).WaitAsync(TestTimeouts.Default)));
+    }
+
+    [Fact]
     public async Task WhenAWriteDoesNotCompleteWithinTheAcknowledgementTimeout_ThenTheRequestAndCompletionFailWithAConnectionException()
     {
         // Arrange
